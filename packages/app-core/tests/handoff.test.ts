@@ -656,35 +656,51 @@ describe('browse-memory handoff persistence', () => {
     vi.useRealTimers()
   })
 
-  it('retains valid handoff drafts, caps oversized contextBlock, and strips malformed handoff objects via savedEntry', async () => {
+  it('retains valid handoff drafts, rejects oversized or malformed contextBlocks, and strips invalid handoff objects via savedEntry', async () => {
     const a = await loadBrowseMemory()
     const scope = 'scope-handoff'
     const validMeta = sampleMeta({ targetBackend: 'claude' })
     const validHandoff = {
       meta: validMeta,
-      contextBlock: '<!-- dsh-handoff:v1 ... -->\n<handoff_context>\nValid\n</handoff_context>',
+      contextBlock: `<!-- dsh-handoff:v1 ${JSON.stringify(validMeta)} -->\n<handoff_context>\nValid\n</handoff_context>`,
     }
     const oversizedMeta = sampleMeta({
       sourceTitle: 'T'.repeat(40_000),
       cwd: `/repo/${'x'.repeat(40_000)}`,
     })
+    const oversizedBlockMeta = sampleMeta({ targetBackend: 'claude' })
+    const oversizedBlock = `<!-- dsh-handoff:v1 ${JSON.stringify(oversizedBlockMeta)} -->\n<handoff_context>\n${'B'.repeat(40_000)}\n</handoff_context>`
 
     a.updateBrowseEntry(scope, 's-valid', {
       draft: 'Continue task',
       handoff: validHandoff,
     })
-    a.updateBrowseEntry(scope, 's-oversize', {
-      draft: 'Bounded handoff',
+    a.updateBrowseEntry(scope, 's-oversize-meta', {
+      draft: 'Bounded meta handoff',
       handoff: {
         meta: oversizedMeta,
-        contextBlock: 'B'.repeat(40_000),
+        contextBlock: validHandoff.contextBlock,
+      },
+    })
+    a.updateBrowseEntry(scope, 's-oversize-block', {
+      draft: 'Keep draft when block exceeds cap',
+      handoff: {
+        meta: oversizedBlockMeta,
+        contextBlock: oversizedBlock,
+      },
+    })
+    a.updateBrowseEntry(scope, 's-truncated-tag', {
+      draft: 'Keep draft when closing tag missing',
+      handoff: {
+        meta: validMeta,
+        contextBlock: `<!-- dsh-handoff:v1 ${JSON.stringify(validMeta)} -->\n<handoff_context>\nTruncated`,
       },
     })
     a.updateBrowseEntry(scope, 's-bad-meta', {
       draft: 'Keep draft only',
       handoff: {
         meta: { ...validMeta, version: 2 as never },
-        contextBlock: '<handoff_context>ok</handoff_context>',
+        contextBlock: validHandoff.contextBlock,
       },
     })
     a.updateBrowseEntry(scope, 's-bad-empty', {
@@ -711,11 +727,15 @@ describe('browse-memory handoff persistence', () => {
 
     expect(persisted.entries[a.browseKey(scope, 's-valid')]?.handoff).toEqual(validHandoff)
 
-    const persistedOversize = persisted.entries[a.browseKey(scope, 's-oversize')]?.handoff
-    expect(persistedOversize?.contextBlock).toHaveLength(32_768)
-    expect(persistedOversize?.meta.sourceTitle).toHaveLength(32_768)
-    expect(persistedOversize?.meta.cwd).toHaveLength(32_768)
+    const persistedOversizeMeta = persisted.entries[a.browseKey(scope, 's-oversize-meta')]?.handoff
+    expect(persistedOversizeMeta?.contextBlock).toBe(validHandoff.contextBlock)
+    expect(persistedOversizeMeta?.meta.sourceTitle).toHaveLength(32_768)
+    expect(persistedOversizeMeta?.meta.cwd).toHaveLength(32_768)
 
+    expect(persisted.entries[a.browseKey(scope, 's-oversize-block')]?.draft).toBe('Keep draft when block exceeds cap')
+    expect(persisted.entries[a.browseKey(scope, 's-oversize-block')]?.handoff).toBeUndefined()
+    expect(persisted.entries[a.browseKey(scope, 's-truncated-tag')]?.draft).toBe('Keep draft when closing tag missing')
+    expect(persisted.entries[a.browseKey(scope, 's-truncated-tag')]?.handoff).toBeUndefined()
     expect(persisted.entries[a.browseKey(scope, 's-bad-meta')]?.draft).toBe('Keep draft only')
     expect(persisted.entries[a.browseKey(scope, 's-bad-meta')]?.handoff).toBeUndefined()
     expect(persisted.entries[a.browseKey(scope, 's-bad-empty')]?.draft).toBe('Keep draft on empty block')
@@ -727,7 +747,9 @@ describe('browse-memory handoff persistence', () => {
     const b = await loadBrowseMemory()
     const restored = b.useBrowseMemory.getState().entries
     expect(restored[b.browseKey(scope, 's-valid')]?.handoff).toEqual(validHandoff)
-    expect(restored[b.browseKey(scope, 's-oversize')]?.handoff?.contextBlock).toHaveLength(32_768)
+    expect(restored[b.browseKey(scope, 's-oversize-meta')]?.handoff?.meta.sourceTitle).toHaveLength(32_768)
+    expect(restored[b.browseKey(scope, 's-oversize-block')]?.handoff).toBeUndefined()
+    expect(restored[b.browseKey(scope, 's-truncated-tag')]?.handoff).toBeUndefined()
     expect(restored[b.browseKey(scope, 's-bad-meta')]?.handoff).toBeUndefined()
     expect(restored[b.browseKey(scope, 's-bad-empty')]?.handoff).toBeUndefined()
     expect(restored[b.browseKey(scope, 's-bad-shape')]?.handoff).toBeUndefined()
@@ -1854,6 +1876,282 @@ describe('session-actions handoff integration', () => {
               expect(res).toEqual({ ok: false, error: zhCN.errors.SESSION_NOT_FOUND })
               expect(acp.createSession).not.toHaveBeenCalled()
             }
+          },
+        },
+      ])
+    })
+
+    it('covers Codex diff filtering, #578 file-only turns, leading omission placement, reconnect recovery, draft/source exclusions, symlink registerPath, and read-only freshness', async () => {
+      await runScenarios([
+        {
+          name: 'Codex file_change rejects unified diff hunks and prose while keeping valid paths',
+          run: () => {
+            const edited = extractHandoffEditedFiles([
+              tool('cx-diff', 'Codex File Change', {
+                toolKey: 'file_change',
+                resultDetail: {
+                  text: [
+                    'File changes completed.',
+                    'diff --git a/src/real.ts b/src/real.ts',
+                    'index 1111111..2222222 100644',
+                    '--- a/src/real.ts',
+                    '+++ b/src/real.ts',
+                    '@@ -1,3 +1,4 @@',
+                    '   unchanged/context/line.ts',
+                    '+const added = foo(bar);',
+                    '-return oldVal;',
+                    'update src/real.ts',
+                    '[create] Dockerfile',
+                  ].join('\n'),
+                  format: 'code',
+                },
+              }),
+            ])
+            expect(edited).toEqual(['src/real.ts', 'Dockerfile'])
+          },
+        },
+        {
+          name: 'preserves #578 attachment-only user turns and places leading omission marker before reserved first user',
+          run: () => {
+            const packet = buildHandoffPacket({
+              items: [
+                msg('a-pre-1', 'assistant', 'Pre-user note 1 '.repeat(12)),
+                msg('a-pre-2', 'assistant', 'Pre-user note 2 '.repeat(12)),
+                msg('u-1', 'user', 'Primary goal'),
+                msg('u-2', 'user', '', {
+                  files: [{ path: 'docs/spec.pdf', name: 'spec.pdf', bytes: 2048, source: 'upload' }],
+                }),
+                msg('a-2', 'assistant', 'Reviewed spec.pdf'),
+              ],
+              sourceBackend: 'claude',
+              targetBackend: 'codex',
+              sourceSessionId: 'claude:files-1',
+              preset: 'custom',
+              maxContextChars: 1_200,
+              now: 123,
+            })
+            expect(packet.contextBlock).toContain('[Attached files: spec.pdf]')
+            const omittedIdx = packet.contextBlock.indexOf('earlier items omitted')
+            const firstUserIdx = packet.contextBlock.indexOf('[User]\nPrimary goal')
+            expect(omittedIdx).toBeGreaterThan(-1)
+            expect(firstUserIdx).toBeGreaterThan(omittedIdx)
+            const pre2Idx = packet.contextBlock.indexOf('Pre-user note 2')
+            if (pre2Idx >= 0) {
+              expect(pre2Idx).toBeGreaterThan(omittedIdx)
+              expect(firstUserIdx).toBeGreaterThan(pre2Idx)
+            }
+
+            // When budget fits Pre-user note 2 but omits Pre-user note 1, chronological order holds.
+            const partialPre = buildHandoffPacket({
+              items: [
+                msg('a-pre-1', 'assistant', 'First preamble '.repeat(30)),
+                msg('a-pre-2', 'assistant', 'Second preamble'),
+                msg('u-1', 'user', 'Primary goal'),
+                msg('u-2', 'user', 'Follow-up'),
+              ],
+              sourceBackend: 'claude',
+              targetBackend: 'codex',
+              sourceSessionId: 'claude:files-2',
+              preset: 'custom',
+              maxContextChars: 920,
+              now: 123,
+            })
+            const pOmit = partialPre.contextBlock.indexOf('[... 1 earlier items omitted ...]')
+            const pPre2 = partialPre.contextBlock.indexOf('[Assistant]\nSecond preamble')
+            const pU1 = partialPre.contextBlock.indexOf('[User]\nPrimary goal')
+            const pU2 = partialPre.contextBlock.indexOf('[User]\nFollow-up')
+            expect(pOmit).toBeGreaterThan(-1)
+            expect(pPre2).toBeGreaterThan(pOmit)
+            expect(pU1).toBeGreaterThan(pPre2)
+            expect(pU2).toBeGreaterThan(pU1)
+          },
+        },
+        {
+          name: 'skips blank sessions carrying images/quotes or matching sourceSessionId on same-backend handoff',
+          run: async () => {
+            const ws: WorkspaceView = {
+              workspaceId: 'ws-same-h',
+              title: 'Repo',
+              path: '/repo/app',
+              backend: 'harness',
+              sessionIds: ['h-source', 'h-img', 'h-quote'],
+              createdAt: '2026-11-23T00:00:00Z',
+              updatedAt: '2026-11-23T00:00:00Z',
+            }
+            const sourceBlank: RemoteSession = { sessionId: 'h-source', backend: 'harness', cwd: '/repo/app', updatedAt: 30, running: false, blank: true }
+            const imgBlank: RemoteSession = { sessionId: 'h-img', backend: 'harness', cwd: '/repo/app', updatedAt: 25, running: false, blank: true }
+            const quoteBlank: RemoteSession = { sessionId: 'h-quote', backend: 'harness', cwd: '/repo/app', updatedAt: 20, running: false, blank: true }
+            const freshCreated: RemoteSession = { sessionId: 'h-new', backend: 'harness', cwd: '/repo/app', updatedAt: 40, running: false, blank: true }
+            const scope = browseScope({ config: useAppStore.getState().config, selectedDevice: useAppStore.getState().selectedDevice })
+            useBrowseMemory.setState({
+              entries: {
+                [browseKey(scope, 'h-img')]: {
+                  images: [{ uri: 'file:///tmp/a.png', mediaType: 'image/png', data: 'AA==', bytes: 1, width: 10, height: 10 }],
+                },
+                [browseKey(scope, 'h-quote')]: { quotes: ['keep this quote'] },
+              },
+            })
+            useAppStore.setState({
+              workspaces: [ws],
+              sessions: [sourceBlank, imgBlank, quoteBlank],
+            })
+            proxy.sessionCreate.mockResolvedValueOnce({ sessionId: 'h-new' })
+            proxy.sessionList.mockResolvedValueOnce([sourceBlank, imgBlank, quoteBlank, freshCreated])
+
+            const packet = buildHandoffPacket({
+              items: [msg('m1', 'user', 'Fresh start')],
+              sourceBackend: 'harness',
+              targetBackend: 'harness',
+              sourceSessionId: 'h-source',
+              cwd: '/repo/app',
+              preset: 'custom',
+            })
+            const res = await useAppStore.getState().handoffSession({
+              targetBackend: 'harness',
+              targetWorkspaceId: ws.workspaceId,
+              instruction: '',
+              packet,
+              mode: 'draft',
+            })
+            expect(res.ok).toBe(true)
+            expect(res.session?.sessionId).toBe('h-new')
+            expect(proxy.sessionCreate).toHaveBeenCalledWith('ws-same-h')
+          },
+        },
+        {
+          name: 'completes handoff when openSession recovers via transient reconnect on the same host',
+          run: async () => {
+            const ws: WorkspaceView = {
+              workspaceId: 'ws-rec',
+              title: 'Repo',
+              path: '/repo/app',
+              backend: 'harness',
+              sessionIds: ['h-target'],
+              createdAt: '2026-11-23T00:00:00Z',
+              updatedAt: '2026-11-23T00:00:00Z',
+            }
+            const target: RemoteSession = { sessionId: 'h-target', backend: 'harness', cwd: '/repo/app', updatedAt: 10, running: false, blank: false }
+            useAppStore.setState({ workspaces: [ws], sessions: [target] })
+
+            const timeoutErr = Object.assign(new Error('RPC timed out'), { code: 'RPC_TIMEOUT' })
+            proxy.sessionHistory
+              .mockRejectedValueOnce(timeoutErr)
+              .mockResolvedValueOnce({ events: [historyEvent(1, 'user', 'Existing')], throughSeq: 1, hasMore: false })
+
+            const packet = buildHandoffPacket({
+              items: [msg('c1', 'user', 'Audit result')],
+              sourceBackend: 'codex',
+              targetBackend: 'harness',
+              sourceSessionId: 'codex:rev-rec',
+              cwd: '/repo/app',
+              preset: 'custom',
+            })
+            const res = await useAppStore.getState().handoffSession({
+              targetBackend: 'harness',
+              targetWorkspaceId: ws.workspaceId,
+              targetSessionId: target.sessionId,
+              instruction: 'Apply review',
+              packet,
+              mode: 'draft',
+            })
+            expect(res.ok).toBe(true)
+            expect(res.delivered).toBe('draft')
+            expect(transport.connect).toHaveBeenCalledTimes(1)
+            const scope = browseScope({ config: useAppStore.getState().config, selectedDevice: useAppStore.getState().selectedDevice })
+            expect(useBrowseMemory.getState().entries[browseKey(scope, target.sessionId)]?.handoff?.meta.sourceSessionId).toBe('codex:rev-rec')
+          },
+        },
+        {
+          name: 'accepts targetSessionId when registerPath resolves through a symlink',
+          run: async () => {
+            const existingTarget: RemoteSession = {
+              sessionId: 'claude:sym-1',
+              nativeId: 'sym-1',
+              backend: 'claude',
+              cwd: '/tmp/work',
+              updatedAt: 20,
+              running: false,
+              blank: false,
+            }
+            useAppStore.setState({ workspaces: [], sessions: [existingTarget] })
+            const originalCreate = useAppStore.getState().workspaceCreate
+            useAppStore.setState({
+              workspaceCreate: vi.fn(async () => {
+                const createdWs: WorkspaceView = {
+                  workspaceId: 'ws-sym',
+                  title: 'work',
+                  path: '/private/tmp/work',
+                  backend: 'claude',
+                  sessionIds: [],
+                  createdAt: '2026-11-23T00:00:00Z',
+                  updatedAt: '2026-11-23T00:00:00Z',
+                }
+                useAppStore.setState(state => ({ workspaces: [...state.workspaces, createdWs] }))
+                return createdWs
+              }),
+            })
+            try {
+              const packet = buildHandoffPacket({
+                items: [msg('s1', 'user', 'Fix symlink')],
+                sourceBackend: 'codex',
+                targetBackend: 'claude',
+                sourceSessionId: 'codex:sym-src',
+                cwd: '/tmp/work',
+                preset: 'custom',
+              })
+              const res = await useAppStore.getState().handoffSession({
+                targetBackend: 'claude',
+                registerPath: '/tmp/work',
+                targetSessionId: existingTarget.sessionId,
+                instruction: '',
+                packet,
+                mode: 'draft',
+              })
+              expect(res.ok).toBe(true)
+              expect(res.session?.sessionId).toBe(existingTarget.sessionId)
+            } finally {
+              useAppStore.setState({ workspaceCreate: originalCreate })
+            }
+          },
+        },
+        {
+          name: 'fetches fresh read-only history for background or offline-snapshot sessions when online and settles idle turns',
+          run: async () => {
+            const bgSession: RemoteSession = { sessionId: 'h-bg', backend: 'harness', updatedAt: 10, running: false, blank: false }
+            const activeSession: RemoteSession = { sessionId: 'h-active', backend: 'harness', updatedAt: 20, running: false, blank: false }
+            // Stale cached messages exist for background session h-bg while h-active is selected
+            useAppStore.setState({
+              selectedSession: activeSession,
+              sessions: [activeSession, bgSession],
+              messages: {
+                'h-bg': [msg('stale-1', 'user', 'Stale cached line', { sessionId: 'h-bg' })],
+              },
+            })
+            proxy.sessionReadOnlyHistory!.mockResolvedValueOnce({
+              events: [
+                historyEvent(1, 'user', 'Fresh remote prompt'),
+                { event: { type: 'assistant/chunk', seq: 2, time: 110, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'Unclosed reply' } } } },
+              ],
+            })
+            const loaded = await useAppStore.getState().loadSessionHandoffItems(bgSession)
+            expect(proxy.sessionReadOnlyHistory).toHaveBeenCalledWith('h-bg', 60, undefined)
+            const reply = loaded.find(item => item.kind === 'message' && item.role === 'assistant') as ChatMessage | undefined
+            expect(reply?.text).toBe('Unclosed reply')
+            expect(reply?.streaming).not.toBe(true)
+
+            // Offline-opened session must re-fetch from Host after reconnecting
+            const scope = browseScope({ config: useAppStore.getState().config, selectedDevice: useAppStore.getState().selectedDevice })
+            const offSess: RemoteSession = { sessionId: 'h-off-reconn', backend: 'harness', updatedAt: 5, running: false, blank: false }
+            saveSessionMessagesSnapshot(scope, offSess.sessionId, [msg('old-off', 'user', 'Offline snapshot', { sessionId: offSess.sessionId })])
+            useAppStore.setState({ connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false } } })
+            expect(await useAppStore.getState().openSession(offSess)).toBe(true)
+            useAppStore.setState({ connection: { phase: 'connected', stats: { mode: 'P2P', connected: true } } })
+            proxy.sessionReadOnlyHistory!.mockResolvedValueOnce({
+              events: [historyEvent(1, 'user', 'Online refreshed prompt')],
+            })
+            const refreshed = await useAppStore.getState().loadSessionHandoffItems(offSess)
+            expect(proxy.sessionReadOnlyHistory).toHaveBeenCalledWith(offSess.sessionId, 60, undefined)
+            expect((refreshed[0] as ChatMessage)?.text).toBe('Online refreshed prompt')
           },
         },
       ])

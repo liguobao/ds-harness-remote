@@ -894,8 +894,8 @@ export class HarnessAlphaClient {
       })
       const converted = readOnlyHistoryPageFromEnvelope(page, maxMessages, true)
       if (converted !== undefined) {
-        if (converted.events.length > 0) return converted
-        pageFallback = converted
+        if (converted.page.events.length > 0 || converted.usedRecords) return converted.page
+        pageFallback = converted.page
       }
     } catch (error) {
       if (!isReadOnlyHistoryFallbackError(error)) throw error
@@ -906,7 +906,7 @@ export class HarnessAlphaClient {
         request: { address },
       })
       const converted = readOnlyHistoryPageFromEnvelope(eventsPayload, maxMessages)
-      return converted ?? pageFallback ?? { events: [], hasMore: false }
+      return converted?.page ?? pageFallback ?? { events: [], hasMore: false }
     } catch (error) {
       if (pageFallback !== undefined && isReadOnlyHistoryFallbackError(error)) return pageFallback
       throw error
@@ -1837,7 +1837,7 @@ function readOnlyHistoryPageFromEnvelope(
   value: unknown,
   maxMessages?: number,
   sliceOnlyWithoutRecords = false,
-): HarnessSessionHistoryPage | undefined {
+): { page: HarnessSessionHistoryPage; usedRecords: boolean } | undefined {
   let rawItems: unknown[] | undefined
   let usedRecords = false
   let hasMore = false
@@ -1872,9 +1872,12 @@ function readOnlyHistoryPageFromEnvelope(
     ? Math.max(explicitThroughSeq, maxSeq)
     : maxSeq ?? explicitThroughSeq
   return {
-    events,
-    hasMore: hasMore || sliced,
-    ...(throughSeq === undefined ? {} : { throughSeq }),
+    page: {
+      events,
+      hasMore: hasMore || sliced,
+      ...(throughSeq === undefined ? {} : { throughSeq }),
+    },
+    usedRecords,
   }
 }
 

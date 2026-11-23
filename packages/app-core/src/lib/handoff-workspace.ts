@@ -164,8 +164,15 @@ export function isSessionInTargetWorkspace({
     if ((workspace.backend ?? 'harness') !== targetBackend) return false
     if (workspace.sessionIds.includes(session.sessionId)) return true
     const trimmedWsPath = workspace.path?.trim()
-    if (!trimmedWsPath || trimmedWsPath.includes('\0') || normalizedSessionCwd === undefined) return false
-    return normalizeWorkspacePath(trimmedWsPath, platform) === normalizedSessionCwd
+    if (trimmedWsPath && !trimmedWsPath.includes('\0') && normalizedSessionCwd !== undefined
+      && normalizeWorkspacePath(trimmedWsPath, platform) === normalizedSessionCwd) {
+      return true
+    }
+    const trimmedRegister = registerPath?.trim()
+    if (trimmedRegister && trimmedRegister.length > 0 && !trimmedRegister.includes('\0') && normalizedSessionCwd !== undefined) {
+      return normalizeWorkspacePath(trimmedRegister, platform) === normalizedSessionCwd
+    }
+    return false
   }
 
   const trimmedRegister = registerPath?.trim()

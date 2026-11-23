@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -24,6 +24,7 @@ import {
   Plus,
   X,
 } from 'lucide-react-native'
+import { useGatedStore } from '../../lib/gated-store'
 import {
   buildHandoffPacket,
   parseHandoffMessage,
@@ -103,7 +104,7 @@ type HandoffSubView = 'main' | 'target' | 'workspace' | 'session' | 'preview'
 
 const VISIBLE_EDITED_FILES_CAP = 4
 
-export function HandoffModal({
+export const HandoffModal = memo(function HandoffModal({
   visible,
   sourceSession,
   sourceWorkspace,
@@ -123,26 +124,27 @@ export function HandoffModal({
   const insets = useSafeAreaInsets()
   const listMaxHeight = usePickerListMaxHeight()
 
-  const loadSessionHandoffItems = useAppStore(state => state.loadSessionHandoffItems)
-  const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
-  const handoffSession = useAppStore(state => state.handoffSession)
-  const workspaces = useAppStore(state => state.workspaces)
-  const sessions = useAppStore(state => state.sessions)
-  const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
-  const selectedDevice = useAppStore(state => state.selectedDevice)
-  const connected = useAppStore(state => state.connection.phase === 'connected')
-  const codexAvailable = useAppStore(state => state.codexAvailable)
-  const cursorAvailable = useAppStore(state => state.cursorAvailable)
-  const antigravityAvailable = useAppStore(state => state.antigravityAvailable)
-  const piAvailable = useAppStore(state => state.piAvailable)
-  const opencodeAvailable = useAppStore(state => state.opencodeAvailable)
-  const claudeAvailable = useAppStore(state => state.claudeAvailable)
-  const hermesAvailable = useAppStore(state => state.hermesAvailable)
-  const customAcpBackends = useAppStore(selectCustomAcpBackends)
-  const liveSourceRunning = useAppStore(state =>
+  const loadSessionHandoffItems = useGatedStore(useAppStore, state => state.loadSessionHandoffItems, visible)
+  const refreshWorkspaces = useGatedStore(useAppStore, state => state.refreshWorkspaces, visible)
+  const handoffSession = useGatedStore(useAppStore, state => state.handoffSession, visible)
+  const workspaces = useGatedStore(useAppStore, state => state.workspaces, visible)
+  const sessions = useGatedStore(useAppStore, state => state.sessions, visible)
+  const archivedSessionIds = useGatedStore(useAppStore, state => state.archivedSessionIds, visible)
+  const selectedDevice = useGatedStore(useAppStore, state => state.selectedDevice, visible)
+  const connected = useGatedStore(useAppStore, state => state.connection.phase === 'connected', visible)
+  const codexAvailable = useGatedStore(useAppStore, state => state.codexAvailable, visible)
+  const cursorAvailable = useGatedStore(useAppStore, state => state.cursorAvailable, visible)
+  const antigravityAvailable = useGatedStore(useAppStore, state => state.antigravityAvailable, visible)
+  const piAvailable = useGatedStore(useAppStore, state => state.piAvailable, visible)
+  const opencodeAvailable = useGatedStore(useAppStore, state => state.opencodeAvailable, visible)
+  const claudeAvailable = useGatedStore(useAppStore, state => state.claudeAvailable, visible)
+  const hermesAvailable = useGatedStore(useAppStore, state => state.hermesAvailable, visible)
+  const customAcpBackends = useGatedStore(useAppStore, selectCustomAcpBackends, visible)
+  const liveSourceRunning = useGatedStore(useAppStore, state =>
     sourceSession === undefined
       ? false
       : (state.sessions.find(item => item.sessionId === sourceSession.sessionId)?.running ?? sourceSession.running),
+    visible,
   )
 
   const sourceBackend: AgentBackend = sourceSession?.backend ?? sourceWorkspace?.backend ?? 'harness'
@@ -1034,9 +1036,9 @@ export function HandoffModal({
       )}
     </SheetModal>
   )
-}
+})
 
-export function HandoffDraftPreviewModal({
+export const HandoffDraftPreviewModal = memo(function HandoffDraftPreviewModal({
   visible,
   draft,
   onClose,
@@ -1085,7 +1087,7 @@ export function HandoffDraftPreviewModal({
       </ScrollView>
     </SheetModal>
   )
-}
+})
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   header: {

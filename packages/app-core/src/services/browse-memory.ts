@@ -2,7 +2,7 @@ import { strings } from '../locales/i18n'
 import { create } from 'zustand'
 const filesystem = () => import('expo-file-system/legacy')
 import { encryptFrame, decryptFrame, fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
-import { parseHandoffMeta, type PendingHandoffDraft } from '../lib/handoff-context'
+import { parseHandoffMessage, parseHandoffMeta, type PendingHandoffDraft } from '../lib/handoff-context'
 import { acpWorkspaceSuppressionKey, isAcpManagedBackend, isDeletedAcpWorkspace } from '../lib/workspace-key'
 import type { AgentBackend, ChatImage, ChatItem, PromptImage, RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../types'
 
@@ -239,18 +239,23 @@ function sanitizeDraftQuotes(quotes?: string[]): string[] | undefined {
 function sanitizePendingHandoff(value: unknown): PendingHandoffDraft | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const candidate = value as Record<string, unknown>
-  if (typeof candidate.contextBlock !== 'string' || candidate.contextBlock.length === 0) return undefined
+  if (
+    typeof candidate.contextBlock !== 'string'
+    || candidate.contextBlock.length === 0
+    || candidate.contextBlock.length > MAX_TEXT_CHARS
+  ) {
+    return undefined
+  }
   const meta = parseHandoffMeta(candidate.meta)
   if (meta === undefined) return undefined
-  const contextBlock = capText(candidate.contextBlock)
-  if (!contextBlock) return undefined
+  if (parseHandoffMessage(candidate.contextBlock) === undefined) return undefined
   return {
     meta: {
       ...meta,
       ...(meta.sourceTitle !== undefined ? { sourceTitle: capText(meta.sourceTitle) } : {}),
       ...(meta.cwd !== undefined ? { cwd: capText(meta.cwd) } : {}),
     },
-    contextBlock,
+    contextBlock: candidate.contextBlock,
   }
 }
 

@@ -38,6 +38,9 @@ export interface ParsedHandoffMessage {
 }
 
 const MAX_EDITED_FILES = 40
+const MAX_META_TITLE_CHARS = 200
+const MAX_META_CWD_CHARS = 512
+const MAX_ATTACHED_FILES_IN_TURN = 10
 const DEFAULT_MAX_CONTEXT_CHARS = 24_000
 const FIRST_USER_MAX_CHARS = 4_000
 const TOOL_SUMMARY_MAX_CHARS = 200
@@ -60,6 +63,27 @@ const ACP_EDIT_PREFIX_RE = /^(?:edit|write)(?:$|[:\s/_-])/iu
 const ACP_INLINE_PATH_RE = /^(?:edit|write)[:\s]+(.+)$/iu
 const CODEX_CHANGE_PREFIX_RE = /^(?:\[(?:update|create|add|delete|modify|rename|write)\]\s+|(?:update|create|add|delete|modify|rename|write)\s+)/iu
 const CODEX_GENERIC_SUMMARY_RE = /^(?:File changes(?: completed\.)?|Modify \d+ files?)$/iu
+const CODEX_DIFF_OR_NOISE_LINE_RE = /^(?:@@|---(?:\s|$)|\+\+\+(?:\s|$)|[+-]|diff --git\b|index [0-9a-f]+\.\.[0-9a-f]+|```)/iu
+const KNOWN_EXTENSIONLESS_BASENAMES = new Set([
+  'dockerfile',
+  'makefile',
+  'gemfile',
+  'procfile',
+  'rakefile',
+  'vagrantfile',
+  'jenkinsfile',
+  'readme',
+  'license',
+  'changelog',
+  'copying',
+  'notice',
+  'authors',
+  '.gitignore',
+  '.gitattributes',
+  '.editorconfig',
+  '.dockerignore',
+  '.nvmrc',
+])
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -90,6 +114,20 @@ function normalizeCandidatePath(raw: unknown): string | undefined {
   return trimmed
 }
 
+function looksLikeWorkspacePath(candidate: string, hadPrefix: boolean): boolean {
+  if (candidate.length === 0 || candidate.length > 260) return false
+  if (/[;{}()=]|=>|\/\/|\/\*|\*\/|:\s/u.test(candidate)) return false
+  if (!hadPrefix && /\s{2,}/u.test(candidate)) return false
+  const base = candidate.replace(/[\\/]+$/u, '').split(/[\\/]/u).pop() ?? ''
+  if (base.length === 0) return false
+  const hasSlash = /[\\/]/u.test(candidate)
+  const hasExt = /\.[a-z0-9]{1,12}$/iu.test(base)
+  const isKnown = KNOWN_EXTENSIONLESS_BASENAMES.has(base.toLowerCase())
+  if (!hasSlash && !hasExt && !isKnown) return false
+  if (!hadPrefix && /\s/u.test(candidate) && !hasSlash) return false
+  return true
+}
+
 function extractPathsFromArgs(args: Record<string, unknown>): string[] {
   const paths: string[] = []
   for (const key of PATH_ARG_KEYS) {
@@ -105,9 +143,14 @@ function parseCodexFileChangeText(text?: string): string[] {
   for (const rawLine of text.split(/\r?\n/u)) {
     const trimmed = rawLine.trim()
     if (trimmed.length === 0 || CODEX_GENERIC_SUMMARY_RE.test(trimmed)) continue
-    const stripped = trimmed.replace(CODEX_CHANGE_PREFIX_RE, '').trim()
+    const hadPrefix = CODEX_CHANGE_PREFIX_RE.test(trimmed)
+    // Skip indented unified-diff context lines and explicit diff/code markers.
+    if (!hadPrefix && (/^\s/u.test(rawLine) || CODEX_DIFF_OR_NOISE_LINE_RE.test(trimmed))) continue
+    const stripped = hadPrefix ? trimmed.replace(CODEX_CHANGE_PREFIX_RE, '').trim() : trimmed
     const candidate = normalizeCandidatePath(stripped)
-    if (candidate !== undefined) paths.push(candidate)
+    if (candidate !== undefined && looksLikeWorkspacePath(candidate, hadPrefix)) {
+      paths.push(candidate)
+    }
   }
   return paths
 }
@@ -275,8 +318,21 @@ function normalizeTranscriptEntries(items: ChatItem[]): HandoffEntry[] {
       if (heartbeat !== undefined) text = heartbeat
     }
 
-    if (!hasVisibleMessageText(text)) continue
-    entries.push({ kind: item.role, text: escapeEmbeddedTags(text.trim()) })
+    const attachedNames = item.role === 'user' && item.files && item.files.length > 0
+      ? item.files
+        .map(file => (file.name || file.path).trim())
+        .filter(name => name.length > 0)
+      : []
+    const attachmentSummary = attachedNames.length > 0
+      ? `[Attached files: ${attachedNames.slice(0, MAX_ATTACHED_FILES_IN_TURN).join(', ')}${attachedNames.length > MAX_ATTACHED_FILES_IN_TURN ? `, +${attachedNames.length - MAX_ATTACHED_FILES_IN_TURN} more` : ''}]`
+      : ''
+
+    const hasText = hasVisibleMessageText(text)
+    if (!hasText && attachmentSummary.length === 0) continue
+    const combined = hasText && attachmentSummary.length > 0
+      ? `${text.trim()}\n${attachmentSummary}`
+      : (hasText ? text.trim() : attachmentSummary)
+    entries.push({ kind: item.role, text: escapeEmbeddedTags(combined) })
   }
   return entries
 }
@@ -346,20 +402,33 @@ export function buildHandoffPacket({
   const editedFiles = extractHandoffEditedFiles(items)
   const entries = normalizeTranscriptEntries(items)
 
+  const trimmedTitle = sourceTitle?.trim()
+  const boundedTitle = trimmedTitle && trimmedTitle.length > 0
+    ? truncateText(trimmedTitle, MAX_META_TITLE_CHARS)
+    : undefined
+  const trimmedCwd = cwd?.trim()
+  const boundedCwd = trimmedCwd && trimmedCwd.length > 0
+    ? truncateText(trimmedCwd, MAX_META_CWD_CHARS)
+    : undefined
   const baseMeta: HandoffMeta = {
     version: 1,
     sourceBackend,
     targetBackend,
     sourceSessionId,
-    ...(sourceTitle !== undefined && sourceTitle.trim().length > 0 ? { sourceTitle: sourceTitle.trim() } : {}),
-    ...(cwd !== undefined && cwd.trim().length > 0 ? { cwd: cwd.trim() } : {}),
+    ...(boundedTitle !== undefined ? { sourceTitle: boundedTitle } : {}),
+    ...(boundedCwd !== undefined ? { cwd: boundedCwd } : {}),
     preset,
     turnsCount: 999,
     filesCount: editedFiles.length,
     omittedTurns: 999,
     createdAt: now,
   }
-  const envelopeOverhead = buildContextBlock(baseMeta, editedFiles, '[... 99999 earlier items omitted ...]').length + 4
+  const omissionPlaceholder = '[... 99999 earlier items omitted ...]'
+  const envelopeOverhead = buildContextBlock(
+    baseMeta,
+    editedFiles,
+    `${omissionPlaceholder}\n\n${omissionPlaceholder}`,
+  ).length + 4
   const transcriptBudget = Math.max(0, maxContextChars - envelopeOverhead)
 
   const userCount = entries.reduce((count, entry) => count + (entry.kind === 'user' ? 1 : 0), 0)
@@ -382,25 +451,31 @@ export function buildHandoffPacket({
     }
   }
 
+  const beforeFirstBlocks: string[] = []
   const recentBlocks: string[] = []
-  let earliestRecentIdx = entries.length
+  const pushSelectedBlock = (idx: number, block: string) => {
+    if (reservedFirstBlock !== undefined && idx < firstUserIdx) {
+      beforeFirstBlocks.unshift(block)
+    } else {
+      recentBlocks.unshift(block)
+    }
+  }
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     if (includedIndices.has(i)) continue
     const block = formatEntryBlock(entries[i]!)
-    const joinCost = recentBlocks.length > 0 || reservedFirstBlock !== undefined ? 2 : 0
+    const hasAnySelected = recentBlocks.length > 0 || beforeFirstBlocks.length > 0 || reservedFirstBlock !== undefined
+    const joinCost = hasAnySelected ? 2 : 0
     if (block.length + joinCost <= remaining) {
-      recentBlocks.unshift(block)
+      pushSelectedBlock(i, block)
       includedIndices.add(i)
-      earliestRecentIdx = i
       remaining -= block.length + joinCost
       continue
     }
-    if (recentBlocks.length === 0 && remaining - joinCost >= 80) {
+    if (recentBlocks.length === 0 && beforeFirstBlocks.length === 0 && remaining - joinCost >= 80) {
       const headerLen = entries[i]!.kind === 'tool' ? 0 : (entries[i]!.kind === 'user' ? '[User]\n'.length : '[Assistant]\n'.length)
       const textCap = Math.max(24, remaining - joinCost - headerLen)
-      recentBlocks.unshift(formatEntryBlock(entries[i]!, textCap))
+      pushSelectedBlock(i, formatEntryBlock(entries[i]!, textCap))
       includedIndices.add(i)
-      earliestRecentIdx = i
       remaining = 0
     }
     break
@@ -418,10 +493,18 @@ export function buildHandoffPacket({
 
   const transcriptParts: string[] = []
   if (reservedFirstBlock !== undefined) {
+    let omittedBeforeFirst = 0
+    for (let i = 0; i < firstUserIdx; i += 1) {
+      if (!includedIndices.has(i)) omittedBeforeFirst += 1
+    }
+    const omittedAfterFirst = omittedTurns - omittedBeforeFirst
+    if (omittedBeforeFirst > 0) {
+      transcriptParts.push(`[... ${omittedBeforeFirst} earlier items omitted ...]`)
+    }
+    transcriptParts.push(...beforeFirstBlocks)
     transcriptParts.push(reservedFirstBlock)
-    const hasGapAfterFirst = earliestRecentIdx > firstUserIdx + 1 || (recentBlocks.length === 0 && omittedTurns > 0)
-    if (omittedTurns > 0 && (hasGapAfterFirst || firstUserIdx > 0)) {
-      transcriptParts.push(`[... ${omittedTurns} earlier items omitted ...]`)
+    if (omittedAfterFirst > 0) {
+      transcriptParts.push(`[... ${omittedAfterFirst} earlier items omitted ...]`)
     }
   } else if (omittedTurns > 0) {
     transcriptParts.push(`[... ${omittedTurns} earlier items omitted ...]`)

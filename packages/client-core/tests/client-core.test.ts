@@ -1860,6 +1860,31 @@ describe('HarnessAlphaClient', () => {
     })
     await client.close()
   })
+
+  it('returns empty session/page records without calling session/events fallback', async () => {
+    const core = new ScriptedCore()
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+    const originalRpc = core.rpc.bind(core)
+    const eventsCalled = vi.fn()
+    vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+      if (method === 'harness.remote.call') {
+        const request = params as { endpoint?: string }
+        if (request.endpoint === 'session/page') {
+          return { ok: true, value: { records: [], hasMore: false } }
+        }
+        if (request.endpoint === 'session/events') {
+          eventsCalled()
+          return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'should not be called', details: {} } }
+        }
+      }
+      return await originalRpc(method, params)
+    })
+
+    const page = await client.sessionReadOnlyHistory('empty-session', 60)
+    expect(page).toEqual({ events: [], hasMore: false })
+    expect(eventsCalled).not.toHaveBeenCalled()
+    await client.close()
+  })
 })
 
 

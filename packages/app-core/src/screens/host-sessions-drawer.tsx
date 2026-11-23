@@ -323,12 +323,14 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
 
   const [menuSession, setMenuSession] = useState<RemoteSession | null>(null)
   const handoffTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => () => {
+  const clearHandoffTimer = useCallback(() => {
     if (handoffTimerRef.current !== undefined) {
       clearTimeout(handoffTimerRef.current)
       handoffTimerRef.current = undefined
     }
   }, [])
+  useEffect(() => clearHandoffTimer, [clearHandoffTimer])
+  useEffect(() => { clearHandoffTimer() }, [deviceId, clearHandoffTimer])
   const [renameTarget, setRenameTarget] = useState<{ sessionId: string; currentTitle: string; backend?: RemoteSession['backend'] } | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
@@ -343,6 +345,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
   const menuIsArchived = !!menuSession && canUseHarnessActions && archivedIds.includes(menuSession.sessionId)
 
   const closeDrawer = () => {
+    clearHandoffTimer()
     setMenuSession(null)
     setRenameTarget(null)
     setRenameError(null)
@@ -606,13 +609,14 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
 
   useEffect(() => {
     if (!connected) {
+      clearHandoffTimer()
       setMenuSession(null)
       setRenameTarget(null)
       setRenameError(null)
       setRenaming(false)
       setToastMessage(null)
     }
-  }, [connected])
+  }, [connected, clearHandoffTimer])
 
   useEffect(() => {
     if (!toastMessage) return
@@ -1003,6 +1007,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
       dragActiveRef.current = false
       translateX.setValue(closedTranslateXRef.current)
       overlayOpacity.setValue(0)
+      clearHandoffTimer()
       setMenuSession(null)
       setRenameTarget(null)
       setRenameError(null)
@@ -1051,7 +1056,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
         currentAnim.current = null
       }
     }
-  }, [inline, open, immediateMount, translateX, overlayOpacity, searchMotion])
+  }, [inline, open, immediateMount, translateX, overlayOpacity, searchMotion, clearHandoffTimer])
 
   useEffect(() => {
     if (!inline && !open && !closingRef.current) {

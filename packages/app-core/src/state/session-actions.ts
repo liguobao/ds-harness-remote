@@ -38,7 +38,7 @@ import { loadHermesCatalog, mergeHermesCatalog, readHermesHistory, selectHermesM
 import { readPiHistory, selectPiModel } from '../services/pi'
 import { saveCodexPermissionPreset } from '../services/storage'
 import { browseKey, browseScope, getCachedSessionMessages, saveSessionMessagesSnapshot, updateBrowseEntry, useBrowseMemory } from '../services/browse-memory'
-import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
+import type { AgentBackend, ChatItem, RemoteSession, WorkspaceView } from '../types'
 import { loadSavedCodexPermissions, withBestCodexPermission, withCodexPermissionState } from './codex-session-state'
 import { foldHistory, settleTurnItems } from './event-reducer'
 import { inboxRpcIds, mergeHistoryAndLive, oldestSeq, prependHistory, reconcileDeliveryStates, reconcileUserQuestionsProjection, reuseUnchangedChatItems } from './message-helpers'
@@ -92,6 +92,9 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
   let permissionSelectToken = 0
   let agentPresetLoadToken = 0
   let agentPresetSelectToken = 0
+  // Track sessions currently displaying an offline browse-memory snapshot so
+  // online read-only handoff loads never shortcut to stale offline messages.
+  const offlineOnlySessionIds = new Set<string>()
 
   const isHarnessBackend = (backend?: RemoteSession['backend']) =>
     (backend ?? 'harness') === 'harness'
@@ -157,14 +160,34 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     targetBackend,
     generation,
     excludeSavedDraft = false,
+    excludeSessionId,
   }: {
     workspaceId?: string
     workspace: WorkspaceView | undefined
     targetBackend?: AgentBackend
     generation: number
     excludeSavedDraft?: boolean
-  }): Promise<{ ok: true; session: RemoteSession } | { ok: false; error?: string }> => {
+    excludeSessionId?: string
+  }): Promise<{ ok: true; session: RemoteSession; generation: number } | { ok: false; error?: string }> => {
     const defaultPermission = get().defaultPermissionPreset
+    const initialHostId = get().selectedDevice?.deviceId
+    const initialIdentityKey = get().selectedDevice?.identityKey
+    const openOnSameHost = async (target: RemoteSession): Promise<{ ok: true; session: RemoteSession; generation: number } | { ok: false; error?: string }> => {
+      const opened = await get().openSession(target)
+      const currentState = get()
+      if (generation === runtime.connectionGeneration) {
+        return opened ? { ok: true, session: target, generation } : { ok: false, error: currentState.error }
+      }
+      const sameConnectedHost = currentState.connection.phase === 'connected'
+        && currentState.selectedDevice?.deviceId === initialHostId
+        && currentState.selectedDevice?.identityKey === initialIdentityKey
+        && currentState.selectedSession?.sessionId === target.sessionId
+        && (currentState.selectedSession?.backend ?? 'harness') === (target.backend ?? 'harness')
+      if (opened && sameConnectedHost) {
+        return { ok: true, session: target, generation: runtime.connectionGeneration }
+      }
+      return { ok: false }
+    }
     set({ busyAction: 'create-session', error: undefined })
     try {
       const backend = targetBackend ?? workspace?.backend ?? 'harness'
@@ -176,6 +199,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const reusable = workspace === undefined ? undefined : state.sessions
         .filter(item => {
           if (!workspace.sessionIds.includes(item.sessionId)
+            || (excludeSessionId !== undefined && item.sessionId === excludeSessionId)
             || (item.backend ?? 'harness') !== backend
             || item.blank !== true || item.running
             || state.sessionLifecycles[item.sessionId]?.running
@@ -188,15 +212,19 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }
           if (excludeSavedDraft && scope !== undefined) {
             const entry = browseEntries?.[browseKey(scope, item.sessionId)]
-            if (entry?.handoff !== undefined || (entry?.draft?.trim().length ?? 0) > 0) return false
+            if (
+              entry?.handoff !== undefined
+              || (entry?.draft?.trim().length ?? 0) > 0
+              || (entry?.images?.length ?? 0) > 0
+              || (entry?.quotes?.length ?? 0) > 0
+              || (entry?.messages?.length ?? 0) > 0
+            ) return false
           }
           return true
         })
         .sort((a, b) => b.updatedAt - a.updatedAt)[0]
       if (reusable !== undefined) {
-        const opened = await get().openSession(reusable)
-        if (generation !== runtime.connectionGeneration) return { ok: false }
-        return opened ? { ok: true, session: reusable } : { ok: false, error: get().error }
+        return await openOnSameHost(reusable)
       }
       const existingPath = workspace?.path || get().workspaces.find(w => !!w.path)?.path
       const isWin = get().selectedDevice?.platform === 'windows'
@@ -226,9 +254,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }),
           busyAction: undefined,
         }))
-        const opened = await get().openSession(created)
-        if (generation !== runtime.connectionGeneration) return { ok: false }
-        return opened ? { ok: true, session: created } : { ok: false, error: get().error }
+        return await openOnSameHost(created)
       }
       if (isAcpManagedBackend(backend)) {
         const client = acpClientForBackend(runtime.connection, backend)
@@ -254,9 +280,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }),
           busyAction: undefined,
         }))
-        const opened = await get().openSession(session)
-        if (generation !== runtime.connectionGeneration) return { ok: false }
-        return opened ? { ok: true, session } : { ok: false, error: get().error }
+        return await openOnSameHost(session)
       }
       const proxy = runtime.connection.requireProxy()
       const { sessionId } = await proxy.sessionCreate(workspaceId ?? workspace?.workspaceId)
@@ -287,9 +311,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }),
       }))
       if (created === undefined) return { ok: false }
-      const opened = await get().openSession(created)
-      if (generation !== runtime.connectionGeneration) return { ok: false }
-      return opened ? { ok: true, session: created } : { ok: false, error: get().error }
+      return await openOnSameHost(created)
     } catch (error) {
       if (generation !== runtime.connectionGeneration) return { ok: false }
       const message = friendlyError(error)
@@ -436,6 +458,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         : (cachedSnapshot && cachedSnapshot.length > 0 ? cachedSnapshot : undefined)
 
       if (get().connection.phase !== 'connected') {
+        offlineOnlySessionIds.add(session.sessionId)
         set(state => ({
           busyAction: undefined,
           selectedSession: session,
@@ -939,6 +962,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       try {
         await load()
         if (!current()) return false
+        offlineOnlySessionIds.delete(session.sessionId)
         return await finishOpen()
       } catch (error) {
         if (!current()) return false
@@ -1037,19 +1061,28 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const sid = session.sessionId
       if (!sid) return []
       const cached = [...(acpOlderHistory.get(sid) ?? []), ...(get().messages[sid] ?? [])]
-      if (cached.length > 0) return cached
       if (get().connection.phase !== 'connected') {
+        if (cached.length > 0) return cached
         if (get().config?.baseUrl && get().selectedDevice?.identityKey) {
           return getCachedSessionMessages(browseScope(get()), sid) ?? []
         }
         return []
+      }
+      const isSelectedLiveSession = get().selectedSession?.sessionId === sid
+        && (get().selectedSession?.backend ?? 'harness') === (session.backend ?? 'harness')
+        && !offlineOnlySessionIds.has(sid)
+      if (isSelectedLiveSession && cached.length > 0) return cached
+
+      const finalizeReadOnlyItems = (items: ChatItem[]): ChatItem[] => {
+        const running = get().sessionLifecycles[sid]?.running ?? session.running
+        return running ? items : settleTurnItems(items)
       }
       const generation = runtime.connectionGeneration
       if (session.backend === 'codex') {
         const client = runtime.connection.requireCodex()
         const page = await readCodexHistoryPage(client, codexThreadId(session), undefined, 60)
         if (generation !== runtime.connectionGeneration) throw new Error(zhCN.runtime.hostClosed)
-        return foldHistory(page.events, sid, true)
+        return finalizeReadOnlyItems(foldHistory(page.events, sid, true))
       }
       if (isAcpManagedBackend(session.backend)) {
         const acpBackend = session.backend
@@ -1072,7 +1105,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 : [] as unknown[],
             }
         if (generation !== runtime.connectionGeneration) throw new Error(zhCN.runtime.hostClosed)
-        return foldAcpHistory(details.events, sid)
+        return finalizeReadOnlyItems(foldAcpHistory(details.events, sid))
       }
       const proxy = runtime.connection.requireProxy()
       if (typeof proxy.sessionReadOnlyHistory !== 'function') {
@@ -1084,7 +1117,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         isSubagentSession(session) ? session.parentSessionId : undefined,
       )
       if (generation !== runtime.connectionGeneration) throw new Error(zhCN.runtime.hostClosed)
-      return foldHistory(history.events, sid, true)
+      return finalizeReadOnlyItems(foldHistory(history.events, sid, true))
     },
 
     async handoffSession(params) {
@@ -1095,7 +1128,9 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         return { ok: false, error: zhCN.errors.AGENT_BUSY }
       }
       const run = async (): Promise<HandoffSessionResult> => {
-        const generation = runtime.connectionGeneration
+        let activeGeneration = runtime.connectionGeneration
+        const initialHostId = get().selectedDevice?.deviceId
+        const initialIdentityKey = get().selectedDevice?.identityKey
         const initialScope = browseScope({ config: get().config, selectedDevice: get().selectedDevice })
         try {
           let targetWorkspace: WorkspaceView | undefined
@@ -1110,7 +1145,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               return { ok: false, error: zhCN.handoff.noWorkspaceAvailable }
             }
             targetWorkspace = await get().workspaceCreate(registerPath, params.targetBackend)
-            if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
+            if (activeGeneration !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
               return { ok: false, error: zhCN.runtime.hostClosed }
             }
             if (targetWorkspace === undefined) {
@@ -1138,32 +1173,42 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 session: existingTarget,
                 targetBackend: params.targetBackend,
                 workspace: targetWorkspace,
+                registerPath: params.registerPath,
                 hostPlatform: get().selectedDevice?.platform,
               })
             if (!validExistingTarget || existingTarget === undefined) {
               return { ok: false, error: zhCN.errors.SESSION_NOT_FOUND }
             }
             const opened = await get().openSession(existingTarget)
-            if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
-              return { ok: false, error: zhCN.runtime.hostClosed }
+            const stateAfterOpen = get()
+            const sameConnectedHost = stateAfterOpen.connection.phase === 'connected'
+              && stateAfterOpen.selectedDevice?.deviceId === initialHostId
+              && stateAfterOpen.selectedDevice?.identityKey === initialIdentityKey
+              && stateAfterOpen.selectedSession?.sessionId === existingTarget.sessionId
+              && (stateAfterOpen.selectedSession?.backend ?? 'harness') === (existingTarget.backend ?? 'harness')
+            if (!opened || !sameConnectedHost) {
+              if (activeGeneration !== runtime.connectionGeneration || stateAfterOpen.connection.phase !== 'connected') {
+                return { ok: false, error: zhCN.runtime.hostClosed }
+              }
+              return { ok: false, error: stateAfterOpen.error ?? zhCN.runtime.hostClosed }
             }
-            if (!opened || get().selectedSession?.sessionId !== existingTarget.sessionId) {
-              return { ok: false, error: get().error ?? zhCN.runtime.hostClosed }
-            }
-            created = get().sessions.find(item => item.sessionId === existingTarget.sessionId) ?? existingTarget
+            activeGeneration = runtime.connectionGeneration
+            created = stateAfterOpen.sessions.find(item => item.sessionId === existingTarget.sessionId) ?? existingTarget
             isExistingTarget = true
           } else {
             const createdResult = await createOrReuseWorkspaceSession({
               workspaceId: targetWorkspace.workspaceId,
               workspace: targetWorkspace,
               targetBackend: params.targetBackend,
-              generation,
+              generation: activeGeneration,
               excludeSavedDraft: true,
+              excludeSessionId: params.packet.meta.sourceSessionId,
             })
             if (!createdResult.ok) {
               return { ok: false, error: createdResult.error ?? get().error }
             }
-            if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
+            activeGeneration = createdResult.generation
+            if (activeGeneration !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
               return { ok: false, error: zhCN.runtime.hostClosed }
             }
             created = createdResult.session
@@ -1225,7 +1270,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
 
           const payload = formatHandoffPayload(params.packet, params.instruction)
           const sendResult = await get().sendMessage(payload)
-          if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
+          if (activeGeneration !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
             return { ok: false, error: zhCN.runtime.hostClosed }
           }
           if (sendResult === 'rejected') {
