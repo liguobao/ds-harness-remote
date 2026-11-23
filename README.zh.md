@@ -1,6 +1,5 @@
 <p align="center">
-
-  <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
+  <img src="docs/images/hero-zh.png" alt="DeepSeek Harness Remote — 一次连接，随时回到工作台" width="100%">
 </p>
 
 <p align="center">
@@ -118,24 +117,20 @@ DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更
 
 ### 桌面端
 
-在另一台电脑上选择在线 Host，然后打开它的 Workspace。Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加密连接状态。
-
+在另一台电脑上选择在线 Host，即可通过远程工作台打开 DSH 或各类 ACP 工作区。会话直接在 Harness 原生界面中运行，顶部显示当前主机、P2P 路由详情与端到端加密状态。
 
 <p align="center">
-  <img src="docs/images/host-list.png" alt="列出在线 Host 的远端工作区选择界面" width="40%">
-  <img src="docs/images/remote.png" alt="通过端到端加密远程连接运行的 Harness 会话" width="40%">
+  <img src="docs/images/desktop-showcase-zh.png" alt="桌面端远程会话、P2P 端到端加密链路状态面板与多引擎远程工作台" width="100%">
 </p>
 
 注意：如果想关闭当前电脑远控其他主机功能，可在[https://dsh.r2049.cn/](https://dsh.r2049.cn/) 「主机列表」中，打开「仅被控」开关，开启「仅被控」后当前设备无法看到账号下其他设备，Web端、其他客户端依旧可以远程当前设备。
 
 ### Android
 
-支持文字/图片 Prompt、模型切换，以及可用工作区的文件和终端。
+支持浅色/深色双主题，在抽屉内快速切换在线主机、多引擎 ACP 工作区与 DS-Bot；支持文字/图片 Prompt、模型与思考深度切换、文件卡片预览、原生 Git Diff 变更审查及远程终端。
 
 <p align="center">
-  <img src="docs/images/mobile-list.jpg" alt="Android 客户端中的在线和离线设备列表" width="30%">
-  <img src="docs/images/image-msg.jpg" alt="从 Android 客户端发送图片 Prompt" width="30%">
-  <img src="docs/images/image-result.jpg" alt="在 Android 客户端中查看图片理解结果" width="30%">
+  <img src="docs/images/mobile-showcase-zh.png" alt="Android 客户端多主机与 ACP 抽屉、原生对话与文件交付、深色模式原生 Git Diff 审查界面" width="100%">
 </p>
 
 移动端设置提供默认关闭的全局「会话精简模式」，下次打开会话生效。
