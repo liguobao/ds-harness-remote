@@ -1,4 +1,4 @@
-import { dshWebLanGrantSchema, DSH_WEB_LAN_CAPABILITY, DSH_WEB_LAN_IPV6_CAPABILITY, DSH_WEB_CAPABILITY, sameLinkIpv6PairSchema } from '@dsh-remote/protocol'
+import { dshWebLanGrantSchema, DSH_WEB_LAN_CAPABILITY, DSH_WEB_LAN_IPV6_CAPABILITY, DSH_WEB_CAPABILITY, WORKSPACE_GIT_CAPABILITY, sameLinkIpv6PairSchema } from '@dsh-remote/protocol'
 import { LanUploadRoutes } from './lan-upload'
 import { nativeWebSocketSender } from './native-websocket-binary'
 import { AgentAcpClient, ClientLiveTransportUpgrader, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
@@ -57,6 +57,7 @@ export class AndroidRemoteConnection {
   private dshWeb = false
   private lanUploads?: LanUploadRoutes
   private sessionEventsSupported = false
+  private workspaceGitSupported = false
   private pluginRouteSupported = false
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
@@ -188,6 +189,7 @@ export class AndroidRemoteConnection {
         this.proxy = undefined
         this.codex = undefined
         this.sessionEventsSupported = false
+        this.workspaceGitSupported = false
     this.codexAvailable = false
         this.cursor = undefined
         this.acpBackends.clear()
@@ -307,6 +309,7 @@ export class AndroidRemoteConnection {
 
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
     this.sessionEventsSupported = features.sessionEvents
+    this.workspaceGitSupported = features.capabilities.includes(WORKSPACE_GIT_CAPABILITY)
     this.pluginRouteSupported = features.pluginRoute
     this.lanWeb = features.capabilities.includes(DSH_WEB_LAN_CAPABILITY)
     this.lanWebIpv6 = features.capabilities.includes(DSH_WEB_LAN_IPV6_CAPABILITY)
@@ -471,6 +474,10 @@ export class AndroidRemoteConnection {
 
   hasSessionEvents(): boolean {
     return this.sessionEventsSupported
+  }
+
+  hasWorkspaceGit(): boolean {
+    return this.workspaceGitSupported
   }
 
   hasCodex(): boolean {
@@ -660,6 +667,7 @@ export class AndroidRemoteConnection {
     this.proxy = undefined
     this.codex = undefined
     this.codexAvailable = false
+    this.workspaceGitSupported = false
     this.cursor = undefined
     this.acpBackends.clear()
     this.sessionTools = undefined

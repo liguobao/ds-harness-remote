@@ -1,10 +1,17 @@
 import { strings } from '../locales/i18n'
 
-export function sessionToolsError(error: unknown): string {
+export function sessionToolsError(error: unknown, scope: 'general' | 'changes' = 'general'): string {
   const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
   if (code === 'TERMINAL_DISABLED') return strings.tools.terminalDisabled
   if (code === 'terminal/control-unavailable') return strings.tools.controlDenied
   if (code === 'PERMISSION_DENIED') return strings.tools.accessDenied
+  if (code === 'WORKSPACE_GIT_UNAVAILABLE') return strings.tools.changesGitUnavailable
+  if (code === 'WORKSPACE_GIT_UNSAFE_REPO') return strings.tools.changesUnsafeRepo
+  if (scope === 'changes') {
+    if (code === 'WORKSPACE_PATH_DENIED') return strings.tools.accessDenied
+    if (code === 'WORKSPACE_UNAVAILABLE') return strings.tools.changesWorkspaceUnavailable
+    if (code === 'RATE_LIMITED') return strings.tools.changesRateLimited
+  }
   if (code === 'workspace-preview/too-large' || code === 'RESPONSE_TOO_LARGE') return strings.tools.previewTooLarge
   if (code === 'workspace-preview/changed') return strings.tools.previewChanged
   if (code === 'workspace-preview/invalid') return strings.tools.previewInvalid

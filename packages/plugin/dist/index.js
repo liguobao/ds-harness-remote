@@ -2125,7 +2125,7 @@ var require_extension = __commonJS({
       if (dest[name2] === void 0) dest[name2] = [elem];
       else dest[name2].push(elem);
     }
-    function parse5(header) {
+    function parse6(header) {
       const offers = /* @__PURE__ */ Object.create(null);
       let params = /* @__PURE__ */ Object.create(null);
       let mustUnescape = false;
@@ -2265,7 +2265,7 @@ var require_extension = __commonJS({
         }).join(", ");
       }).join(", ");
     }
-    module.exports = { format, parse: parse5 };
+    module.exports = { format, parse: parse6 };
   }
 });
 
@@ -2299,7 +2299,7 @@ var require_websocket = __commonJS({
     var {
       EventTarget: { addEventListener, removeEventListener }
     } = require_event_target();
-    var { format, parse: parse5 } = require_extension();
+    var { format, parse: parse6 } = require_extension();
     var { toBuffer } = require_buffer_util();
     var kAborted = Symbol("kAborted");
     var protocolVersions = [8, 13];
@@ -2976,7 +2976,7 @@ var require_websocket = __commonJS({
           }
           let extensions;
           try {
-            extensions = parse5(secWebSocketExtensions);
+            extensions = parse6(secWebSocketExtensions);
           } catch (err5) {
             const message = "Invalid Sec-WebSocket-Extensions header";
             abortHandshake(websocket, socket, message);
@@ -3227,7 +3227,7 @@ var require_stream = __commonJS({
       };
       duplex._final = function(callback) {
         if (ws.readyState === ws.CONNECTING) {
-          ws.once("open", function open7() {
+          ws.once("open", function open8() {
             duplex._final(callback);
           });
           return;
@@ -3248,7 +3248,7 @@ var require_stream = __commonJS({
       };
       duplex._write = function(chunk, encoding, callback) {
         if (ws.readyState === ws.CONNECTING) {
-          ws.once("open", function open7() {
+          ws.once("open", function open8() {
             duplex._write(chunk, encoding, callback);
           });
           return;
@@ -3268,7 +3268,7 @@ var require_subprotocol = __commonJS({
   "node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
-    function parse5(header) {
+    function parse6(header) {
       const protocols = /* @__PURE__ */ new Set();
       let start = -1;
       let end = -1;
@@ -3304,7 +3304,7 @@ var require_subprotocol = __commonJS({
       protocols.add(protocol);
       return protocols;
     }
-    module.exports = { parse: parse5 };
+    module.exports = { parse: parse6 };
   }
 });
 
@@ -7337,15 +7337,15 @@ function createCipher2(cipher) {
   }
   return null;
 }
-function createAEADCipher(id7, name2, block, kx, constants7, hash22 = "sha256") {
+function createAEADCipher(id7, name2, block, kx, constants8, hash22 = "sha256") {
   const cipher = new AEADCipher();
   cipher.id = id7;
   cipher.name = name2;
   cipher.blockAlgorithm = block;
   cipher.kx = kx;
   cipher.hashAlgorithm = hash22;
-  cipher.keyLength = constants7.K_LEN;
-  cipher.nonceLength = constants7.N_MAX;
+  cipher.keyLength = constants8.K_LEN;
+  cipher.nonceLength = constants8.N_MAX;
   cipher.nonceImplicitLength = 4;
   cipher.nonceExplicitLength = 8;
   cipher.ivLength = cipher.nonceImplicitLength;
@@ -8148,9 +8148,9 @@ function assertAuthenticatedPacketLength(condition, message) {
     throw new SrtpAuthenticationError(message);
   }
 }
-function wrapAuthenticationError(parse5, message) {
+function wrapAuthenticationError(parse6, message) {
   try {
-    return parse5();
+    return parse6();
   } catch {
     throw new SrtpAuthenticationError(message);
   }
@@ -8772,14 +8772,14 @@ function addressFromSocket(socket) {
   return [socket.remoteAddress, socket.remotePort];
 }
 async function waitForListening(server, host, port) {
-  return await new Promise((resolve10, reject) => {
+  return await new Promise((resolve11, reject) => {
     const onError = (error62) => {
       server.off("listening", onListening);
       reject(error62);
     };
     const onListening = () => {
       server.off("error", onError);
-      resolve10();
+      resolve11();
     };
     server.once("error", onError);
     server.once("listening", onListening);
@@ -9169,10 +9169,10 @@ function generateCodecStatsId(transportId, payloadType, scopeId) {
 function getStatsTimestamp() {
   return performance.timeOrigin + performance.now();
 }
-function getReferencedStatsIds(stat12) {
+function getReferencedStatsIds(stat13) {
   const references = [];
   for (const [key, value] of Object.entries(
-    stat12
+    stat13
   )) {
     if (key === "id") {
       continue;
@@ -9195,8 +9195,8 @@ function getReferencedStatsIds(stat12) {
 }
 function buildStatsReport(stats, rootIds) {
   const index = /* @__PURE__ */ new Map();
-  for (const stat12 of stats) {
-    index.set(stat12.id, stat12);
+  for (const stat13 of stats) {
+    index.set(stat13.id, stat13);
   }
   if (!rootIds) {
     return new RTCStatsReport([...index.values()]);
@@ -9208,15 +9208,15 @@ function buildStatsReport(stats, rootIds) {
     if (!id7 || includedIds.has(id7)) {
       continue;
     }
-    const stat12 = index.get(id7);
-    if (!stat12) {
+    const stat13 = index.get(id7);
+    if (!stat13) {
       continue;
     }
     includedIds.add(id7);
-    queue.push(...getReferencedStatsIds(stat12));
+    queue.push(...getReferencedStatsIds(stat13));
   }
   return new RTCStatsReport(
-    [...includedIds].map((id7) => index.get(id7)).filter((stat12) => !!stat12)
+    [...includedIds].map((id7) => index.get(id7)).filter((stat13) => !!stat13)
   );
 }
 function getApplicationStopRevision(transceiver) {
@@ -10109,18 +10109,18 @@ function normalizeCandidateUfrag(message) {
   return { ...init, usernameFragment: fromString };
 }
 function settledState(event2, current, done) {
-  return new Promise((resolve10) => {
+  return new Promise((resolve11) => {
     if (done(current()) || event2.ended) {
-      resolve10(current());
+      resolve11(current());
       return;
     }
     const { unSubscribe } = event2.subscribe(
       (state2) => {
         if (!done(state2)) return;
         unSubscribe();
-        resolve10(state2);
+        resolve11(state2);
       },
-      () => resolve10(current())
+      () => resolve11(current())
     );
   });
 }
@@ -10635,7 +10635,7 @@ var init_lib = __esm({
           error62
         );
       };
-      watch = (cb, timeLimit) => new Promise((resolve10, reject) => {
+      watch = (cb, timeLimit) => new Promise((resolve11, reject) => {
         const timeout = timeLimit && setTimeout(() => {
           reject("Event watch timeout");
         }, timeLimit);
@@ -10644,22 +10644,22 @@ var init_lib = __esm({
           if (done) {
             if (timeout) clearTimeout(timeout);
             unSubscribe();
-            resolve10(args);
+            resolve11(args);
           }
         });
       });
-      asPromise = (timeLimit) => new Promise((resolve10, reject) => {
+      asPromise = (timeLimit) => new Promise((resolve11, reject) => {
         const timeout = timeLimit && setTimeout(() => {
           reject("Event asPromise timeout");
         }, timeLimit);
         this.once(
           (...args) => {
             if (timeout) clearTimeout(timeout);
-            resolve10(args);
+            resolve11(args);
           },
           () => {
             if (timeout) clearTimeout(timeout);
-            resolve10([]);
+            resolve11([]);
           },
           (err5) => {
             if (timeout) clearTimeout(timeout);
@@ -10961,7 +10961,7 @@ var init_lib = __esm({
         if (this.closed) {
           throw new Error("udp transport closed");
         }
-        await new Promise((resolve10, reject) => {
+        await new Promise((resolve11, reject) => {
           let settled = false;
           const settle2 = (error62) => {
             if (settled) return;
@@ -10969,7 +10969,7 @@ var init_lib = __esm({
             this.socket.off("listening", onListening);
             this.socket.off("error", onBindError);
             this.socket.off("close", onClose);
-            error62 ? reject(error62) : resolve10();
+            error62 ? reject(error62) : resolve11();
           };
           const onListening = () => {
             this.listening = true;
@@ -11167,7 +11167,7 @@ var init_lib = __esm({
         }
         const client = this.createClient();
         this.client = client;
-        this.connecting = new Promise((resolve10, reject) => {
+        this.connecting = new Promise((resolve11, reject) => {
           let settled = false;
           const settle2 = (error62) => {
             if (settled) return;
@@ -11176,7 +11176,7 @@ var init_lib = __esm({
             client.off(this.connectEvent, onConnect);
             client.off("error", onConnectError);
             this.rejectConnecting = void 0;
-            error62 ? reject(error62) : resolve10();
+            error62 ? reject(error62) : resolve11();
           };
           const onConnect = () => {
             settle2();
@@ -11223,13 +11223,13 @@ var init_lib = __esm({
       send = async (data2, addr) => {
         void addr;
         await this.connecting;
-        await new Promise((resolve10, reject) => {
+        await new Promise((resolve11, reject) => {
           this.client.write(data2, (err5) => {
             if (err5) {
               reject(err5);
               return;
             }
-            resolve10();
+            resolve11();
           });
         });
       };
@@ -18480,10 +18480,10 @@ var init_lib = __esm({
       }
     };
     cancelable = (ex) => {
-      let resolve10;
+      let resolve11;
       let reject;
       const p = new Promise((r, f) => {
-        resolve10 = r;
+        resolve11 = r;
         reject = f;
       });
       p.then(() => {
@@ -18494,9 +18494,9 @@ var init_lib = __esm({
         onCancel.complete();
       });
       const onCancel = new Event2();
-      ex(resolve10, reject, onCancel).catch(() => {
+      ex(resolve11, reject, onCancel).catch(() => {
       });
-      return { awaitable: p, resolve: resolve10, reject };
+      return { awaitable: p, resolve: resolve11, reject };
     };
     COOKIE = 554869826;
     FINGERPRINT_LENGTH = 8;
@@ -18989,21 +18989,21 @@ var init_lib = __esm({
           clearTimeout(this.waitTimer);
           this.waitTimer = void 0;
         }
-        const resolve10 = this.waitResolve;
+        const resolve11 = this.waitResolve;
         this.waitResolve = void 0;
-        resolve10?.();
+        resolve11?.();
       }
       wait(ms) {
-        return new Promise((resolve10) => {
+        return new Promise((resolve11) => {
           if (this.ended || this.signal?.aborted) {
-            resolve10();
+            resolve11();
             return;
           }
-          this.waitResolve = resolve10;
+          this.waitResolve = resolve11;
           this.waitTimer = setTimeout(() => {
             this.waitTimer = void 0;
             this.waitResolve = void 0;
-            resolve10();
+            resolve11();
           }, ms);
         });
       }
@@ -19284,13 +19284,13 @@ var init_lib = __esm({
       async sendFrame(data2, addr) {
         const entry = await this.getSocket(addr);
         try {
-          await new Promise((resolve10, reject) => {
+          await new Promise((resolve11, reject) => {
             entry.socket.write(encodeTcpFrame(data2), (error62) => {
               if (error62) {
                 reject(error62);
                 return;
               }
-              resolve10();
+              resolve11();
             });
           });
         } catch (error62) {
@@ -19373,7 +19373,7 @@ var init_lib = __esm({
         if (pending) {
           return await pending;
         }
-        const connecting = new Promise((resolve10, reject) => {
+        const connecting = new Promise((resolve11, reject) => {
           const socket = connect3({
             host: addr[0],
             port: addr[1],
@@ -19386,7 +19386,7 @@ var init_lib = __esm({
           };
           const onConnect = () => {
             socket.off("error", onError);
-            resolve10(entry);
+            resolve11(entry);
           };
           socket.once("error", onError);
           socket.once("connect", onConnect);
@@ -19435,8 +19435,8 @@ var init_lib = __esm({
       }
       async close() {
         await super.close();
-        await new Promise((resolve10) => {
-          this.server.close(() => resolve10());
+        await new Promise((resolve11) => {
+          this.server.close(() => resolve11());
         });
       }
     };
@@ -20091,8 +20091,8 @@ var init_lib = __esm({
     Connection = class {
       constructor(_iceControlling, options) {
         this._iceControlling = _iceControlling;
-        this.closedSignal = new Promise((resolve10) => {
-          this.signalClosed = resolve10;
+        this.closedSignal = new Promise((resolve11) => {
+          this.signalClosed = resolve11;
         });
         this.options = {
           ...defaultOptions,
@@ -21058,8 +21058,8 @@ var init_lib = __esm({
               serverReflexiveCandidate(protocol, stunServer).catch(
                 () => void 0
               ),
-              new Promise((resolve10) => {
-                timer2 = setTimeout(() => resolve10(void 0), timeout * 1e3);
+              new Promise((resolve11) => {
+                timer2 = setTimeout(() => resolve11(void 0), timeout * 1e3);
               })
             ]);
             clearTimeout(timer2);
@@ -21325,14 +21325,14 @@ var init_lib = __esm({
         return this.consentFresh;
       }
       abortableDelay(ms, signal) {
-        return new Promise((resolve10, reject) => {
+        return new Promise((resolve11, reject) => {
           if (signal.aborted) {
             reject(new DOMException("The operation was aborted", "AbortError"));
             return;
           }
           const timer2 = setTimeout(() => {
             signal.removeEventListener("abort", onAbort);
-            resolve10();
+            resolve11();
           }, ms);
           const onAbort = () => {
             clearTimeout(timer2);
@@ -23359,8 +23359,8 @@ var init_lib = __esm({
           this.outboundStreamSeq[streamId] = uint16Add(streamSeqNum, 1);
         }
         const lastChunk = chunks[chunks.length - 1];
-        const sent = lastChunk && !this.isStopped ? new Promise((resolve10) => {
-          this.sendWaiters.push({ chunk: lastChunk, resolve: resolve10 });
+        const sent = lastChunk && !this.isStopped ? new Promise((resolve11) => {
+          this.sendWaiters.push({ chunk: lastChunk, resolve: resolve11 });
         }) : void 0;
         await this.transmit();
         await sent;
@@ -24138,8 +24138,8 @@ var init_lib = __esm({
       constructor(stats) {
         super();
         if (stats) {
-          for (const stat12 of stats) {
-            this.set(stat12.id, stat12);
+          for (const stat13 of stats) {
+            this.set(stat13.id, stat13);
           }
         }
       }
@@ -29335,9 +29335,9 @@ var init_lib = __esm({
           this.settlePendingRtp(item);
         }
       }
-      enqueuePendingRtp(rtp, resolve10, reject) {
+      enqueuePendingRtp(rtp, resolve11, reject) {
         const packet = Buffer.isBuffer(rtp) ? RtpPacket.deSerialize(rtp) : rtp.clone();
-        this.pendingRtp.push({ packet, resolve: resolve10, reject });
+        this.pendingRtp.push({ packet, resolve: resolve11, reject });
         while (this.pendingRtp.length > this.pendingRtpMaxLength) {
           const dropped = this.pendingRtp.shift();
           if (dropped) {
@@ -29540,8 +29540,8 @@ var init_lib = __esm({
           await this.dispatchRtp(rtp);
           return;
         }
-        await new Promise((resolve10, reject) => {
-          this.enqueuePendingRtp(rtp, resolve10, reject);
+        await new Promise((resolve11, reject) => {
+          this.enqueuePendingRtp(rtp, resolve11, reject);
           void this.drainPendingRtp();
         });
       }
@@ -31851,7 +31851,7 @@ var init_lib = __esm({
       async close() {
         if (this.sctpTransport) {
           await this.sctpTransport.stop();
-          await new Promise((resolve10) => setImmediate(resolve10));
+          await new Promise((resolve11) => setImmediate(resolve11));
         }
         this.onDataChannel.allUnsubscribe();
       }
@@ -33818,11 +33818,11 @@ var init_lib = __esm({
         const previous = this.descriptionTail;
         let releaseDone;
         let releaseApplied;
-        const done = new Promise((resolve10) => {
-          releaseDone = resolve10;
+        const done = new Promise((resolve11) => {
+          releaseDone = resolve11;
         });
-        const applied = new Promise((resolve10) => {
-          releaseApplied = resolve10;
+        const applied = new Promise((resolve11) => {
+          releaseApplied = resolve11;
         });
         this.descriptionTail = afterApplied ? {
           done: Promise.all([previous.done, done]).then(() => void 0),
@@ -34394,7 +34394,7 @@ var init_lib = __esm({
             this.negotiationNeed.discardPendingOffer();
             this.negotiationNeed.recheck = true;
             this.setSignalingState("stable");
-            await new Promise((resolve10) => setImmediate(resolve10));
+            await new Promise((resolve11) => setImmediate(resolve11));
             this.assertOpenAfterYield();
           }
           if (remoteSdp.type === "offer" && this.signalingState === "have-remote-offer") {
@@ -41443,11 +41443,11 @@ var require_dijkstra = __commonJS({
         var predecessors = {};
         var costs = {};
         costs[s] = 0;
-        var open7 = dijkstra.PriorityQueue.make();
-        open7.push(s, 0);
+        var open8 = dijkstra.PriorityQueue.make();
+        open8.push(s, 0);
         var closest, u, v, cost_of_s_to_u, adjacent_nodes, cost_of_e, cost_of_s_to_u_plus_cost_of_e, cost_of_s_to_v, first_visit;
-        while (!open7.empty()) {
-          closest = open7.pop();
+        while (!open8.empty()) {
+          closest = open8.pop();
           u = closest.value;
           cost_of_s_to_u = closest.cost;
           adjacent_nodes = graph[u] || {};
@@ -41459,7 +41459,7 @@ var require_dijkstra = __commonJS({
               first_visit = typeof costs[v] === "undefined";
               if (first_visit || cost_of_s_to_v > cost_of_s_to_u_plus_cost_of_e) {
                 costs[v] = cost_of_s_to_u_plus_cost_of_e;
-                open7.push(v, cost_of_s_to_u_plus_cost_of_e);
+                open8.push(v, cost_of_s_to_u_plus_cost_of_e);
                 predecessors[v] = u;
               }
             }
@@ -42469,7 +42469,7 @@ var require_crc = __commonJS({
 var require_parser = __commonJS({
   "node_modules/pngjs/lib/parser.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     var CrcCalculator = require_crc();
     var Parser = module.exports = function(options, dependencies) {
       this._options = options;
@@ -42480,12 +42480,12 @@ var require_parser = __commonJS({
       this._palette = [];
       this._colorType = 0;
       this._chunks = {};
-      this._chunks[constants7.TYPE_IHDR] = this._handleIHDR.bind(this);
-      this._chunks[constants7.TYPE_IEND] = this._handleIEND.bind(this);
-      this._chunks[constants7.TYPE_IDAT] = this._handleIDAT.bind(this);
-      this._chunks[constants7.TYPE_PLTE] = this._handlePLTE.bind(this);
-      this._chunks[constants7.TYPE_tRNS] = this._handleTRNS.bind(this);
-      this._chunks[constants7.TYPE_gAMA] = this._handleGAMA.bind(this);
+      this._chunks[constants8.TYPE_IHDR] = this._handleIHDR.bind(this);
+      this._chunks[constants8.TYPE_IEND] = this._handleIEND.bind(this);
+      this._chunks[constants8.TYPE_IDAT] = this._handleIDAT.bind(this);
+      this._chunks[constants8.TYPE_PLTE] = this._handlePLTE.bind(this);
+      this._chunks[constants8.TYPE_tRNS] = this._handleTRNS.bind(this);
+      this._chunks[constants8.TYPE_gAMA] = this._handleGAMA.bind(this);
       this.read = dependencies.read;
       this.error = dependencies.error;
       this.metadata = dependencies.metadata;
@@ -42500,10 +42500,10 @@ var require_parser = __commonJS({
       };
     };
     Parser.prototype.start = function() {
-      this.read(constants7.PNG_SIGNATURE.length, this._parseSignature.bind(this));
+      this.read(constants8.PNG_SIGNATURE.length, this._parseSignature.bind(this));
     };
     Parser.prototype._parseSignature = function(data2) {
-      let signature = constants7.PNG_SIGNATURE;
+      let signature = constants8.PNG_SIGNATURE;
       for (let i = 0; i < signature.length; i++) {
         if (data2[i] !== signature[i]) {
           this.error(new Error("Invalid file signature"));
@@ -42520,7 +42520,7 @@ var require_parser = __commonJS({
         name2 += String.fromCharCode(data2[i]);
       }
       let ancillary = Boolean(data2[4] & 32);
-      if (!this._hasIHDR && type !== constants7.TYPE_IHDR) {
+      if (!this._hasIHDR && type !== constants8.TYPE_IHDR) {
         this.error(new Error("Expected IHDR on beggining"));
         return;
       }
@@ -42568,7 +42568,7 @@ var require_parser = __commonJS({
         this.error(new Error("Unsupported bit depth " + depth));
         return;
       }
-      if (!(colorType in constants7.COLORTYPE_TO_BPP_MAP)) {
+      if (!(colorType in constants8.COLORTYPE_TO_BPP_MAP)) {
         this.error(new Error("Unsupported color type"));
         return;
       }
@@ -42585,16 +42585,16 @@ var require_parser = __commonJS({
         return;
       }
       this._colorType = colorType;
-      let bpp = constants7.COLORTYPE_TO_BPP_MAP[this._colorType];
+      let bpp = constants8.COLORTYPE_TO_BPP_MAP[this._colorType];
       this._hasIHDR = true;
       this.metadata({
         width,
         height,
         depth,
         interlace: Boolean(interlace),
-        palette: Boolean(colorType & constants7.COLORTYPE_PALETTE),
-        color: Boolean(colorType & constants7.COLORTYPE_COLOR),
-        alpha: Boolean(colorType & constants7.COLORTYPE_ALPHA),
+        palette: Boolean(colorType & constants8.COLORTYPE_PALETTE),
+        color: Boolean(colorType & constants8.COLORTYPE_COLOR),
+        alpha: Boolean(colorType & constants8.COLORTYPE_ALPHA),
         bpp,
         colorType
       });
@@ -42618,7 +42618,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseTRNS = function(data2) {
       this._crc.write(data2);
-      if (this._colorType === constants7.COLORTYPE_PALETTE_COLOR) {
+      if (this._colorType === constants8.COLORTYPE_PALETTE_COLOR) {
         if (this._palette.length === 0) {
           this.error(new Error("Transparency chunk must be after palette"));
           return;
@@ -42632,10 +42632,10 @@ var require_parser = __commonJS({
         }
         this.palette(this._palette);
       }
-      if (this._colorType === constants7.COLORTYPE_GRAYSCALE) {
+      if (this._colorType === constants8.COLORTYPE_GRAYSCALE) {
         this.transColor([data2.readUInt16BE(0)]);
       }
-      if (this._colorType === constants7.COLORTYPE_COLOR) {
+      if (this._colorType === constants8.COLORTYPE_COLOR) {
         this.transColor([
           data2.readUInt16BE(0),
           data2.readUInt16BE(2),
@@ -42649,7 +42649,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseGAMA = function(data2) {
       this._crc.write(data2);
-      this.gamma(data2.readUInt32BE(0) / constants7.GAMMA_DIVISION);
+      this.gamma(data2.readUInt32BE(0) / constants8.GAMMA_DIVISION);
       this._handleChunkEnd();
     };
     Parser.prototype._handleIDAT = function(length) {
@@ -42661,7 +42661,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseIDAT = function(length, data2) {
       this._crc.write(data2);
-      if (this._colorType === constants7.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
+      if (this._colorType === constants8.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
         throw new Error("Expected palette not found");
       }
       this.inflateData(data2);
@@ -43145,9 +43145,9 @@ var require_parser_async = __commonJS({
 var require_bitpacker = __commonJS({
   "node_modules/pngjs/lib/bitpacker.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     module.exports = function(dataIn, width, height, options) {
-      let outHasAlpha = [constants7.COLORTYPE_COLOR_ALPHA, constants7.COLORTYPE_ALPHA].indexOf(
+      let outHasAlpha = [constants8.COLORTYPE_COLOR_ALPHA, constants8.COLORTYPE_ALPHA].indexOf(
         options.colorType
       ) !== -1;
       if (options.colorType === options.inputColorType) {
@@ -43167,11 +43167,11 @@ var require_bitpacker = __commonJS({
       }
       let data2 = options.bitDepth !== 16 ? dataIn : new Uint16Array(dataIn.buffer);
       let maxValue = 255;
-      let inBpp = constants7.COLORTYPE_TO_BPP_MAP[options.inputColorType];
+      let inBpp = constants8.COLORTYPE_TO_BPP_MAP[options.inputColorType];
       if (inBpp === 4 && !options.inputHasAlpha) {
         inBpp = 3;
       }
-      let outBpp = constants7.COLORTYPE_TO_BPP_MAP[options.colorType];
+      let outBpp = constants8.COLORTYPE_TO_BPP_MAP[options.colorType];
       if (options.bitDepth === 16) {
         maxValue = 65535;
         outBpp *= 2;
@@ -43195,24 +43195,24 @@ var require_bitpacker = __commonJS({
         let blue;
         let alpha = maxValue;
         switch (options.inputColorType) {
-          case constants7.COLORTYPE_COLOR_ALPHA:
+          case constants8.COLORTYPE_COLOR_ALPHA:
             alpha = data2[inIndex + 3];
             red = data2[inIndex];
             green = data2[inIndex + 1];
             blue = data2[inIndex + 2];
             break;
-          case constants7.COLORTYPE_COLOR:
+          case constants8.COLORTYPE_COLOR:
             red = data2[inIndex];
             green = data2[inIndex + 1];
             blue = data2[inIndex + 2];
             break;
-          case constants7.COLORTYPE_ALPHA:
+          case constants8.COLORTYPE_ALPHA:
             alpha = data2[inIndex + 1];
             red = data2[inIndex];
             green = red;
             blue = red;
             break;
-          case constants7.COLORTYPE_GRAYSCALE:
+          case constants8.COLORTYPE_GRAYSCALE:
             red = data2[inIndex];
             green = red;
             blue = red;
@@ -43245,8 +43245,8 @@ var require_bitpacker = __commonJS({
         for (let x = 0; x < width; x++) {
           let rgba = getRGBA(data2, inIndex);
           switch (options.colorType) {
-            case constants7.COLORTYPE_COLOR_ALPHA:
-            case constants7.COLORTYPE_COLOR:
+            case constants8.COLORTYPE_COLOR_ALPHA:
+            case constants8.COLORTYPE_COLOR:
               if (options.bitDepth === 8) {
                 outData[outIndex] = rgba.red;
                 outData[outIndex + 1] = rgba.green;
@@ -43263,8 +43263,8 @@ var require_bitpacker = __commonJS({
                 }
               }
               break;
-            case constants7.COLORTYPE_ALPHA:
-            case constants7.COLORTYPE_GRAYSCALE: {
+            case constants8.COLORTYPE_ALPHA:
+            case constants8.COLORTYPE_GRAYSCALE: {
               let grayscale = (rgba.red + rgba.green + rgba.blue) / 3;
               if (options.bitDepth === 8) {
                 outData[outIndex] = grayscale;
@@ -43437,7 +43437,7 @@ var require_filter_pack = __commonJS({
 var require_packer = __commonJS({
   "node_modules/pngjs/lib/packer.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     var CrcStream = require_crc();
     var bitPacker = require_bitpacker();
     var filter = require_filter_pack();
@@ -43450,23 +43450,23 @@ var require_packer = __commonJS({
       options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
       options.deflateFactory = options.deflateFactory || zlib.createDeflate;
       options.bitDepth = options.bitDepth || 8;
-      options.colorType = typeof options.colorType === "number" ? options.colorType : constants7.COLORTYPE_COLOR_ALPHA;
-      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants7.COLORTYPE_COLOR_ALPHA;
+      options.colorType = typeof options.colorType === "number" ? options.colorType : constants8.COLORTYPE_COLOR_ALPHA;
+      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants8.COLORTYPE_COLOR_ALPHA;
       if ([
-        constants7.COLORTYPE_GRAYSCALE,
-        constants7.COLORTYPE_COLOR,
-        constants7.COLORTYPE_COLOR_ALPHA,
-        constants7.COLORTYPE_ALPHA
+        constants8.COLORTYPE_GRAYSCALE,
+        constants8.COLORTYPE_COLOR,
+        constants8.COLORTYPE_COLOR_ALPHA,
+        constants8.COLORTYPE_ALPHA
       ].indexOf(options.colorType) === -1) {
         throw new Error(
           "option color type:" + options.colorType + " is not supported at present"
         );
       }
       if ([
-        constants7.COLORTYPE_GRAYSCALE,
-        constants7.COLORTYPE_COLOR,
-        constants7.COLORTYPE_COLOR_ALPHA,
-        constants7.COLORTYPE_ALPHA
+        constants8.COLORTYPE_GRAYSCALE,
+        constants8.COLORTYPE_COLOR,
+        constants8.COLORTYPE_COLOR_ALPHA,
+        constants8.COLORTYPE_ALPHA
       ].indexOf(options.inputColorType) === -1) {
         throw new Error(
           "option input color type:" + options.inputColorType + " is not supported at present"
@@ -43490,7 +43490,7 @@ var require_packer = __commonJS({
     };
     Packer.prototype.filterData = function(data2, width, height) {
       let packedData = bitPacker(data2, width, height, this._options);
-      let bpp = constants7.COLORTYPE_TO_BPP_MAP[this._options.colorType];
+      let bpp = constants8.COLORTYPE_TO_BPP_MAP[this._options.colorType];
       let filteredData = filter(packedData, width, height, this._options, bpp);
       return filteredData;
     };
@@ -43510,8 +43510,8 @@ var require_packer = __commonJS({
     };
     Packer.prototype.packGAMA = function(gamma) {
       let buf = Buffer.alloc(4);
-      buf.writeUInt32BE(Math.floor(gamma * constants7.GAMMA_DIVISION), 0);
-      return this._packChunk(constants7.TYPE_gAMA, buf);
+      buf.writeUInt32BE(Math.floor(gamma * constants8.GAMMA_DIVISION), 0);
+      return this._packChunk(constants8.TYPE_gAMA, buf);
     };
     Packer.prototype.packIHDR = function(width, height) {
       let buf = Buffer.alloc(13);
@@ -43522,13 +43522,13 @@ var require_packer = __commonJS({
       buf[10] = 0;
       buf[11] = 0;
       buf[12] = 0;
-      return this._packChunk(constants7.TYPE_IHDR, buf);
+      return this._packChunk(constants8.TYPE_IHDR, buf);
     };
     Packer.prototype.packIDAT = function(data2) {
-      return this._packChunk(constants7.TYPE_IDAT, data2);
+      return this._packChunk(constants8.TYPE_IDAT, data2);
     };
     Packer.prototype.packIEND = function() {
-      return this._packChunk(constants7.TYPE_IEND, null);
+      return this._packChunk(constants8.TYPE_IEND, null);
     };
   }
 });
@@ -43539,7 +43539,7 @@ var require_packer_async = __commonJS({
     "use strict";
     var util = __require("util");
     var Stream = __require("stream");
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     var Packer = require_packer();
     var PackerAsync = module.exports = function(opt) {
       Stream.call(this);
@@ -43550,7 +43550,7 @@ var require_packer_async = __commonJS({
     };
     util.inherits(PackerAsync, Stream);
     PackerAsync.prototype.pack = function(data2, width, height, gamma) {
-      this.emit("data", Buffer.from(constants7.PNG_SIGNATURE));
+      this.emit("data", Buffer.from(constants8.PNG_SIGNATURE));
       this.emit("data", this._packer.packIHDR(width, height));
       if (gamma) {
         this.emit("data", this._packer.packGAMA(gamma));
@@ -43874,7 +43874,7 @@ var require_packer_sync = __commonJS({
     if (!zlib.deflateSync) {
       hasSyncZlib = false;
     }
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     var Packer = require_packer();
     module.exports = function(metaData, opt) {
       if (!hasSyncZlib) {
@@ -43885,7 +43885,7 @@ var require_packer_sync = __commonJS({
       let options = opt || {};
       let packer = new Packer(options);
       let chunks = [];
-      chunks.push(Buffer.from(constants7.PNG_SIGNATURE));
+      chunks.push(Buffer.from(constants8.PNG_SIGNATURE));
       chunks.push(packer.packIHDR(metaData.width, metaData.height));
       if (metaData.gamma) {
         chunks.push(packer.packGAMA(metaData.gamma));
@@ -43914,10 +43914,10 @@ var require_packer_sync = __commonJS({
 var require_png_sync = __commonJS({
   "node_modules/pngjs/lib/png-sync.js"(exports) {
     "use strict";
-    var parse5 = require_parser_sync();
+    var parse6 = require_parser_sync();
     var pack2 = require_packer_sync();
     exports.read = function(buffer3, options) {
-      return parse5(buffer3, options || {});
+      return parse6(buffer3, options || {});
     };
     exports.write = function(png, options) {
       return pack2(png, options);
@@ -44546,10 +44546,10 @@ var require_browser = __commonJS({
           text = canvas;
           canvas = void 0;
         }
-        return new Promise(function(resolve10, reject) {
+        return new Promise(function(resolve11, reject) {
           try {
             const data2 = QRCode.create(text, opts);
-            resolve10(renderFunc(data2, canvas, opts));
+            resolve11(renderFunc(data2, canvas, opts));
           } catch (e) {
             reject(e);
           }
@@ -44630,11 +44630,11 @@ var require_server = __commonJS({
     }
     function render(renderFunc, text, params) {
       if (!params.cb) {
-        return new Promise(function(resolve10, reject) {
+        return new Promise(function(resolve11, reject) {
           try {
             const data2 = QRCode.create(text, params.opts);
             return renderFunc(data2, params.opts, function(err5, data3) {
-              return err5 ? reject(err5) : resolve10(data3);
+              return err5 ? reject(err5) : resolve11(data3);
             });
           } catch (e) {
             reject(e);
@@ -46559,18 +46559,18 @@ var validateAsync = async (schema, value, _ctx) => {
   return result.issues.length === 0;
 };
 var _encode = (_Err) => {
-  const parse5 = _parse(_Err);
+  const parse6 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return parse5(schema, value, ctx, finalizeParams(fn, _params));
+    return parse6(schema, value, ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
 var encode = /* @__PURE__ */ _encode($ZodRealError);
 var _decode = (_Err) => {
-  const parse5 = _parse(_Err);
+  const parse6 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
-    return parse5(schema, value, _ctx, finalizeParams(fn, _params));
+    return parse6(schema, value, _ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
@@ -48065,7 +48065,7 @@ function capSize(inst, size2) {
   if (!caps.length)
     return;
   const cap = Math.min(...caps.map((c) => c[0]));
-  const parse5 = inst._zod.parse;
+  const parse6 = inst._zod.parse;
   inst._zod.parse = (payload, ctx) => {
     const n = size2(payload.value);
     if (n > cap && !ctx?.skipChecks && ctx?.direction !== "backward") {
@@ -48079,7 +48079,7 @@ function capSize(inst, size2) {
         }
       }
     }
-    return parse5(payload, ctx);
+    return parse6(payload, ctx);
   };
 }
 var arraySize = (input4) => Array.isArray(input4) ? input4.length : -1;
@@ -49768,7 +49768,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve10) {
+function isRecursive(inst, stack, resolve11) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -49778,7 +49778,7 @@ function isRecursive(inst, stack, resolve10) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve10);
+      const answer = isRecursive(child, stack, resolve11);
       if (answer > result)
         result = answer;
     }
@@ -49789,7 +49789,7 @@ function isRecursive(inst, stack, resolve10) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve10) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve11) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -49853,7 +49853,7 @@ function isRecursive(inst, stack, resolve10) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve10 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve11 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -64961,6 +64961,93 @@ function parseWireJson(input4) {
   }
 }
 
+// packages/protocol/dist/workspace-git.js
+var WORKSPACE_GIT_CAPABILITY = "workspace.git.read.v1";
+var WORKSPACE_GIT_METHODS = [
+  "workspace.git.status",
+  "workspace.git.diff"
+];
+var WORKSPACE_GIT_SCOPES = ["all", "staged", "unstaged"];
+var WORKSPACE_GIT_FILE_STATUSES = [
+  "modified",
+  "added",
+  "deleted",
+  "renamed",
+  "copied",
+  "untracked",
+  "unmerged"
+];
+var WORKSPACE_GIT_MAX_FILES = 200;
+var WORKSPACE_GIT_MAX_STATUS_STDOUT_BYTES = 512 * 1024;
+var WORKSPACE_GIT_MAX_DIFF_BYTES = 256 * 1024;
+var WORKSPACE_GIT_MAX_DIFF_LINES = 2500;
+var WORKSPACE_GIT_DEFAULT_CONTEXT_LINES = 3;
+var WORKSPACE_GIT_MAX_CONTEXT_LINES = 20;
+var WORKSPACE_GIT_TIMEOUT_MS = 1e4;
+var WORKSPACE_GIT_MAX_CONCURRENT = 4;
+var WORKSPACE_GIT_MAX_PATH_LENGTH = 1024;
+function isSafeWorkspaceGitRelativePath(value) {
+  if (value.length === 0 || value.length > WORKSPACE_GIT_MAX_PATH_LENGTH)
+    return false;
+  if (/[\0\r\n\\:]/.test(value))
+    return false;
+  if (value.startsWith("/") || value.startsWith("-"))
+    return false;
+  const segments = value.split("/");
+  for (const segment of segments) {
+    if (segment.length === 0 || segment === "." || segment === "..")
+      return false;
+  }
+  return true;
+}
+var workspaceGitScopeSchema = external_exports.enum(WORKSPACE_GIT_SCOPES);
+var workspaceGitFileStatusSchema = external_exports.enum(WORKSPACE_GIT_FILE_STATUSES);
+var workspaceGitStatusParamsSchema = external_exports.object({
+  sessionId: external_exports.string().min(1).max(512),
+  scope: workspaceGitScopeSchema.optional()
+}).strict();
+var workspaceGitFileEntrySchema = external_exports.object({
+  path: external_exports.string().min(1).max(WORKSPACE_GIT_MAX_PATH_LENGTH),
+  oldPath: external_exports.string().min(1).max(WORKSPACE_GIT_MAX_PATH_LENGTH).optional(),
+  status: workspaceGitFileStatusSchema,
+  staged: external_exports.boolean(),
+  unstaged: external_exports.boolean(),
+  additions: external_exports.number().int().min(0).nullable(),
+  deletions: external_exports.number().int().min(0).nullable(),
+  isBinary: external_exports.boolean()
+}).strict();
+var workspaceGitStatusResultSchema = external_exports.object({
+  isGitRepo: external_exports.boolean(),
+  branch: external_exports.string().max(256).optional(),
+  headShortSha: external_exports.string().max(64).optional(),
+  hasHead: external_exports.boolean(),
+  scope: workspaceGitScopeSchema,
+  files: external_exports.array(workspaceGitFileEntrySchema).max(WORKSPACE_GIT_MAX_FILES),
+  totalFiles: external_exports.number().int().min(0),
+  truncated: external_exports.boolean(),
+  totalAdditions: external_exports.number().int().min(0),
+  totalDeletions: external_exports.number().int().min(0)
+}).strict();
+var workspaceGitDiffParamsSchema = external_exports.object({
+  sessionId: external_exports.string().min(1).max(512),
+  path: external_exports.string().min(1).max(WORKSPACE_GIT_MAX_PATH_LENGTH).optional(),
+  scope: workspaceGitScopeSchema.optional(),
+  contextLines: external_exports.number().int().min(0).max(WORKSPACE_GIT_MAX_CONTEXT_LINES).optional()
+}).strict();
+var workspaceGitDiffResultSchema = external_exports.object({
+  isGitRepo: external_exports.boolean(),
+  path: external_exports.string().min(1).max(WORKSPACE_GIT_MAX_PATH_LENGTH).optional(),
+  scope: workspaceGitScopeSchema,
+  diff: external_exports.string(),
+  bytes: external_exports.number().int().min(0),
+  lines: external_exports.number().int().min(0),
+  additions: external_exports.number().int().min(0),
+  deletions: external_exports.number().int().min(0),
+  isBinary: external_exports.boolean(),
+  truncated: external_exports.boolean(),
+  truncatedReason: external_exports.enum(["max-bytes", "max-lines"]).optional()
+}).strict();
+
 // packages/protocol/dist/close-semantics.js
 var SERVER_SHUTDOWN_REASON = "server shutdown";
 var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
@@ -65112,6 +65199,7 @@ var sessionTransferMethods = [
 ];
 var rpcMethods = [
   ...sessionTransferMethods,
+  ...WORKSPACE_GIT_METHODS,
   "workspace.upload.lan.open",
   "workspace.upload.open",
   "workspace.upload.chunk",
@@ -66795,8 +66883,8 @@ var DirectPreferredRace = class {
   constructor(signal, windowMs = 3e3, deadlineMs = 12e3, deferWindow = false) {
     this.signal = signal;
     this.windowMs = windowMs;
-    this.result = new Promise((resolve10, reject) => {
-      this.resolve = resolve10;
+    this.result = new Promise((resolve11, reject) => {
+      this.resolve = resolve11;
       this.reject = reject;
     });
     this.deadlineAt = Date.now() + deadlineMs;
@@ -66887,7 +66975,7 @@ async function waitForRelayCapacity(socket) {
   while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
     if (socket.readyState !== 1 || Date.now() - started > 1e4)
       throw new Error("Relay consumer is too slow or disconnected");
-    await new Promise((resolve10) => setTimeout(resolve10, 10));
+    await new Promise((resolve11) => setTimeout(resolve11, 10));
   }
   if (socket.readyState !== 1)
     throw new Error("Relay transport closed");
@@ -67367,8 +67455,8 @@ var RtcDataChannelTransport = class {
     if (this.connectPromise !== void 0)
       return this.connectPromise;
     this.armAbort(signal);
-    this.connectPromise = new Promise((resolve10, reject) => {
-      this.openResolve = resolve10;
+    this.connectPromise = new Promise((resolve11, reject) => {
+      this.openResolve = resolve11;
       this.openReject = reject;
       this.negotiateTimer = setTimeout(() => {
         void this.failOpenAfterStats(new RtcConnectError("RTC_CONNECT_TIMEOUT", `WebRTC negotiation timed out after ${this.negotiateTimeoutMs}ms.`));
@@ -67614,10 +67702,10 @@ var RtcDataChannelTransport = class {
           return;
         }
         this.opened = true;
-        const resolve10 = this.openResolve;
+        const resolve11 = this.openResolve;
         this.openResolve = void 0;
         this.openReject = void 0;
-        resolve10?.();
+        resolve11?.();
       });
     };
     channel.onmessage = (event2) => {
@@ -67750,9 +67838,9 @@ var RtcDataChannelTransport = class {
     this.lastBufferedAmount = 0;
   }
   async refreshStatsDiagnostics(onGlobalIpv6Pair) {
-    const stats = [...await new Promise((resolve10, reject) => {
+    const stats = [...await new Promise((resolve11, reject) => {
       const timer2 = setTimeout(() => reject(new Error("WebRTC statistics timed out.")), 250);
-      Promise.resolve().then(() => this.pc.getStats()).then(resolve10, reject).finally(() => clearTimeout(timer2));
+      Promise.resolve().then(() => this.pc.getStats()).then(resolve11, reject).finally(() => clearTimeout(timer2));
     })];
     if (this.closed)
       return {};
@@ -68043,7 +68131,7 @@ function asError(error62) {
   return error62 instanceof Error ? error62 : new RtcConnectError("RTC_FAILED", "WebRTC negotiation failed.");
 }
 function sleep(ms) {
-  return new Promise((resolve10) => setTimeout(resolve10, ms));
+  return new Promise((resolve11) => setTimeout(resolve11, ms));
 }
 
 // packages/webrtc/dist/control-lease.js
@@ -68191,8 +68279,8 @@ var AdaptiveTransport = class extends BaseTransport {
     this.socket = new WebSocket(this.url);
     this.controlFrameLimits = {};
     this.socket.binaryType = "arraybuffer";
-    await new Promise((resolve10, reject) => {
-      this.readyResolve = resolve10;
+    await new Promise((resolve11, reject) => {
+      this.readyResolve = resolve11;
       this.readyReject = reject;
       const onAbort = () => this.failConnection(new Error("Adaptive connection was aborted"));
       this.options.signal?.addEventListener("abort", onAbort, { once: true });
@@ -68707,7 +68795,7 @@ var AdaptiveTransport = class extends BaseTransport {
   async fetchIceServers(connectionId, signal) {
     if (this.options.fetchIceServers === void 0)
       return [];
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve11, reject) => {
       const request2 = new AbortController();
       let settled = false;
       const finish = (error62, servers = []) => {
@@ -68719,7 +68807,7 @@ var AdaptiveTransport = class extends BaseTransport {
         if (error62)
           reject(error62);
         else
-          resolve10(servers);
+          resolve11(servers);
       };
       const onAbort = () => {
         finish(new Error("ICE configuration request was aborted"));
@@ -68769,7 +68857,7 @@ var AdaptiveTransport = class extends BaseTransport {
     const socket = new WebSocket(assignment.relayEndpoint);
     socket.binaryType = "arraybuffer";
     this.dataSocket = socket;
-    await new Promise((resolve10, reject) => {
+    await new Promise((resolve11, reject) => {
       const clearTimer = () => {
         if (this.dataSocketTimer !== void 0)
           clearTimeout(this.dataSocketTimer);
@@ -68806,7 +68894,7 @@ var AdaptiveTransport = class extends BaseTransport {
             }
             clearTimer();
             this.dataReady = true;
-            resolve10();
+            resolve11();
             return;
           }
           void this.handleDataSocketFrame(socket, data2.type, data2.payload).catch((error62) => {
@@ -69089,13 +69177,13 @@ var RemoteClientCore = class {
     }
     const timeoutMs = typeof options === "number" ? options : callTimeoutMs(this.timeoutMs, options);
     const request2 = createRpcRequest(method, params);
-    const result = new Promise((resolve10, reject) => {
+    const result = new Promise((resolve11, reject) => {
       const timer2 = setTimeout(() => {
         this.rejectPending(request2.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       const pending = {
         method,
-        resolve: resolve10,
+        resolve: resolve11,
         reject,
         timer: timer2
       };
@@ -69245,7 +69333,7 @@ function attachSharedInFlight(entry, signal) {
     return Promise.reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
   }
   entry.waiters += 1;
-  return new Promise((resolve10, reject) => {
+  return new Promise((resolve11, reject) => {
     let finished = false;
     const onAbort = () => {
       if (finished) return;
@@ -69262,7 +69350,7 @@ function attachSharedInFlight(entry, signal) {
         if (finished) return;
         finished = true;
         signal?.removeEventListener("abort", onAbort);
-        resolve10(cloneStructured(value));
+        resolve11(cloneStructured(value));
       },
       (error62) => {
         if (finished) return;
@@ -70595,7 +70683,7 @@ var AsyncValueQueue = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve10) => this.waiters.push(resolve10));
+      const next = await new Promise((resolve11) => this.waiters.push(resolve11));
       if (next.done) return;
       yield next.value;
     }
@@ -71547,11 +71635,11 @@ var AcpSessionTitles = class {
   }
 };
 function waitForTitle(delay, signal) {
-  return new Promise((resolve10) => {
+  return new Promise((resolve11) => {
     const finish = () => {
       clearTimeout(timer2);
       signal.removeEventListener("abort", finish);
-      resolve10();
+      resolve11();
     };
     const timer2 = setTimeout(finish, delay);
     signal.addEventListener("abort", finish, { once: true });
@@ -73012,7 +73100,7 @@ function shortId(value) {
 }
 async function waitForCodexFrames(stream, signal) {
   if (signal?.aborted) throw new ClientModeError("RPC_ABORTED", "The Codex event poll was cancelled.");
-  await new Promise((resolve10, reject) => {
+  await new Promise((resolve11, reject) => {
     const previousWake = stream.wake;
     const timer2 = setTimeout(done, 25e3);
     const onAbort = () => {
@@ -73026,7 +73114,7 @@ async function waitForCodexFrames(stream, signal) {
     }
     function done() {
       cleanup();
-      resolve10();
+      resolve11();
     }
     stream.wake = () => {
       previousWake();
@@ -77895,8 +77983,8 @@ function edwards2(params, extraOpts = {}) {
     multiply(scalar) {
       if (!Fn2.isValidNot0(scalar))
         throw new RangeError("invalid scalar: expected 1 <= sc < curve.n");
-      const { p, f } = wnaf.mulSecret(this, scalar, cofactor, normalize);
-      return normalize([p, f])[0];
+      const { p, f } = wnaf.mulSecret(this, scalar, cofactor, normalize2);
+      return normalize2([p, f])[0];
     }
     // Non-constant-time multiplication. Uses double-and-add algorithm.
     // It's faster, but should only be used when you don't care about
@@ -77910,7 +77998,7 @@ function edwards2(params, extraOpts = {}) {
         return Point.ZERO;
       if (this.is0() || scalar === _1n10)
         return this;
-      return wnaf.mulUnsafe(this, scalar, normalize);
+      return wnaf.mulUnsafe(this, scalar, normalize2);
     }
     // Checks if point is of small order.
     // If you add something to small order point, you will have "dirty"
@@ -77968,7 +78056,7 @@ function edwards2(params, extraOpts = {}) {
       return `<Point ${this.is0() ? "ZERO" : this.toHex()}>`;
     }
   }
-  const normalize = (points) => normalizeZ2(Point, points);
+  const normalize2 = (points) => normalizeZ2(Point, points);
   const wnaf = new ScalarMultiplier(Point, randomBytes16);
   if (wnaf.bits >= 6)
     Point.BASE.precompute(6);
@@ -80494,7 +80582,7 @@ var ClientSecureTransport = class {
   }
 };
 async function waitForResponder(inner, noise, signal) {
-  await new Promise((resolve10, reject) => {
+  await new Promise((resolve11, reject) => {
     let settled = false;
     let unsubscribe = () => {
     };
@@ -80509,7 +80597,7 @@ async function waitForResponder(inner, noise, signal) {
       unsubscribe();
       unsubscribeClose();
       signal.removeEventListener("abort", onAbort);
-      if (error62 === void 0) resolve10();
+      if (error62 === void 0) resolve11();
       else reject(error62);
     };
     unsubscribe = inner.onHandshake((step, data2) => {
@@ -80740,11 +80828,11 @@ var ClientReconnect = class {
   async run(connect4, pending) {
     while (!pending.signal.aborted) {
       const delay = Math.random() * this.config.maxDelayMs;
-      await new Promise((resolve10) => {
+      await new Promise((resolve11) => {
         const finish = () => {
           clearTimeout(timer2);
           pending.signal.removeEventListener("abort", finish);
-          resolve10();
+          resolve11();
         };
         const timer2 = setTimeout(finish, delay);
         pending.signal.addEventListener("abort", finish, { once: true });
@@ -80874,7 +80962,7 @@ var LoopbackHost = class {
         const response = handle.response;
         let chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
         if (chunk === null && !response.readableEnded && !response.destroyed) {
-          await new Promise((resolve10, reject) => {
+          await new Promise((resolve11, reject) => {
             const timer2 = setTimeout(() => finish(new Error("timeout")), 2e4);
             const ready = () => finish();
             const fail7 = () => finish(new Error("closed"));
@@ -80884,7 +80972,7 @@ var LoopbackHost = class {
               response.off("end", ready);
               response.off("close", ready);
               response.off("error", fail7);
-              error62 === void 0 ? resolve10() : reject(error62);
+              error62 === void 0 ? resolve11() : reject(error62);
             };
             response.once("readable", ready);
             response.once("end", ready);
@@ -80915,22 +81003,22 @@ var LoopbackHost = class {
           this.close(value.id);
           throw new RpcError("RATE_LIMITED", "Preview WebSocket buffer exceeded its limit.");
         }
-        await new Promise((resolve10, reject) => handle.socket.send(data2, { binary: value.binary }, (error62) => error62 ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve10()));
+        await new Promise((resolve11, reject) => handle.socket.send(data2, { binary: value.binary }, (error62) => error62 ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve11()));
         return { sent: true };
       }
       if (value.op === "ws.read") {
         if (handle.reading) throw new RpcError("REQUEST_CONFLICT", "Only one preview read may be pending.");
         handle.reading = true;
         try {
-          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve10) => {
+          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve11) => {
             const timer2 = setTimeout(() => {
               handle.wake = void 0;
-              resolve10();
+              resolve11();
             }, 2e4);
             handle.wake = () => {
               clearTimeout(timer2);
               handle.wake = void 0;
-              resolve10();
+              resolve11();
             };
           });
           let bytes = 0;
@@ -80977,7 +81065,7 @@ var LoopbackHost = class {
   openHttp(value) {
     const body = value.body === void 0 ? void 0 : Buffer.from(value.body, "base64");
     if ((body?.length ?? 0) > LOOPBACK_MAX_BODY_BYTES) throw new Error("body limit");
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve11, reject) => {
       const headers = Object.fromEntries(cleanHeaders(value.headers));
       let handle;
       const request2 = httpRequest({
@@ -80996,7 +81084,7 @@ var LoopbackHost = class {
         handle.response = response;
         response.on("error", () => void 0);
         clearTimeout(timer2);
-        resolve10({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
+        resolve11({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
       });
       const timer2 = setTimeout(() => {
         request2.destroy();
@@ -81012,7 +81100,7 @@ var LoopbackHost = class {
     });
   }
   openWs(value) {
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve11, reject) => {
       const socket = new import_websocket.default(`ws://127.0.0.1:${value.port}${value.path}`, value.protocols, {
         headers: Object.fromEntries(cleanHeaders(value.headers)),
         followRedirects: false,
@@ -81022,7 +81110,7 @@ var LoopbackHost = class {
       });
       const handle = { kind: "ws", port: value.port, socket, messages: [], bytes: 0, reading: false, closed: false, touched: Date.now() };
       this.handles.set(value.id, handle);
-      socket.once("open", () => resolve10({ protocol: socket.protocol }));
+      socket.once("open", () => resolve11({ protocol: socket.protocol }));
       socket.on("message", (data2, binary) => {
         if (handle.closed) return;
         const message = { data: Buffer.from(data2).toString("base64"), binary };
@@ -81081,7 +81169,7 @@ var LoopbackPreview = class {
       for (const client of running.ws.clients) client.terminate();
       running.ws.close();
       running.server.closeAllConnections();
-      await new Promise((resolve10) => running.server.close(() => resolve10()));
+      await new Promise((resolve11) => running.server.close(() => resolve11()));
     }
     this.servers.clear();
   }
@@ -81136,11 +81224,11 @@ var LoopbackPreview = class {
         void this.release(id7);
       });
     });
-    await new Promise((resolve10, reject) => {
+    await new Promise((resolve11, reject) => {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", () => {
         server.off("error", reject);
-        resolve10();
+        resolve11();
       });
     });
     const address2 = server.address();
@@ -81206,10 +81294,10 @@ var LoopbackPreview = class {
       while (!signal.aborted) {
         const chunk = await this.client.rpc("loopback.call", { op: "http.read", id: id7 }, signal);
         if (chunk.data !== "" && !res.write(Buffer.from(chunk.data, "base64"))) {
-          await new Promise((resolve10, reject) => {
+          await new Promise((resolve11, reject) => {
             const ready = () => {
               cleanup();
-              resolve10();
+              resolve11();
             };
             const closed = () => {
               cleanup();
@@ -81269,7 +81357,7 @@ var LoopbackPreview = class {
           const result = await this.client.rpc("loopback.call", { op: "ws.read", id: id7 }, signal);
           for (const message of result.messages) {
             if (socket.bufferedAmount > 1024 * 1024) throw new Error("slow preview");
-            await new Promise((resolve10, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error62) => error62 ? reject(error62) : resolve10()));
+            await new Promise((resolve11, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error62) => error62 ? reject(error62) : resolve11()));
           }
           if (result.closed) break;
         }
@@ -82670,7 +82758,7 @@ var AsyncValueQueue2 = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve10) => this.waiters.push(resolve10));
+      const next = await new Promise((resolve11) => this.waiters.push(resolve11));
       if (next.done) return;
       yield next.value;
     }
@@ -84786,13 +84874,13 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
 function awaitWithAbort(promise2, signal) {
   if (signal === void 0) return promise2;
   signal.throwIfAborted();
-  return new Promise((resolve10, reject) => {
+  return new Promise((resolve11, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
     promise2.then(
       (value) => {
         signal.removeEventListener("abort", onAbort);
-        resolve10(value);
+        resolve11(value);
       },
       (error62) => {
         signal.removeEventListener("abort", onAbort);
@@ -85611,7 +85699,7 @@ var RemoteTypertGateway2 = class {
       if (signal.aborted) return;
       if (resyncRequired || isRecord9(error62) && error62.isDSHRemoteError === true) throw error62;
       if (this.deferStreamDisconnect) {
-        await new Promise((resolve10) => signal.addEventListener("abort", () => resolve10(), { once: true }));
+        await new Promise((resolve11) => signal.addEventListener("abort", () => resolve11(), { once: true }));
         return;
       }
       throw error62;
@@ -85625,7 +85713,7 @@ var RemoteTypertGateway2 = class {
     signal.throwIfAborted();
     yield snapshot2;
     if (this.deferStreamDisconnect && !signal.aborted) {
-      await new Promise((resolve10) => signal.addEventListener("abort", () => resolve10(), { once: true }));
+      await new Promise((resolve11) => signal.addEventListener("abort", () => resolve11(), { once: true }));
     }
   }
   async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime2, transferSignal, disconnected, sessionId, fallbackSnapshot) {
@@ -85679,7 +85767,7 @@ var RemoteTypertGateway2 = class {
   async deferDisconnect(error62, disconnected, signal) {
     if (!this.deferStreamDisconnect || !disconnected || signal.aborted) return;
     if (isRecord9(error62) && error62.isDSHRemoteError === true) return;
-    await new Promise((resolve10) => signal.addEventListener("abort", () => resolve10(), { once: true }));
+    await new Promise((resolve11) => signal.addEventListener("abort", () => resolve11(), { once: true }));
   }
   async callTransferred(encoded, signal) {
     if (encoded.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
@@ -85791,7 +85879,7 @@ var AsyncValueQueue4 = class {
         if (this.error !== void 0) throw this.error;
         return;
       }
-      const next = await new Promise((resolve10) => this.waiters.push(resolve10));
+      const next = await new Promise((resolve11) => this.waiters.push(resolve11));
       if (next.done) {
         if (this.error !== void 0) throw this.error;
         return;
@@ -86660,7 +86748,7 @@ async function withQueueLock(lock, operation) {
       const preceding = entries.some((entry) => entry.id !== id7 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id7));
       if (!preceding) break;
       if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
-      await new Promise((resolve10) => setTimeout(resolve10, 50));
+      await new Promise((resolve11) => setTimeout(resolve11, 50));
     }
     return await operation();
   } finally {
@@ -86702,7 +86790,7 @@ async function ensureQueueMarker(lock, deadline) {
       if (!await isLockContention(error62, lock)) throw error62;
       if (await readQueueMarker(lock) === SERVER_CREDENTIALS_QUEUE_MARKER) return;
       if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
-      await new Promise((resolve10) => setTimeout(resolve10, 50));
+      await new Promise((resolve11) => setTimeout(resolve11, 50));
     }
   }
 }
@@ -87298,8 +87386,8 @@ function validateVolatileSchema(schema, path = [], blocked = false, seen = /* @_
   if (schema.inner && (schema.type !== "lazy" || schema.inner[kSchema])) validateVolatileSchema(schema.inner, [...path, "*"], true, seen);
   if (schema.list) for (let index = 0; index < schema.list.length; index++) validateVolatileSchema(schema.list[index], [...path, String(index)], true, seen);
 }
-Schema.extend = function extend2(type, resolve10) {
-  resolvers[type] = resolve10;
+Schema.extend = function extend2(type, resolve11) {
+  resolvers[type] = resolve11;
 };
 Schema.resolve = function resolve2(data2, schema, options = {}, strict = false) {
   if (!schema) return [data2];
@@ -88648,8 +88736,8 @@ var Queue = class {
         this.bytes -= entry.bytes;
         yield entry.value;
       } else if (this.closed) break;
-      else await new Promise((resolve10) => {
-        this.wake = resolve10;
+      else await new Promise((resolve11) => {
+        this.wake = resolve11;
       });
     }
     if (this.error) throw this.error;
@@ -88722,8 +88810,8 @@ var TerminalCarrierCompat = class {
     const abort = () => entry.control.abort();
     signal.addEventListener("abort", abort, { once: true });
     try {
-      await new Promise((resolve10, reject) => {
-        entry.pending.set(sequence2, { resolve: resolve10, reject });
+      await new Promise((resolve11, reject) => {
+        entry.pending.set(sequence2, { resolve: resolve11, reject });
         try {
           entry.queue.push(value);
         } catch (error62) {
@@ -88760,8 +88848,8 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
     throw error62;
   }
   let startInput;
-  const ready = new Promise((resolve10) => {
-    startInput = resolve10;
+  const ready = new Promise((resolve11) => {
+    startInput = resolve11;
   });
   lifetime2.addEventListener("abort", startInput, { once: true });
   if (lifetime2.aborted) startInput();
@@ -88872,7 +88960,7 @@ var TypertGatewaySwitch = class {
         return { ok: false, error: this.failure(error62) };
       }
     }) : (endpoint, payload, signal) => this.localDispatch(endpoint, payload, signal, peer);
-    const open7 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
+    const open8 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
       return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...peer === void 0 ? {} : { peer } });
     }) : (endpoint, payload, signal, uplink) => this.localOpen(endpoint, payload, signal, uplink, peer);
@@ -88881,7 +88969,7 @@ var TypertGatewaySwitch = class {
       peer,
       ...this.localStream === void 0 ? {} : { stream: (request2) => this.localStream({ ...request2, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
-      open: open7,
+      open: open8,
       failure: (error62) => this.failure(error62),
       supportsCarrier: this.localDispatch !== void 0 && this.localOpen !== void 0
     };
@@ -88908,12 +88996,12 @@ var TypertGatewaySwitch = class {
       };
     }
     if (this.originalOpen !== void 0) {
-      const open7 = this.originalOpen;
-      const rc1 = usesRc1Arity(open7);
+      const open8 = this.originalOpen;
+      const rc1 = usesRc1Arity(open8);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
         if (this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint)) {
-          return rc1 ? Reflect.apply(open7, this.runtime, callArgs) : open7.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
+          return rc1 ? Reflect.apply(open8, this.runtime, callArgs) : open8.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
         return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] : void 0);
@@ -88997,8 +89085,8 @@ function workspaceConnectionResult(endpoint, result) {
     ]
   };
 }
-function usesRc1Arity(open7) {
-  return open7.length >= 5;
+function usesRc1Arity(open8) {
+  return open8.length >= 5;
 }
 function endedUplink() {
   return {
@@ -89017,9 +89105,9 @@ function linkControl(signal) {
   return control;
 }
 function createLocalOpen(gateway, runtime) {
-  const open7 = runtime.openWireStream;
-  if (open7 !== void 0) {
-    return usesRc1Arity(open7) ? (endpoint, payload, signal, uplink, peer) => peer === void 0 ? Promise.reject(missingPeerError(endpoint)) : open7.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open7.call(runtime, endpoint, payload, signal);
+  const open8 = runtime.openWireStream;
+  if (open8 !== void 0) {
+    return usesRc1Arity(open8) ? (endpoint, payload, signal, uplink, peer) => peer === void 0 ? Promise.reject(missingPeerError(endpoint)) : open8.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open8.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
@@ -89174,10 +89262,10 @@ function isUsableExternalNode(candidate, requireFrom) {
 }
 function isExecutableFile(candidate) {
   try {
-    const stat12 = statSync(candidate);
-    if (!stat12.isFile()) return false;
+    const stat13 = statSync(candidate);
+    if (!stat13.isFile()) return false;
     if (process.platform === "win32") return true;
-    return (stat12.mode & 73) !== 0;
+    return (stat13.mode & 73) !== 0;
   } catch {
     return false;
   }
@@ -89267,8 +89355,8 @@ var ExternalNativePeerConnection = class {
   request(method, payload) {
     if (this.closed) return Promise.reject(new Error("native rtc helper is closed"));
     const id7 = this.nextRequestId++;
-    const promise2 = new Promise((resolve10, reject) => {
-      this.pending.set(id7, { resolve: resolve10, reject });
+    const promise2 = new Promise((resolve11, reject) => {
+      this.pending.set(id7, { resolve: resolve11, reject });
     });
     this.write({ id: id7, method, payload });
     return promise2;
@@ -90233,10 +90321,10 @@ function parseRouteTarget(value) {
 async function detectRouteHostIpv4(target3, timeoutMs) {
   const socket = createSocket4("udp4");
   try {
-    return await new Promise((resolve10, reject) => {
+    return await new Promise((resolve11, reject) => {
       const timer2 = setTimeout(() => {
         cleanup();
-        resolve10(void 0);
+        resolve11(void 0);
       }, timeoutMs);
       const cleanup = () => {
         clearTimeout(timer2);
@@ -90250,7 +90338,7 @@ async function detectRouteHostIpv4(target3, timeoutMs) {
       socket.connect(target3.port, target3.host, () => {
         cleanup();
         const address2 = socket.address();
-        resolve10(typeof address2 === "string" ? void 0 : address2.address);
+        resolve11(typeof address2 === "string" ? void 0 : address2.address);
       });
     });
   } finally {
@@ -92172,7 +92260,7 @@ async function withIdentityLock(directory, operation) {
         "IDENTITY_LOCKED"
       );
     }
-    await new Promise((resolve10) => setTimeout(resolve10, delay));
+    await new Promise((resolve11) => setTimeout(resolve11, delay));
     delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
   }
   try {
@@ -92802,8 +92890,8 @@ var CodexAppServerClient = class {
       throw new CodexAppServerError("CODEX_BINARY_UNAVAILABLE", "Codex App Server binary is unavailable.", { cause });
     }
     let resolveExit;
-    const exitPromise = new Promise((resolve10) => {
-      resolveExit = resolve10;
+    const exitPromise = new Promise((resolve11) => {
+      resolveExit = resolve11;
     });
     this.childExitPromises.set(child, exitPromise);
     this.process = child;
@@ -92875,13 +92963,13 @@ var CodexAppServerClient = class {
   }
   request(method, params, timeoutMs) {
     const id7 = this.nextId++;
-    const result = new Promise((resolve10, reject) => {
+    const result = new Promise((resolve11, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id7);
         reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id7, { method, resolve: resolve10, reject, timer: timer2 });
+      this.pending.set(id7, { method, resolve: resolve11, reject, timer: timer2 });
     });
     try {
       this.write({ id: id7, method, params });
@@ -92975,13 +93063,13 @@ var CodexAppServerClient = class {
     const existing = this.terminatingChildren.get(child);
     if (existing !== void 0) return existing;
     const exitPromise = this.childExitPromises.get(child);
-    const termination = new Promise((resolve10) => {
+    const termination = new Promise((resolve11) => {
       let finished = false;
       const finish = () => {
         if (finished) return;
         finished = true;
         clearTimeout(timer2);
-        resolve10();
+        resolve11();
       };
       const timer2 = setTimeout(() => {
         if (!this.hasChildExited(child)) {
@@ -93940,9 +94028,9 @@ var CodexThreadLifecycle = class {
   async unload(threadId, state2) {
     let timer2;
     let onClosed;
-    const closed = new Promise((resolve10, reject) => {
-      onClosed = resolve10;
-      state2.closed = resolve10;
+    const closed = new Promise((resolve11, reject) => {
+      onClosed = resolve11;
+      state2.closed = resolve11;
       timer2 = setTimeout(() => reject(new RpcError("CODEX_THREAD_CLOSING", "The CodeX thread is still closing. Please retry shortly.")), this.closeTimeoutMs);
       timer2.unref?.();
     });
@@ -96322,15 +96410,15 @@ var CursorAcpClient = class {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve10) => {
+    await new Promise((resolve11) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve10();
+        resolve11();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve10();
+        resolve11();
       });
       child.kill("SIGTERM");
     });
@@ -96414,13 +96502,13 @@ var CursorAcpClient = class {
   }
   request(method, params, timeoutMs) {
     const id7 = this.nextId++;
-    const result = new Promise((resolve10, reject) => {
+    const result = new Promise((resolve11, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id7);
         reject(new CursorAcpError(this.code("REQUEST_TIMEOUT"), `${this.adapterLabel} ACP request timed out.`));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id7, { resolve: resolve10, reject, timer: timer2 });
+      this.pending.set(id7, { resolve: resolve11, reject, timer: timer2 });
     });
     try {
       this.write({ jsonrpc: "2.0", id: id7, method, params });
@@ -97176,14 +97264,14 @@ async function discoverTerminalShells(provider, signal = new AbortController().s
     platform: process.platform === "win32" ? "windows" : "posix",
     defaultShell: process.platform === "win32" ? process.env.ComSpec : process.env.SHELL || userInfo().shell || void 0
   } : await provider.terminalEnvironment(signal);
-  const resolve10 = provider?.resolveExecutable?.bind(provider) ?? localExecutable;
+  const resolve11 = provider?.resolveExecutable?.bind(provider) ?? localExecutable;
   const preferred = profile(environment.defaultShell || (environment.platform === "windows" ? "cmd.exe" : "/bin/sh"));
-  preferred.path = await resolve10(preferred.path, void 0, signal);
+  preferred.path = await resolve11(preferred.path, void 0, signal);
   if (provider && !provider.terminalEnvironment) return [preferred];
   const candidates = ["zsh", "bash", "fish", "pwsh", "powershell", "cmd"];
   const found = await Promise.all(candidates.map(async (file2) => {
     try {
-      return { ...profile(file2), path: await resolve10(file2, void 0, signal) };
+      return { ...profile(file2), path: await resolve11(file2, void 0, signal) };
     } catch (error62) {
       if (error62 instanceof RpcError && error62.code === "TERMINAL_SHELL_UNAVAILABLE" || error62 instanceof Error && error62.name === "SubprocessExecutableNotFoundError") return void 0;
       throw error62;
@@ -97210,14 +97298,14 @@ function pipeTerminalSpawner() {
     output2.setEncoding("utf8");
     child.stdout.pipe(output2, { end: false });
     child.stderr.pipe(output2, { end: false });
-    const completed = new Promise((resolve10, reject) => {
+    const completed = new Promise((resolve11, reject) => {
       child.once("error", (error62) => {
         output2.destroy();
         reject(error62);
       });
       child.once("close", (exitCode) => {
         output2.end();
-        resolve10({ exitCode });
+        resolve11({ exitCode });
       });
     });
     void completed.catch(() => void 0);
@@ -97226,8 +97314,8 @@ function pipeTerminalSpawner() {
     };
     spec.signal.addEventListener("abort", abort, { once: true });
     try {
-      await new Promise((resolve10, reject) => {
-        child.once("spawn", resolve10);
+      await new Promise((resolve11, reject) => {
+        child.once("spawn", resolve11);
         child.once("error", reject);
       });
       spec.signal.throwIfAborted();
@@ -97340,8 +97428,8 @@ var TerminalFollower = class {
           this.bytes -= next.bytes;
           yield next.value;
         } else if (this.finished) break;
-        else await new Promise((resolve10) => {
-          this.wake = resolve10;
+        else await new Promise((resolve11) => {
+          this.wake = resolve11;
         });
       }
       if (this.failure) throw this.failure;
@@ -97424,7 +97512,7 @@ var OwnedTerminal = class {
           start = end;
           await this.enqueue(async () => {
             if (this.disposed) return;
-            await new Promise((resolve10) => this.screen.write(data2, resolve10));
+            await new Promise((resolve11) => this.screen.write(data2, resolve11));
             this.sequence++;
             this.emit({ type: "output", sequence: this.sequence, data: data2 });
           });
@@ -97548,9 +97636,9 @@ var RemoteTerminalState = class {
   }
 };
 var RemoteTerminalController = class {
-  constructor(shared, spawn4, enabled, scopeError) {
+  constructor(shared, spawn5, enabled, scopeError) {
     this.shared = shared;
-    this.spawn = spawn4;
+    this.spawn = spawn5;
     this.enabled = enabled;
     this.scopeError = scopeError;
   }
@@ -97670,8 +97758,8 @@ var RemoteTerminalController = class {
           dirty = false;
           yield this.roster(sessionId);
         } else {
-          await new Promise((resolve10) => {
-            wake = resolve10;
+          await new Promise((resolve11) => {
+            wake = resolve11;
           });
           wake = void 0;
         }
@@ -97794,7 +97882,7 @@ var AsyncQueue = class {
     const value = this.values.shift();
     if (value !== void 0) return Promise.resolve({ done: false, value });
     if (this.ended) return Promise.resolve({ done: true, value: void 0 });
-    return new Promise((resolve10) => this.waiters.push(resolve10));
+    return new Promise((resolve11) => this.waiters.push(resolve11));
   }
   [Symbol.asyncIterator]() {
     return this;
@@ -98651,16 +98739,16 @@ var TranscriptWatcher = class extends EventEmitter2 {
     return this.readTail;
   }
   async readNewLines() {
-    let stat12;
+    let stat13;
     try {
-      stat12 = await fs2.stat(this.transcriptPath);
+      stat13 = await fs2.stat(this.transcriptPath);
     } catch {
       return;
     }
-    if (stat12.size <= this.offset) return;
+    if (stat13.size <= this.offset) return;
     const handle = await fs2.open(this.transcriptPath, "r");
     try {
-      const bytesToRead = stat12.size - this.offset;
+      const bytesToRead = stat13.size - this.offset;
       const buffer3 = Buffer.alloc(bytesToRead);
       const { bytesRead } = await handle.read(buffer3, 0, bytesToRead, this.offset);
       if (this.closed || bytesRead === 0) return;
@@ -99050,7 +99138,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   }
   async stopChildProcess(child) {
     if (child.exitCode !== null || child.signalCode !== null || child.killed) return;
-    await new Promise((resolve10) => {
+    await new Promise((resolve11) => {
       let settled = false;
       const finish = () => {
         if (settled) return;
@@ -99058,7 +99146,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         clearTimeout(sigkillTimer);
         clearTimeout(fallbackTimer);
         child.removeListener("exit", onExit);
-        resolve10();
+        resolve11();
       };
       const onExit = () => finish();
       const sigkillTimer = setTimeout(() => {
@@ -99095,15 +99183,15 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       await this.stopPending;
       return;
     }
-    await Promise.all([this.stopPending, new Promise((resolve10) => {
+    await Promise.all([this.stopPending, new Promise((resolve11) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve10();
+        resolve11();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve10();
+        resolve11();
       });
       child.kill("SIGTERM");
     })]);
@@ -99144,7 +99232,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     let streamFailure;
     let initResolved = false;
     let rejectInit;
-    const initPromise = new Promise((resolve10, reject) => {
+    const initPromise = new Promise((resolve11, reject) => {
       rejectInit = reject;
       const timer2 = setTimeout(() => {
         if (!initResolved) {
@@ -99162,7 +99250,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
               this.activeConversationId = conversationId;
               this.attachWatcher(conversationId);
             }
-            resolve10();
+            resolve11();
           }
         });
       };
@@ -99248,7 +99336,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
     const selected = this.selections.get(sessionId);
     if (selected) this.emitNotification("session/update", { sessionId, update: { sessionUpdate: "model_selection", selected } });
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve11, reject) => {
       const timer2 = setTimeout(() => {
         if (this.currentPromptPending) {
           this.currentPromptPending = void 0;
@@ -99256,7 +99344,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         }
       }, timeoutMs);
       timer2.unref?.();
-      this.currentPromptPending = { sessionId, resolve: resolve10, reject, timer: timer2 };
+      this.currentPromptPending = { sessionId, resolve: resolve11, reject, timer: timer2 };
       const payload = {
         event: "user",
         message: { content: promptText }
@@ -99555,12 +99643,12 @@ var OpencodeNativeApi = class {
 };
 async function opencodeLoopbackPort() {
   const server = createServer3();
-  await new Promise((resolve10, reject) => {
+  await new Promise((resolve11, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve10());
+    server.listen(0, "127.0.0.1", () => resolve11());
   });
   const address2 = server.address();
-  await new Promise((resolve10, reject) => server.close((error62) => error62 ? reject(error62) : resolve10()));
+  await new Promise((resolve11, reject) => server.close((error62) => error62 ? reject(error62) : resolve11()));
   if (!address2 || typeof address2 === "string") throw unavailable();
   return address2.port;
 }
@@ -99894,15 +99982,15 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       await history2;
       return;
     }
-    await Promise.all([history2, new Promise((resolve10) => {
+    await Promise.all([history2, new Promise((resolve11) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve10();
+        resolve11();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve10();
+        resolve11();
       });
       child.kill("SIGTERM");
     })]);
@@ -99996,13 +100084,13 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   request(method, params, timeoutMs) {
     const id7 = this.nextId++;
-    const result = new Promise((resolve10, reject) => {
+    const result = new Promise((resolve11, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id7);
         reject(new OpencodeAcpError("OPENCODE_REQUEST_TIMEOUT", "OpenCode ACP request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id7, { resolve: resolve10, reject, timer: timer2 });
+      this.pending.set(id7, { resolve: resolve11, reject, timer: timer2 });
     });
     try {
       this.write({ jsonrpc: "2.0", id: id7, method, params });
@@ -100539,7 +100627,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
   try {
     const path = await transcriptPath(baseDir, conversationId);
     if (path === void 0) return void 0;
-    const stat12 = await fs3.stat(path);
+    const stat13 = await fs3.stat(path);
     const handle = await fs3.open(path, "r");
     try {
       const firstLine = await readFirstLine(handle);
@@ -100548,7 +100636,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
       if (record12.type !== "USER_INPUT") return void 0;
       const title = cleanUserPrompt(record12.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record12.content ?? "").length > 0 ? "Image" : void 0);
       if (!title) return void 0;
-      return { conversationId, title, createdAt: record12.created_at ? new Date(record12.created_at).getTime() : stat12.mtimeMs, updatedAt: stat12.mtimeMs };
+      return { conversationId, title, createdAt: record12.created_at ? new Date(record12.created_at).getTime() : stat13.mtimeMs, updatedAt: stat13.mtimeMs };
     } finally {
       await handle.close();
     }
@@ -102046,8 +102134,8 @@ var AcpRemoteGateway = class {
     const readEpoch = ++this.historyEpoch;
     const previous = this.backendHistoryChains.get(backend) ?? Promise.resolve();
     let releaseQueue;
-    const currentTurn = new Promise((resolve10) => {
-      releaseQueue = resolve10;
+    const currentTurn = new Promise((resolve11) => {
+      releaseQueue = resolve11;
     });
     const nextChain = previous.then(() => currentTurn, () => currentTurn);
     this.backendHistoryChains.set(backend, nextChain);
@@ -103199,8 +103287,8 @@ function isBuiltinAcpBackend(id7) {
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat12 = statSync4(candidate);
-    if (!stat12.isFile()) return false;
+    const stat13 = statSync4(candidate);
+    if (!stat13.isFile()) return false;
     if (platform3 === "win32") return isWindowsExecutablePath(candidate);
     accessSync2(candidate, constants5.X_OK);
     return true;
@@ -104231,7 +104319,7 @@ function fail5(error62) {
 }
 
 // packages/plugin/src/index.ts
-import { basename as basename9, dirname as dirname10 } from "node:path";
+import { basename as basename10, dirname as dirname11 } from "node:path";
 
 // packages/plugin/src/host-log-store.ts
 import { mkdir as mkdir5, open as open5, readFile as readFile6, rename as rename4, rm as rm4, stat as stat6, writeFile as writeFile4 } from "node:fs/promises";
@@ -105155,7 +105243,7 @@ var DshWebLanPeer = class {
         server.close();
         for (const socket of sockets) socket.destroy();
       }, { once: true });
-      await new Promise((resolve10, reject) => {
+      await new Promise((resolve11, reject) => {
         const cancelled = () => reject(new Error("LAN Web closed"));
         signal.addEventListener("abort", cancelled, { once: true });
         server.once("error", (error62) => {
@@ -105163,7 +105251,7 @@ var DshWebLanPeer = class {
         });
         server.listen({ host: address2, port: 0, signal }, () => {
           signal.removeEventListener("abort", cancelled);
-          resolve10();
+          resolve11();
         });
       });
       const bound = server.address();
@@ -105228,8 +105316,8 @@ function errorFromResponse(status2, text) {
 import http from "node:http";
 import https from "node:https";
 var MAX_LOCAL_QUEUE_BYTES = 32 * 1024 * 1024;
-function createStream(context, id7, open7) {
-  return open7.websocket ? new WebSocketStream(context, id7, open7) : new HttpStream(context, id7, open7);
+function createStream(context, id7, open8) {
+  return open8.websocket ? new WebSocketStream(context, id7, open8) : new HttpStream(context, id7, open8);
 }
 var HttpStream = class {
   context;
@@ -105244,10 +105332,10 @@ var HttpStream = class {
   window;
   requestEnded = false;
   finished = false;
-  constructor(context, id7, open7) {
+  constructor(context, id7, open8) {
     this.context = context;
     this.id = id7;
-    this.open = open7;
+    this.open = open8;
     this.window = new GrowingWindow(context.windowBudget);
   }
   start() {
@@ -105342,8 +105430,8 @@ var HttpStream = class {
         for (let offset2 = 0; offset2 < chunk.byteLength; offset2 += MAX_CHUNK_BYTES) {
           const part = chunk.subarray(offset2, offset2 + MAX_CHUNK_BYTES);
           while (!this.finished && this.sendCredit < part.byteLength) {
-            await new Promise((resolve10) => {
-              this.wakeSender = resolve10;
+            await new Promise((resolve11) => {
+              this.wakeSender = resolve11;
             });
           }
           if (this.finished) {
@@ -105392,10 +105480,10 @@ var WebSocketStream = class {
   ended = false;
   /** Messages from the local server not yet written to the tunnel. */
   unflushed = 0;
-  constructor(context, id7, open7) {
+  constructor(context, id7, open8) {
     this.context = context;
     this.id = id7;
-    this.open = open7;
+    this.open = open8;
   }
   start() {
     const { target: target3, publicOrigin, send } = this.context;
@@ -105547,7 +105635,7 @@ var Connection2 = class _Connection {
   heartbeat;
   pongTimeout;
   static open(options, signal) {
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve11, reject) => {
       signal?.throwIfAborted();
       const socket = new import_websocket.default(options.tunnel.connectUrl, {
         headers: { authorization: `Bearer ${options.tunnel.token}`, ...PROTOCOL_HEADERS },
@@ -105569,7 +105657,7 @@ var Connection2 = class _Connection {
       socket.once("open", () => {
         removeAbort();
         socket.removeAllListeners("error");
-        resolve10(new _Connection(socket, options));
+        resolve11(new _Connection(socket, options));
       });
     });
   }
@@ -105577,8 +105665,8 @@ var Connection2 = class _Connection {
     this.socket = socket;
     this.options = options;
     let resolveClosed;
-    this.closed = new Promise((resolve10) => {
-      resolveClosed = resolve10;
+    this.closed = new Promise((resolve11) => {
+      resolveClosed = resolve11;
     });
     socket.on("message", (data2, isBinary2) => {
       clearTimeout(this.pongTimeout);
@@ -105840,8 +105928,8 @@ async function waitForCheck(connector, signal) {
   let timer2;
   let onAbort;
   try {
-    return await Promise.race([connector.closed, new Promise((resolve10) => {
-      onAbort = () => resolve10(void 0);
+    return await Promise.race([connector.closed, new Promise((resolve11) => {
+      onAbort = () => resolve11(void 0);
       signal.addEventListener("abort", onAbort, { once: true });
       timer2 = setTimeout(onAbort, 12e4);
       timer2.unref();
@@ -106182,7 +106270,7 @@ var LanUploadHost = class {
     const entry = { server, wss, sessionId: p.sessionId, uploadId: p.uploadId, used: false, opened: false, committed: false, disposed: false, queuedBytes: 0, requests: 0 };
     this.entries.add(entry);
     try {
-      await new Promise((resolve10, reject) => {
+      await new Promise((resolve11, reject) => {
         entry.rejectBinding = () => reject(unavailable2());
         server.once("error", reject);
         server.listen(0, p.address, () => {
@@ -106191,7 +106279,7 @@ var LanUploadHost = class {
           if (entry.disposed) {
             server.close();
             reject(unavailable2());
-          } else resolve10();
+          } else resolve11();
         });
       });
       if (!this.live() || entry.disposed) throw unavailable2();
@@ -106266,7 +106354,7 @@ var LanUploadHost = class {
     const send = async (message) => {
       for (const frame of outgoing.encode(encodeMessage(message))) {
         if (!this.live() || entry.disposed || socket.readyState !== import_websocket.default.OPEN) throw unavailable2();
-        await new Promise((resolve10, reject) => socket.send(noise.encrypt(frame), { binary: true }, (error62) => error62 ? reject(error62) : resolve10()));
+        await new Promise((resolve11, reject) => socket.send(noise.encrypt(frame), { binary: true }, (error62) => error62 ? reject(error62) : resolve11()));
       }
     };
     const touch = () => {
@@ -106580,11 +106668,1680 @@ var HostPairing = class {
   }
 };
 
+// packages/plugin/src/workspace-git.ts
+import { spawn as spawn4 } from "node:child_process";
+import { constants as constants6 } from "node:fs";
+import { access as access2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat8 } from "node:fs/promises";
+import { basename as basename8, dirname as dirname8, isAbsolute as isAbsolute8, join as join17, normalize, parse as parse3, relative as relative5, resolve as resolve8, sep as sep3 } from "node:path";
+var EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+var ROOT_CACHE_TTL_MS = 5e3;
+var ROOT_CACHE_MAX_ENTRIES = 64;
+var MAX_STDERR_BYTES = 16 * 1024;
+var MAX_FILTER_CONFIG_BYTES = 64 * 1024;
+var MAX_FILTER_DRIVERS = 128;
+var MAX_GITDIR_BACKLINK_BYTES = 4 * 1024;
+var UNTRACKED_STAT_LIMIT = 50;
+var UNTRACKED_MAX_BYTES = 256 * 1024;
+var BINARY_SNIFF_BYTES = 8 * 1024;
+var CLOSE_GRACE_MS = 2e3;
+var COMBINED_HUNK_HEADER_RE = /^(@{3,}) (?:-\d+(?:,\d+)? )+\+\d+(?:,\d+)? \1/;
+var SAFE_GIT_ARGS = [
+  "--no-pager",
+  "--no-optional-locks",
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.quotepath=false",
+  "-c",
+  "core.sshCommand=false",
+  "-c",
+  "credential.helper=",
+  "-c",
+  "protocol.allow=never",
+  "-c",
+  "protocol.ext.allow=never",
+  "-c",
+  "diff.external=",
+  "-c",
+  "diff.noprefix=false",
+  "-c",
+  "diff.mnemonicPrefix=false",
+  "-c",
+  "diff.submodule=short",
+  "-c",
+  "status.submoduleSummary=false",
+  "-c",
+  "color.ui=never",
+  "-c",
+  "safe.bareRepository=explicit",
+  "-c",
+  "i18n.logOutputEncoding=UTF-8"
+];
+function buildSanitizedGitEnv(baseEnv = process.env) {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(baseEnv)) {
+    if (value === void 0) continue;
+    if (/^GIT_/i.test(key) || /^PAGER$/i.test(key) || /^SSH_ASKPASS$/i.test(key)) continue;
+    sanitized[key] = value;
+  }
+  sanitized.GIT_TERMINAL_PROMPT = "0";
+  sanitized.GIT_OPTIONAL_LOCKS = "0";
+  sanitized.GIT_NO_LAZY_FETCH = "1";
+  sanitized.GIT_ALLOW_PROTOCOL = "";
+  sanitized.GIT_PAGER = "cat";
+  sanitized.LC_ALL = "C";
+  return sanitized;
+}
+async function resolveGitExecutable(options = {}) {
+  const platform3 = options.platform ?? process.platform;
+  const env = options.env ?? process.env;
+  const rawPath = readPathEnv(env, platform3);
+  if (!rawPath) return void 0;
+  const delimiter3 = platform3 === "win32" ? ";" : ":";
+  const excludedDirs = await collectExcludedDirs(options.cwd, platform3);
+  const binaryName = platform3 === "win32" ? "git.exe" : "git";
+  for (const rawEntry of rawPath.split(delimiter3)) {
+    const dir = stripOuterQuotes(rawEntry, platform3);
+    if (dir.length === 0 || dir.trim().length === 0) continue;
+    if (!isStrictAbsolutePath(dir, platform3)) continue;
+    if (excludedDirs.has(normalizeDirForCompare(dir, platform3))) continue;
+    let realDir;
+    try {
+      realDir = await realpath6(dir);
+    } catch {
+      continue;
+    }
+    if (excludedDirs.has(normalizeDirForCompare(realDir, platform3))) continue;
+    const candidate = join17(dir, binaryName);
+    let info;
+    try {
+      info = await stat8(candidate);
+    } catch {
+      continue;
+    }
+    if (!info.isFile()) continue;
+    if (excludedDirs.size > 0) {
+      try {
+        const realCandidate = await realpath6(candidate);
+        if (excludedDirs.has(normalizeDirForCompare(dirname8(realCandidate), platform3))) continue;
+      } catch {
+        continue;
+      }
+    }
+    try {
+      await access2(candidate, platform3 === "win32" ? constants6.F_OK : constants6.X_OK);
+    } catch {
+      continue;
+    }
+    return candidate;
+  }
+  return void 0;
+}
+var WorkspaceGitHost = class {
+  constructor(resolveRoot, options = {}) {
+    this.resolveRoot = resolveRoot;
+    this.timeoutMs = options.timeoutMs ?? WORKSPACE_GIT_TIMEOUT_MS;
+    this.maxConcurrent = options.maxConcurrent ?? WORKSPACE_GIT_MAX_CONCURRENT;
+    this.rootCacheTtlMs = options.rootCacheTtlMs ?? ROOT_CACHE_TTL_MS;
+    this.now = options.now ?? Date.now;
+    this.env = options.env ?? process.env;
+    this.sanitizedEnv = buildSanitizedGitEnv(this.env);
+    this.platform = options.platform ?? process.platform;
+    this.gitExecutableOverride = options.gitExecutable;
+    this.spawnProcess = options.spawnProcess ?? spawn4;
+  }
+  lifetime = new AbortController();
+  activeChildren = /* @__PURE__ */ new Set();
+  rootCache = /* @__PURE__ */ new Map();
+  timeoutMs;
+  maxConcurrent;
+  rootCacheTtlMs;
+  now;
+  env;
+  sanitizedEnv;
+  platform;
+  gitExecutableOverride;
+  spawnProcess;
+  cachedGitBin;
+  inFlight = 0;
+  closed = false;
+  async status(input4) {
+    const params = workspaceGitStatusParamsSchema.parse(input4);
+    const scope3 = params.scope ?? "all";
+    return this.withConcurrencySlot(async () => {
+      const deadlineMs = this.now() + this.timeoutMs;
+      const canonicalRoot = await this.resolveCanonicalRoot(params.sessionId, deadlineMs);
+      const repo = await this.inspectRepo(canonicalRoot, true, deadlineMs);
+      if (!repo.isGitRepo) {
+        return emptyStatusResult(scope3);
+      }
+      const porcelain = await this.runGit(
+        ["--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=all", "--", "."],
+        {
+          cwd: canonicalRoot,
+          allowTruncate: true,
+          maxStdoutBytes: WORKSPACE_GIT_MAX_STATUS_STDOUT_BYTES,
+          filterOverrides: repo.filterOverrides,
+          deadlineMs
+        }
+      );
+      if (porcelain.exitCode !== 0) {
+        if (isNotGitRepoStderr(porcelain.stderr)) return emptyStatusResult(scope3);
+        throw new RpcError("WORKSPACE_GIT_FAILED", "The workspace git status command failed.");
+      }
+      const parsedPorcelain = parsePorcelainZ(porcelain.stdout, porcelain.stdoutTruncated);
+      let truncated = parsedPorcelain.truncated;
+      const entries = [];
+      const seenPaths = /* @__PURE__ */ new Set();
+      const untrackedDirRelPaths = [];
+      let hasTrackedChanges = false;
+      for (const item of parsedPorcelain.entries) {
+        const isIgnored = item.x === "!" && item.y === "!";
+        if (isIgnored) continue;
+        const isUntracked = item.x === "?" && item.y === "?";
+        if (isUntracked) {
+          if (scope3 === "staged") continue;
+          if (item.rawPath.endsWith("/")) {
+            const dirRel = stripUntrackedDirPrefix(item.rawPath, repo.prefix);
+            if (dirRel !== void 0) untrackedDirRelPaths.push(dirRel);
+            continue;
+          }
+          const relPath2 = stripRepoPrefix(item.rawPath, repo.prefix);
+          if (relPath2 === void 0 || !isAllowedWorkspaceGitPath(relPath2) || seenPaths.has(relPath2)) continue;
+          if (entries.length >= WORKSPACE_GIT_MAX_FILES) {
+            if (!truncated && await isRegularUntrackedFile(canonicalRoot, relPath2)) {
+              truncated = true;
+            }
+            continue;
+          }
+          if (!await isRegularUntrackedFile(canonicalRoot, relPath2)) continue;
+          seenPaths.add(relPath2);
+          entries.push({
+            path: relPath2,
+            status: "untracked",
+            staged: false,
+            unstaged: true,
+            additions: null,
+            deletions: null,
+            isBinary: false
+          });
+          continue;
+        }
+        const isUnmerged = isUnmergedPair(item.x, item.y);
+        const staged = item.x !== " " && item.x !== "?";
+        const unstaged = item.y !== " " && item.y !== "?";
+        if (scope3 === "staged" && !staged) continue;
+        if (scope3 === "unstaged" && !unstaged) continue;
+        if (scope3 === "all" && !staged && !unstaged) continue;
+        const relPath = stripRepoPrefix(item.rawPath, repo.prefix);
+        if (relPath === void 0 || !isAllowedWorkspaceGitPath(relPath) || seenPaths.has(relPath)) continue;
+        let oldPath;
+        if (item.rawOldPath !== void 0 && scope3 !== "unstaged") {
+          const strippedOld = stripRepoPrefix(item.rawOldPath, repo.prefix);
+          if (strippedOld !== void 0 && isAllowedWorkspaceGitPath(strippedOld)) {
+            oldPath = strippedOld;
+          }
+        }
+        const status2 = classifyTrackedStatus(item.x, item.y, isUnmerged, scope3);
+        seenPaths.add(relPath);
+        hasTrackedChanges = true;
+        entries.push({
+          path: relPath,
+          ...oldPath === void 0 ? {} : { oldPath },
+          status: status2,
+          staged,
+          unstaged,
+          additions: null,
+          deletions: null,
+          isBinary: false
+        });
+      }
+      if (scope3 !== "staged" && untrackedDirRelPaths.length > 0) {
+        const expanded = await this.expandUntrackedDirs(
+          canonicalRoot,
+          untrackedDirRelPaths,
+          seenPaths,
+          Math.max(0, WORKSPACE_GIT_MAX_FILES - entries.length),
+          repo.filterOverrides,
+          deadlineMs
+        );
+        if (expanded.truncated) truncated = true;
+        for (const relPath of expanded.files) {
+          entries.push({
+            path: relPath,
+            status: "untracked",
+            staged: false,
+            unstaged: true,
+            additions: null,
+            deletions: null,
+            isBinary: false
+          });
+        }
+      }
+      const totalFiles = entries.length;
+      if (entries.length > WORKSPACE_GIT_MAX_FILES) {
+        truncated = true;
+      }
+      const files = entries.slice(0, WORKSPACE_GIT_MAX_FILES);
+      if (hasTrackedChanges) {
+        const numstatArgs = [
+          "--literal-pathspecs",
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--ignore-submodules=all",
+          "--numstat",
+          "-z",
+          "-M",
+          "--relative"
+        ];
+        if (scope3 === "staged") {
+          numstatArgs.push("--cached");
+        } else if (scope3 === "all") {
+          numstatArgs.push(repo.hasHead ? "HEAD" : EMPTY_TREE_SHA);
+        }
+        numstatArgs.push("--", ".");
+        const numstat = await this.runGit(numstatArgs, {
+          cwd: canonicalRoot,
+          allowTruncate: true,
+          maxStdoutBytes: WORKSPACE_GIT_MAX_STATUS_STDOUT_BYTES,
+          filterOverrides: repo.filterOverrides,
+          deadlineMs
+        });
+        if (numstat.exitCode === 0) {
+          const statsMap = parseNumstatZ(numstat.stdout, numstat.stdoutTruncated);
+          for (const entry of files) {
+            if (entry.status === "untracked") continue;
+            const statEntry = statsMap.get(entry.path);
+            if (statEntry !== void 0) {
+              entry.additions = statEntry.additions;
+              entry.deletions = statEntry.deletions;
+              entry.isBinary = statEntry.isBinary;
+            }
+          }
+        } else if (isNotGitRepoStderr(numstat.stderr)) {
+          return emptyStatusResult(scope3);
+        }
+      }
+      let untrackedCounted = 0;
+      for (const entry of files) {
+        if (entry.status !== "untracked") continue;
+        if (untrackedCounted >= UNTRACKED_STAT_LIMIT) break;
+        untrackedCounted += 1;
+        const stats = await inspectUntrackedFile(canonicalRoot, entry.path);
+        if (stats !== void 0) {
+          entry.additions = stats.additions;
+          entry.deletions = stats.deletions;
+          entry.isBinary = stats.isBinary;
+        }
+      }
+      let totalAdditions = 0;
+      let totalDeletions = 0;
+      for (const entry of files) {
+        if (entry.additions !== null) totalAdditions += entry.additions;
+        if (entry.deletions !== null) totalDeletions += entry.deletions;
+      }
+      return {
+        isGitRepo: true,
+        ...repo.branch === void 0 ? {} : { branch: repo.branch },
+        ...repo.headShortSha === void 0 ? {} : { headShortSha: repo.headShortSha },
+        hasHead: repo.hasHead,
+        scope: scope3,
+        files,
+        totalFiles,
+        truncated,
+        totalAdditions,
+        totalDeletions
+      };
+    });
+  }
+  async diff(input4) {
+    const params = workspaceGitDiffParamsSchema.parse(input4);
+    const scope3 = params.scope ?? "all";
+    const contextLines = params.contextLines ?? WORKSPACE_GIT_DEFAULT_CONTEXT_LINES;
+    const requestedPath = params.path;
+    if (requestedPath !== void 0 && !isAllowedWorkspaceGitPath(requestedPath)) {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is invalid.", "outside-root");
+    }
+    return this.withConcurrencySlot(async () => {
+      const deadlineMs = this.now() + this.timeoutMs;
+      const canonicalRoot = await this.resolveCanonicalRoot(params.sessionId, deadlineMs);
+      let targetCheck;
+      if (requestedPath !== void 0) {
+        targetCheck = await validateTargetPath(canonicalRoot, requestedPath);
+      }
+      const repo = await this.inspectRepo(canonicalRoot, false, deadlineMs);
+      if (!repo.isGitRepo) {
+        return emptyDiffResult(scope3, requestedPath, false);
+      }
+      if (requestedPath !== void 0 && scope3 !== "staged" && targetCheck?.exists && targetCheck.isFile) {
+        const [tracked, ignored] = await Promise.all([
+          this.isPathTrackedInIndexOrHead(
+            canonicalRoot,
+            requestedPath,
+            repo.prefix,
+            repo.hasHead,
+            repo.filterOverrides,
+            deadlineMs
+          ),
+          this.isPathIgnored(canonicalRoot, requestedPath, repo.filterOverrides, deadlineMs)
+        ]);
+        if (!tracked) {
+          if (ignored) {
+            return emptyDiffResult(scope3, requestedPath, true);
+          }
+          return synthesizeUntrackedFileDiff(targetCheck.absolutePath, requestedPath, scope3);
+        }
+      }
+      const args = [
+        "--literal-pathspecs",
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--ignore-submodules=all",
+        "--no-color",
+        "--relative",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        `--unified=${contextLines}`
+      ];
+      if (scope3 === "staged") {
+        args.push("--cached");
+      } else if (scope3 === "all") {
+        args.push(repo.hasHead ? "HEAD" : EMPTY_TREE_SHA);
+      }
+      args.push("--", requestedPath ?? ".");
+      const diffResult = await this.runGit(args, {
+        cwd: canonicalRoot,
+        allowTruncate: true,
+        maxStdoutBytes: WORKSPACE_GIT_MAX_DIFF_BYTES,
+        filterOverrides: repo.filterOverrides,
+        deadlineMs
+      });
+      if (diffResult.exitCode !== 0) {
+        if (isNotGitRepoStderr(diffResult.stderr)) {
+          return emptyDiffResult(scope3, requestedPath, false);
+        }
+        throw new RpcError("WORKSPACE_GIT_FAILED", "The workspace git diff command failed.");
+      }
+      return formatDiffOutput(diffResult.stdout, diffResult.stdoutTruncated, scope3, requestedPath);
+    });
+  }
+  async closeAll() {
+    this.closed = true;
+    this.lifetime.abort();
+    this.rootCache.clear();
+    const pending = [];
+    for (const active2 of this.activeChildren) {
+      killProcess(active2.child);
+      pending.push(active2.done);
+    }
+    if (pending.length === 0) return;
+    let timer2;
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise((resolve11) => {
+        timer2 = setTimeout(resolve11, CLOSE_GRACE_MS);
+        timer2.unref?.();
+      })
+    ]);
+    if (timer2 !== void 0) clearTimeout(timer2);
+  }
+  async withConcurrencySlot(operation) {
+    this.assertLive();
+    if (this.inFlight >= this.maxConcurrent) {
+      throw new RpcError("RATE_LIMITED", "Too many workspace git requests are pending.", void 0, true);
+    }
+    this.inFlight += 1;
+    try {
+      return await operation();
+    } finally {
+      this.inFlight -= 1;
+    }
+  }
+  assertLive() {
+    if (this.closed || this.lifetime.signal.aborted) {
+      throw new RpcError("WORKSPACE_GIT_CLOSED", "The workspace git service is closed.");
+    }
+  }
+  remainingTimeoutMs(deadlineMs) {
+    if (deadlineMs === void 0) return this.timeoutMs;
+    const remaining = deadlineMs - this.now();
+    if (remaining <= 0) {
+      throw new RpcError("RPC_TIMEOUT", "The workspace git command timed out.", void 0, true);
+    }
+    return Math.min(this.timeoutMs, remaining);
+  }
+  async resolveCanonicalRoot(sessionId, deadlineMs) {
+    this.assertLive();
+    const cached2 = this.rootCache.get(sessionId);
+    if (cached2 !== void 0 && this.now() - cached2.checkedAt < this.rootCacheTtlMs) {
+      try {
+        const canonical2 = await validateCanonicalDirectory(cached2.sourceRoot);
+        if (canonical2 === cached2.root) return canonical2;
+      } catch {
+      }
+      this.rootCache.delete(sessionId);
+    }
+    const remainingMs = this.remainingTimeoutMs(deadlineMs);
+    const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(remainingMs)]);
+    let sourceRoot;
+    try {
+      sourceRoot = await this.resolveRoot(sessionId, signal);
+    } catch {
+      this.assertLive();
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.", "authority-unavailable");
+    }
+    this.assertLive();
+    if (typeof sourceRoot !== "string" || sourceRoot.length === 0) {
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.", "authority-unavailable");
+    }
+    if (!isAbsolute8(sourceRoot)) {
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.", "root-invalid");
+    }
+    let canonical;
+    try {
+      canonical = await validateCanonicalDirectory(sourceRoot);
+    } catch {
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.", "root-invalid");
+    }
+    this.rootCache.delete(sessionId);
+    this.rootCache.set(sessionId, { sourceRoot, root: canonical, checkedAt: this.now() });
+    if (this.rootCache.size > ROOT_CACHE_MAX_ENTRIES) {
+      const oldest = this.rootCache.keys().next().value;
+      if (oldest !== void 0) this.rootCache.delete(oldest);
+    }
+    return canonical;
+  }
+  async getGitBin(cwd2) {
+    if (typeof this.gitExecutableOverride === "string") {
+      return this.gitExecutableOverride;
+    }
+    if (typeof this.gitExecutableOverride === "function") {
+      const resolved2 = await this.gitExecutableOverride();
+      if (!resolved2) {
+        throw new RpcError("WORKSPACE_GIT_UNAVAILABLE", "Git is unavailable on this Host.");
+      }
+      return resolved2;
+    }
+    if (this.cachedGitBin !== void 0) {
+      const binDir = dirname8(this.cachedGitBin);
+      if (!await isSameDirectory(binDir, cwd2, this.platform)) {
+        return this.cachedGitBin;
+      }
+    }
+    const resolved = await resolveGitExecutable({ cwd: cwd2, env: this.env, platform: this.platform });
+    if (resolved === void 0) {
+      throw new RpcError("WORKSPACE_GIT_UNAVAILABLE", "Git is unavailable on this Host.");
+    }
+    this.cachedGitBin = resolved;
+    return resolved;
+  }
+  async inspectRepo(canonicalRoot, includeBranchInfo, deadlineMs) {
+    const toplevelResult = await this.runGit(["rev-parse", "--show-toplevel", "--absolute-git-dir"], {
+      cwd: canonicalRoot,
+      allowTruncate: false,
+      maxStdoutBytes: 16 * 1024,
+      deadlineMs
+    });
+    if (toplevelResult.exitCode !== 0) {
+      if (isNotGitRepoStderr(toplevelResult.stderr)) {
+        return { isGitRepo: false, prefix: "", hasHead: false };
+      }
+      throw new RpcError("WORKSPACE_GIT_FAILED", "Failed to inspect the Git repository.");
+    }
+    const revLines = toplevelResult.stdout.toString("utf8").replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
+    const rawToplevel = revLines[0] ?? "";
+    const rawGitDir = revLines[1] ?? "";
+    if (rawToplevel.length === 0) {
+      return { isGitRepo: false, prefix: "", hasHead: false };
+    }
+    let canonicalToplevel;
+    try {
+      canonicalToplevel = await realpath6(rawToplevel);
+    } catch {
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.", "root-invalid");
+    }
+    if (this.platform === "win32" && process.platform === "win32") {
+      if (parse3(canonicalToplevel).root.toLowerCase() !== parse3(canonicalRoot).root.toLowerCase()) {
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace is outside its Git repository.", "outside-root");
+      }
+    }
+    const rel = relative5(canonicalToplevel, canonicalRoot);
+    if (isPathOutside(rel)) {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace is outside its Git repository.", "outside-root");
+    }
+    const prefix = rel.length === 0 ? "" : `${rel.split(sep3).join("/")}/`;
+    await this.verifyGitDirOwnership(canonicalToplevel, rawGitDir, deadlineMs);
+    const [headResult, branchResult, filterOverrides] = await Promise.all([
+      this.runGit(["rev-parse", "--verify", "--quiet", "--short", "HEAD"], {
+        cwd: canonicalRoot,
+        allowTruncate: false,
+        maxStdoutBytes: 1024,
+        deadlineMs
+      }),
+      includeBranchInfo ? this.runGit(["symbolic-ref", "--quiet", "--short", "HEAD"], {
+        cwd: canonicalRoot,
+        allowTruncate: false,
+        maxStdoutBytes: 1024,
+        deadlineMs
+      }) : Promise.resolve(void 0),
+      this.collectFilterOverrides(canonicalRoot, deadlineMs)
+    ]);
+    const hasHead = headResult.exitCode === 0;
+    const rawSha = hasHead ? headResult.stdout.toString("utf8").replace(/\r?\n$/, "") : "";
+    const headShortSha = rawSha.length > 0 ? rawSha.slice(0, 64) : void 0;
+    let branch;
+    if (branchResult !== void 0 && branchResult.exitCode === 0) {
+      const rawBranch = branchResult.stdout.toString("utf8").replace(/\r?\n$/, "");
+      if (rawBranch.length > 0) branch = rawBranch.slice(0, 256);
+    }
+    return {
+      isGitRepo: true,
+      canonicalToplevel,
+      prefix,
+      hasHead,
+      headShortSha,
+      branch,
+      filterOverrides
+    };
+  }
+  /**
+   * Prevent forged `.git` gitfile escapes pointing at an unrelated repository on
+   * the host: allow `.git` inside `canonicalToplevel`, or external gitdirs only
+   * when a host-owned backlink (`<gitdir>/gitdir` for linked worktrees or
+   * `<gitdir>/config` `core.worktree` for submodules) resolves back to
+   * `canonicalToplevel`.
+   */
+  async verifyGitDirOwnership(canonicalToplevel, rawGitDir, deadlineMs) {
+    if (rawGitDir.length === 0) {
+      throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Git directory does not match the workspace repository.");
+    }
+    let canonicalGitDir;
+    try {
+      canonicalGitDir = await realpath6(rawGitDir);
+    } catch {
+      throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Git directory does not match the workspace repository.");
+    }
+    const sameDrive = !(this.platform === "win32" && process.platform === "win32") || parse3(canonicalToplevel).root.toLowerCase() === parse3(canonicalGitDir).root.toLowerCase();
+    if (sameDrive && !isPathOutside(relative5(canonicalToplevel, canonicalGitDir))) {
+      return;
+    }
+    let dotGitInfo;
+    try {
+      dotGitInfo = await lstat5(join17(canonicalToplevel, ".git"));
+    } catch {
+      throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Git directory does not match the workspace repository.");
+    }
+    if (dotGitInfo.isSymbolicLink() || !dotGitInfo.isFile()) {
+      throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Git directory does not match the workspace repository.");
+    }
+    const backlink = await readBoundedRegularText(join17(canonicalGitDir, "gitdir"), MAX_GITDIR_BACKLINK_BYTES);
+    if (backlink !== void 0) {
+      const trimmed = backlink.trim();
+      if (trimmed.length > 0) {
+        const resolvedBacklink = resolve8(canonicalGitDir, trimmed);
+        const expectedName = basename8(resolvedBacklink);
+        const nameMatches = this.platform === "win32" ? expectedName.toLowerCase() === ".git" : expectedName === ".git";
+        if (nameMatches) {
+          try {
+            const backlinkParent = await realpath6(dirname8(resolvedBacklink));
+            if (normalizeDirForCompare(backlinkParent, this.platform) === normalizeDirForCompare(canonicalToplevel, this.platform)) {
+              return;
+            }
+          } catch {
+          }
+        }
+      }
+    }
+    const configPath = join17(canonicalGitDir, "config");
+    let configInfo;
+    try {
+      configInfo = await lstat5(configPath);
+    } catch {
+      configInfo = void 0;
+    }
+    if (configInfo !== void 0 && !configInfo.isSymbolicLink() && configInfo.isFile()) {
+      const wtResult = await this.runGit(["config", "--no-includes", "--file", configPath, "--get", "core.worktree"], {
+        cwd: canonicalToplevel,
+        allowTruncate: false,
+        maxStdoutBytes: MAX_GITDIR_BACKLINK_BYTES,
+        deadlineMs
+      });
+      if (wtResult.exitCode === 0) {
+        const rawWorktree = wtResult.stdout.toString("utf8").trim();
+        if (rawWorktree.length > 0) {
+          try {
+            const resolvedWt = await realpath6(resolve8(canonicalGitDir, rawWorktree));
+            if (normalizeDirForCompare(resolvedWt, this.platform) === normalizeDirForCompare(canonicalToplevel, this.platform)) {
+              return;
+            }
+          } catch {
+          }
+        }
+      }
+    }
+    throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Git directory does not match the workspace repository.");
+  }
+  async collectFilterOverrides(canonicalRoot, deadlineMs) {
+    const configResult = await this.runGit(
+      ["config", "--includes", "--null", "--name-only", "--get-regexp", "^(filter\\.|extensions\\.partialclone$|remote\\..*\\.promisor$)"],
+      {
+        cwd: canonicalRoot,
+        allowTruncate: false,
+        maxStdoutBytes: MAX_FILTER_CONFIG_BYTES,
+        deadlineMs
+      }
+    );
+    if (configResult.stdoutTruncated) {
+      throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Repository filter configuration exceeded safe limits.");
+    }
+    if (configResult.exitCode === 1) {
+      return void 0;
+    }
+    if (configResult.exitCode !== 0) {
+      throw new RpcError("WORKSPACE_GIT_FAILED", "Failed to inspect repository filter configuration.");
+    }
+    const { tokens } = splitNulTerminated(configResult.stdout);
+    const names = /* @__PURE__ */ new Set();
+    for (const key of tokens) {
+      if (key.length === 0) continue;
+      const lower = key.toLowerCase();
+      if (lower === "extensions.partialclone" || lower.startsWith("remote.") && lower.endsWith(".promisor")) {
+        throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Partial-clone promisor repositories are not supported for read-only inspection.");
+      }
+      const firstDot = key.indexOf(".");
+      const lastDot = key.lastIndexOf(".");
+      if (firstDot <= 0 || lastDot <= firstDot) continue;
+      const subsection = key.slice(firstDot + 1, lastDot);
+      if (subsection.length === 0) continue;
+      if (/[\r\n\0]/.test(subsection)) {
+        throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Repository filter configuration contains an unsafe filter name.");
+      }
+      names.add(subsection);
+      if (names.size > MAX_FILTER_DRIVERS) {
+        throw new RpcError("WORKSPACE_GIT_UNSAFE_REPO", "Repository filter configuration exceeded safe limits.");
+      }
+    }
+    if (names.size === 0) return void 0;
+    const args = [];
+    const env = { ...this.sanitizedEnv };
+    let count = 0;
+    for (const name2 of names) {
+      for (const [field, value] of [
+        ["clean", ""],
+        ["smudge", ""],
+        ["process", ""],
+        ["required", "false"]
+      ]) {
+        const key = `filter.${name2}.${field}`;
+        env[`GIT_CONFIG_KEY_${count}`] = key;
+        env[`GIT_CONFIG_VALUE_${count}`] = value;
+        count += 1;
+        if (!name2.includes("=")) {
+          args.push("-c", `${key}=${value}`);
+        }
+      }
+    }
+    env.GIT_CONFIG_COUNT = String(count);
+    return { args, env };
+  }
+  async isPathTrackedInIndexOrHead(canonicalRoot, relPath, prefix, hasHead, filterOverrides, deadlineMs) {
+    const lsFiles = await this.runGit(["--literal-pathspecs", "ls-files", "--error-unmatch", "--", relPath], {
+      cwd: canonicalRoot,
+      allowTruncate: false,
+      maxStdoutBytes: 8 * 1024,
+      filterOverrides,
+      deadlineMs
+    });
+    if (lsFiles.exitCode === 0) return true;
+    if (!hasHead) return false;
+    const repoPath = `${prefix}${relPath}`;
+    const inHead = await this.runGit(["cat-file", "-e", `HEAD:${repoPath}`], {
+      cwd: canonicalRoot,
+      allowTruncate: false,
+      maxStdoutBytes: 1024,
+      filterOverrides,
+      deadlineMs
+    });
+    return inHead.exitCode === 0;
+  }
+  async isPathIgnored(canonicalRoot, relPath, filterOverrides, deadlineMs) {
+    const check2 = await this.runGit(["check-ignore", "-q", "--", relPath], {
+      cwd: canonicalRoot,
+      allowTruncate: false,
+      maxStdoutBytes: 4 * 1024,
+      filterOverrides,
+      deadlineMs
+    });
+    if (check2.exitCode === 0) return true;
+    if (check2.exitCode === 1) return false;
+    return true;
+  }
+  async expandUntrackedDirs(canonicalRoot, dirRelPaths, seenPaths, remainingBudget, filterOverrides, deadlineMs) {
+    const verifiedDirs = [];
+    let includeWholeWorkspace = false;
+    for (const dirRel of dirRelPaths) {
+      if (dirRel.length === 0) {
+        includeWholeWorkspace = true;
+        break;
+      }
+      if (!isAllowedWorkspaceGitPath(dirRel)) continue;
+      if (dirRel.split("/").includes("node_modules")) continue;
+      const verified = await verifyDirectoryNoSymlinks(canonicalRoot, dirRel);
+      if (verified !== void 0) {
+        verifiedDirs.push(dirRel);
+      }
+    }
+    const targets = includeWholeWorkspace ? ["."] : verifiedDirs;
+    if (targets.length === 0) {
+      return { files: [], truncated: false };
+    }
+    const lsResult = await this.runGit(
+      ["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--", ...targets],
+      {
+        cwd: canonicalRoot,
+        allowTruncate: true,
+        maxStdoutBytes: WORKSPACE_GIT_MAX_STATUS_STDOUT_BYTES,
+        filterOverrides,
+        deadlineMs
+      }
+    );
+    if (lsResult.exitCode !== 0 && !lsResult.stdoutTruncated) {
+      return { files: [], truncated: false };
+    }
+    const { tokens, hadTrailingRemainder } = splitNulTerminated(lsResult.stdout);
+    const collected = [];
+    let truncated = lsResult.stdoutTruncated || hadTrailingRemainder;
+    for (const rawPath of tokens) {
+      this.assertLive();
+      if (rawPath.length === 0) continue;
+      const relPath = rawPath.replace(/\/+$/, "");
+      if (!isAllowedWorkspaceGitPath(relPath)) continue;
+      if (relPath.split("/").includes("node_modules")) continue;
+      if (seenPaths.has(relPath)) continue;
+      if (!await isRegularUntrackedFile(canonicalRoot, relPath)) continue;
+      if (collected.length >= remainingBudget) {
+        truncated = true;
+        break;
+      }
+      seenPaths.add(relPath);
+      collected.push(relPath);
+    }
+    return { files: collected, truncated };
+  }
+  async runGit(args, options) {
+    this.assertLive();
+    const remainingMs = this.remainingTimeoutMs(options.deadlineMs);
+    const gitBin = await this.getGitBin(options.cwd);
+    this.assertLive();
+    const childTimeoutMs = this.remainingTimeoutMs(options.deadlineMs);
+    const spawnArgs = options.filterOverrides !== void 0 ? [...SAFE_GIT_ARGS, ...options.filterOverrides.args, ...args] : [...SAFE_GIT_ARGS, ...args];
+    const spawnEnv = options.filterOverrides !== void 0 ? options.filterOverrides.env : this.sanitizedEnv;
+    return new Promise((resolvePromise, rejectPromise) => {
+      const child = this.spawnProcess(gitBin, spawnArgs, {
+        cwd: options.cwd,
+        env: spawnEnv,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true
+      });
+      let settled = false;
+      let timedOut = false;
+      let aborted2 = false;
+      let stdoutTruncated = false;
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
+      const stdoutChunks = [];
+      const stderrChunks = [];
+      let markDone;
+      const done = new Promise((resolveDone) => {
+        markDone = resolveDone;
+      });
+      const activeEntry = { child, done };
+      this.activeChildren.add(activeEntry);
+      const cleanup = () => {
+        clearTimeout(timer2);
+        this.lifetime.signal.removeEventListener("abort", onAbort);
+        this.activeChildren.delete(activeEntry);
+        markDone();
+      };
+      const onAbort = () => {
+        aborted2 = true;
+        killProcess(child);
+      };
+      this.lifetime.signal.addEventListener("abort", onAbort, { once: true });
+      if (this.lifetime.signal.aborted) {
+        onAbort();
+      }
+      const timer2 = setTimeout(() => {
+        timedOut = true;
+        killProcess(child);
+      }, Math.min(remainingMs, childTimeoutMs));
+      timer2.unref?.();
+      child.stdout.on("data", (chunk) => {
+        if (stdoutTruncated) return;
+        if (stdoutBytes + chunk.length > options.maxStdoutBytes) {
+          const remaining = options.maxStdoutBytes - stdoutBytes;
+          if (remaining > 0) {
+            stdoutChunks.push(chunk.subarray(0, remaining));
+            stdoutBytes += remaining;
+          }
+          stdoutTruncated = true;
+          killProcess(child);
+          return;
+        }
+        stdoutChunks.push(chunk);
+        stdoutBytes += chunk.length;
+      });
+      child.stderr.on("data", (chunk) => {
+        if (stderrBytes >= MAX_STDERR_BYTES) return;
+        const remaining = MAX_STDERR_BYTES - stderrBytes;
+        const slice = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
+        stderrChunks.push(slice);
+        stderrBytes += slice.length;
+      });
+      child.once("error", (error62) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (aborted2) {
+          rejectPromise(new RpcError("WORKSPACE_GIT_CLOSED", "The workspace git service is closed."));
+          return;
+        }
+        if (error62.code === "ENOENT") {
+          rejectPromise(new RpcError("WORKSPACE_GIT_UNAVAILABLE", "Git is unavailable on this Host."));
+          return;
+        }
+        rejectPromise(new RpcError("WORKSPACE_GIT_FAILED", "The workspace git command failed."));
+      });
+      child.once("close", (code) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const stdout = Buffer.concat(stdoutChunks);
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
+        if (aborted2) {
+          rejectPromise(new RpcError("WORKSPACE_GIT_CLOSED", "The workspace git service is closed."));
+          return;
+        }
+        if (timedOut) {
+          rejectPromise(new RpcError("RPC_TIMEOUT", "The workspace git command timed out.", void 0, true));
+          return;
+        }
+        if (stdoutTruncated && options.allowTruncate) {
+          resolvePromise({ exitCode: 0, stdout, stderr, stdoutTruncated: true });
+          return;
+        }
+        if (code !== 0 && isDubiousOwnershipStderr(stderr)) {
+          rejectPromise(new RpcError(
+            "WORKSPACE_GIT_UNSAFE_REPO",
+            "Git rejected this workspace because of repository ownership checks."
+          ));
+          return;
+        }
+        resolvePromise({
+          exitCode: code ?? 1,
+          stdout,
+          stderr,
+          stdoutTruncated
+        });
+      });
+    });
+  }
+};
+function emptyStatusResult(scope3) {
+  return {
+    isGitRepo: false,
+    hasHead: false,
+    scope: scope3,
+    files: [],
+    totalFiles: 0,
+    truncated: false,
+    totalAdditions: 0,
+    totalDeletions: 0
+  };
+}
+function emptyDiffResult(scope3, path, isGitRepo) {
+  return {
+    isGitRepo,
+    ...path === void 0 ? {} : { path },
+    scope: scope3,
+    diff: "",
+    bytes: 0,
+    lines: 0,
+    additions: 0,
+    deletions: 0,
+    isBinary: false,
+    truncated: false
+  };
+}
+function readPathEnv(env, platform3) {
+  if (platform3 !== "win32") return env.PATH;
+  if (typeof env.PATH === "string") return env.PATH;
+  if (typeof env.Path === "string") return env.Path;
+  for (const [key, value] of Object.entries(env)) {
+    if (key.toLowerCase() === "path" && typeof value === "string") return value;
+  }
+  return void 0;
+}
+function stripOuterQuotes(value, platform3) {
+  if (platform3 !== "win32") return value;
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+function isStrictAbsolutePath(value, platform3) {
+  if (platform3 === "win32") {
+    if (/^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\")) return true;
+    if (process.platform !== "win32" && value.startsWith("/")) return true;
+    return false;
+  }
+  return value.startsWith("/");
+}
+function normalizeDirForCompare(dir, platform3) {
+  let normalized = normalize(dir);
+  if (platform3 === "win32") {
+    normalized = normalized.replaceAll("/", "\\").replace(/[\\]+$/, "");
+    if (/^[A-Za-z]:$/.test(normalized)) normalized += "\\";
+    return normalized.toLowerCase();
+  }
+  normalized = normalized.replace(/\/+$/, "");
+  return normalized.length === 0 ? "/" : normalized;
+}
+async function collectExcludedDirs(cwd2, platform3) {
+  const excluded = /* @__PURE__ */ new Set();
+  if (!cwd2) return excluded;
+  excluded.add(normalizeDirForCompare(cwd2, platform3));
+  try {
+    const canonical = await realpath6(cwd2);
+    excluded.add(normalizeDirForCompare(canonical, platform3));
+  } catch {
+  }
+  return excluded;
+}
+async function isSameDirectory(left, right, platform3) {
+  if (normalizeDirForCompare(left, platform3) === normalizeDirForCompare(right, platform3)) return true;
+  try {
+    const [realLeft, realRight] = await Promise.all([realpath6(left), realpath6(right)]);
+    return normalizeDirForCompare(realLeft, platform3) === normalizeDirForCompare(realRight, platform3);
+  } catch {
+    return false;
+  }
+}
+function killProcess(child) {
+  try {
+    child.kill("SIGKILL");
+  } catch {
+  }
+}
+function isDubiousOwnershipStderr(stderr) {
+  return /dubious ownership/i.test(stderr);
+}
+function isNotGitRepoStderr(stderr) {
+  return /not a git repository/i.test(stderr) || /must be run in a work tree/i.test(stderr) || /cannot use bare repository/i.test(stderr);
+}
+function isPathOutside(rel) {
+  return rel === ".." || rel.startsWith(`..${sep3}`) || isAbsolute8(rel);
+}
+function isAllowedWorkspaceGitPath(relPath) {
+  if (!isSafeWorkspaceGitRelativePath(relPath)) return false;
+  return !relPath.split("/").some((segment) => segment.toLowerCase() === ".git");
+}
+async function validateCanonicalDirectory(sourceRoot) {
+  if (!isAbsolute8(sourceRoot)) {
+    throw new Error("Workspace root must be absolute.");
+  }
+  const canonical = await realpath6(sourceRoot);
+  const info = await lstat5(canonical);
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new Error("Workspace root must be a directory.");
+  }
+  return canonical;
+}
+async function verifyDirectoryNoSymlinks(canonicalRoot, relDir) {
+  const segments = relDir.split("/");
+  let current = canonicalRoot;
+  for (const segment of segments) {
+    current = join17(current, segment);
+    if (isPathOutside(relative5(canonicalRoot, current))) return void 0;
+    try {
+      const info = await lstat5(current);
+      if (info.isSymbolicLink() || !info.isDirectory()) return void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  try {
+    const canonical = await realpath6(current);
+    if (isPathOutside(relative5(canonicalRoot, canonical))) return void 0;
+    return canonical;
+  } catch {
+    return void 0;
+  }
+}
+async function validateTargetPath(canonicalRoot, relPath) {
+  const segments = relPath.split("/");
+  let current = canonicalRoot;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    current = join17(current, segments[index]);
+    if (isPathOutside(relative5(canonicalRoot, current))) {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
+    }
+    let dirInfo;
+    try {
+      dirInfo = await lstat5(current);
+    } catch (error62) {
+      if (error62.code === "ENOENT") {
+        return { exists: false, isFile: false, absolutePath: join17(canonicalRoot, ...segments) };
+      }
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.", "io");
+    }
+    if (dirInfo.isSymbolicLink()) {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "Symbolic links are not supported.", "symlink");
+    }
+    if (!dirInfo.isDirectory()) {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor path is not a directory.", "not-regular-file");
+    }
+  }
+  const target3 = join17(current, segments[segments.length - 1]);
+  if (isPathOutside(relative5(canonicalRoot, target3))) {
+    throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
+  }
+  let targetInfo;
+  try {
+    targetInfo = await lstat5(target3);
+  } catch (error62) {
+    if (error62.code === "ENOENT") {
+      return { exists: false, isFile: false, absolutePath: target3 };
+    }
+    throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.", "io");
+  }
+  if (targetInfo.isSymbolicLink()) {
+    throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "Symbolic links are not supported.", "symlink");
+  }
+  try {
+    const canonicalTarget = await realpath6(target3);
+    if (process.platform === "win32") {
+      if (parse3(canonicalRoot).root.toLowerCase() !== parse3(canonicalTarget).root.toLowerCase()) {
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
+      }
+    }
+    if (isPathOutside(relative5(canonicalRoot, canonicalTarget))) {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
+    }
+  } catch (error62) {
+    if (error62 instanceof RpcError) throw error62;
+    throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.", "io");
+  }
+  return {
+    exists: true,
+    isFile: targetInfo.isFile(),
+    absolutePath: target3
+  };
+}
+async function isRegularUntrackedFile(canonicalRoot, relPath) {
+  try {
+    const check2 = await validateTargetPath(canonicalRoot, relPath);
+    return check2.exists && check2.isFile;
+  } catch {
+    return false;
+  }
+}
+async function readBoundedRegularText(filePath, maxBytes2) {
+  let info;
+  try {
+    info = await lstat5(filePath);
+  } catch {
+    return void 0;
+  }
+  if (info.isSymbolicLink() || !info.isFile()) return void 0;
+  let handle;
+  try {
+    handle = await open6(filePath, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0));
+  } catch {
+    return void 0;
+  }
+  try {
+    const statInfo = await handle.stat();
+    if (!statInfo.isFile() || statInfo.size > maxBytes2) return void 0;
+    const readResult = await readHandleBounded(handle, maxBytes2);
+    if (readResult.exceededLimit) return void 0;
+    return readResult.data.toString("utf8");
+  } catch {
+    return void 0;
+  } finally {
+    await handle.close().catch(() => void 0);
+  }
+}
+function splitNulTerminated(buffer3) {
+  const tokens = [];
+  let start = 0;
+  for (let index = 0; index < buffer3.length; index += 1) {
+    if (buffer3[index] === 0) {
+      tokens.push(buffer3.subarray(start, index).toString("utf8"));
+      start = index + 1;
+    }
+  }
+  return {
+    tokens,
+    hadTrailingRemainder: start < buffer3.length
+  };
+}
+function parsePorcelainZ(buffer3, stdoutTruncated) {
+  const { tokens, hadTrailingRemainder } = splitNulTerminated(buffer3);
+  let truncated = stdoutTruncated || hadTrailingRemainder;
+  const entries = [];
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index++];
+    if (token.length < 4 || token[2] !== " ") {
+      if (stdoutTruncated) truncated = true;
+      continue;
+    }
+    const x = token[0];
+    const y = token[1];
+    const rawPath = token.slice(3);
+    if (x === "R" || x === "C" || y === "R" || y === "C") {
+      const rawOldPath = tokens[index++];
+      if (rawOldPath === void 0) {
+        truncated = true;
+        break;
+      }
+      entries.push({ x, y, rawPath, rawOldPath });
+    } else {
+      entries.push({ x, y, rawPath });
+    }
+  }
+  return { entries, truncated };
+}
+function parseNumstatZ(buffer3, stdoutTruncated) {
+  const { tokens } = splitNulTerminated(buffer3);
+  const map2 = /* @__PURE__ */ new Map();
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index++];
+    const firstTab = token.indexOf("	");
+    if (firstTab < 0) continue;
+    const secondTab = token.indexOf("	", firstTab + 1);
+    if (secondTab < 0) continue;
+    const addStr = token.slice(0, firstTab);
+    const delStr = token.slice(firstTab + 1, secondTab);
+    let filePath = token.slice(secondTab + 1);
+    if (filePath.length === 0) {
+      const oldPath = tokens[index++];
+      const newPath = tokens[index++];
+      if (oldPath === void 0 || newPath === void 0) {
+        if (stdoutTruncated) break;
+        break;
+      }
+      filePath = newPath;
+    }
+    if (!isAllowedWorkspaceGitPath(filePath)) continue;
+    const isBinary2 = addStr === "-" || delStr === "-";
+    const parsedAdd = isBinary2 ? null : Number.parseInt(addStr, 10);
+    const parsedDel = isBinary2 ? null : Number.parseInt(delStr, 10);
+    map2.set(filePath, {
+      additions: parsedAdd !== null && Number.isSafeInteger(parsedAdd) && parsedAdd >= 0 ? parsedAdd : null,
+      deletions: parsedDel !== null && Number.isSafeInteger(parsedDel) && parsedDel >= 0 ? parsedDel : null,
+      isBinary: isBinary2
+    });
+  }
+  return map2;
+}
+function stripRepoPrefix(repoRelativePath, prefix) {
+  if (prefix.length === 0) return repoRelativePath;
+  if (!repoRelativePath.startsWith(prefix)) return void 0;
+  return repoRelativePath.slice(prefix.length);
+}
+function stripUntrackedDirPrefix(repoDirPath, prefix) {
+  if (prefix.length === 0) {
+    const stripped2 = repoDirPath.replace(/\/+$/, "");
+    return stripped2.length === 0 ? void 0 : stripped2;
+  }
+  if (repoDirPath === prefix) return "";
+  if (!repoDirPath.startsWith(prefix)) return void 0;
+  const stripped = repoDirPath.slice(prefix.length).replace(/\/+$/, "");
+  return stripped.length === 0 ? "" : stripped;
+}
+function isUnmergedPair(x, y) {
+  return x === "U" || y === "U" || x === "A" && y === "A" || x === "D" && y === "D";
+}
+function mapPorcelainChar(ch) {
+  switch (ch) {
+    case "A":
+      return "added";
+    case "D":
+      return "deleted";
+    case "R":
+      return "renamed";
+    case "C":
+      return "copied";
+    default:
+      return "modified";
+  }
+}
+function classifyTrackedStatus(x, y, isUnmerged, scope3) {
+  if (isUnmerged) return "unmerged";
+  if (scope3 === "staged") return mapPorcelainChar(x);
+  if (scope3 === "unstaged") return mapPorcelainChar(y);
+  if (x === "R") return "renamed";
+  if (x === "C") return "copied";
+  if (x === "D" || y === "D") return "deleted";
+  if (x !== " ") return mapPorcelainChar(x);
+  return mapPorcelainChar(y);
+}
+async function inspectUntrackedFile(canonicalRoot, relPath) {
+  let check2;
+  try {
+    check2 = await validateTargetPath(canonicalRoot, relPath);
+  } catch {
+    return void 0;
+  }
+  if (!check2.exists || !check2.isFile) return void 0;
+  let handle;
+  try {
+    handle = await open6(check2.absolutePath, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0));
+  } catch {
+    return void 0;
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > UNTRACKED_MAX_BYTES) return void 0;
+    const readResult = await readHandleBounded(handle, UNTRACKED_MAX_BYTES);
+    if (readResult.exceededLimit) return void 0;
+    const data2 = readResult.data;
+    if (isBinaryBuffer(data2)) {
+      return { additions: null, deletions: null, isBinary: true };
+    }
+    return {
+      additions: countBufferLines(data2),
+      deletions: 0,
+      isBinary: false
+    };
+  } catch {
+    return void 0;
+  } finally {
+    await handle.close().catch(() => void 0);
+  }
+}
+async function synthesizeUntrackedFileDiff(absolutePath, relPath, scope3) {
+  let handle;
+  try {
+    handle = await open6(absolutePath, constants6.O_RDONLY | (constants6.O_NOFOLLOW ?? 0));
+  } catch (error62) {
+    const code = error62.code;
+    if (code === "ELOOP") {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "Symbolic links are not supported.", "symlink");
+    }
+    throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.", "io");
+  }
+  let data2;
+  let exceededBytes;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "not-regular-file");
+    }
+    const readResult = await readHandleBounded(handle, WORKSPACE_GIT_MAX_DIFF_BYTES);
+    data2 = readResult.data;
+    exceededBytes = readResult.exceededLimit;
+  } finally {
+    await handle.close().catch(() => void 0);
+  }
+  if (isBinaryBuffer(data2)) {
+    return {
+      isGitRepo: true,
+      path: relPath,
+      scope: scope3,
+      diff: "",
+      bytes: 0,
+      lines: 0,
+      additions: 0,
+      deletions: 0,
+      isBinary: true,
+      truncated: false
+    };
+  }
+  const oldHeaderPath = formatGitDiffPath("a/", relPath);
+  const newHeaderPath = formatGitDiffPath("b/", relPath);
+  if (data2.length === 0) {
+    const emptyDiff = `diff --git ${oldHeaderPath} ${newHeaderPath}
+new file mode 100644
+`;
+    return {
+      isGitRepo: true,
+      path: relPath,
+      scope: scope3,
+      diff: emptyDiff,
+      bytes: Buffer.byteLength(emptyDiff, "utf8"),
+      lines: 2,
+      additions: 0,
+      deletions: 0,
+      isBinary: false,
+      truncated: false
+    };
+  }
+  let text = (exceededBytes ? trimIncompleteUtf8Tail(data2) : data2).toString("utf8");
+  let truncated = exceededBytes;
+  let truncatedReason = exceededBytes ? "max-bytes" : void 0;
+  if (exceededBytes && !text.endsWith("\n")) {
+    const lastNewline = text.lastIndexOf("\n");
+    if (lastNewline >= 0) {
+      text = text.slice(0, lastNewline + 1);
+    }
+  }
+  const hasTrailingNewline = text.endsWith("\n");
+  const contentLines = (hasTrailingNewline ? text.slice(0, -1) : text).split("\n");
+  const candidateLines = [
+    `diff --git ${oldHeaderPath} ${newHeaderPath}`,
+    "new file mode 100644",
+    "--- /dev/null",
+    `+++ ${newHeaderPath}`,
+    `@@ -0,0 +1,${contentLines.length} @@`,
+    ...contentLines.map((line) => `+${line}`)
+  ];
+  if (!hasTrailingNewline && !exceededBytes) {
+    candidateLines.push("\\ No newline at end of file");
+  }
+  const keptLines = [];
+  let keptBytes = 0;
+  let endedWithNewline = true;
+  for (const line of candidateLines) {
+    if (keptLines.length >= WORKSPACE_GIT_MAX_DIFF_LINES) {
+      truncated = true;
+      truncatedReason = "max-lines";
+      break;
+    }
+    const lineBytes = Buffer.byteLength(line, "utf8") + 1;
+    if (keptBytes + lineBytes > WORKSPACE_GIT_MAX_DIFF_BYTES) {
+      const remaining = WORKSPACE_GIT_MAX_DIFF_BYTES - keptBytes;
+      const hasAddedContentLine = keptLines.some((existing) => existing.startsWith("+") && !existing.startsWith("+++ "));
+      if (remaining > 1 && line.startsWith("+") && !hasAddedContentLine) {
+        const sliced = trimIncompleteUtf8Tail(Buffer.from(line, "utf8").subarray(0, remaining)).toString("utf8");
+        if (sliced.length > 0) {
+          keptLines.push(sliced);
+          keptBytes += Buffer.byteLength(sliced, "utf8");
+          endedWithNewline = false;
+        }
+      }
+      truncated = true;
+      truncatedReason = "max-bytes";
+      break;
+    }
+    keptLines.push(line);
+    keptBytes += lineBytes;
+  }
+  const diff = keptLines.length === 0 ? "" : endedWithNewline ? `${keptLines.join("\n")}
+` : keptLines.join("\n");
+  const { additions, deletions } = countUnifiedDiffChanges(keptLines);
+  return {
+    isGitRepo: true,
+    path: relPath,
+    scope: scope3,
+    diff,
+    bytes: Buffer.byteLength(diff, "utf8"),
+    lines: keptLines.length,
+    additions,
+    deletions,
+    isBinary: false,
+    truncated,
+    ...truncated && truncatedReason !== void 0 ? { truncatedReason } : {}
+  };
+}
+async function readHandleBounded(handle, maxBytes2) {
+  const chunks = [];
+  let total = 0;
+  const chunkSize = 32 * 1024;
+  while (total <= maxBytes2) {
+    const remaining = maxBytes2 + 1 - total;
+    const buffer3 = Buffer.allocUnsafe(Math.min(chunkSize, remaining));
+    const { bytesRead } = await handle.read(buffer3, 0, buffer3.length, total);
+    if (bytesRead === 0) break;
+    chunks.push(buffer3.subarray(0, bytesRead));
+    total += bytesRead;
+  }
+  const combined = Buffer.concat(chunks);
+  if (combined.length > maxBytes2) {
+    return { data: combined.subarray(0, maxBytes2), exceededLimit: true };
+  }
+  return { data: combined, exceededLimit: false };
+}
+function isBinaryBuffer(data2) {
+  const sniffLength = Math.min(data2.length, BINARY_SNIFF_BYTES);
+  return data2.subarray(0, sniffLength).includes(0);
+}
+function countBufferLines(data2) {
+  if (data2.length === 0) return 0;
+  let count = 0;
+  for (let index = 0; index < data2.length; index += 1) {
+    if (data2[index] === 10) count += 1;
+  }
+  if (data2[data2.length - 1] !== 10) count += 1;
+  return count;
+}
+function trimIncompleteUtf8Tail(buffer3) {
+  if (buffer3.length === 0) return buffer3;
+  let index = buffer3.length - 1;
+  let continuations = 0;
+  while (index >= 0 && continuations < 3 && (buffer3[index] & 192) === 128) {
+    index -= 1;
+    continuations += 1;
+  }
+  if (index < 0) return buffer3.subarray(0, 0);
+  const lead = buffer3[index];
+  let expectedLength = 1;
+  if ((lead & 128) === 0) {
+    expectedLength = 1;
+  } else if ((lead & 224) === 192) {
+    expectedLength = 2;
+  } else if ((lead & 240) === 224) {
+    expectedLength = 3;
+  } else if ((lead & 248) === 240) {
+    expectedLength = 4;
+  } else {
+    return buffer3.subarray(0, index);
+  }
+  const actualLength = buffer3.length - index;
+  return actualLength < expectedLength ? buffer3.subarray(0, index) : buffer3;
+}
+function formatGitDiffPath(prefix, relPath) {
+  const full = `${prefix}${relPath}`;
+  if (!/[\x00-\x1f\x7f"\\]/.test(relPath)) return full;
+  let escaped = "";
+  for (const ch of full) {
+    const code = ch.charCodeAt(0);
+    if (ch === "\\") escaped += "\\\\";
+    else if (ch === '"') escaped += '\\"';
+    else if (ch === "	") escaped += "\\t";
+    else if (ch === "\n") escaped += "\\n";
+    else if (ch === "\r") escaped += "\\r";
+    else if (code < 32 || code === 127) escaped += `\\${code.toString(8).padStart(3, "0")}`;
+    else escaped += ch;
+  }
+  return `"${escaped}"`;
+}
+function unquoteGitHeaderPath(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/\\(["\\tnr])/g, (_, ch) => {
+      if (ch === "t") return "	";
+      if (ch === "n") return "\n";
+      if (ch === "r") return "\r";
+      return ch;
+    });
+  }
+  return trimmed;
+}
+function extractDiffSectionPaths(headerLine) {
+  if (headerLine.startsWith("diff --cc ")) {
+    const p = unquoteGitHeaderPath(headerLine.slice("diff --cc ".length));
+    return p.length > 0 ? [p] : [];
+  }
+  if (headerLine.startsWith("diff --combined ")) {
+    const p = unquoteGitHeaderPath(headerLine.slice("diff --combined ".length));
+    return p.length > 0 ? [p] : [];
+  }
+  if (!headerLine.startsWith("diff --git ")) return [];
+  const rest = headerLine.slice("diff --git ".length);
+  const paths = [];
+  const stripPrefix = (raw, prefix) => {
+    const unquoted = unquoteGitHeaderPath(raw);
+    return unquoted.startsWith(prefix) ? unquoted.slice(prefix.length) : unquoted;
+  };
+  if (rest.startsWith('"')) {
+    let idx = 1;
+    while (idx < rest.length) {
+      if (rest[idx] === "\\") {
+        idx += 2;
+        continue;
+      }
+      if (rest[idx] === '"') {
+        idx += 1;
+        break;
+      }
+      idx += 1;
+    }
+    const left = rest.slice(0, idx);
+    const right = rest.slice(idx + 1);
+    if (left.length > 0) paths.push(stripPrefix(left, "a/"));
+    if (right.length > 0) paths.push(stripPrefix(right, "b/"));
+    return paths;
+  }
+  if (rest.endsWith('"')) {
+    const split3 = rest.indexOf(' "b/');
+    if (split3 > 0) {
+      paths.push(stripPrefix(rest.slice(0, split3), "a/"));
+      paths.push(stripPrefix(rest.slice(split3 + 1), "b/"));
+      return paths;
+    }
+  }
+  if (rest.startsWith("a/") && (rest.length - 1) % 2 === 0) {
+    const half = (rest.length - 1) / 2;
+    if (rest[half] === " " && rest.slice(half + 1, half + 3) === "b/" && rest.slice(2, half) === rest.slice(half + 3)) {
+      const same = rest.slice(2, half);
+      return [same, same];
+    }
+  }
+  const plain = /^a\/(.+?) b\/(.+)$/.exec(rest);
+  if (plain !== null && plain[1] !== void 0 && plain[2] !== void 0) {
+    return [plain[1], plain[2]];
+  }
+  return [];
+}
+function isDiffFileHeaderLine(line) {
+  return line.startsWith("diff --git ") || line.startsWith("diff --cc ") || line.startsWith("diff --combined ");
+}
+function filterAllowedDiffSections(lines) {
+  const result = [];
+  let keepCurrent = true;
+  for (const line of lines) {
+    if (isDiffFileHeaderLine(line)) {
+      const paths = extractDiffSectionPaths(line);
+      keepCurrent = paths.length > 0 && paths.every((p) => isAllowedWorkspaceGitPath(p));
+    }
+    if (keepCurrent) result.push(line);
+  }
+  return result;
+}
+function formatDiffOutput(rawStdout, stdoutTruncated, scope3, path) {
+  let truncated = stdoutTruncated;
+  let truncatedReason = stdoutTruncated ? "max-bytes" : void 0;
+  const cleanBuffer = stdoutTruncated ? trimIncompleteUtf8Tail(rawStdout) : rawStdout;
+  let text = cleanBuffer.toString("utf8");
+  if (stdoutTruncated && !text.endsWith("\n")) {
+    const lastNewline = text.lastIndexOf("\n");
+    if (lastNewline >= 0) {
+      text = text.slice(0, lastNewline + 1);
+    }
+  }
+  let linesList = text.length === 0 ? [] : text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
+  if (path === void 0 && linesList.length > 0) {
+    const filtered = filterAllowedDiffSections(linesList);
+    if (filtered.length !== linesList.length) {
+      linesList = filtered;
+      text = linesList.length === 0 ? "" : `${linesList.join("\n")}
+`;
+    }
+  }
+  if (linesList.length > WORKSPACE_GIT_MAX_DIFF_LINES) {
+    linesList = linesList.slice(0, WORKSPACE_GIT_MAX_DIFF_LINES);
+    text = `${linesList.join("\n")}
+`;
+    truncated = true;
+    truncatedReason = "max-lines";
+  }
+  const isBinary2 = linesList.some(
+    (line) => /^Binary files .* differ$/.test(line) || line === "GIT binary patch"
+  );
+  const { additions, deletions } = countUnifiedDiffChanges(linesList);
+  return {
+    isGitRepo: true,
+    ...path === void 0 ? {} : { path },
+    scope: scope3,
+    diff: text,
+    bytes: Buffer.byteLength(text, "utf8"),
+    lines: linesList.length,
+    additions,
+    deletions,
+    isBinary: isBinary2,
+    truncated,
+    ...truncated && truncatedReason !== void 0 ? { truncatedReason } : {}
+  };
+}
+function countUnifiedDiffChanges(lines) {
+  let additions = 0;
+  let deletions = 0;
+  let hunkPrefixWidth = 0;
+  for (const line of lines) {
+    if (isDiffFileHeaderLine(line)) {
+      hunkPrefixWidth = 0;
+      continue;
+    }
+    if (line.startsWith("@@ ")) {
+      hunkPrefixWidth = 1;
+      continue;
+    }
+    const combinedMatch = COMBINED_HUNK_HEADER_RE.exec(line);
+    if (combinedMatch !== null && combinedMatch[1] !== void 0) {
+      hunkPrefixWidth = combinedMatch[1].length - 1;
+      continue;
+    }
+    if (hunkPrefixWidth === 0) continue;
+    if (line.startsWith("\\")) continue;
+    if (hunkPrefixWidth === 1) {
+      if (line.startsWith("+")) {
+        additions += 1;
+      } else if (line.startsWith("-")) {
+        deletions += 1;
+      } else if (!line.startsWith(" ")) {
+        hunkPrefixWidth = 0;
+      }
+      continue;
+    }
+    if (line.length < hunkPrefixWidth) {
+      hunkPrefixWidth = 0;
+      continue;
+    }
+    const prefix = line.slice(0, hunkPrefixWidth);
+    if (!/^[ +-]+$/.test(prefix)) {
+      hunkPrefixWidth = 0;
+      continue;
+    }
+    if (prefix.includes("+")) {
+      additions += 1;
+    } else if (prefix.includes("-")) {
+      deletions += 1;
+    }
+  }
+  return { additions, deletions };
+}
+
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID19 } from "node:crypto";
-import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat8, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
+import { constants as constants7 } from "node:fs";
+import { link as link2, lstat as lstat6, open as open7, realpath as realpath7, stat as stat9, unlink as unlink2 } from "node:fs/promises";
+import { extname, isAbsolute as isAbsolute9, join as join18 } from "node:path";
 
 // packages/plugin/src/workspace-upload-budget.ts
 import { statfs } from "node:fs/promises";
@@ -106727,15 +108484,15 @@ var WorkspaceUploadHost = class {
     if (this.uploads.size >= 2) throw failure4("UPLOAD_LIMIT");
     const sourceRoot = await this.sessionRoot(p.sessionId);
     this.assertLive();
-    if (!sourceRoot || !isAbsolute8(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const root2 = await realpath6(sourceRoot);
-    const directory = await stat8(root2);
+    if (!sourceRoot || !isAbsolute9(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
+    const root2 = await realpath7(sourceRoot);
+    const directory = await stat9(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join17(root2, `.dsh-upload-${randomUUID19()}.part`);
+    const temp = join18(root2, `.dsh-upload-${randomUUID19()}.part`);
     let handle;
     try {
-      handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
+      handle = await open7(temp, constants7.O_CREAT | constants7.O_EXCL | constants7.O_RDWR | (constants7.O_NOFOLLOW ?? 0), 384);
     } catch (error62) {
       reservation.release();
       throw error62;
@@ -106794,7 +108551,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat5(upload.temp);
+    const temp = await lstat6(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -106802,7 +108559,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link2(upload.temp, join17(upload.root, name2));
+        await link2(upload.temp, join18(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -106854,12 +108611,12 @@ var WorkspaceUploadHost = class {
     if (recheckAuthority) {
       const current = await this.sessionRoot(upload.sessionId);
       this.assertLive();
-      if (current !== upload.sourceRoot || await realpath6(current) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
+      if (current !== upload.sourceRoot || await realpath7(current) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
       upload.authorityCheckedAt = this.now();
       upload.authorityBytes = upload.received;
     }
-    if (await realpath6(upload.root) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
-    const directory = await stat8(upload.root);
+    if (await realpath7(upload.root) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
+    const directory = await stat9(upload.root);
     if (!directory.isDirectory() || directory.dev !== upload.dev || directory.ino !== upload.ino) throw failure4("UPLOAD_WORKSPACE_CHANGED");
   }
   async discard(id7, upload) {
@@ -106868,8 +108625,8 @@ var WorkspaceUploadHost = class {
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root2 = await lstat5(upload.root);
-      const temp = await lstat5(upload.temp);
+      const root2 = await lstat6(upload.root);
+      const temp = await lstat6(upload.temp);
       if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
     } catch {
     }
@@ -106891,25 +108648,34 @@ function decodeChunk(value) {
   return data2;
 }
 function validName(name2) {
-  return Buffer.byteLength(name2, "utf8") <= 220 && name2 !== "." && name2 !== ".." && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name2) && !/[. ]$/u.test(name2) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name2) && !name2.startsWith(".dsh-upload-");
+  return Buffer.byteLength(name2, "utf8") <= 220 && name2 !== "." && name2 !== ".." && name2.toLowerCase() !== ".git" && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name2) && !/[. ]$/u.test(name2) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name2) && !name2.startsWith(".dsh-upload-");
 }
 
 // packages/plugin/src/workspace-upload-authority.ts
-function workspaceUploadRootResolver(gateway, supportsHarnessSessions, codex, acp) {
+function resolveSessionWorkspaceRoot(gateway, supportsHarnessSessions, codex, acp, unavailableError = unavailable3) {
   return async (sessionId, signal) => {
     signal.throwIfAborted();
     if (sessionId.startsWith("codex:")) {
       const parsed = parseCodexSessionId(sessionId);
-      if (!parsed) throw unavailable3();
+      if (!parsed) throw unavailableError();
       return codex(parsed.threadId);
     }
-    if (/^(acp|antigravity|cursor|pi|opencode|claude|hermes):/.test(sessionId)) return acp(sessionId);
-    if (!gateway?.supportsCarrier || !supportsHarnessSessions()) throw unavailable3();
+    const colonIndex = sessionId.indexOf(":");
+    if (colonIndex > 0) {
+      const prefix = sessionId.slice(0, colonIndex);
+      if (prefix === "acp" || prefix !== "codex" && prefix !== "harness" && prefix !== "kimi" && prefix === prefix.trim() && isValidAcpBackendId(prefix)) {
+        return acp(sessionId);
+      }
+    }
+    if (!gateway?.supportsCarrier || !supportsHarnessSessions()) throw unavailableError();
     const result = await gateway.dispatch("session/list", { args: { _request: {} } }, signal);
     signal.throwIfAborted();
     const value = result.ok ? result.value : void 0;
     return value?.items?.find((item) => item.sessionId === sessionId)?.cwd;
   };
+}
+function workspaceUploadRootResolver(gateway, supportsHarnessSessions, codex, acp) {
+  return resolveSessionWorkspaceRoot(gateway, supportsHarnessSessions, codex, acp, unavailable3);
 }
 function unavailable3() {
   return new RpcError("UPLOAD_WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.");
@@ -107166,8 +108932,8 @@ var TransportUpgradeHost = class {
     }
     let answerResolve;
     let answerReject;
-    const answerReady = new Promise((resolve10, reject) => {
-      answerResolve = resolve10;
+    const answerReady = new Promise((resolve11, reject) => {
+      answerResolve = resolve11;
       answerReject = reject;
     });
     const rtc = new RtcDataChannelTransport({
@@ -107281,7 +109047,7 @@ var TransportUpgradeHost = class {
         const details2 = await attempt.rtc.connectionDetails().catch(() => void 0);
         verifiedMode = details2?.mode;
         if (verifiedMode !== void 0) break;
-        if (i < 4) await new Promise((resolve10) => setTimeout(resolve10, 40));
+        if (i < 4) await new Promise((resolve11) => setTimeout(resolve11, 40));
       }
       if (this.closed || this.candidate !== attempt) {
         await this.disposeAttempt(attempt, true);
@@ -107362,6 +109128,7 @@ var compactionOperationSchema = external_exports.object({
 }).strict();
 var apiMethods = /* @__PURE__ */ new Set([
   ...sessionTransferMethods,
+  ...WORKSPACE_GIT_METHODS,
   "harness.transport.describe",
   "dsh.web.open",
   "dsh.web.close",
@@ -107423,7 +109190,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints, workspaceGit) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -107442,6 +109209,7 @@ var RpcRouter = class {
     this.dshWeb = dshWeb;
     this.lanWeb = lanWeb;
     this.sameLinkIpv6Endpoints = sameLinkIpv6Endpoints;
+    this.workspaceGit = workspaceGit;
   }
   active = 0;
   async closePeerStreams() {
@@ -107455,7 +109223,8 @@ var RpcRouter = class {
       this.workspaceUpload?.closeAll(),
       this.lanUpload?.closeAll(),
       this.transportUpgrade?.closeAll(),
-      this.dshWeb?.dispose()
+      this.dshWeb?.dispose(),
+      this.workspaceGit?.closeAll()
     ]);
   }
   async handle(message) {
@@ -107484,7 +109253,7 @@ var RpcRouter = class {
       return createRpcResponse(request2.id, result);
     } catch (error62) {
       const response = errorResponse2(request2.id, error62);
-      const failedEndpoint = !request2.payload.method.startsWith("workspace.upload.") && !request2.payload.method.startsWith("session.transfer.") && typeof request2.payload.params?.endpoint === "string" ? String(request2.payload.params.endpoint) : void 0;
+      const failedEndpoint = !request2.payload.method.startsWith("workspace.upload.") && !request2.payload.method.startsWith("workspace.git.") && !request2.payload.method.startsWith("session.transfer.") && typeof request2.payload.params?.endpoint === "string" ? String(request2.payload.params.endpoint) : void 0;
       const reason = workspaceFileFailureReason(error62);
       this.logger?.warn("host rpc failed", {
         method: request2.payload.method,
@@ -107524,6 +109293,7 @@ var RpcRouter = class {
           ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"],
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
           ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
+          ...this.workspaceGit === void 0 ? [] : [WORKSPACE_GIT_CAPABILITY],
           ...this.sessionTransfer?.capabilities() ?? [],
           ...this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : [],
           ...this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === "linux" ? [DSH_WEB_LAN_IPV6_CAPABILITY] : [],
@@ -107640,6 +109410,14 @@ var RpcRouter = class {
       case "workspace.upload.abort": {
         if (!this.workspaceUpload) throw new RpcError("FEATURE_NOT_SUPPORTED", "Workspace upload is unavailable on this Host.");
         return this.workspaceUpload.call(method, params);
+      }
+      case "workspace.git.status": {
+        if (!this.workspaceGit) throw new RpcError("FEATURE_NOT_SUPPORTED", "Workspace Git is unavailable on this Host.");
+        return this.workspaceGit.status(params);
+      }
+      case "workspace.git.diff": {
+        if (!this.workspaceGit) throw new RpcError("FEATURE_NOT_SUPPORTED", "Workspace Git is unavailable on this Host.");
+        return this.workspaceGit.diff(params);
       }
       case "plugin.route.call":
         return this.requirePluginRoute().call(params);
@@ -108034,7 +109812,7 @@ var HostServerConnection = class {
     let invalidControl = false;
     let socketError;
     let messageQueue = Promise.resolve();
-    await new Promise((resolve10, reject) => {
+    await new Promise((resolve11, reject) => {
       let settled = false;
       let closing = false;
       let upgradeTimer;
@@ -108076,7 +109854,7 @@ var HostServerConnection = class {
         }
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested && (error62 === void 0 ? retainOnClose : isRetryable(error62)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? "") && [...this.tunnels.values()].some((tunnel) => tunnel.lease?.canDetach());
         const cleanup = preserve ? Promise.all([...this.tunnels.values()].filter((tunnel) => !tunnel.lease?.canDetach()).map((tunnel) => this.dropTunnel(tunnel.connectionId))) : this.dropTunnels();
-        void cleanup.catch(() => void 0).finally(() => error62 === void 0 ? resolve10() : reject(error62));
+        void cleanup.catch(() => void 0).finally(() => error62 === void 0 ? resolve11() : reject(error62));
       };
       let forceDrainWake;
       const handleClose = (event2, forced = false) => {
@@ -108097,9 +109875,9 @@ var HostServerConnection = class {
             let drainTimer;
             await Promise.race([
               messageQueue.catch(() => void 0),
-              new Promise((resolve11) => {
-                forceDrainWake = resolve11;
-                drainTimer = setTimeout(resolve11, 50);
+              new Promise((resolve12) => {
+                forceDrainWake = resolve12;
+                drainTimer = setTimeout(resolve12, 50);
               })
             ]);
             if (drainTimer !== void 0) clearTimeout(drainTimer);
@@ -108979,7 +110757,7 @@ var HostServerConnection = class {
     const socket = this.createWebSocket(assignment.relayEndpoint);
     socket.binaryType = "arraybuffer";
     tunnel.dataSocket = socket;
-    const opening = new Promise((resolve10, reject) => {
+    const opening = new Promise((resolve11, reject) => {
       let settled = false;
       const timer2 = setTimeout(() => finish(new Error("Relay data attach timed out")), 15e3);
       const finish = (error62) => {
@@ -108989,7 +110767,7 @@ var HostServerConnection = class {
         if (tunnel.abortDataSocketOpen === abort) tunnel.abortDataSocketOpen = void 0;
         if (tunnel.dataSocketOpening === opening) tunnel.dataSocketOpening = void 0;
         if (error62 === void 0) {
-          resolve10();
+          resolve11();
         } else {
           if (!tunnel.dataReady) this.retireDataSocket(tunnel, socket);
           reject(error62);
@@ -109136,14 +110914,14 @@ var HostServerConnection = class {
   }
   waitBeforeRetry() {
     const delay = Math.round(Math.random() * this.config.reconnect.maxDelayMs);
-    return new Promise((resolve10) => {
+    return new Promise((resolve11) => {
       const timer2 = setTimeout(() => {
         this.retryWake = void 0;
-        resolve10();
+        resolve11();
       }, delay);
       this.retryWake = () => {
         clearTimeout(timer2);
-        resolve10();
+        resolve11();
       };
     });
   }
@@ -109494,32 +111272,32 @@ function closeCode(code) {
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID20 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
-import { lstat as lstat6, realpath as realpath7, stat as stat10 } from "node:fs/promises";
-import { dirname as dirname9, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
+import { lstat as lstat7, realpath as realpath8, stat as stat11 } from "node:fs/promises";
+import { dirname as dirname10, isAbsolute as isAbsolute11, join as join19, parse as parse5, relative as relative6, resolve as resolve10, sep as sep4 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
-import { mkdir as mkdir6, readdir as readdir6, stat as stat9 } from "node:fs/promises";
+import { mkdir as mkdir6, readdir as readdir6, stat as stat10 } from "node:fs/promises";
 import { homedir as homedir9, platform as platform2 } from "node:os";
-import { basename as basename8, dirname as dirname8, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
+import { basename as basename9, dirname as dirname9, isAbsolute as isAbsolute10, parse as parse4, resolve as resolve9 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
-  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve8(path) === parse3(path).root) {
+  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute10(path) || resolve9(path) === parse4(path).root) {
     throw new RpcError("INVALID_MESSAGE", "Workspace path must be an absolute, non-root directory path.");
   }
   await mkdir6(path, { recursive: true });
 }
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve8(homedir9());
-  const target3 = path === void 0 || path.trim() === "" ? home : resolve8(path);
-  if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
+  const home = resolve9(homedir9());
+  const target3 = path === void 0 || path.trim() === "" ? home : resolve9(path);
+  if (!isAbsolute10(target3)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir6(target3, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
-    const child = resolve8(target3, row.name);
+    const child = resolve9(target3, row.name);
     let directory = row.isDirectory();
-    if (!directory && row.isSymbolicLink()) directory = await stat9(child).then((value) => value.isDirectory()).catch(() => false);
+    if (!directory && row.isSymbolicLink()) directory = await stat10(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
     directories.push({ name: row.name, path: child, hidden: platform2() !== "win32" && row.name.startsWith(".") });
   }
@@ -109533,16 +111311,16 @@ async function listRemoteDirectory(path, signal) {
   };
 }
 function crumbs(path) {
-  const root2 = parse3(path).root;
+  const root2 = parse4(path).root;
   const result = [{ name: root2, path: root2, hidden: false }];
   const segments = [];
   let current = path;
   while (current !== root2) {
-    segments.unshift(basename8(current));
-    current = dirname8(current);
+    segments.unshift(basename9(current));
+    current = dirname9(current);
   }
   for (const segment of segments) {
-    current = resolve8(current, segment);
+    current = resolve9(current, segment);
     result.push({ name: segment, path: current, hidden: false });
   }
   return result;
@@ -110156,12 +111934,12 @@ var HarnessRemoteBridge = class {
     } catch (error62) {
       if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
       yield { type: "ready", clientId: randomUUID20(), host: { home: homedir10() } };
-      await new Promise((resolve10) => {
+      await new Promise((resolve11) => {
         if (signal.aborted) {
-          resolve10();
+          resolve11();
           return;
         }
-        signal.addEventListener("abort", () => resolve10(), { once: true });
+        signal.addEventListener("abort", () => resolve11(), { once: true });
       });
       return;
     }
@@ -110299,8 +112077,8 @@ var HarnessRemoteBridge = class {
     const transferId = randomUUID20();
     const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     let finish;
-    const completed = new Promise((resolve10, reject) => {
-      finish = (error62) => error62 === void 0 ? resolve10() : reject(error62);
+    const completed = new Promise((resolve11, reject) => {
+      finish = (error62) => error62 === void 0 ? resolve11() : reject(error62);
     });
     void completed.catch(() => void 0);
     const transfer = { bytes, totalChunks, nextIndex: 0, touchedAt: Date.now(), finish };
@@ -110344,10 +112122,10 @@ var HarnessRemoteBridge = class {
     let path;
     try {
       path = this.attachmentHostPath(reference);
-      if (path !== void 0 && isAbsolute10(path)) {
-        const info = await lstat6(path);
+      if (path !== void 0 && isAbsolute11(path)) {
+        const info = await lstat7(path);
         if (!info.isSymbolicLink() && info.isFile() && info.size === reference.bytes) {
-          path = await realpath7(path);
+          path = await realpath8(path);
         } else {
           path = void 0;
         }
@@ -110355,7 +112133,7 @@ var HarnessRemoteBridge = class {
     } catch {
       throw deny();
     }
-    if (path === void 0 || !isAbsolute10(path)) throw deny();
+    if (path === void 0 || !isAbsolute11(path)) throw deny();
     if (endpoint === "workspaceFiles/readAll" && reference.bytes > MAX_READ_BYTES2) {
       throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
     }
@@ -110399,8 +112177,8 @@ var HarnessRemoteBridge = class {
     let safeRel;
     if (rawBaseFile !== void 0) {
       const path = typeof args.path === "string" ? args.path : "";
-      const relative6 = path.replaceAll("\\", "/");
-      if (relative6.length === 0 || relative6.startsWith("/") || /^[a-z][a-z\d+.-]*:/iu.test(relative6) || relative6.includes("\0")) {
+      const relative7 = path.replaceAll("\\", "/");
+      if (relative7.length === 0 || relative7.startsWith("/") || /^[a-z][a-z\d+.-]*:/iu.test(relative7) || relative7.includes("\0")) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
       const baseSegments = process.platform === "win32" ? rawBaseFile.replaceAll("\\", "/").split("/") : rawBaseFile.split("/");
@@ -110408,9 +112186,9 @@ var HarnessRemoteBridge = class {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
       const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint, sessionWorkspace.cwd);
-      const baseCandidate = resolve9(sessionWorkspace.root, safeBaseRel);
-      const baseDir = dirname9(baseCandidate);
-      const targetCandidate = resolve9(baseDir, path);
+      const baseCandidate = resolve10(sessionWorkspace.root, safeBaseRel);
+      const baseDir = dirname10(baseCandidate);
+      const targetCandidate = resolve10(baseDir, path);
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint, sessionWorkspace.cwd);
     } else {
       const path = typeof args.path === "string" ? args.path : ".";
@@ -110458,8 +112236,8 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
     try {
-      const root2 = await realpath7(cwd2);
-      const info = await stat10(root2);
+      const root2 = await realpath8(cwd2);
+      const info = await stat11(root2);
       if (!info.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "root-invalid");
       }
@@ -110476,33 +112254,33 @@ var HarnessRemoteBridge = class {
    * unchanged: the canonical target must stay inside the canonical root.
    */
   async verifyWorkspacePathContainment(root2, path, endpoint, cwd2 = root2) {
-    const supplied = isAbsolute10(path) ? resolve9(path) : resolve9(root2, path);
-    const cwdRelative = relative5(resolve9(cwd2), supplied);
-    const candidate = isAbsolute10(path) && !isPathOutside(cwdRelative) ? resolve9(root2, cwdRelative) : supplied;
+    const supplied = isAbsolute11(path) ? resolve10(path) : resolve10(root2, path);
+    const cwdRelative = relative6(resolve10(cwd2), supplied);
+    const candidate = isAbsolute11(path) && !isPathOutside2(cwdRelative) ? resolve10(root2, cwdRelative) : supplied;
     if (process.platform === "win32") {
-      const rootDrive = parse4(root2).root.toLowerCase();
-      const candDrive = parse4(candidate).root.toLowerCase();
+      const rootDrive = parse5(root2).root.toLowerCase();
+      const candDrive = parse5(candidate).root.toLowerCase();
       if (rootDrive !== candDrive) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
     }
-    if (isPathOutside(relative5(root2, candidate))) {
+    if (isPathOutside2(relative6(root2, candidate))) {
       throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
     }
     try {
-      const rootLstat = await lstat6(root2);
+      const rootLstat = await lstat7(root2);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.", "root-invalid");
       }
-      const rel = relative5(root2, candidate);
-      const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
+      const rel = relative6(root2, candidate);
+      const parts = rel.split(sep4).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join18(currentPath, parts[i]);
-        if (isPathOutside(relative5(root2, currentPath))) {
+        currentPath = join19(currentPath, parts[i]);
+        if (isPathOutside2(relative6(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
-        const dirLstat = await lstat6(currentPath);
+        const dirLstat = await lstat7(currentPath);
         if (dirLstat.isSymbolicLink()) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "symlink");
         }
@@ -110510,23 +112288,23 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "not-regular-file");
         }
       }
-      const targetLstat = await lstat6(candidate);
+      const targetLstat = await lstat7(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "symlink");
       }
-      const canonical = await realpath7(candidate);
+      const canonical = await realpath8(candidate);
       if (process.platform === "win32") {
-        const rootDrive = parse4(root2).root.toLowerCase();
-        const canonicalDrive = parse4(canonical).root.toLowerCase();
+        const rootDrive = parse5(root2).root.toLowerCase();
+        const canonicalDrive = parse5(canonical).root.toLowerCase();
         if (rootDrive !== canonicalDrive) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
       }
-      const canonicalRel = relative5(root2, canonical);
-      if (isPathOutside(canonicalRel)) {
+      const canonicalRel = relative6(root2, canonical);
+      if (isPathOutside2(canonicalRel)) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
-      const info = await stat10(canonical);
+      const info = await stat11(canonical);
       if (endpoint !== "workspaceFiles/stat" && !info.isFile()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "not-regular-file");
       }
@@ -110534,10 +112312,10 @@ var HarnessRemoteBridge = class {
         throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
       }
       const safeRel = canonicalRel === "" ? "." : process.platform === "win32" ? canonicalRel.replaceAll("\\", "/") : canonicalRel;
-      const dispatchedCandidate = resolve9(root2, safeRel);
-      const dispatchedCanonical = await realpath7(dispatchedCandidate);
-      const dispatchedRel = relative5(root2, dispatchedCanonical);
-      if (isPathOutside(dispatchedRel)) {
+      const dispatchedCandidate = resolve10(root2, safeRel);
+      const dispatchedCanonical = await realpath8(dispatchedCandidate);
+      const dispatchedRel = relative6(root2, dispatchedCanonical);
+      if (isPathOutside2(dispatchedRel)) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
       return safeRel;
@@ -110552,8 +112330,8 @@ function journalSessionId(payload) {
   const address2 = requestArgs(payload).address;
   return isRecord25(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
 }
-function isPathOutside(rel) {
-  if (rel === ".." || isAbsolute10(rel)) return true;
+function isPathOutside2(rel) {
+  if (rel === ".." || isAbsolute11(rel)) return true;
   if (process.platform === "win32") {
     return rel.startsWith("..\\") || rel.startsWith("../");
   }
@@ -111033,8 +112811,8 @@ var RemoteCompactionOperations = class {
   createOperation(params, owner, budgetMs) {
     let resolveCommandSettled = () => {
     };
-    const commandSettled = new Promise((resolve10) => {
-      resolveCommandSettled = resolve10;
+    const commandSettled = new Promise((resolve11) => {
+      resolveCommandSettled = resolve11;
     });
     return {
       operationId: randomUUID21(),
@@ -111368,14 +113146,14 @@ function sanitizeMessage(message) {
   return message.length <= 2e3 ? message : `${message.slice(0, 2e3)}\u2026`;
 }
 function waitWithTimeout(promise2, ms) {
-  return new Promise((resolve10) => {
+  return new Promise((resolve11) => {
     const timer2 = setTimeout(() => {
-      resolve10();
+      resolve11();
     }, ms);
     timer2.unref?.();
     void promise2.finally(() => {
       clearTimeout(timer2);
-      resolve10();
+      resolve11();
     });
   });
 }
@@ -111568,6 +113346,13 @@ var HostPluginRuntime = class {
         (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
       ), void 0, context.transportMode, Date.now, this.uploadBudget);
+      const workspaceGit = new WorkspaceGitHost(resolveSessionWorkspaceRoot(
+        peerGateway,
+        () => harnessSessionGeneration(this.harnessVersion) === "v3",
+        (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+        (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
+        () => workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.", "authority-unavailable")
+      ));
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId,
         peerIdentityKey: context.peerIdentityKey,
@@ -111599,7 +113384,8 @@ var HostPluginRuntime = class {
           connectionId: context.connectionId
         }, resolveDshWeb) : void 0,
         resolveDshWeb && context.transportMode && context.lanWebAddress ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : void 0,
-        context.sameLinkIpv6Endpoints
+        context.sameLinkIpv6Endpoints,
+        workspaceGit
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -112126,10 +113912,10 @@ async function waitForStartupGrace(promise2, graceMs) {
   try {
     return await Promise.race([
       guarded,
-      new Promise((resolve10) => {
+      new Promise((resolve11) => {
         timer2 = setTimeout(() => {
           settledByTimer = true;
-          resolve10(true);
+          resolve11(true);
         }, graceMs);
         timer2.unref?.();
       })
@@ -112194,11 +113980,11 @@ function createPluginRouteDispatcher(readConnection, readPort, peer) {
   };
 }
 function withSignal(pending, signal) {
-  return new Promise((resolve10, reject) => {
+  return new Promise((resolve11, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) onAbort();
-    void pending.then(resolve10, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    void pending.then(resolve11, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
 }
 
@@ -112218,7 +114004,7 @@ var workspaceSchema = object5(
   { backend: string8, workspaceId: string8, path: string8, title: string8 },
   ["backend", "workspaceId", "path", "title"]
 );
-function remoteDiscoveryTools(resolve10) {
+function remoteDiscoveryTools(resolve11) {
   const output2 = (schema) => ({
     schema,
     render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }]
@@ -112226,12 +114012,12 @@ function remoteDiscoveryTools(resolve10) {
   const run2 = async (signal, query) => {
     const lifetime2 = AbortSignal.any([signal, AbortSignal.timeout(12e4)]);
     lifetime2.throwIfAborted();
-    const client = resolve10();
+    const client = resolve11();
     if (client === void 0) throw new Error("REMOTE_UNAVAILABLE: Configure Remote and sign in through the local Remote panel first.");
     try {
       const result = await query(client, lifetime2);
       lifetime2.throwIfAborted();
-      if (resolve10() !== client) throw new Error("Remote runtime changed.");
+      if (resolve11() !== client) throw new Error("Remote runtime changed.");
       return result;
     } catch {
       lifetime2.throwIfAborted();
@@ -112271,7 +114057,7 @@ function remoteDiscoveryTools(resolve10) {
     }
   ];
 }
-function remoteSessionTools(resolve10) {
+function remoteSessionTools(resolve11) {
   const target3 = {
     hostId: { ...string8, description: "Exact hostId from remote_list_hosts." },
     backend: { type: "string", enum: ["harness"], description: "Session operations currently support native Harness only." },
@@ -112352,11 +114138,11 @@ function remoteSessionTools(resolve10) {
       sessionToolInputs[name2].parse(args);
       const signal = AbortSignal.any([exec2.signal, AbortSignal.timeout(name2 === "remote_upload_file" ? 60 * 6e4 : 12e4)]);
       signal.throwIfAborted();
-      const client = resolve10();
+      const client = resolve11();
       if (!client) throw new Error("REMOTE_UNAVAILABLE: Sign in through the local Remote panel.");
       try {
         const result = await client.runSessionTool(name2, args, signal);
-        if (resolve10() !== client) throw new RemoteSessionToolError("REMOTE_AUTHORITY_CHANGED: Inspect remote state; do not replay mutations.");
+        if (resolve11() !== client) throw new RemoteSessionToolError("REMOTE_AUTHORITY_CHANGED: Inspect remote state; do not replay mutations.");
         return result;
       } catch (error62) {
         if (error62 instanceof RemoteSessionToolError) throw error62;
@@ -112365,10 +114151,10 @@ function remoteSessionTools(resolve10) {
     }
   }));
 }
-function installRemoteDiscoveryTools(ctx, resolve10) {
+function installRemoteDiscoveryTools(ctx, resolve11) {
   ctx.inject(["tools"], (toolContext) => {
     const tools = toolContext.get("tools");
-    for (const definition of [...remoteDiscoveryTools(resolve10), ...remoteSessionTools(resolve10)]) {
+    for (const definition of [...remoteDiscoveryTools(resolve11), ...remoteSessionTools(resolve11)]) {
       toolContext.effect(() => tools.register(definition));
     }
   });
@@ -112379,15 +114165,15 @@ var PUMP_KEY = Symbol.for("ds-harness-remote.hmr-safe-settings-pump");
 function createPump() {
   const queue = [];
   let wake;
-  let sleeping = new Promise((resolve10) => {
-    wake = resolve10;
+  let sleeping = new Promise((resolve11) => {
+    wake = resolve11;
   });
   void (async () => {
     for (; ; ) {
       if (queue.length === 0) {
         await sleeping;
-        sleeping = new Promise((resolve10) => {
-          wake = resolve10;
+        sleeping = new Promise((resolve11) => {
+          wake = resolve11;
         });
       }
       const job = queue.shift();
@@ -112401,8 +114187,8 @@ function createPump() {
   })();
   return {
     enqueue(run2) {
-      return new Promise((resolve10, reject) => {
-        queue.push({ run: run2, resolve: resolve10, reject });
+      return new Promise((resolve11, reject) => {
+        queue.push({ run: run2, resolve: resolve11, reject });
         wake();
       });
     }
@@ -112478,18 +114264,18 @@ var PluginUpdateChecker = class {
    * before the mirror is consulted.
    */
   fetchLatestVersion() {
-    return new Promise((resolve10) => {
+    return new Promise((resolve11) => {
       let pending = DIST_TAG_URLS.length;
       let settled = false;
       const settle2 = (latest) => {
         if (settled) return;
         if (latest !== void 0) {
           settled = true;
-          resolve10(latest);
+          resolve11(latest);
           return;
         }
         pending -= 1;
-        if (pending === 0) resolve10(void 0);
+        if (pending === 0) resolve11(void 0);
       };
       if (pending === 0) {
         settle2(void 0);
@@ -112634,10 +114420,10 @@ var LocalPluginUpgrade = class {
     const requestId2 = this.requestId();
     let dispose = () => {
     };
-    const started = new Promise((resolve10) => {
+    const started = new Promise((resolve11) => {
       dispose = this.subscribe((event2) => {
         if (event2.requestId !== requestId2) return;
-        if (event2.step === "removing" || event2.step === "installing") resolve10({ status: "started" });
+        if (event2.step === "removing" || event2.step === "installing") resolve11({ status: "started" });
       });
     });
     try {
@@ -112790,9 +114576,9 @@ function decodeBase64(value) {
 }
 
 // packages/plugin/src/cli.ts
-import { stat as stat11 } from "node:fs/promises";
+import { stat as stat12 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join19 } from "node:path";
+import { join as join20 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -112884,7 +114670,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join19(directory, "device.json"))) {
+  if (!await exists3(join20(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -112944,9 +114730,9 @@ async function logout(args, runtime) {
   }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const [hasDevice, hasKey, hasCredentials] = await Promise.all([
-    exists3(join19(directory, "device.json")),
-    exists3(join19(directory, "device.key")),
-    exists3(join19(directory, "server-credentials.json"))
+    exists3(join20(directory, "device.json")),
+    exists3(join20(directory, "device.key")),
+    exists3(join20(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();
@@ -113012,7 +114798,7 @@ function resolveDependencies(input4) {
     stdout: input4.stdout ?? process.stdout,
     stderr: input4.stderr ?? process.stderr,
     now: input4.now ?? Date.now,
-    wait: input4.wait ?? ((milliseconds) => new Promise((resolve10) => setTimeout(resolve10, milliseconds))),
+    wait: input4.wait ?? ((milliseconds) => new Promise((resolve11) => setTimeout(resolve11, milliseconds))),
     renderQr: input4.renderQr ?? renderTerminalQr,
     createIdentityStore: input4.createIdentityStore ?? ((options) => new IdentityStore(options)),
     createHostApi: input4.createHostApi ?? ((serverUrl, store) => new HostServerApi(serverUrl, store))
@@ -113075,7 +114861,7 @@ function terminalLink(url2, target3) {
 }
 async function exists3(path) {
   try {
-    await stat11(path);
+    await stat12(path);
     return true;
   } catch (error62) {
     if (error62 instanceof Error && "code" in error62 && error62.code === "ENOENT") return false;
@@ -113660,8 +115446,8 @@ function extractProfileFromDirectoryPath(candidate) {
   if (typeof candidate !== "string") return void 0;
   const trimmed = candidate.trim().replace(/[\\/]+$/, "");
   if (trimmed.length === 0) return void 0;
-  if (basename9(dirname10(trimmed)) === "profiles") {
-    const segment = basename9(trimmed);
+  if (basename10(dirname11(trimmed)) === "profiles") {
+    const segment = basename10(trimmed);
     if (segment.length > 0) return segment;
   }
   return void 0;
