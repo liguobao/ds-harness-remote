@@ -2257,7 +2257,9 @@ struct Index {
             this.passwordInput = '';
             this.passwordLoginOpen = false;
             this.loginServerEditor = false;
-            this.runtime.loadProviders(server);
+            this.runtime.selectServer(server).then((selected: string | undefined) => {
+              if (selected !== undefined) this.serverInput = selected;
+            });
           },
           onClose: () => { this.loginServerEditor = false; }
         })

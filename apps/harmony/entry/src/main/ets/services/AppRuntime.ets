@@ -45,15 +45,9 @@ export const PHASE_CHAT: string = 'chat';
 
 /** Official public Server, used to prefill the setup screen and as the QR-login fallback
  *  so a fresh install never dials a dead placeholder address. */
-/**
- * 本地专用版的默认服务器：局域网自建 server。
- *
- * 这个 fork 就是给「日常只连自家 LAN」用的，省得每次在登录页切服务器。
- * 官方服务器仍可在登录页手动改地址登录（不会删掉这个默认值）。
- */
-export const DEFAULT_SERVER_URL: string = 'http://192.168.11.128:8080';
-/** 本地专用版预填的账号。 */
-export const DEFAULT_ACCOUNT: string = 'admin@dsh.local';
+/** 默认服务器必须与 Android 客户端一致。自建 Server 仍可在登录页手动填写。 */
+export const DEFAULT_SERVER_URL: string = 'https://dsh.r2049.cn';
+export const DEFAULT_ACCOUNT: string = '';
 
 const MAX_TOOL_DETAIL_CHARS: number = 8000;
 
@@ -673,6 +667,47 @@ export class AppRuntime {
       if (error instanceof RemoteApiError && error.code === 'TWO_FACTOR_EXPIRED') return '';
     }
     return undefined;
+  }
+
+  /** Android 同步的服务器切换语义：验证新地址后清理旧登录态与主机信任。 */
+  async selectServer(input: string): Promise<string | undefined> {
+    if (this.busy) return undefined;
+    this.setBusy(true);
+    this.errorMsg = '';
+    try {
+      const normalized: string = normalizeServerUrl(input);
+      await new RemoteServerApi(normalized).health();
+      if (normalized === this.serverUrl) {
+        this.setBusy(false);
+        this.notify();
+        return normalized;
+      }
+      this.teardownConnection();
+      this.clearReconnectTimer();
+      await this.store.clearCredentials();
+      await this.store.clearHostPins();
+      this.store.saveLastHost('');
+      this.store.clearHostInfo();
+      const config: StoredServerConfig = new StoredServerConfig();
+      config.baseUrl = normalized;
+      await this.store.saveConfig(config);
+      this.config = config;
+      this.credentials = undefined;
+      this.serverUrl = normalized;
+      this.email = '';
+      this.devices = [];
+      this.providers = [];
+      this.phase = PHASE_SETUP;
+      this.setBusy(false);
+      this.notify();
+      await this.loadProviders(normalized);
+      return normalized;
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.setBusy(false);
+      this.notify();
+      return undefined;
+    }
   }
 
   async readAccountMembership(): Promise<AccountMembership> {

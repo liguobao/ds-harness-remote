@@ -527,6 +527,12 @@ export class SecureStore {
     await this.saveHostPins(next);
   }
 
+  /** Remove all pinned Host identities when changing Server/account. */
+  async clearHostPins(): Promise<void> {
+    this.hostPins = {};
+    await this.saveHostPins({});
+  }
+
   private async reloadHostPins(): Promise<void> {
     let raw: string | undefined = await this.readSecret(ASSET_ALIAS_HOST_PINS);
     if (raw === undefined || raw.length === 0) {
