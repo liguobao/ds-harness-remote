@@ -7,6 +7,7 @@ export struct WorkspaceToolbar {
   @Prop palette: Palette = lightPalette();
   @Prop connected: boolean = false;
   @Prop botMode: boolean = false;
+  @Prop platformLabel: string = 'DeepSeek';
   @Prop searchOpen: boolean = false;
   onAgents: () => void = () => {};
   onBots: () => void = () => {};
@@ -58,8 +59,8 @@ export struct WorkspaceToolbar {
       if (!this.botMode) {
         Row({ space: 8 }) {
           Text(t('工作区列表')).fontSize(14.5).fontColor(this.palette.text2)
-          Row({ space: 3 }) {
-            Text('DeepSeek').fontSize(12).fontWeight(FontWeight.Bold).fontColor(this.palette.text)
+            Row({ space: 3 }) {
+            Text(this.platformLabel).fontSize(12).fontWeight(FontWeight.Bold).fontColor(this.palette.text)
           }
           .height(28).padding({ left: 10, right: 10 })
           .borderRadius(14).backgroundColor(this.palette.chip)

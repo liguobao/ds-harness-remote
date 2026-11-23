@@ -4738,16 +4738,20 @@ struct Index {
   @Builder
   SessionsPanelBody(connected: boolean = true) {
     Column() {
-      Row({ space: 8 }) {
-        Image($r('app.media.ic_fish'))
-          .width(22)
-          .height(16)
-          .fillColor(this.pal().text)
-        Text('DS Harness Remote')
-          .fontSize(this.fs(20))
-          .lineHeight(this.fs(25))
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.pal().text)
+      Row() {
+        Row({ space: 8 }) {
+          Image($r('app.media.ic_fish'))
+            .width(22)
+            .height(16)
+            .fillColor(this.pal().text)
+          Text('DS Harness Remote')
+            .fontSize(this.fs(20))
+            .lineHeight(this.fs(25))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+        }
+        .accessibilityText('DS Harness Remote · ' + this.tr('关于'))
+        .onClick(() => { this.aboutOpen = true; })
         Blank()
         Button({ type: ButtonType.Circle }) {
           Image($r('app.media.ic_more'))
@@ -4765,6 +4769,7 @@ struct Index {
         palette: this.pal(),
         connected: connected,
         botMode: this.botTabOpen,
+        platformLabel: this.currentAgentPlatformLabel(),
         searchOpen: this.workspaceSearchOpen,
         onAgents: () => { this.botTabOpen = false; },
         onBots: () => {
@@ -5098,6 +5103,32 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+  }
+
+  private currentAgentPlatformLabel(): string {
+    const sessionId: string = this.currentSessionId;
+    if (sessionId.startsWith('codex:')) {
+      return 'Codex';
+    }
+    if (sessionId.startsWith('claude:')) {
+      return 'Claude';
+    }
+    if (sessionId.startsWith('cursor:')) {
+      return 'Cursor';
+    }
+    if (sessionId.startsWith('opencode:')) {
+      return 'OpenCode';
+    }
+    if (sessionId.startsWith('antigravity:')) {
+      return 'Antigravity';
+    }
+    if (sessionId.startsWith('hermes:')) {
+      return 'Hermes';
+    }
+    if (sessionId.startsWith('pi:')) {
+      return 'Pi';
+    }
+    return 'DeepSeek';
   }
 
   private openCatalogSession(session: HarnessRemoteSession): void {
