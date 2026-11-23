@@ -65720,7 +65720,7 @@ function cryptoRandomId() {
 
 // packages/client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
-var SPEECH_PREPARE_TIMEOUT_MS = 10 * 6e4;
+var SPEECH_TRANSCRIBE_TIMEOUT_MS = 3 * 6e4;
 function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id7, capability) {
   if (!capabilities.includes(capability))
     return false;
@@ -72901,12 +72901,16 @@ var ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES = [
   "pluginRegistryProbe/",
   "credentials/",
   "llm/",
-  "speech/",
   "account/"
 ];
 var ALLOWED_HOST_CARRIER_DISPATCH_EXACT = /* @__PURE__ */ new Set([
   "pluginInventory/list",
-  "permissionPresets/catalog"
+  "permissionPresets/catalog",
+  "speech/catalog",
+  "speech/transcribe",
+  "speech/prepare",
+  "speech/configure",
+  "speech/cancelPreparation"
 ]);
 function isAllowedHostCarrierDispatch(endpoint) {
   return ALLOWED_HOST_CARRIER_DISPATCH_EXACT.has(endpoint) || ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES.some((prefix) => endpoint.startsWith(prefix));
@@ -85233,7 +85237,7 @@ function isEventSeq(value) {
 
 // packages/plugin/src/remote-typert-gateway.ts
 var DIRECT_REMOTE_CALL_BYTES2 = 2 * 1024 * 1024;
-var SPEECH_PREPARE_TIMEOUT_MS2 = 10 * 6e4;
+var SPEECH_TRANSCRIBE_TIMEOUT_MS2 = 3 * 6e4;
 var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
 var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
 var WELCOME_NOTICE_VERSION = "2026-08-13.1";
@@ -85300,7 +85304,7 @@ var RemoteTypertGateway2 = class {
     return result;
   }
   async dispatchRemote(endpoint, payload, signal) {
-    const rpcOptions = endpoint === "speech/prepare" ? { timeoutMs: SPEECH_PREPARE_TIMEOUT_MS2 } : void 0;
+    const rpcOptions = endpoint === "speech/transcribe" ? { timeoutMs: SPEECH_TRANSCRIBE_TIMEOUT_MS2 } : void 0;
     const request2 = { endpoint, payload };
     const encoded = new TextEncoder().encode(JSON.stringify(request2));
     let response;
@@ -109434,7 +109438,7 @@ var MAX_ACTIVE_STREAMS3 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS3 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var DEFAULT_CALL_TIMEOUT_MS = 6e4;
-var SPEECH_PREPARE_TIMEOUT_MS3 = 10 * 6e4;
+var SPEECH_TRANSCRIBE_TIMEOUT_MS3 = 3 * 6e4;
 var HARNESS_REMOTE_ALLOWLIST = [
   "$events",
   "$events/result",
@@ -109605,6 +109609,7 @@ var HarnessRemoteBridge = class {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   compactHistoryEnabled = false;
+  lifetime = new AbortController();
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
@@ -109652,13 +109657,13 @@ var HarnessRemoteBridge = class {
       await ensureHostWorkspaceDirectory(folder);
     }
     const startedAt = performance.now();
-    const timeoutMs = params.endpoint === "speech/prepare" ? SPEECH_PREPARE_TIMEOUT_MS3 : DEFAULT_CALL_TIMEOUT_MS;
+    const timeoutMs = params.endpoint === "speech/transcribe" ? SPEECH_TRANSCRIBE_TIMEOUT_MS3 : DEFAULT_CALL_TIMEOUT_MS;
     const controller = new AbortController();
     const timer2 = setTimeout(() => {
       controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
     }, timeoutMs);
     timer2.unref?.();
-    const { signal } = controller;
+    const signal = AbortSignal.any([this.lifetime.signal, controller.signal]);
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
       nativePayload = await normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion, this.gateway, signal);
@@ -109948,6 +109953,7 @@ var HarnessRemoteBridge = class {
     return { closed: active2 !== void 0, streamId: params.streamId };
   }
   async closeAll(reason = "peer-disconnected") {
+    if (!this.lifetime.signal.aborted) this.lifetime.abort(reason);
     const streams = [...this.streams.entries()];
     this.streams.clear();
     this.incomingTransfers.clear();

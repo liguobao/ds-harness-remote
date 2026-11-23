@@ -27,7 +27,7 @@ import type {
 } from './typert-gateway-contract.js'
 
 const DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024
-const SPEECH_PREPARE_TIMEOUT_MS = 10 * 60_000
+const SPEECH_TRANSCRIBE_TIMEOUT_MS = 3 * 60_000
 const WELCOME_NOTICE_NAMESPACE = 'ui-settings-general'
 const WELCOME_NOTICE_FIELD = 'welcomeNoticeVersion'
 const WELCOME_NOTICE_VERSION = '2026-08-13.1'
@@ -113,8 +113,8 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
     // The Remote Gateway contract requires a single plain-object `args` field.
     // Keep the payload unchanged here: converting it to positional arrays makes
     // current Hosts reject even empty calls such as `llm/listProviders`.
-    const rpcOptions: RemoteRpcOptions | undefined = endpoint === 'speech/prepare'
-      ? { timeoutMs: SPEECH_PREPARE_TIMEOUT_MS }
+    const rpcOptions: RemoteRpcOptions | undefined = endpoint === 'speech/transcribe'
+      ? { timeoutMs: SPEECH_TRANSCRIBE_TIMEOUT_MS }
       : undefined
     const request = { endpoint, payload }
     const encoded = new TextEncoder().encode(JSON.stringify(request))

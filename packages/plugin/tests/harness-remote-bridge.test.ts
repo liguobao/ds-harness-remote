@@ -316,7 +316,11 @@ describe('HarnessRemoteBridge', () => {
           const dispatch = vi.fn(async () => outcome)
           const open = vi.fn()
           const bridge = new HarnessRemoteBridge(gateway({ dispatch, open }), vi.fn())
-          const payload = { args: endpoint === 'speech/transcribe' ? { audioBase64: 'UklGRg==' } : {} }
+          const payload = endpoint === 'speech/transcribe'
+            ? { args: { request: { audioBase64: 'UklGRg==' } } }
+            : endpoint === 'speech/prepare'
+              ? { args: { providerId: 'sensevoice' } }
+              : { args: {} }
           await expect(bridge.call({ endpoint, payload })).resolves.toEqual(outcome)
           expect(dispatch).toHaveBeenCalledTimes(1)
           expect(dispatch).toHaveBeenCalledWith(endpoint, payload, expect.any(AbortSignal))
@@ -371,9 +375,10 @@ describe('HarnessRemoteBridge', () => {
           const dispatch = vi.fn(async () => ({ ok: true as const, value: { text: 'hello' } }))
           const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
           const transferId = '00000000-0000-4000-8000-000000000001'
+          const payload = { args: { request: { audioBase64: 'UklGRg==' } } }
           const bytes = new TextEncoder().encode(JSON.stringify({
             endpoint: 'speech/transcribe',
-            payload: { args: { audioBase64: 'UklGRg==' } },
+            payload,
           }))
           expect(bridge.openTransfer({ transferId, totalBytes: bytes.byteLength, totalChunks: 1 }))
             .toEqual({ opened: true, transferId })
@@ -384,7 +389,7 @@ describe('HarnessRemoteBridge', () => {
             response: { ok: true, value: { text: 'hello' } },
           })
           expect(dispatch).toHaveBeenCalledTimes(1)
-          expect(dispatch).toHaveBeenCalledWith('speech/transcribe', { args: { audioBase64: 'UklGRg==' } }, expect.any(AbortSignal))
+          expect(dispatch).toHaveBeenCalledWith('speech/transcribe', payload, expect.any(AbortSignal))
 
           const followTransferId = '00000000-0000-4000-8000-000000000002'
           const followBytes = new TextEncoder().encode(JSON.stringify({
@@ -400,40 +405,84 @@ describe('HarnessRemoteBridge', () => {
     ])
   })
 
-  it('applies a 10-minute call timeout to speech/prepare while keeping 60s for other speech endpoints', async () => {
+  it('applies a 3-minute call timeout to speech/transcribe, keeps 60s for other speech endpoints, and aborts in-flight calls on closeAll', async () => {
     await runScenarios([
-      { name: 'speech/prepare aborts at 600_000ms', endpoint: 'speech/prepare', timeoutMs: 600_000 },
-      { name: 'speech/catalog aborts at 60_000ms', endpoint: 'speech/catalog', timeoutMs: 60_000 },
-      { name: 'speech/prepare clears timer on early completion', endpoint: 'speech/prepare', immediate: true },
+      {
+        name: 'speech/transcribe aborts at 180_000ms',
+        endpoint: 'speech/transcribe',
+        payload: { args: { request: { audioBase64: 'UklGRg==' } } },
+        timeoutMs: 180_000,
+      },
+      {
+        name: 'speech/prepare aborts at 60_000ms',
+        endpoint: 'speech/prepare',
+        payload: { args: { providerId: 'sensevoice' } },
+        timeoutMs: 60_000,
+      },
+      {
+        name: 'speech/catalog aborts at 60_000ms',
+        endpoint: 'speech/catalog',
+        payload: { args: {} },
+        timeoutMs: 60_000,
+      },
+      {
+        name: 'speech/transcribe clears timer on early completion',
+        endpoint: 'speech/transcribe',
+        payload: { args: { request: { audioBase64: 'UklGRg==' } } },
+        immediate: true,
+      },
+      {
+        name: 'closeAll aborts in-flight speech/transcribe unary call and clears its timer',
+        endpoint: 'speech/transcribe',
+        payload: { args: { request: { audioBase64: 'UklGRg==' } } },
+        closeAll: true,
+      },
     ].map(scenario => ({
       name: scenario.name,
       run: async () => {
         vi.useFakeTimers()
         try {
           if (scenario.immediate) {
-            const dispatch = vi.fn(async () => ({ ok: true as const, value: { ready: true } }))
+            const dispatch = vi.fn(async () => ({ ok: true as const, value: { text: 'hello' } }))
             const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
-            await expect(bridge.call({ endpoint: scenario.endpoint, payload: { args: {} } }))
-              .resolves.toEqual({ ok: true, value: { ready: true } })
+            await expect(bridge.call({ endpoint: scenario.endpoint, payload: scenario.payload }))
+              .resolves.toEqual({ ok: true, value: { text: 'hello' } })
             expect(vi.getTimerCount()).toBe(0)
             return
           }
           let capturedSignal: AbortSignal | undefined
-          let resolveDispatch!: (value: { ok: true; value: { ready: boolean } }) => void
+          let resolveDispatch!: (value: { ok: true; value: { text: string } }) => void
+          let rejectDispatch!: (reason?: unknown) => void
           let markDispatched!: () => void
           const dispatched = new Promise<void>(resolve => { markDispatched = resolve })
           const dispatch = vi.fn((_endpoint: string, _payload: unknown, signal: AbortSignal) => {
             capturedSignal = signal
             markDispatched()
-            return new Promise<{ ok: true; value: { ready: boolean } }>(resolve => { resolveDispatch = resolve })
+            return new Promise<{ ok: true; value: { text: string } }>((resolve, reject) => {
+              resolveDispatch = resolve
+              rejectDispatch = reject
+            })
           })
           const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
-          const callPromise = bridge.call({ endpoint: scenario.endpoint, payload: { args: {} } })
+          const callPromise = bridge.call({ endpoint: scenario.endpoint, payload: scenario.payload })
           await dispatched
-          if (scenario.timeoutMs === 600_000) {
+          if (scenario.closeAll) {
+            expect(capturedSignal?.aborted).toBe(false)
+            capturedSignal?.addEventListener('abort', () => {
+              rejectDispatch(new DOMException('Aborted', 'AbortError'))
+            }, { once: true })
+            const settled = expect(callPromise).rejects.toMatchObject({ name: 'AbortError' })
+            await bridge.closeAll('peer-disconnected')
+            expect(capturedSignal?.aborted).toBe(true)
+            expect(capturedSignal?.reason).toBe('peer-disconnected')
+            await settled
+            expect(vi.getTimerCount()).toBe(0)
+            return
+          }
+          if (scenario.timeoutMs === 180_000) {
             await vi.advanceTimersByTimeAsync(60_000)
             expect(capturedSignal?.aborted).toBe(false)
-            await vi.advanceTimersByTimeAsync(539_999)
+            await vi.advanceTimersByTimeAsync(119_999)
             expect(capturedSignal?.aborted).toBe(false)
             await vi.advanceTimersByTimeAsync(1)
           } else {
@@ -443,7 +492,7 @@ describe('HarnessRemoteBridge', () => {
           }
           expect(capturedSignal?.aborted).toBe(true)
           expect((capturedSignal?.reason as Error | undefined)?.name).toBe('TimeoutError')
-          resolveDispatch({ ok: true, value: { ready: true } })
+          resolveDispatch({ ok: true, value: { text: 'hello' } })
           await callPromise
           expect(vi.getTimerCount()).toBe(0)
         } finally {

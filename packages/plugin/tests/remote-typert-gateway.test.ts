@@ -714,64 +714,73 @@ describe('RemoteTypertGateway', () => {
     })
   })
 
-  it('applies extended timeout to speech/prepare and transfers oversized speech/transcribe payloads', async () => {
+  it('applies extended timeout to speech/transcribe and keeps defaults for speech/prepare and speech/catalog', async () => {
     await runScenarios([
       {
-        name: 'direct speech/prepare passes 10-minute timeout',
+        name: 'direct speech/transcribe passes 3-minute timeout',
         run: async () => {
-          const rpc = vi.fn(async () => ({ ok: true, value: { ready: true } }))
+          const rpc = vi.fn(async () => ({ ok: true, value: { text: 'hello' } }))
           const signal = new AbortController().signal
+          const payload = { args: { request: { audioBase64: 'UklGRg==' } } }
           await expect(
-            new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).dispatch('speech/prepare', { args: {} }, signal),
-          ).resolves.toEqual({ ok: true, value: { ready: true } })
+            new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).dispatch('speech/transcribe', payload, signal),
+          ).resolves.toEqual({ ok: true, value: { text: 'hello' } })
           expect(rpc).toHaveBeenCalledWith(
             'harness.remote.call',
-            { endpoint: 'speech/prepare', payload: { args: {} } },
+            { endpoint: 'speech/transcribe', payload },
             signal,
-            { timeoutMs: 600_000 },
+            { timeoutMs: 180_000 },
           )
         },
       },
       {
-        name: 'transferred speech/prepare fallback passes 10-minute timeout to commit',
+        name: 'transferred speech/transcribe fallback passes 3-minute timeout to commit',
         run: async () => {
           const rpc = vi.fn(async (method: string) => {
             if (method === 'harness.remote.call') {
               throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
             }
             if (method === 'harness.remote.transfer.commit') {
-              return { kind: 'inline', response: { ok: true, value: { ready: true } } }
+              return { kind: 'inline', response: { ok: true, value: { text: 'hello' } } }
             }
             if (method === 'harness.remote.transfer.close') return { closed: true }
             return { accepted: true }
           })
           const signal = new AbortController().signal
+          const payload = { args: { request: { audioBase64: 'UklGRg==' } } }
           await expect(
-            new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).dispatch('speech/prepare', { args: {} }, signal),
-          ).resolves.toEqual({ ok: true, value: { ready: true } })
+            new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).dispatch('speech/transcribe', payload, signal),
+          ).resolves.toEqual({ ok: true, value: { text: 'hello' } })
           expect(rpc).toHaveBeenCalledWith(
             'harness.remote.call',
-            { endpoint: 'speech/prepare', payload: { args: {} } },
+            { endpoint: 'speech/transcribe', payload },
             signal,
-            { timeoutMs: 600_000 },
+            { timeoutMs: 180_000 },
           )
           expect(rpc).toHaveBeenCalledWith(
             'harness.remote.transfer.commit',
             { transferId: expect.any(String) },
             signal,
-            { timeoutMs: 600_000 },
+            { timeoutMs: 180_000 },
           )
         },
       },
       {
-        name: 'speech/catalog keeps default 3-argument rpc call',
+        name: 'speech/prepare and speech/catalog keep default 3-argument rpc call',
         run: async () => {
-          const rpc = vi.fn(async () => ({ ok: true, value: { providers: [] } }))
+          const rpc = vi.fn(async () => ({ ok: true }))
           const signal = new AbortController().signal
-          await expect(
-            new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).dispatch('speech/catalog', { args: {} }, signal),
-          ).resolves.toEqual({ ok: true, value: { providers: [] } })
+          const gateway = new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore)
+          await expect(gateway.dispatch('speech/prepare', { args: { providerId: 'sensevoice' } }, signal))
+            .resolves.toEqual({ ok: true })
           expect(rpc.mock.calls[0]).toEqual([
+            'harness.remote.call',
+            { endpoint: 'speech/prepare', payload: { args: { providerId: 'sensevoice' } } },
+            signal,
+          ])
+          await expect(gateway.dispatch('speech/catalog', { args: {} }, signal))
+            .resolves.toEqual({ ok: true })
+          expect(rpc.mock.calls[1]).toEqual([
             'harness.remote.call',
             { endpoint: 'speech/catalog', payload: { args: {} } },
             signal,
@@ -779,7 +788,7 @@ describe('RemoteTypertGateway', () => {
         },
       },
       {
-        name: 'oversized speech/transcribe switches to harness.remote.transfer.*',
+        name: 'oversized speech/transcribe switches to harness.remote.transfer.* and passes 3-minute timeout to commit',
         run: async () => {
           const methods: string[] = []
           const rpc = vi.fn(async (method: string) => {
@@ -795,7 +804,7 @@ describe('RemoteTypertGateway', () => {
           await expect(
             new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).dispatch(
               'speech/transcribe',
-              { args: { audioBase64 } },
+              { args: { request: { audioBase64 } } },
               signal,
             ),
           ).resolves.toEqual({ ok: true, value: { text: 'long audio' } })
@@ -803,7 +812,12 @@ describe('RemoteTypertGateway', () => {
           expect(methods[0]).toBe('harness.remote.transfer.open')
           expect(methods.filter(method => method === 'harness.remote.transfer.chunk').length).toBeGreaterThan(1)
           const commitCall = rpc.mock.calls.find(call => call[0] === 'harness.remote.transfer.commit')
-          expect(commitCall).toEqual(['harness.remote.transfer.commit', { transferId: expect.any(String) }, signal])
+          expect(commitCall).toEqual([
+            'harness.remote.transfer.commit',
+            { transferId: expect.any(String) },
+            signal,
+            { timeoutMs: 180_000 },
+          ])
           expect(methods.at(-1)).toBe('harness.remote.transfer.close')
         },
       },

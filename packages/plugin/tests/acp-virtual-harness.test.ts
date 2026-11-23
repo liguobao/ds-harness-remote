@@ -1391,7 +1391,7 @@ describe('AcpVirtualHarness', () => {
         .resolves.toEqual({ ok: true, value: { outcome: 'already-finished' } })
       expect(hostCarrier.dispatch).not.toHaveBeenCalled()
 
-      for (const blocked of ['schedule/list', 'workspaceFiles/readRelated', 'workspace/unarchiveSession']) {
+      for (const blocked of ['schedule/list', 'workspaceFiles/readRelated', 'workspace/unarchiveSession', 'speech/follow', 'speech/arbitrary']) {
         await expect(target.dispatch(blocked, { args: {} }, signal))
           .resolves.toMatchObject({ ok: false, error: { code: 'method-not-found' } })
       }
