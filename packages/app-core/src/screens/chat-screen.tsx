@@ -1,10 +1,11 @@
 import * as Haptics from 'expo-haptics'
 import { ArrowDown, ArrowLeft, FileText, Film, Menu, MessageSquare, MoreHorizontal, RefreshCw, X } from 'lucide-react-native'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 import {
   AccessibilityInfo,
   ActivityIndicator,
   Animated,
+  BackHandler,
   DeviceEventEmitter,
   Easing,
   FlatList,
@@ -40,6 +41,7 @@ import type {
   ModelProviderGroup,
   PermissionSelect,
   PromptImage,
+  RemoteSession,
   WorkspaceView
 } from '../types'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
@@ -47,7 +49,7 @@ import { ChatImageProvider } from '../ui/chat-image'
 import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, openSafeExternalUrl } from '../ui/markdown'
-import { NavigationFocusProvider } from '../ui/mention-popover'
+import { NavigationFocusProvider, useNavigationFocused } from '../ui/mention-popover'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { useResponsiveLayout } from '../ui/responsive'
 import { spacing } from '../ui/theme'
@@ -128,11 +130,126 @@ const EMPTY_UI_ARTIFACTS: UiArtifact[] = []
 
 /** Hard cap mirroring the largest backend prompt budget (ACP/CodeX 256 KiB). */
 const LONG_DRAFT_MAX = 256_000
+const NOOP = () => {}
+const FALSE_REF: RefObject<boolean> = { current: false }
+
+function useEdgeSwipeOpen(
+  splitNav: boolean,
+  drawerOpenRef: RefObject<boolean>,
+  trajectoryRef: RefObject<boolean>,
+  openSessionsDrawer: () => void,
+) {
+  const edgeSwipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponder: (_evt, g) => {
+          if (splitNav || drawerOpenRef.current) return false
+          return shouldStartSwipeRightToOpen({ dx: g.dx, dy: g.dy, x0: g.x0 }, trajectoryRef.current)
+        },
+        onMoveShouldSetPanResponderCapture: (_evt, g) => {
+          if (splitNav || drawerOpenRef.current) return false
+          return shouldStartSwipeRightToOpen({ dx: g.dx, dy: g.dy, x0: g.x0 }, trajectoryRef.current)
+        },
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderRelease: (_evt, g) => {
+          if (splitNav || drawerOpenRef.current) return
+          if (shouldConfirmSwipeRightOpen({ dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx })) {
+            openSessionsDrawer()
+          }
+        },
+      }),
+    [splitNav, drawerOpenRef, trajectoryRef, openSessionsDrawer],
+  )
+  const swipeStartRef = useRef<{ x0: number; y0: number; t0: number } | undefined>(undefined)
+  return useMemo(
+    () => ({
+      ...edgeSwipeResponder.panHandlers,
+      onTouchStart: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+        swipeStartRef.current = { x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, t0: Date.now() }
+      },
+      onTouchEnd: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+        const start = swipeStartRef.current
+        swipeStartRef.current = undefined
+        if (start === undefined || splitNav || drawerOpenRef.current) return
+        const dx = e.nativeEvent.pageX - start.x0
+        const dy = e.nativeEvent.pageY - start.y0
+        const dt = Math.max(16, Date.now() - start.t0)
+        const vx = dx / dt
+        if (
+          shouldStartSwipeRightToOpen({ dx, dy, x0: start.x0 }, trajectoryRef.current)
+          && shouldConfirmSwipeRightOpen({ dx, dy, x0: start.x0, vx })
+        ) {
+          openSessionsDrawer()
+        }
+      },
+    }),
+    [edgeSwipeResponder, splitNav, drawerOpenRef, trajectoryRef, openSessionsDrawer],
+  )
+}
+
+function ComposerFocusGate({ disabled, children }: { disabled: boolean; children: ReactNode }) {
+  const parentFocused = useNavigationFocused()
+  return <NavigationFocusProvider value={parentFocused && !disabled}>{children}</NavigationFocusProvider>
+}
+
+function BotChatImageProvider({ hostId, connected, children }: {
+  hostId: string | undefined
+  connected: boolean
+  children: ReactNode
+}) {
+  const session = useAppStore(state => state.selectedSession)
+  const imageGeneration = chatImageConnectionGeneration()
+  const imageLoader = useMemo(
+    () => session === undefined || !connected ? undefined : sessionChatImageLoader(session),
+    [session?.sessionId, session?.backend, hostId, imageGeneration, connected],
+  )
+  return <ChatImageProvider value={imageLoader}>{children}</ChatImageProvider>
+}
+
+function BotModeBackHandler({
+  active,
+  splitNav,
+  drawerOpenRef,
+  drawerBackRef,
+  onOpenSessionsDrawer,
+  onBack,
+}: {
+  active: boolean
+  splitNav: boolean
+  drawerOpenRef: RefObject<boolean>
+  drawerBackRef: RefObject<(() => boolean) | undefined>
+  onOpenSessionsDrawer: () => void
+  onBack: () => void
+}) {
+  const latestRef = useRef({ active, splitNav, onOpenSessionsDrawer, onBack })
+  latestRef.current = { active, splitNav, onOpenSessionsDrawer, onBack }
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const { active: isActive, splitNav: isSplit, onOpenSessionsDrawer: openDrawer, onBack: leave } = latestRef.current
+      if (!isActive) return false
+      if (!isSplit && drawerOpenRef.current) {
+        return drawerBackRef.current?.() ?? false
+      }
+      if (!isSplit && !drawerOpenRef.current) {
+        Keyboard.dismiss()
+        openDrawer()
+        return true
+      }
+      Keyboard.dismiss()
+      leave()
+      return true
+    })
+    return () => subscription.remove()
+  }, [drawerOpenRef, drawerBackRef])
+  return null
+}
 
 export function ChatScreen({
   active = true,
   suppressAutoSelect = false,
-  onBack = () => {},
+  onBack = NOOP,
   onOpenDevices: _onOpenDevices,
   onNewSession,
   onOpenWorkspaces,
@@ -162,12 +279,402 @@ export function ChatScreen({
   onBotModeChange?: (botMode: boolean) => void
   onSelectBot?: (id?: string) => void
 }) {
+  const styles = useThemedStyles(createStyles)
+  const { splitNav } = useResponsiveLayout()
+  const hostId = useAppStore(state => state.selectedDevice?.deviceId)
+  const pluginsAvailable = useAppStore(state => state.connection.phase === 'connected')
+
+  const [sessionsOpen, setSessionsOpen] = useState(true)
+  const [drawerEntrance, setDrawerEntrance] = useState<'immediate' | 'slide'>('immediate')
+  // Cold start parks the sidebar full-screen before any page is chosen; swiping
+  // or pressing back must not drop the user into an arbitrary conversation.
+  const [drawerSwipeUnlocked, setDrawerSwipeUnlocked] = useState(false)
+  const [pluginsOpen, setPluginsOpen] = useState(false)
+  const [automationTasksOpen, setAutomationTasksOpen] = useState(false)
+
+  const drawerBackRef = useRef<(() => boolean) | undefined>(undefined)
+  const drawerCloseRef = useRef<((options?: { withHaptic?: boolean; force?: boolean }) => void) | undefined>(undefined)
+  const drawerOpenRef = useRef(sessionsOpen && !splitNav)
+  drawerOpenRef.current = sessionsOpen && !splitNav
+  const splitNavRef = useRef(splitNav)
+  splitNavRef.current = splitNav
+  const cancelScrollRef = useRef<(() => void) | undefined>(undefined)
+  const onDrawerClosedRef = useRef<(() => void) | undefined>(undefined)
+  const closeMentionRef = useRef<(() => void) | undefined>(undefined)
+  const openFileLinkRef = useRef<((path: string) => void) | undefined>(undefined)
+  const lastAgentSessionByScopeRef = useRef<Record<string, RemoteSession | undefined>>({})
+  const selectRequestSeqRef = useRef(0)
+
+  const onBackPropRef = useRef(onBack)
+  onBackPropRef.current = onBack
+  const onNewSessionRef = useRef(onNewSession)
+  onNewSessionRef.current = onNewSession
+  const onOpenWorkspacesRef = useRef(onOpenWorkspaces)
+  onOpenWorkspacesRef.current = onOpenWorkspaces
+  const onOpenDeviceInfoRef = useRef(onOpenDeviceInfo)
+  onOpenDeviceInfoRef.current = onOpenDeviceInfo
+  const onOpenHostSwitcherRef = useRef(onOpenHostSwitcher)
+  onOpenHostSwitcherRef.current = onOpenHostSwitcher
+  const onOpenSettingsRef = useRef(onOpenSettings)
+  onOpenSettingsRef.current = onOpenSettings
+  const onOpenAboutRef = useRef(onOpenAbout)
+  onOpenAboutRef.current = onOpenAbout
+  const onBotModeChangeRef = useRef(onBotModeChange)
+  onBotModeChangeRef.current = onBotModeChange
+  const onSelectBotRef = useRef(onSelectBot)
+  onSelectBotRef.current = onSelectBot
+
+  const markConversationChosen = useCallback(() => setDrawerSwipeUnlocked(true), [])
+
+  const lastHostIdRef = useRef(hostId)
+  useEffect(() => {
+    if (hostId === lastHostIdRef.current) return
+    lastHostIdRef.current = hostId
+    closeMentionRef.current?.()
+    cancelScrollRef.current?.()
+    setDrawerSwipeUnlocked(false)
+    setDrawerEntrance('immediate')
+    setSessionsOpen(true)
+  }, [hostId])
+
+  // Explicit navigation must also reveal an already selected conversation.
+  // A revision (rather than session identity) handles repeated notification taps.
+  useEffect(() => {
+    if (externalOpenRevision === undefined) return
+    setDrawerSwipeUnlocked(true)
+    setSessionsOpen(false)
+  }, [externalOpenRevision])
+
+  // splitNav (from useResponsiveLayout) keeps the session list visible beside
+  // the conversation. Short landscape phone windows stay single-pane; a wide
+  // tablet keeps the split even while the IME reduces the window height.
+  useEffect(() => {
+    if (splitNav) setSessionsOpen(false)
+  }, [splitNav])
+
+  const prevOverlayDrawerOpenRef = useRef(sessionsOpen && !splitNav)
+  useEffect(() => {
+    const overlayOpen = sessionsOpen && !splitNav
+    const wasOverlayOpen = prevOverlayDrawerOpenRef.current
+    prevOverlayDrawerOpenRef.current = overlayOpen
+    if (overlayOpen && !wasOverlayOpen) {
+      cancelScrollRef.current?.()
+    } else if (!overlayOpen && wasOverlayOpen) {
+      onDrawerClosedRef.current?.()
+    }
+  }, [sessionsOpen, splitNav])
+
+  const openSessionsDrawer = useCallback(() => {
+    Keyboard.dismiss()
+    closeMentionRef.current?.()
+    cancelScrollRef.current?.()
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+    // Reached from a conversation, so the sidebar may be swiped away again.
+    setDrawerSwipeUnlocked(true)
+    setDrawerEntrance('slide')
+    setSessionsOpen(true)
+  }, [])
+
+  const stableOnBack = useCallback(() => onBackPropRef.current(), [])
+  const stableOnNewSession = useCallback(() => onNewSessionRef.current?.(), [])
+  const stableOnOpenWorkspaces = useCallback((focusWorkspaceKey?: string) => onOpenWorkspacesRef.current?.(focusWorkspaceKey), [])
+  const stableOnOpenHostSwitcher = useCallback(() => onOpenHostSwitcherRef.current?.(), [])
+  const stableOnOpenAbout = useCallback(() => onOpenAboutRef.current?.(), [])
+  const stableOnBotModeChange = useCallback((nextBotMode: boolean) => onBotModeChangeRef.current?.(nextBotMode), [])
+  const handleBotSelect = useCallback((id?: string) => onSelectBotRef.current?.(id), [])
+  const handleBotDeviceInfo = useCallback(() => onOpenDeviceInfoRef.current?.(), [])
+  const handleBotMore = useCallback(() => onOpenSettingsRef.current?.(), [])
+
+  const handleDrawerSelectBot = useCallback((id: string) => {
+    markConversationChosen()
+    onSelectBotRef.current?.(id)
+  }, [markConversationChosen])
+  const handleDrawerOpenDeviceInfo = useCallback(() => {
+    Keyboard.dismiss()
+    onOpenDeviceInfoRef.current?.()
+  }, [])
+  const handleDrawerOpenWorkspaces = useCallback(() => {
+    Keyboard.dismiss()
+    onOpenWorkspacesRef.current?.()
+  }, [])
+  const handleDrawerBack = useCallback(() => {
+    Keyboard.dismiss()
+    setSessionsOpen(false)
+  }, [])
+  const handleInlineDrawerClose = useCallback(() => {
+    Keyboard.dismiss()
+  }, [])
+  const handleOverlayDrawerClose = useCallback(() => {
+    setDrawerSwipeUnlocked(true)
+    setSessionsOpen(false)
+  }, [])
+  const handleDrawerOpenAutomationTasks = useCallback(() => {
+    Keyboard.dismiss()
+    setAutomationTasksOpen(true)
+  }, [])
+  const handleDrawerOpenPlugins = useCallback(() => {
+    Keyboard.dismiss()
+    setPluginsOpen(true)
+  }, [])
+  const handleDrawerOpenHostSwitcher = useCallback(() => {
+    Keyboard.dismiss()
+    onOpenHostSwitcherRef.current?.()
+  }, [])
+  const handleDrawerOpenSettings = useCallback(() => {
+    Keyboard.dismiss()
+    onOpenSettingsRef.current?.()
+  }, [])
+
+  const scheduleOverlayDrawerClose = useCallback((seq: number) => {
+    requestAnimationFrame(() => {
+      if (selectRequestSeqRef.current !== seq) return
+      if (splitNavRef.current) return
+      if (drawerCloseRef.current !== undefined) {
+        drawerCloseRef.current({ withHaptic: false, force: true })
+      } else {
+        setDrawerSwipeUnlocked(true)
+        setSessionsOpen(false)
+      }
+    })
+  }, [])
+
+  const handleDrawerSelect = useCallback(async (next: RemoteSession) => {
+    const seq = ++selectRequestSeqRef.current
+    if (splitNavRef.current) markConversationChosen()
+    const pending = useAppStore.getState().openSession(next)
+    onBotModeChangeRef.current?.(false)
+    const visible = useAppStore.getState().selectedSession?.sessionId === next.sessionId
+    if (!splitNavRef.current && visible) {
+      scheduleOverlayDrawerClose(seq)
+    }
+    if (await pending && !splitNavRef.current && !visible) {
+      scheduleOverlayDrawerClose(seq)
+    }
+  }, [markConversationChosen, scheduleOverlayDrawerClose])
+
+  const openLink = useCallback((href: string) => {
+    // 1. Session reference navigation: dsh-session:<base64url>
+    const targetSessionId = decodeSessionMentionUri(href)
+    if (targetSessionId !== undefined) {
+      const matchedBot = useBotTeamStore.getState().state?.bots.find(entry => entry.sessionId === targetSessionId)
+      if (matchedBot !== undefined) {
+        onBotModeChangeRef.current?.(true)
+        onSelectBotRef.current?.(matchedBot.id)
+        return
+      }
+      const storeState = useAppStore.getState()
+      const targetSession = storeState.sessions.find(candidate => candidate.sessionId === targetSessionId)
+      if (targetSession !== undefined) {
+        void storeState.openSession(targetSession)
+      }
+      return
+    }
+
+    // 2. Safe external web URLs (http, https, mailto, www.*)
+    if (openSafeExternalUrl(href)) return
+
+    // 3. Workspace file link
+    const path = markdownFilePath(href)
+    if (path === undefined) return
+    openFileLinkRef.current?.(path)
+  }, [])
+
+  const switchToAgentMode = useCallback(() => {
+    const storeState = useAppStore.getState()
+    const botTeamState = useBotTeamStore.getState().state
+    const memoryScope = browseScope(storeState)
+    const candidates = storeState.sessions.filter(
+      item => !storeState.archivedSessionIds.includes(item.sessionId)
+        && !isKnownBotSessionId(item.sessionId, botTeamState, memoryScope),
+    )
+    const remembered = lastAgentSessionByScopeRef.current[memoryScope]
+    const preferred = remembered
+      ? candidates.find(item => item.sessionId === remembered.sessionId && (item.backend ?? 'harness') === (remembered.backend ?? 'harness'))
+      : undefined
+    const target = preferred ?? [...candidates].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+    if (target !== undefined) {
+      void storeState.openSession(target)
+    } else if (storeState.selectedSession !== undefined && isKnownBotSessionId(storeState.selectedSession.sessionId, botTeamState, memoryScope)) {
+      useAppStore.setState({ selectedSession: undefined })
+    }
+    onBotModeChangeRef.current?.(false)
+  }, [])
+
+  const closePluginsModal = useCallback(() => setPluginsOpen(false), [])
+  const closeAutomationTasksModal = useCallback(() => setAutomationTasksOpen(false), [])
+  const handleAutomationOpenSession = useCallback(async (targetSession: RemoteSession) => {
+    markConversationChosen()
+    const opened = await useAppStore.getState().openSession(targetSession)
+    onBotModeChangeRef.current?.(false)
+    if (opened && !splitNavRef.current) setSessionsOpen(false)
+    setAutomationTasksOpen(false)
+  }, [markConversationChosen])
+  const handleAutomationNewTask = useCallback(async () => {
+    markConversationChosen()
+    const storeState = useAppStore.getState()
+    const currentSession = storeState.selectedSession
+    const defaultTaskWorkspaceId =
+      (currentSession === undefined
+        ? undefined
+        : storeState.workspaces.find(w => w.sessionIds.includes(currentSession.sessionId))?.workspaceId)
+      ?? storeState.workspaces[0]?.workspaceId
+    const created = await storeState.createSession(defaultTaskWorkspaceId)
+    onBotModeChangeRef.current?.(false)
+    if (created && !splitNavRef.current) setSessionsOpen(false)
+    setAutomationTasksOpen(false)
+  }, [markConversationChosen])
+
+  const botSwipeRightTouchProps = useEdgeSwipeOpen(splitNav, drawerOpenRef, FALSE_REF, openSessionsDrawer)
+
+  const hasOpenWorkspaces = onOpenWorkspaces !== undefined
+  const hasOpenHostSwitcher = onOpenHostSwitcher !== undefined
+  const hasOpenAbout = onOpenAbout !== undefined
+  const hasNewSession = onNewSession !== undefined
+  const hasBotModeChange = onBotModeChange !== undefined
+
+  const renderDrawer = (inlineMode: boolean) => (
+    <HostSessionsDrawer
+      key={inlineMode ? 'inline-navigation' : 'navigation-drawer'}
+      inline={inlineMode}
+      open={inlineMode ? true : sessionsOpen}
+      entrance={inlineMode ? 'immediate' : drawerEntrance}
+      backRef={inlineMode ? undefined : drawerBackRef}
+      closeRef={inlineMode ? undefined : drawerCloseRef}
+      onUnlockDismissible={inlineMode ? undefined : markConversationChosen}
+      botMode={botMode}
+      onBotModeChange={hasBotModeChange ? stableOnBotModeChange : undefined}
+      dismissible={inlineMode || drawerSwipeUnlocked}
+      onSelectBot={handleDrawerSelectBot}
+      onOpenDeviceInfo={handleDrawerOpenDeviceInfo}
+      onOpenWorkspaces={handleDrawerOpenWorkspaces}
+      onBack={inlineMode ? undefined : handleDrawerBack}
+      backLabel={strings.chat.backToChat}
+      onClose={inlineMode ? handleInlineDrawerClose : handleOverlayDrawerClose}
+      onOpenAutomationTasks={handleDrawerOpenAutomationTasks}
+      onOpenPlugins={pluginsAvailable ? handleDrawerOpenPlugins : undefined}
+      onOpenHostSwitcher={hasOpenHostSwitcher ? handleDrawerOpenHostSwitcher : undefined}
+      onOpenAbout={hasOpenAbout ? stableOnOpenAbout : undefined}
+      onOpenSettings={handleDrawerOpenSettings}
+      onSelect={handleDrawerSelect}
+    />
+  )
+
+  return (
+    <MarkdownLinkProvider onLinkPress={openLink} canStatFiles={pluginsAvailable}>
+      <View style={styles.flex}>
+        <NavigationFocusProvider value={active && (!sessionsOpen || splitNav)}>
+          <KeyboardInset>
+            <View
+              key="chat-layout"
+              style={[styles.splitRoot, splitNav && styles.splitRootWide]}
+              pointerEvents={sessionsOpen && !splitNav ? 'none' : 'auto'}
+              accessibilityElementsHidden={sessionsOpen && !splitNav}
+              importantForAccessibility={sessionsOpen && !splitNav ? 'no-hide-descendants' : 'auto'}
+            >
+              {splitNav && <View style={styles.splitSidebar}>{renderDrawer(true)}</View>}
+              {botMode ? (
+                <BotChatImageProvider hostId={hostId} connected={pluginsAvailable}>
+                  <BotModeBackHandler
+                    active={active}
+                    splitNav={splitNav}
+                    drawerOpenRef={drawerOpenRef}
+                    drawerBackRef={drawerBackRef}
+                    onOpenSessionsDrawer={openSessionsDrawer}
+                    onBack={stableOnBack}
+                  />
+                  <View style={styles.splitMain} {...botSwipeRightTouchProps}>
+                    <BotModeScreen
+                      selectedId={botConversationId}
+                      onSelect={handleBotSelect}
+                      onAgentMode={switchToAgentMode}
+                      onOpenDrawer={openSessionsDrawer}
+                      onDeviceInfo={handleBotDeviceInfo}
+                      onMore={handleBotMore}
+                      splitView={splitNav}
+                      drawerOpen={sessionsOpen || splitNav}
+                      screenActive={active && (!sessionsOpen || splitNav)}
+                    />
+                  </View>
+                </BotChatImageProvider>
+              ) : (
+                <ChatConversationPane
+                  active={active}
+                  suppressAutoSelect={suppressAutoSelect}
+                  splitNav={splitNav}
+                  drawerOpenRef={drawerOpenRef}
+                  drawerBackRef={drawerBackRef}
+                  cancelScrollRef={cancelScrollRef}
+                  onDrawerClosedRef={onDrawerClosedRef}
+                  closeMentionRef={closeMentionRef}
+                  openFileLinkRef={openFileLinkRef}
+                  lastAgentSessionByScopeRef={lastAgentSessionByScopeRef}
+                  onOpenLink={openLink}
+                  onOpenSessionsDrawer={openSessionsDrawer}
+                  onBack={stableOnBack}
+                  onNewSession={hasNewSession ? stableOnNewSession : undefined}
+                  onOpenWorkspaces={hasOpenWorkspaces ? stableOnOpenWorkspaces : undefined}
+                  onOpenHostSwitcher={hasOpenHostSwitcher ? stableOnOpenHostSwitcher : undefined}
+                />
+              )}
+            </View>
+          </KeyboardInset>
+        </NavigationFocusProvider>
+        {!splitNav && renderDrawer(false)}
+        <PluginsModal visible={pluginsOpen} onClose={closePluginsModal} />
+        <AutomationTasksModal
+          visible={automationTasksOpen}
+          onClose={closeAutomationTasksModal}
+          onOpenSession={handleAutomationOpenSession}
+          onNewTask={handleAutomationNewTask}
+        />
+      </View>
+    </MarkdownLinkProvider>
+  )
+}
+
+interface ChatConversationPaneProps {
+  active: boolean
+  suppressAutoSelect: boolean
+  splitNav: boolean
+  drawerOpenRef: RefObject<boolean>
+  drawerBackRef: RefObject<(() => boolean) | undefined>
+  cancelScrollRef: MutableRefObject<(() => void) | undefined>
+  onDrawerClosedRef: MutableRefObject<(() => void) | undefined>
+  closeMentionRef: MutableRefObject<(() => void) | undefined>
+  openFileLinkRef: MutableRefObject<((path: string) => void) | undefined>
+  lastAgentSessionByScopeRef: MutableRefObject<Record<string, RemoteSession | undefined>>
+  onOpenLink: (href: string) => void
+  onOpenSessionsDrawer: () => void
+  onBack: () => void
+  onNewSession?: () => void
+  onOpenWorkspaces?: (focusWorkspaceKey?: string) => void
+  onOpenHostSwitcher?: () => void
+}
+
+const ChatConversationPane = memo(function ChatConversationPane({
+  active,
+  suppressAutoSelect,
+  splitNav,
+  drawerOpenRef,
+  drawerBackRef,
+  cancelScrollRef,
+  onDrawerClosedRef,
+  closeMentionRef,
+  openFileLinkRef,
+  lastAgentSessionByScopeRef,
+  onOpenLink,
+  onOpenSessionsDrawer,
+  onBack,
+  onNewSession,
+  onOpenWorkspaces,
+  onOpenHostSwitcher,
+}: ChatConversationPaneProps) {
   const reduceMotion = useReduceMotion()
   const session = useAppStore(state => state.selectedSession)
   const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
   // Legacy Hosts keep the 8s poll; event-capable Hosts use `$events` + `session/control`.
   // Keep this mounted in chat so subagent/running updates still arrive when list screens unmount.
-  useLiveSessionStatus(!botMode && session !== undefined && (session.backend ?? 'harness') === 'harness')
+  useLiveSessionStatus(session !== undefined && (session.backend ?? 'harness') === 'harness')
   const hostId = useAppStore(state => state.selectedDevice?.deviceId)
   const hostPlatform = useAppStore(state => state.selectedDevice?.platform)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
@@ -229,6 +736,8 @@ export function ChatScreen({
   const memoryError = useBrowseMemory(state => state.error)
   const setDraft = (value: string) => updateBrowseEntry(memoryScope, session?.sessionId ?? '', {draft: value})
   const [trajectory, setTrajectory] = useState(false)
+  const trajectoryRef = useRef(trajectory)
+  trajectoryRef.current = trajectory
   // Enter-only motion for the transcript <-> trajectory swap. Both views keep
   // their own scroll state; only the incoming view moves.
   const trajectoryMotion = useRef(new Animated.Value(1)).current
@@ -249,31 +758,6 @@ export function ChatScreen({
     return () => animation.stop()
   }, [trajectory, trajectoryMotion, reduceMotion])
 
-  const [sessionsOpen, setSessionsOpen] = useState(true)
-  const [drawerEntrance, setDrawerEntrance] = useState<'immediate' | 'slide'>('immediate')
-  const drawerBackRef = useRef<(() => boolean) | undefined>(undefined)
-  // Cold start parks the sidebar full-screen before any page is chosen; swiping
-  // or pressing back must not drop the user into an arbitrary conversation.
-  const [drawerSwipeUnlocked, setDrawerSwipeUnlocked] = useState(false)
-  const markConversationChosen = () => setDrawerSwipeUnlocked(true)
-  const lastHostIdRef = useRef(hostId)
-  useEffect(() => {
-    if (hostId === lastHostIdRef.current) return
-    lastHostIdRef.current = hostId
-    setDrawerSwipeUnlocked(false)
-    setDrawerEntrance('immediate')
-    setSessionsOpen(true)
-  }, [hostId])
-  // Explicit navigation must also reveal an already selected conversation.
-  // A revision (rather than session identity) handles repeated notification taps.
-  useEffect(() => {
-    if (externalOpenRevision === undefined) return
-    setDrawerSwipeUnlocked(true)
-    setSessionsOpen(false)
-  }, [externalOpenRevision])
-  const [automationTasksOpen, setAutomationTasksOpen] = useState(false)
-  const [pluginsOpen, setPluginsOpen] = useState(false)
-  const pluginsAvailable = useAppStore(state => state.connection.phase === 'connected')
   const [sessionInfoOpen, setSessionInfoOpen] = useState(false)
 
   // Web-style blue marks: `/` commands and `@` references render in accent blue.
@@ -283,10 +767,10 @@ export function ChatScreen({
     updateBrowseEntry(memoryScope, session?.sessionId ?? '', {images: typeof value === 'function' ? value(previous) : value})
   }
   const quotes = useBrowseMemory(state => state.entries[memoryKey]?.quotes ?? EMPTY_QUOTES)
-  const setQuotes = (value: string[] | ((previous: string[]) => string[])) => {
+  const setQuotes = useCallback((value: string[] | ((previous: string[]) => string[])) => {
     const previous = useBrowseMemory.getState().entries[memoryKey]?.quotes ?? EMPTY_QUOTES
     updateBrowseEntry(memoryScope, session?.sessionId ?? '', {quotes: typeof value === 'function' ? value(previous) : value})
-  }
+  }, [memoryKey, memoryScope, session?.sessionId])
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [permissionPickerOpen, setPermissionPickerOpen] = useState(false)
   const mentionInput = useChatMentions({
@@ -294,6 +778,12 @@ export function ChatScreen({
     setPermissionPickerOpen, setModelPickerOpen,
   })
   const { composerInputRef, draftRef, mentionType, setMentionType, applyDraft, closeMention, resetSelection } = mentionInput
+  useEffect(() => {
+    closeMentionRef.current = closeMention
+    return () => {
+      if (closeMentionRef.current === closeMention) closeMentionRef.current = undefined
+    }
+  }, [closeMentionRef, closeMention])
   const lastQuoteCountRef = useRef(quotes.length)
   useEffect(() => {
     if (quotes.length > lastQuoteCountRef.current) {
@@ -428,104 +918,43 @@ export function ChatScreen({
   const panelOpen = composerExpanded || plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || previewFilePath !== undefined || trajectory || mentionType !== null
     || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || sessionInfoOpen
-  const { listRef, viewability, awayFromLatest, newContent, jumpToLatest, beginSendScroll,
+  const { listRef, displaySections, maintainVisibleContentPosition, viewability, awayFromLatest, newContent, jumpToLatest, beginSendScroll,
     onListLayout, onListContentSizeChange, onListScroll, onListDragEnd, onListMomentumEnd,
     onScrollBeginDrag, onMomentumScrollBegin } = useChatScroll({
     session, messages, visibleMessages, visibleSections, memoryScope, memoryKey,
     panelOpen, historyLoadingOlder, busy, setTrajectory,
+    drawerOpenRef, cancelScrollRef, onDrawerClosedRef,
   })
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   // Landscape phones are short: keep the composer compact when the IME is up
   // and let the list use a readable centred column on wide windows.
-  const { landscape, compactHeight, height, width, contentMaxWidth, splitNav } = useResponsiveLayout()
+  const { landscape, compactHeight, height, contentMaxWidth } = useResponsiveLayout()
   const compactComposer = landscape || compactHeight
   const composerInputMaxHeight = compactComposer ? Math.max(48, Math.min(96, Math.round(height * 0.22))) : 126
-  // splitNav (from useResponsiveLayout) keeps the session list visible beside
-  // the conversation. Short landscape phone windows stay single-pane; a wide
-  // tablet keeps the split even while the IME reduces the window height.
-  useEffect(() => {
-    if (splitNav) setSessionsOpen(false)
-  }, [splitNav])
   const readableColumn = { width: '100%' as const, maxWidth: contentMaxWidth, alignSelf: 'center' as const }
 
-  const openSessionsDrawer = useCallback(() => {
-    Keyboard.dismiss()
-    setMentionType(null)
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
-    // Reached from a conversation, so the sidebar may be swiped away again.
-    setDrawerSwipeUnlocked(true)
-    setDrawerEntrance('slide')
-    setSessionsOpen(true)
-  }, [setMentionType])
-
   // Swipe right gesture to open sessions drawer with haptic feedback
-  const edgeSwipeResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_evt, g) => {
-          if (splitNav || sessionsOpen) return false
-          return shouldStartSwipeRightToOpen({ dx: g.dx, dy: g.dy, x0: g.x0 }, trajectory)
-        },
-        onMoveShouldSetPanResponderCapture: (_evt, g) => {
-          if (splitNav || sessionsOpen) return false
-          return shouldStartSwipeRightToOpen({ dx: g.dx, dy: g.dy, x0: g.x0 }, trajectory)
-        },
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderRelease: (_evt, g) => {
-          if (splitNav || sessionsOpen) return
-          if (shouldConfirmSwipeRightOpen({ dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx })) {
-            openSessionsDrawer()
-          }
-        },
-      }),
-    [sessionsOpen, splitNav, trajectory, openSessionsDrawer]
-  )
-  const swipeStartRef = useRef<{ x0: number; y0: number; t0: number } | undefined>(undefined)
-  const swipeRightTouchProps = useMemo(
-    () => ({
-      ...edgeSwipeResponder.panHandlers,
-      onTouchStart: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
-        swipeStartRef.current = { x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, t0: Date.now() }
-      },
-      onTouchEnd: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
-        const start = swipeStartRef.current
-        swipeStartRef.current = undefined
-        if (start === undefined || splitNav || sessionsOpen) return
-        const dx = e.nativeEvent.pageX - start.x0
-        const dy = e.nativeEvent.pageY - start.y0
-        const dt = Math.max(16, Date.now() - start.t0)
-        const vx = dx / dt
-        if (
-          shouldStartSwipeRightToOpen({ dx, dy, x0: start.x0 }, trajectory)
-          && shouldConfirmSwipeRightOpen({ dx, dy, x0: start.x0, vx })
-        ) {
-          openSessionsDrawer()
-        }
-      },
-    }),
-    [edgeSwipeResponder, splitNav, sessionsOpen, trajectory, openSessionsDrawer],
-  )
+  const swipeRightTouchProps = useEdgeSwipeOpen(splitNav, drawerOpenRef, trajectoryRef, onOpenSessionsDrawer)
 
+  const stopping = busy === 'stop-session'
+  const lastDisplaySectionKey = displaySections[displaySections.length - 1]?.key
   // Artifact changes must invalidate FlatList cells even when their section is
   // reused (a later turn can patch a card owned by an earlier turn).
-  const renderChatItem = useCallback(({ item, index }: { item: ChatSection; index: number }) => item.kind === 'process'
+  const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
     ? <ChatProcessGroup
         items={item.items}
         artifacts={uiBySection.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS}
         updatedArtifacts={uiBySection.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS}
         availableUiIds={visibleUiIds}
-        busyAction={busy}
-        isTurnRunning={index === visibleSections.length - 1 && (session?.running === true || busy === 'stop-session')}
+        isTurnRunning={item.key === lastDisplaySectionKey && (session?.running === true || stopping)}
         turnUsage={turnUsageByTurn.get(item.turn)}
         onApproval={respondApproval}
         onQuestion={respondQuestion}
       />
-    : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [busy, respondApproval, respondQuestion, session?.running, turnUsageByTurn, uiBySection, visibleSections.length, visibleUiIds])
+    : <ChatItemView item={item.item} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
+  [lastDisplaySectionKey, respondApproval, respondQuestion, session?.running, stopping, turnUsageByTurn, uiBySection, visibleUiIds])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can
@@ -533,7 +962,7 @@ export function ChatScreen({
   // Back inside a subagent child returns to its parent conversation (the
   // official subagent UI's navigation), instead of leaving the chat entirely.
   const backFromChat = () => {
-    if (!splitNav && sessionsOpen) {
+    if (!splitNav && drawerOpenRef.current) {
       return drawerBackRef.current?.() ?? false
     }
     const parent = session !== undefined && isSubagentSession(session)
@@ -544,8 +973,8 @@ export function ChatScreen({
       void openSession(parent)
       return true
     }
-    if (!splitNav && !sessionsOpen) {
-      openSessionsDrawer()
+    if (!splitNav && !drawerOpenRef.current) {
+      onOpenSessionsDrawer()
       return true
     }
     Keyboard.dismiss()
@@ -569,7 +998,7 @@ export function ChatScreen({
     { open: previewFilePath !== undefined, close: () => setPreviewFilePath(undefined) },
     { open: toolsMode !== undefined, close: () => { setToolsMode(undefined); setFilesInitialPath(undefined) } },
     { open: trajectory, close: () => setTrajectory(false) },
-  ], active)
+  ], active, () => (!splitNav && drawerOpenRef.current ? (drawerBackRef.current?.() ?? false) : false))
 
   const botTeamState = useBotTeamStore(state => state.state)
   const connected = connection.phase === 'connected' && !reconnectingSession
@@ -582,41 +1011,23 @@ export function ChatScreen({
     setPreviewFilePath(path)
   }, [connected])
 
-  const openLink = useCallback((href: string) => {
-    // 1. Session reference navigation: dsh-session:<base64url>
-    const targetSessionId = decodeSessionMentionUri(href)
-    if (targetSessionId !== undefined) {
-      const matchedBot = botTeamState?.bots.find(entry => entry.sessionId === targetSessionId)
-      if (matchedBot !== undefined) {
-        onBotModeChange?.(true)
-        onSelectBot?.(matchedBot.id)
-        return
+  useEffect(() => {
+    openFileLinkRef.current = openWorkspaceFile
+    return () => {
+      if (openFileLinkRef.current === openWorkspaceFile) {
+        openFileLinkRef.current = undefined
       }
-      const targetSession = sessions.find(candidate => candidate.sessionId === targetSessionId)
-      if (targetSession !== undefined) {
-        void openSession(targetSession)
-      }
-      return
     }
-
-    // 2. Safe external web URLs (http, https, mailto, www.*)
-    if (openSafeExternalUrl(href)) return
-
-    // 3. Workspace file link
-    const path = markdownFilePath(href)
-    if (path === undefined) return
-    openWorkspaceFile(path)
-  }, [openSession, openWorkspaceFile, sessions, botTeamState?.bots, onBotModeChange, onSelectBot])
+  }, [openFileLinkRef, openWorkspaceFile])
 
   const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
   const replyActive = connected && (busy === 'send-message' || busy === 'stop-session' || (session?.running ?? false) || hasActiveChatItem)
 
-  const lastAgentSessionByScopeRef = useRef<Record<string, typeof session>>({})
   useEffect(() => {
-    if (!botMode && session !== undefined && !isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)) {
+    if (session !== undefined && !isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)) {
       lastAgentSessionByScopeRef.current[memoryScope] = session
     }
-  }, [botMode, session, botTeamState, memoryScope])
+  }, [session, botTeamState, memoryScope, lastAgentSessionByScopeRef])
 
   const findPreferredAgentSession = () => {
     const candidates = sessions.filter(
@@ -629,19 +1040,9 @@ export function ChatScreen({
     return preferred ?? [...candidates].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
   }
 
-  const switchToAgentMode = () => {
-    const target = findPreferredAgentSession()
-    if (target !== undefined) {
-      void openSession(target)
-    } else if (session !== undefined && isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)) {
-      useAppStore.setState({ selectedSession: undefined })
-    }
-    onBotModeChange?.(false)
-  }
-
   const autoSelectingRef = useRef(false)
   useEffect(() => {
-    if (botMode || suppressAutoSelect) return
+    if (suppressAutoSelect) return
     const sessionIsBot = session !== undefined && isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)
     if (sessionIsBot) {
       useAppStore.setState({ selectedSession: undefined })
@@ -654,135 +1055,7 @@ export function ChatScreen({
         autoSelectingRef.current = false
       })
     }
-  }, [botMode, suppressAutoSelect, session, connected, busy, sessions, archivedSessionIds, openSession, botTeamState, memoryScope])
-
-  const drawerElement = (inlineMode: boolean) => (
-      <HostSessionsDrawer
-        key={inlineMode ? 'inline-navigation' : 'navigation-drawer'}
-        inline={inlineMode}
-        entrance={inlineMode ? 'immediate' : drawerEntrance}
-        backRef={inlineMode ? undefined : drawerBackRef}
-        botMode={botMode}
-        onBotModeChange={onBotModeChange}
-        dismissible={inlineMode || drawerSwipeUnlocked}
-        onSelectBot={id => {
-          markConversationChosen()
-          onSelectBot?.(id)
-        }}
-      onOpenDeviceInfo={() => {
-        Keyboard.dismiss()
-        onOpenDeviceInfo?.()
-      }}
-      onOpenWorkspaces={() => {
-        Keyboard.dismiss()
-        if (onOpenWorkspaces) onOpenWorkspaces()
-      }}
-      onBack={inlineMode ? undefined : () => {
-        Keyboard.dismiss()
-        setSessionsOpen(false)
-      }}
-      backLabel={strings.chat.backToChat}
-      onClose={() => {
-        if (inlineMode) Keyboard.dismiss()
-        else setSessionsOpen(false)
-      }}
-      onOpenAutomationTasks={() => {
-        Keyboard.dismiss()
-        setAutomationTasksOpen(true)
-      }}
-      onOpenPlugins={pluginsAvailable ? () => {
-        Keyboard.dismiss()
-        setPluginsOpen(true)
-      } : undefined}
-      onOpenHostSwitcher={onOpenHostSwitcher ? () => {
-        Keyboard.dismiss()
-        onOpenHostSwitcher()
-      } : undefined}
-      onOpenAbout={onOpenAbout}
-      onOpenSettings={() => {
-        Keyboard.dismiss()
-        onOpenSettings?.()
-      }}
-      onSelect={async next => {
-        markConversationChosen()
-        const pending = openSession(next)
-        onBotModeChange?.(false)
-        const visible = useAppStore.getState().selectedSession?.sessionId === next.sessionId
-        if (!inlineMode && visible) {
-          setSessionsOpen(false)
-        }
-        if (await pending && !inlineMode && !visible) {
-          setSessionsOpen(false)
-        }
-      }}
-    />
-  )
-
-  const defaultTaskWorkspaceId =
-    (session === undefined ? undefined : workspaces.find(w => w.sessionIds.includes(session.sessionId))?.workspaceId)
-    ?? workspaces[0]?.workspaceId
-
-  const wrapChatShell = (mainPane: ReactNode, extraOverlays?: ReactNode) => (
-    <ChatImageProvider value={imageLoader}>
-      <MarkdownLinkProvider onLinkPress={openLink} onFilePress={openWorkspaceFile} canStatFiles={connected}>
-        <View style={styles.flex}>
-          <NavigationFocusProvider value={active && (!sessionsOpen || splitNav) && !composerExpanded}>
-            <KeyboardInset>
-              <View
-                key="chat-layout"
-                style={[styles.splitRoot, splitNav && styles.splitRootWide]}
-                pointerEvents={sessionsOpen && !splitNav ? 'none' : 'auto'}
-                accessibilityElementsHidden={sessionsOpen && !splitNav}
-                importantForAccessibility={sessionsOpen && !splitNav ? 'no-hide-descendants' : 'auto'}
-              >
-                {splitNav && <View style={styles.splitSidebar}>{drawerElement(true)}</View>}
-                {mainPane}
-              </View>
-              {extraOverlays}
-            </KeyboardInset>
-          </NavigationFocusProvider>
-          {sessionsOpen && !splitNav && drawerElement(false)}
-          <PluginsModal visible={pluginsOpen} onClose={() => setPluginsOpen(false)} />
-          <AutomationTasksModal
-            visible={automationTasksOpen}
-            onClose={() => setAutomationTasksOpen(false)}
-            onOpenSession={async targetSession => {
-              markConversationChosen()
-              const opened = await openSession(targetSession)
-              onBotModeChange?.(false)
-              if (opened && !splitNav) setSessionsOpen(false)
-              setAutomationTasksOpen(false)
-            }}
-            onNewTask={async () => {
-              markConversationChosen()
-              const created = await createSession(defaultTaskWorkspaceId)
-              onBotModeChange?.(false)
-              if (created && !splitNav) setSessionsOpen(false)
-              setAutomationTasksOpen(false)
-            }}
-          />
-        </View>
-      </MarkdownLinkProvider>
-    </ChatImageProvider>
-  )
-
-  if (botMode) {
-    return wrapChatShell(
-      <View style={styles.splitMain} {...swipeRightTouchProps}>
-        <BotModeScreen
-          selectedId={botConversationId}
-          onSelect={id => onSelectBot?.(id)}
-          onAgentMode={switchToAgentMode}
-          onOpenDrawer={openSessionsDrawer}
-          onDeviceInfo={() => onOpenDeviceInfo?.()}
-          onMore={() => onOpenSettings?.()}
-          splitView={splitNav}
-          drawerOpen={sessionsOpen || splitNav}
-          screenActive={active && (!sessionsOpen || splitNav)}
-        />
-      </View>,
-    )
-  }
+  }, [suppressAutoSelect, session, connected, busy, sessions, archivedSessionIds, openSession, botTeamState, memoryScope])
 
   const sessionIsBot = session !== undefined && isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)
   if (session === undefined || sessionIsBot) {
@@ -791,7 +1064,7 @@ export function ChatScreen({
         title={strings.chat.newChat}
         titleLines={1}
         titleAlign="between"
-        onBack={splitNav ? undefined : openSessionsDrawer}
+        onBack={splitNav ? undefined : onOpenSessionsDrawer}
         backIcon={Menu}
         backLabel={strings.chat.openHostSessions}
         action={
@@ -818,22 +1091,26 @@ export function ChatScreen({
         }
       />
     )
-    return wrapChatShell(
-      <View style={styles.splitMain} {...swipeRightTouchProps}>
-        <BlurHeaderFrame header={emptyHeader}>
-          {headerHeight => (
-            <View style={[styles.list, readableColumn, styles.emptyList, { paddingTop: headerHeight + spacing.xl }]}>
-              {busy !== undefined ? (
-                <View style={{ padding: spacing.xl, alignItems: 'center' }}>
-                  <ActivityIndicator size="large" color={colors.primary} />
+    return (
+      <ChatImageProvider value={imageLoader}>
+        <MarkdownLinkProvider onLinkPress={onOpenLink} onFilePress={openWorkspaceFile} canStatFiles={connected}>
+          <View style={styles.splitMain} {...swipeRightTouchProps}>
+            <BlurHeaderFrame header={emptyHeader}>
+              {headerHeight => (
+                <View style={[styles.list, readableColumn, styles.emptyList, { paddingTop: headerHeight + spacing.xl }]}>
+                  {busy !== undefined ? (
+                    <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                      <ActivityIndicator size="large" color={colors.primary} />
+                    </View>
+                  ) : (
+                    <WelcomeMessage />
+                  )}
                 </View>
-              ) : (
-                <WelcomeMessage />
               )}
-            </View>
-          )}
-        </BlurHeaderFrame>
-      </View>,
+            </BlurHeaderFrame>
+          </View>
+        </MarkdownLinkProvider>
+      </ChatImageProvider>
     )
   }
 
@@ -1095,7 +1372,6 @@ export function ChatScreen({
   const sendReady = connected && !busy?.startsWith('session:')
     && (session.backend !== 'codex' || codexReadySessionId === session.sessionId)
   const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0
-  const stopping = busy === 'stop-session'
   const commandRunning = busy === 'command'
   const stopOrCancel = () => {
     if (!commandRunning) { void stopSession(); return }
@@ -1416,7 +1692,7 @@ export function ChatScreen({
         onSubtitlePress={sessionModels !== undefined ? () => { Keyboard.dismiss(); setMentionType(null); setModelPickerOpen(true) } : undefined}
         titleLines={1}
         titleAlign="between"
-        onBack={trajectory ? handleBack : (splitNav ? undefined : openSessionsDrawer)}
+        onBack={trajectory ? handleBack : (splitNav ? undefined : onOpenSessionsDrawer)}
         backIcon={trajectory ? ArrowLeft : Menu}
         backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
         action={<>
@@ -1490,21 +1766,22 @@ export function ChatScreen({
         </View>
       )}
     </>
-  return wrapChatShell(
-    <View style={styles.splitMain} {...swipeRightTouchProps}>
-      {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
-      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}><Animated.View style={[{ flex: 1 }, { opacity: trajectoryMotion, transform: [{ translateY: trajectoryMotion.interpolate({ inputRange: [0, 1], outputRange: [resolveMotion('fullscreen', reduceMotion).translate, 0] }) }] }]}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
+  return (
+    <ChatImageProvider value={imageLoader}>
+      <MarkdownLinkProvider onLinkPress={onOpenLink} onFilePress={openWorkspaceFile} canStatFiles={connected}>
+      <View style={styles.splitMain} {...swipeRightTouchProps}>
+        {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
+        <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary resetKey={session.sessionId}><Animated.View style={[{ flex: 1 }, { opacity: trajectoryMotion, transform: [{ translateY: trajectoryMotion.interpolate({ inputRange: [0, 1], outputRange: [resolveMotion('fullscreen', reduceMotion).translate, 0] }) }] }]}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
         <FlatList
           ref={listRef}
-          key={session.sessionId}
           style={[styles.list, readableColumn]}
           contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 ? styles.emptyList : styles.shortConversation]}
-          data={visibleSections}
+          data={displaySections}
           keyExtractor={item => item.key}
           renderItem={renderChatItem}
-          initialNumToRender={6}
-          maxToRenderPerBatch={6}
-          updateCellsBatchingPeriod={16}
+          initialNumToRender={4}
+          maxToRenderPerBatch={3}
+          updateCellsBatchingPeriod={32}
           windowSize={7}
           removeClippedSubviews
           keyboardShouldPersistTaps="handled"
@@ -1516,7 +1793,7 @@ export function ChatScreen({
           onScrollToIndexFailed={info => {
             listRef.current?.scrollToOffset({offset: Math.max(0, info.averageItemLength * info.index), animated: false})
           }}
-          maintainVisibleContentPosition={{minIndexForVisible: 0}}
+          maintainVisibleContentPosition={maintainVisibleContentPosition}
           scrollEventThrottle={16}
           onScrollBeginDrag={onScrollBeginDrag}
           onScrollEndDrag={onListDragEnd}
@@ -1587,19 +1864,21 @@ export function ChatScreen({
           />
         )}
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
-        <ChatComposer
-          backend={session.backend} draft={draft} input={mentionInput}
-          quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
-          headerSlot={composerHeaderSlot}
-          replyActive={replyActive} stopping={stopping} commandRunning={commandRunning}
-          hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
-          composerDisabled={composerDisabled} sendDisabled={sendDisabled}
-          compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
-          onOpenExpand={() => setComposerExpanded(true)}
-          onOpenActions={openPlusMenu}
-          onOpenPrompts={openPromptsPicker}
-          onSubmit={() => void submit()} onStop={stopOrCancel}
-        />
+        <ComposerFocusGate disabled={composerExpanded}>
+          <ChatComposer
+            backend={session.backend} draft={draft} input={mentionInput}
+            quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
+            headerSlot={composerHeaderSlot}
+            replyActive={replyActive} stopping={stopping} commandRunning={commandRunning}
+            hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
+            composerDisabled={composerDisabled} sendDisabled={sendDisabled}
+            compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
+            onOpenExpand={() => setComposerExpanded(true)}
+            onOpenActions={openPlusMenu}
+            onOpenPrompts={openPromptsPicker}
+            onSubmit={() => void submit()} onStop={stopOrCancel}
+          />
+        </ComposerFocusGate>
         </View>
       </View>
       <ExpandedComposer
@@ -1617,8 +1896,7 @@ export function ChatScreen({
         onSubmit={() => void submit()}
         onStop={stopOrCancel}
       />
-        </View>,
-    <>
+      </View>
 
       <ChatActionMenu
         visible={plusMenuOpen} onClose={closePlusMenu} anchor={sheetAnchor}
@@ -1700,7 +1978,7 @@ export function ChatScreen({
         runAfterClose={runAfterSessionInfo}
         onOpenWorkspace={() => {
           if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
-          else openSessionsDrawer()
+          else onOpenSessionsDrawer()
         }}
         onToggleTrajectory={() => {
           Keyboard.dismiss()
@@ -1709,7 +1987,7 @@ export function ChatScreen({
         }}
         onToggleArchive={canArchiveSession ? toggleArchiveCurrentSession : undefined}
       />
-      <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); openSessionsDrawer() }} />
+      <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); onOpenSessionsDrawer() }} />
       <ToolAccessPicker visible={toolPickerOpen} supportsChanges={hostWorkspaceGit} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
       <PromptsPicker
         visible={promptsPickerOpen}
@@ -1777,8 +2055,9 @@ export function ChatScreen({
           </Pressable>
         </View>
       </Modal>
-    </>,
+      </MarkdownLinkProvider>
+    </ChatImageProvider>
   )
-}
+})
 
 export { ModalSurface,usePickerListMaxHeight } from './chat/modal'
