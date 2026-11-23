@@ -4,7 +4,7 @@
     "vendor": "r2049",
     "versionCode": 75,
     "versionName": "0.6.7",
-    "icon": "$media:layered_image",
+    "icon": "$media:icon",
     "label": "$string:app_name"
   }
 }

@@ -26,7 +26,6 @@ import {
   isCompactWidth, isExpandedWidth
 } from '../services/Adaptive';
 import { PickedImage, compressPixelMap, pickImages } from '../services/ImagePicker';
-import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
 import { RtcBridge } from '../services/RtcBridge';
 import { heartbeatBodyOf } from '../services/Heartbeat';
@@ -44,6 +43,7 @@ import { LoginServerEditor } from '../ui/LoginServerEditor';
 import BuildProfile from 'BuildProfile';
 
 const MEMBERSHIP_PRICING_URL: string = 'https://dsh.r2049.cn/pricing';
+const RELEASES_URL: string = 'https://github.com/liguobao/ds-harness-remote/releases/latest';
 
 class SessionFolder {
   key: string;
@@ -164,20 +164,13 @@ struct Index {
   /** 按住说话：波形条高度、计时、是否处于「上滑取消」区。 */
   /** 文字大小档位与倍数（0 小 / 1 标准 / 2 大 / 3 特大）。 */
   @State textScaleMode: number = 1;
-  @State profilesList: SavedProfile[] = [];
   /** 「更多」面板（替代系统菜单，自己控制对比度）。 */
   @State showMoreMenu: boolean = false;
-  /** 服务器切换面板。 */
-  @State showServerSwitch: boolean = false;
   /** 通用设置的点选面板。 */
   @State choiceOpen: boolean = false;
   @State choiceKind: string = '';
   /** 单台设备的操作面板（卡片 ⋯）。 */
   @State deviceMenuId: string = '';
-  /** 按下中的服务器行 key，用来做明显的按压反馈。 */
-  @State pressedChoiceKey: string = '';
-  /** 官方服务器固定地址，切换时直接可选，不用手输。 */
-  private static readonly OFFICIAL_SERVER: string = 'https://dsh.r2049.cn';
   @State textScaleValue: number = 1;
   /** 窗口尺寸（vp），PC 上放大窗口时据此调整布局。 */
   @State windowWidthVp: number = 0;
@@ -188,9 +181,6 @@ struct Index {
   @State foldState: FoldState = 'expanded';
   /** 键盘是否弹起：弹起时收起语境胶囊、收窄列表底部留白。 */
   @State keyboardVisible: boolean = false;
-  /** 切换服务器中（与 runtime 同步），用于设备页的即时提示与防重复点击。 */
-  @State switchingServer: boolean = false;
-  @State switchingTo: string = '';
   /** 提示词面板（本地提示词库）。 */
   @State promptPanelOpen: boolean = false;
   /** 执行轨迹面板：把本次会话里的工具调用按顺序列成时间线。 */
@@ -520,9 +510,8 @@ struct Index {
       this.backFromFiles();
       return true;
     }
-    if (this.showServerSwitch || this.showMoreMenu
+    if (this.showMoreMenu
       || this.showSessionPanel || this.showBrowser || this.showSettings) {
-      this.showServerSwitch = false;
       this.showMoreMenu = false;
       this.showModelPicker = false;
       this.showSessionPanel = false;
@@ -752,7 +741,6 @@ struct Index {
     this.currentModelProvider = this.runtime.currentModelProvider;
     this.currentModelEffort = this.runtime.currentModelEffort;
     this.textScaleMode = this.runtime.textScaleMode;
-    this.profilesList = this.runtime.profiles.slice();
     this.textScaleValue = this.runtime.textScale();
     this.permissionPreset = this.runtime.permissionPreset;
     this.permissionOptionsList = this.runtime.permissionOptions.slice();
@@ -802,8 +790,6 @@ struct Index {
         }
       }
     }
-    this.switchingServer = this.runtime.switchingServer;
-    this.switchingTo = this.runtime.switchingTo;
     this.connectedHostName = this.runtime.connectedHostName;
     if (this.reconnecting || this.connectedDeviceId !== this.runtime.connectedDeviceId) {
       this.dshWebOpen = false;
@@ -1076,78 +1062,6 @@ struct Index {
     return this.currentSessionTitle.length > 12;
   }
 
-  /** 当前服务器胶囊文案  /** 顶栏切换按钮的文案：只给「官方 / 本地 / 自定义」短标签，长邮箱不该出现在这里。 */
-  private accountSwitchLabel(): string {
-    const url: string = this.runtime.serverUrl;
-    if (url.length === 0) {
-      return this.tr('切换账号');
-    }
-    const host: string = serverHostLabel(url);
-    if (url.indexOf('dsh.r2049.cn') >= 0) {
-      return this.tr('官方') + ' · ' + host;
-    }
-    if (url.indexOf('192.168.') >= 0 || url.indexOf('127.0.0.1') >= 0 || url.indexOf('localhost') >= 0) {
-      return this.tr('本地') + ' · ' + host;
-    }
-    return host;
-  }
-
-  /** 主机选择页直接切换服务器/账号：列出已保存的登录态，点了就换（不用重输密码）。 */
-  private openAccountSwitcher(): void {
-    this.showMoreMenu = false;
-    this.showServerSwitch = true;
-  }
-
-  /** 服务器候选：已保存的登录态 + 内置的官方/本地出口（去重）。 */
-  private serverChoices(): ServerChoice[] {
-    const out: ServerChoice[] = [];
-    const currentUrl: string = this.runtime.serverUrl;
-    const currentEmail: string = this.runtime.email;
-    const push = (url: string, email: string, profile: SavedProfile | undefined): void => {
-      const emailFull: string = email;
-      for (const existing of out) {
-        // 同一个服务器只留一条（先入为主的是已保存的登录态）
-        if (existing.url === url) {
-          return;
-        }
-      }
-      const choice: ServerChoice = new ServerChoice();
-      choice.url = url;
-      choice.account = this.shortEmail(emailFull);
-      choice.accountFull = emailFull;
-      choice.profile = profile;
-      choice.host = serverHostLabel(url);
-      choice.label = this.serverTag(url);
-      choice.active = url === currentUrl && emailFull === currentEmail;
-      out.push(choice);
-    };
-    for (const profile of this.profilesList) {
-      push(profile.baseUrl, profile.email, profile);
-    }
-    push('https://dsh.r2049.cn', '', undefined);
-    push('http://192.168.11.128:8080', '', undefined);
-    return out;
-  }
-
-  /** 服务器短标签：官方 / 本地 / 自定义。 */
-  private serverTag(url: string): string {
-    if (url.indexOf('dsh.r2049.cn') >= 0) {
-      return this.tr('官方服务器');
-    }
-    if (url.indexOf('192.168.') >= 0 || url.indexOf('127.0.0.1') >= 0 || url.indexOf('localhost') >= 0) {
-      return this.tr('本地服务器');
-    }
-    return this.tr('自定义服务器');
-  }
-
-  /** 邮箱只留前缀并截断，避免长数字串撑行。 */
-  private shortEmail(email: string): string {
-    const at: number = email.indexOf('@');
-    const head: string = at > 0 ? email.substring(0, at) : email;
-    return head.length > 16 ? head.substring(0, 16) + '…' : head;
-  }
-
-  /** 选中某条服务器：有保存的登录态就直接切，没有就带上地址去登录页。 */
   /** 跨天时插一条日期分隔；同一天不打断。 */
   private shouldShowDayDivider(index: number): boolean {
     const rows: ChatItem[] = this.chatRows();
@@ -1419,38 +1333,6 @@ struct Index {
       }
     }
     return '#' + sessionId.substring(sessionId.length - 6);
-  }
-
-  private chooseServerChoice(choice: ServerChoice): void {
-    if (this.switchingServer) {
-      return;
-    }
-    this.showServerSwitch = false;
-    const profile: SavedProfile | undefined = choice.profile;
-    if (profile !== undefined) {
-      if (!choice.active) {
-        this.runtime.switchProfile(profile);
-      }
-      return;
-    }
-    this.prefillAndLogout(choice.url);
-  }
-
-  /** 在已保存登录态里按服务器找一条。 */  /** 在已保存登录态里按服务器找一条。 */
-  private findProfile(baseUrl: string): SavedProfile | undefined {
-    for (const profile of this.profilesList) {
-      if (profile.baseUrl === baseUrl) {
-        return profile;
-      }
-    }
-    return undefined;
-  }
-
-  /** 退出登录并把登录页的服务器地址预填成指定值（点击官方/本地切换时用）。 */
-  private prefillAndLogout(baseUrl: string): void {
-    this.serverInput = baseUrl;
-    this.fieldsPrefilled = true;
-    this.runtime.logout();
   }
 
   /** 文字大小：所有关键字号都过这个函数，改档位就是整体缩放。 */
@@ -2394,9 +2276,6 @@ struct Index {
       if (this.showMoreMenu) {
         this.MoreMenuOverlay()
       }
-      if (this.showServerSwitch) {
-        this.ServerSwitchOverlay()
-      }
       if (this.deviceMenuId.length > 0) {
         this.DeviceMenuOverlay()
       }
@@ -2438,143 +2317,6 @@ struct Index {
     })
   }
 
-  /**
-   * 服务器切换面板：自绘列表，选中项有明确的三重反馈
-   * （左侧青色竖条 + 高亮底 + 右侧 ✓），按下时行底色再压暗一档。
-   */
-  @Builder
-  ServerSwitchOverlay() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.pal().backdrop)
-        .onClick(() => {
-          this.showServerSwitch = false;
-        })
-      Column({ space: 10 }) {
-        Row() {
-          Column({ space: 2 }) {
-            Text(this.tr('切换服务器'))
-              .fontSize(17)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.pal().text)
-            Text(this.tr('点一下即切换，不用重输密码'))
-              .fontSize(11)
-              .fontColor(this.pal().text3)
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-          Text('✕')
-            .fontSize(15)
-            .fontColor(this.pal().text3)
-            .width(30)
-            .height(30)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.showServerSwitch = false;
-            })
-        }
-        .width('100%')
-        .padding({ bottom: 4 })
-        Scroll() {
-          Column({ space: 10 }) {
-            ForEach(this.serverChoices(), (choice: ServerChoice) => {
-          Row({ space: 12 }) {
-            // 单选指示：选中填满品牌色并带内圈白点
-            Stack() {
-              Column()
-                .width(18)
-                .height(18)
-                .borderRadius(9)
-                .border({ width: 2, color: choice.active ? this.pal().primary : this.pal().borderStrong })
-              if (choice.active) {
-                Column()
-                  .width(9)
-                  .height(9)
-                  .borderRadius(4.5)
-                  .backgroundColor(this.pal().primary)
-              }
-            }
-            .width(18)
-            .height(18)
-            Column({ space: 3 }) {
-              Text(choice.label)
-                .fontSize(14)
-                .fontWeight(choice.active ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.pal().text)
-                .width('100%')
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text(choice.account.length > 0 ? choice.host + ' · ' + choice.account : choice.host)
-                .fontSize(11)
-                .fontColor(this.pal().text3)
-                .width('100%')
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-            }
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-            Text(choice.active ? '✓' : '›')
-              .fontSize(choice.active ? 17 : 15)
-              .fontColor(choice.active ? this.pal().primary : this.pal().text3)
-          }
-          .width('100%')
-          .padding({ top: 12, bottom: 12, left: 14, right: 14 })
-          .backgroundColor(choice.active
-            ? this.pal().primarySoft
-            : (this.pressedChoiceKey === choice.url + '|' + choice.account ? this.pal().inputBg : this.pal().card))
-          .borderRadius(14)
-          .border({
-            width: choice.active ? 1.5 : 1,
-            color: choice.active ? this.pal().primary : this.pal().border
-          })
-          .onTouch((event: TouchEvent) => {
-            const key: string = choice.url + '|' + choice.account;
-            if (event.type === TouchType.Down) {
-              this.pressedChoiceKey = key;
-            } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-              this.pressedChoiceKey = '';
-            }
-          })
-          .onClick(() => {
-            this.chooseServerChoice(choice);
-          })
-            }, (choice: ServerChoice) => 'sv-' + choice.url + '|' + choice.account)
-          }
-          .width('100%')
-        }
-        .scrollable(ScrollDirection.Vertical)
-        .scrollBar(BarState.Auto)
-        .constraintSize({ maxHeight: this.windowHeightVp > 0 ? this.windowHeightVp * 0.62 : 460 })
-        .width('100%')
-        Text(this.tr('登录其他服务器…'))
-          .fontSize(13)
-          .fontColor(this.pal().text2)
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .backgroundColor(this.pal().chip)
-          .borderRadius(14)
-          .onClick(() => {
-            this.showServerSwitch = false;
-            this.runtime.logout();
-          })
-      }
-      .width('100%')
-      .constraintSize({ maxWidth: 480 })
-      .padding({ left: 20, right: 20, top: 18, bottom: 24 })
-      .backgroundColor(this.pal().panel)
-      .borderRadius({ topLeft: 20, topRight: 20 })
-      .border({ width: 1, color: this.pal().border })
-      .transition(TransitionEffect.translate({ y: 320 })
-        .combine(TransitionEffect.opacity(0))
-        .animation({ duration: 220, curve: Curve.Friction }))
-    }
-    .width('100%')
-    .height('100%')
-  }
-
   @Builder
   MoreMenuOverlay() {
     Stack({ alignContent: Alignment.TopEnd }) {
@@ -2584,51 +2326,34 @@ struct Index {
         .backgroundColor(this.pal().backdrop)
         .onClick(() => { this.showMoreMenu = false; })
       Column() {
-        this.MoreMenuRow(this.tr('切换服务器'), false, () => {
-          if (this.phase === PHASE_SETUP) {
+        if (this.phase === PHASE_SETUP) {
+          this.MoreMenuRow($r('app.media.ic_refresh'), this.tr('切换服务器'), false, () => {
             this.loginServerEditor = true;
-          } else {
-            this.openAccountSwitcher();
-          }
-        })
-        this.MoreMenuRow(this.tr('会员方案'), false, () => {
-          this.openBrowserLink(MEMBERSHIP_PRICING_URL);
-        })
-        if (this.phase === PHASE_CHAT && !this.reconnecting) {
-          this.MoreMenuRow(this.tr('插件管理'), false, () => {
-            this.pluginsOpen = true;
-            this.pluginSelected = '';
-            this.reloadPlugins();
           })
-        }
-        this.MoreMenuRow(this.tr('设置'), false, () => { this.showSettings = true; })
-        this.MoreMenuRow(this.tr('关于'), false, () => { this.aboutOpen = true; })
-        if (this.phase === PHASE_SETUP && this.profilesList.length > 0) {
-          this.MoreMenuRow(this.tr('已保存的登录（一键进入）'), false, () => { this.openAccountSwitcher(); })
-        }
-        if (this.phase !== PHASE_SETUP) {
-          this.MoreMenuRow(this.tr('管理远程主机'), false, () => { this.openHostManagement(); })
-        }
-        if (this.phase !== PHASE_SETUP) {
-          this.MoreMenuRow(this.tr('执行轨迹'), false, () => { this.trajectoryOpen = true; })
-          this.MoreMenuRow(this.tr('退出登录'), true, () => {
-            AlertDialog.show({
-              title: this.tr('退出登录'),
-              message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
-              autoCancel: true,
-              primaryButton: {
-                value: this.tr('取消'),
-                action: () => {
-                }
-              },
-              secondaryButton: {
-                value: this.tr('退出'),
-                fontColor: this.pal().danger,
-                action: () => {
-                  this.runtime.logout();
-                }
-              }
-            });
+          this.MoreMenuRow($r('app.media.ic_zap'), this.tr('会员方案'), false, () => {
+            this.openBrowserLink(MEMBERSHIP_PRICING_URL);
+          })
+          this.MoreMenuRow($r('app.media.ic_settings'), this.tr('设置'), false, () => { this.showSettings = true; })
+          this.MoreMenuRow($r('app.media.ic_info'), this.tr('关于'), false, () => { this.aboutOpen = true; })
+          this.MoreMenuRow($r('app.media.ic_download'), this.tr('检查更新'), false, () => {
+            this.openBrowserLink(RELEASES_URL);
+          })
+        } else if (this.phase === PHASE_CHAT) {
+          if (!this.reconnecting) {
+            this.MoreMenuRow($r('app.media.ic_puzzle'), this.tr('插件管理'), false, () => {
+              this.pluginsOpen = true;
+              this.pluginSelected = '';
+              this.reloadPlugins();
+            })
+          }
+          this.MoreMenuRow($r('app.media.ic_clock'), this.tr('自动化任务'), false, () => {
+            this.schedulesOpen = true;
+          })
+          this.MoreMenuDivider()
+          this.MoreMenuRow($r('app.media.ic_settings'), this.tr('设置'), false, () => { this.showSettings = true; })
+          this.MoreMenuRow($r('app.media.ic_info'), this.tr('关于'), false, () => { this.aboutOpen = true; })
+          this.MoreMenuRow($r('app.media.ic_download'), this.tr('检查更新'), false, () => {
+            this.openBrowserLink(RELEASES_URL);
           })
         }
       }
@@ -2645,19 +2370,39 @@ struct Index {
   }
 
   @Builder
-  MoreMenuRow(label: string, danger: boolean, action: () => void) {
-    Button(label, { type: ButtonType.Normal })
+  MoreMenuRow(icon: Resource, label: string, danger: boolean, action: () => void) {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: 12 }) {
+        Image(icon)
+          .width(20)
+          .height(20)
+          .fillColor(danger ? this.pal().danger : this.pal().text)
+        Text(label)
+          .fontSize(15)
+          .fontColor(danger ? this.pal().danger : this.pal().text)
+          .layoutWeight(1)
+          .textAlign(TextAlign.Start)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+    }
       .width('100%')
       .height(48)
-      .fontSize(15)
-      .fontColor(danger ? this.pal().danger : this.pal().text)
       .backgroundColor(Color.Transparent)
       .align(Alignment.Start)
-      .padding({ left: 14, right: 14 })
+      .padding({ left: 12, right: 12 })
       .onClick(() => {
         this.showMoreMenu = false;
         action();
       })
+  }
+
+  @Builder
+  MoreMenuDivider() {
+    Divider()
+      .strokeWidth(0.5)
+      .color(this.pal().border)
+      .margin({ left: 12, right: 12, top: 4, bottom: 4 })
   }
 
   private loadMembership(): void {
@@ -2777,10 +2522,6 @@ struct Index {
                     new Date(this.membershipExpiry).toLocaleDateString(this.en() ? 'en-US' : 'zh-CN'), false, undefined)
                 }
               }
-              this.SettingsRow(this.tr('切换服务器'), this.currentServerSummary(), false, () => {
-                this.showSettings = false;
-                this.showServerSwitch = true;
-              })
             }
             .width('100%')
             .backgroundColor(this.pal().card)
@@ -3256,10 +2997,6 @@ struct Index {
     })
   }
 
-  private currentServerSummary(): string {
-    return this.accountSwitchLabel();
-  }
-
   private textScaleLabel(): string {
     if (this.textScaleMode === 0) {
       return this.tr('小') + ' 0.9×';
@@ -3663,19 +3400,6 @@ struct Index {
         .onClick(() => {
           this.runtime.refreshDevices();
         })
-        Button({ type: ButtonType.Normal }) {
-          Image($r('app.media.ic_more'))
-            .width(19)
-            .height(19)
-            .rotate({ angle: 90 })
-            .fillColor(this.pal().text)
-        }
-        .width(44)
-        .height(44)
-        .padding(0)
-        .backgroundColor(Color.Transparent)
-        .accessibilityText(this.tr('更多'))
-        .onClick(() => { this.showMoreMenu = true; })
       }
       .width('100%')
       .padding({ left: 20, right: 12, top: 12 })
@@ -3691,9 +3415,7 @@ struct Index {
             .width(18)
             .height(18)
             .color(this.pal().primary)
-          Text(this.switchingServer && this.switchingTo.length > 0
-            ? this.tr('正在切换服务器…') + ' ' + serverHostLabel(this.switchingTo)
-            : this.tr('正在刷新设备…'))
+          Text(this.tr('正在刷新设备…'))
             .fontSize(13)
             .fontColor(this.pal().text2)
             .layoutWeight(1)
@@ -3809,16 +3531,6 @@ struct Index {
               .borderRadius(10)
               .onClick(() => {
                 this.runtime.refreshDevices();
-              })
-            Text(this.tr('切换服务器'))
-              .fontSize(this.fs(12))
-              .fontColor(this.pal().text2)
-              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-              .backgroundColor(this.pal().chip)
-              .borderRadius(10)
-              .border({ width: 1, color: this.pal().border })
-              .onClick(() => {
-                this.showServerSwitch = true;
               })
           }
           .padding({ top: 2 })
@@ -4038,6 +3750,7 @@ struct Index {
           (this.currentModelLabel.length > 0 ? this.chatModelLabel() : this.tr('更换模型')),
         drawerInline: this.isLandscape,
         hasSession: this.currentSessionId.length > 0,
+        trajectoryOpen: this.trajectoryOpen,
         titleSize: this.fs(15.5),
         subtitleSize: this.fs(12),
         onDrawer: () => {
@@ -4052,7 +3765,7 @@ struct Index {
           this.runtime.refreshModelCatalog();
           this.showModelPicker = true;
         },
-        onTrajectory: () => { this.trajectoryOpen = true; },
+        onCloseTrajectory: () => { this.trajectoryOpen = false; },
         onNewChat: () => {
           this.closeDrawer();
           this.runtime.createNewSession();
@@ -5911,6 +5624,15 @@ struct Index {
             }
 
             this.SettingsRow(this.tr('终端'), '', false, () => { this.openTerminalPage(); })
+            this.SettingsRow(
+              this.trajectoryOpen ? this.tr('切换到对话模式') : this.tr('切换到轨迹模式'),
+              '',
+              false,
+              () => {
+                this.showSessionPanel = false;
+                this.trajectoryOpen = !this.trajectoryOpen;
+              }
+            )
 
             // —— 模型 ——
             Row({ space: 10 }) {
@@ -8189,7 +7911,7 @@ struct Index {
       })
       Scroll() {
         Column() {
-          Image($r('app.media.about_icon'))
+          Image($r('app.media.icon'))
             .width(84)
             .height(84)
             .borderRadius(22)
@@ -9248,19 +8970,6 @@ function decodeBase64Image(base64: string): Promise<PixelMap> {
   const bytes: Uint8Array = new util.Base64Helper().decodeSync(base64);
   const source: image.ImageSource = image.createImageSource(bytes.buffer as ArrayBuffer);
   return source.createPixelMap();
-}
-
-/** 服务器切换面板的一行。 */
-class ServerChoice {
-  url: string = '';
-  /** 显示用的短账号（截断过）。 */
-  account: string = '';
-  /** 完整账号，用来判定「是不是当前这条」。 */
-  accountFull: string = '';
-  label: string = '';
-  host: string = '';
-  active: boolean = false;
-  profile: SavedProfile | undefined = undefined;
 }
 
 /** 设置面板里的一项主题选择。 */

@@ -37,9 +37,6 @@ const KEY_THEME_TINT = 'dshremote.themeTint.v1';
 const KEY_PET = 'dshremote.pet.v1';
 /** 已发送文本里的 Key/Token 默认打码。 */
 const KEY_SECRET_MASK = 'dshremote.secretMask.v1';
-/** 多服务器/多账号：一份「已登录过的服务器」快照列表（含 token），存在 asset store 里。 */
-const ASSET_ALIAS_PROFILES = 'dshremote.profiles';
-
 // Secrets never live in the plaintext KV. They go to the system Asset Store, which is
 // guarded by the device lock credential and (with SyncType.NEVER) never leaves this device.
 const ASSET_ALIAS_CREDENTIALS = 'dshremote.credentials.v1';
@@ -358,58 +355,6 @@ export class SecureStore {
 
   async saveDeviceAliases(aliases: Record<string, string>): Promise<void> {
     await this.putSync(KEY_DEVICE_ALIASES, JSON.stringify(aliases));
-  }
-
-  /** 已保存的一套「服务器 + 账号 + 凭据」，用于一键切换而不必重新登录。 */
-  loadProfiles(): SavedProfile[] {
-    const text: string = this.getSync(KEY_HOST_PINS + '.profiles', '');
-    if (text.length === 0) {
-      return [];
-    }
-    try {
-      const root: Object = JSON.parse(text) as Object;
-      const list: Object[] | undefined = asArray(root);
-      const out: SavedProfile[] = [];
-      if (list !== undefined) {
-        for (const item of list) {
-          const record: Record<string, Object> | undefined = asRecord(item);
-          if (record === undefined) {
-            continue;
-          }
-          const profile: SavedProfile = new SavedProfile();
-          profile.baseUrl = jsonStr(record, 'baseUrl', '');
-          profile.email = jsonStr(record, 'email', '');
-          profile.accessToken = jsonStr(record, 'accessToken', '');
-          profile.accessTokenExpiresAt = jsonNum(record, 'accessTokenExpiresAt', 0);
-          profile.refreshToken = jsonStr(record, 'refreshToken', '');
-          profile.refreshTokenExpiresAt = jsonNum(record, 'refreshTokenExpiresAt', 0);
-          profile.deviceId = jsonStr(record, 'deviceId', '');
-          if (profile.baseUrl.length > 0 && profile.email.length > 0) {
-            out.push(profile);
-          }
-        }
-      }
-      return out;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  async saveProfiles(profiles: SavedProfile[]): Promise<void> {
-    const list: Object[] = [];
-    for (const profile of profiles) {
-      const body: Record<string, Object> = {
-        'baseUrl': profile.baseUrl,
-        'email': profile.email,
-        'accessToken': profile.accessToken,
-        'accessTokenExpiresAt': profile.accessTokenExpiresAt,
-        'refreshToken': profile.refreshToken,
-        'refreshTokenExpiresAt': profile.refreshTokenExpiresAt,
-        'deviceId': profile.deviceId
-      };
-      list.push(body);
-    }
-    await this.putSync(KEY_HOST_PINS + '.profiles', JSON.stringify(list));
   }
 
   loadAutoConnectLastHost(): boolean {
@@ -965,15 +910,4 @@ export class SecureStore {
     prefs.putSync(key, value);
     await prefs.flush();
   }
-}
-
-/** 一套已保存的登录态：服务器 + 账号 + token（token 与主凭据同源，切换时直接复用）。 */
-export class SavedProfile {
-  baseUrl: string = '';
-  email: string = '';
-  accessToken: string = '';
-  accessTokenExpiresAt: number = 0;
-  refreshToken: string = '';
-  refreshTokenExpiresAt: number = 0;
-  deviceId: string = '';
 }

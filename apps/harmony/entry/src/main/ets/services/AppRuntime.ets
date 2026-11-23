@@ -8,7 +8,7 @@ import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { notificationManager } from '@kit.NotificationKit';
-import { SecureStore, StoredServerConfig, SavedProfile } from './SecureStore';
+import { SecureStore, StoredServerConfig } from './SecureStore';
 import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
   AccountMembership, OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
 import { CloseVerdict, RelayConnectionInfo, RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
@@ -364,9 +364,6 @@ export class AppRuntime {
   /** 完成通知开关（默认开），以及 App 是否在后台——只有后台才值得打扰。 */
   /** busy 的起始时间，用于泄漏自愈。 */
   private busySince: number = 0;
-  /** 切换服务器时用的独立锁：不再共用 busy，避免别处的 busy 把切换挡回去。 */
-  switchingServer: boolean = false;
-  switchingTo: string = '';
   notificationsEnabled: boolean = true;
   appBackground: boolean = false;
   /** 系统网络是否可用（断网时立刻把 UI 变灰，而不是等 socket 自己断）。 */
@@ -383,8 +380,6 @@ export class AppRuntime {
   languageMode: number = 0;
   /** 文字大小档位：0 小 / 1 标准 / 2 大 / 3 特大（对应 0.9 / 1.0 / 1.15 / 1.3 倍）。 */
   textScaleMode: number = 1;
-  /** 已保存的服务器/账号登录态（一键切换，不用重输密码）。 */
-  profiles: SavedProfile[] = [];
   /** 设备身份读不出来（安全存储不可用）时置位，解锁回到前台后自动重试。 */
   identityBlocked: boolean = false;
   /** 服务端下发的 ICE 配置（空串表示没有），将来给 RtcBridge.startOffer 用。 */
@@ -586,7 +581,6 @@ export class AppRuntime {
       this.showInspector = this.store.loadShowInspector();
       this.compactHistory = this.store.loadCompactHistory();
       this.secretMask = this.store.loadSecretMask();
-      this.profiles = this.store.loadProfiles();
       this.drafts = this.store.loadDrafts();
       this.prompts = this.store.loadPrompts();
       const meta: Record<string, string[]> = this.store.loadSessionMeta();
@@ -663,7 +657,6 @@ export class AppRuntime {
       this.email = config.email;
       this.phase = PHASE_DEVICES;
       this.setBusy(false);
-      await this.rememberProfile();
       this.notify();
       await this.refreshDevices();
       return;
@@ -1316,8 +1309,6 @@ export class AppRuntime {
     NetTrace.reset();
     this.sessionsSnapshot = [];
     this.sessionsSnapshotHost = '';
-    // 退出前先把手上的登录态存成 profile：以后在设置里一键切回来，不用重输密码
-    await this.rememberProfile();
     this.phase = PHASE_SETUP;
     this.setBusy(false);
     this.errorMsg = '';
@@ -1875,105 +1866,6 @@ export class AppRuntime {
       logInfo('slash command not handled, falling back to prompt: ' + line.split(' ')[0]);
       return false;
     }
-  }
-
-  /** 把当前 config+credentials 记成一份 profile（同一 server+账号则覆盖）。 */
-  private async rememberProfile(): Promise<void> {
-    const config: StoredServerConfig | undefined = this.config;
-    const credentials: TokenPair | undefined = this.credentials;
-    const identity: DeviceIdentity | undefined = this.identity;
-    if (config === undefined || credentials === undefined) {
-      return;
-    }
-    const next: SavedProfile[] = [];
-    for (const existing of this.profiles) {
-      if (existing.baseUrl !== config.baseUrl || existing.email !== config.email) {
-        next.push(existing);
-      }
-    }
-    const profile: SavedProfile = new SavedProfile();
-    profile.baseUrl = config.baseUrl;
-    profile.email = config.email;
-    profile.accessToken = credentials.accessToken;
-    profile.accessTokenExpiresAt = credentials.accessTokenExpiresAt;
-    profile.refreshToken = credentials.refreshToken;
-    profile.refreshTokenExpiresAt = credentials.refreshTokenExpiresAt;
-    profile.deviceId = identity !== undefined ? identity.deviceId : '';
-    next.unshift(profile);
-    this.profiles = next;
-    try {
-      await this.store.saveProfiles(next);
-    } catch (error) {
-      logWarn('save profiles failed');
-    }
-  }
-
-  /** 切换到一个已保存的服务器/账号：不需要重新输密码。 */
-  async switchProfile(profile: SavedProfile): Promise<void> {
-    if (this.switchingServer) {
-      return;
-    }
-    this.switchingServer = true;
-    this.switchingTo = profile.baseUrl;
-    this.errorMsg = '';
-    // 先把内存状态切过去，界面立刻有反应；落盘、旧连接清理都放到后面
-    const config: StoredServerConfig = new StoredServerConfig();
-    config.baseUrl = profile.baseUrl;
-    config.email = profile.email;
-    const tokens: TokenPair = new TokenPair();
-    tokens.accessToken = profile.accessToken;
-    tokens.accessTokenExpiresAt = profile.accessTokenExpiresAt;
-    tokens.refreshToken = profile.refreshToken;
-    tokens.refreshTokenExpiresAt = profile.refreshTokenExpiresAt;
-    this.config = config;
-    this.credentials = tokens;
-    this.serverUrl = config.baseUrl;
-    this.email = config.email;
-    this.phase = PHASE_DEVICES;
-    this.devices = [];
-    // 换到另一套服务器/账号：打点与抖动计数清零，否则数字会串到上一台头上
-    NetTrace.reset();
-    this.sessionsSnapshot = [];
-    this.sessionsSnapshotHost = '';
-    this.setBusy(true);
-    this.notify();
-    // 旧连接是同步拆的（关闭 WS、销毁 core），丢到下一帧别挡点击响应
-    setTimeout(() => {
-      try {
-        this.teardownConnection();
-        this.clearReconnectTimer();
-      } catch (error) {
-        logWarn('teardown on switch failed');
-      }
-    }, 0);
-    try {
-      await this.store.saveConfig(config);
-      await this.store.saveCredentials(tokens);
-      const identity: DeviceIdentity = await this.store.loadOrCreateIdentity();
-      this.identity = identity;
-      this.notify();
-      await this.rememberProfile();
-    } catch (error) {
-      this.errorMsg = errorMessage(error);
-    }
-    this.switchingServer = false;
-    this.switchingTo = '';
-    this.notify();
-    // 设备列表单独刷新：失败只影响列表，不会把整个切换判死
-    this.refreshDevices().catch(() => undefined);
-  }
-
-  /** 删掉一套保存的登录态（不影响服务端注册）。 */
-  async forgetProfile(profile: SavedProfile): Promise<void> {
-    const next: SavedProfile[] = [];
-    for (const existing of this.profiles) {
-      if (existing.baseUrl !== profile.baseUrl || existing.email !== profile.email) {
-        next.push(existing);
-      }
-    }
-    this.profiles = next;
-    await this.store.saveProfiles(next);
-    this.notify();
   }
 
   /** 载入 Host 工作区列表。 */

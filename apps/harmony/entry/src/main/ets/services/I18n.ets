@@ -120,6 +120,7 @@ function buildEnglish(): Map<string, string> {
   map.set('请在主机上重启 DeepSeek Harness', 'Restart DeepSeek Harness on the Host');
   map.set('无法读取主机插件，请检查连接和主机版本后重试。', 'Could not load Host plugins. Check the connection and Host version, then retry.');
   map.set('插件管理', 'Plugins');
+  map.set('自动化任务', 'Automation tasks');
   map.set('打开 DSH Web', 'Open DSH Web');
   map.set('无法打开 DSH Web，请重试。', 'Could not open DSH Web. Please try again.');
   map.set('正在建立 DSH Web 连接…', 'Establishing the DSH Web connection…');
@@ -170,6 +171,7 @@ function buildEnglish(): Map<string, string> {
   map.set('选择模型', 'Select model');
   map.set('模型目录为空', 'No models available');
   map.set('关于', 'About');
+  map.set('检查更新', 'Check for updates');
   map.set('聊天外观', 'Chat appearance');
   map.set('实时效果预览', 'Live preview');
   map.set('帮我总结一下这次改动。', 'Summarize the changes.');
@@ -353,20 +355,9 @@ function buildEnglish(): Map<string, string> {
   map.set('工作区信息', 'Workspace info');
   map.set('工作区目录', 'Workspace directory');
   map.set('服务器', 'Server');
-  map.set('切换账号', 'Switch account');
-  map.set('已保存的登录（一键进入）', 'Saved sign-ins (one tap)');
   map.set('进入', 'Enter');
   map.set('切换服务器', 'Switch server');
   map.set('更多', 'More');
-  map.set('常用', 'Presets');
-  map.set('本地', 'Local');
-  map.set('官方服务器', 'Official server');
-  map.set('本地服务器', 'Local server');
-  map.set('自定义服务器', 'Custom server');
-  map.set('点一下即切换，不用重输密码', 'Tap to switch — no password needed');
-  map.set('登录其他服务器…', 'Sign in to another server…');
-  map.set('已保存的登录态，点一下就切（无需重新输密码）',
-    'Saved sign-ins — tap one to switch, no password needed');
   map.set('切换', 'Switch');
   map.set('当前', 'Current');
   map.set('更换', 'Change');
@@ -526,6 +517,9 @@ function buildEnglish(): Map<string, string> {
   map.set('归档会话', 'Archive session');
   map.set('快捷入口', 'Shortcuts');
   map.set('执行轨迹', 'Execution trace');
+  map.set('更多操作', 'More actions');
+  map.set('切换到轨迹模式', 'Switch to trajectory');
+  map.set('切换到对话模式', 'Switch to conversation');
   map.set('挑一条常用提示词填进输入框', 'Pick a saved prompt to fill the composer');
   map.set('换一套氛围色（背景/面板/表面），强调色保持不变', 'Pick a mood palette (background / panel / surface); the accent color stays');
   map.set('提示词', 'Prompts');
