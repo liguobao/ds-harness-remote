@@ -58,6 +58,7 @@ export interface HandoffSessionParams {
   targetBackend: AgentBackend
   targetWorkspaceId?: string
   registerPath?: string
+  targetSessionId?: string
   instruction: string
   packet: HandoffPacket
   mode: 'send' | 'draft'

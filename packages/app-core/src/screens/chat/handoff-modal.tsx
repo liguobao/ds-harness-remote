@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,13 +12,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   AlertCircle,
   ArrowLeft,
+  ArrowRight,
   ArrowRightLeft,
   Check,
   Eye,
   FileCode2,
   Folder,
   FolderPlus,
+  History,
+  MessageSquare,
   MoreHorizontal,
+  Plus,
+  RotateCcw,
   X,
 } from 'lucide-react-native'
 import {
@@ -26,12 +32,17 @@ import {
   type HandoffPreset,
   type PendingHandoffDraft,
 } from '../../lib/handoff-context'
-import { availableHandoffTargets, matchTargetWorkspace } from '../../lib/handoff-workspace'
+import {
+  availableHandoffTargets,
+  findLatestHandoffOrigin,
+  matchTargetWorkspace,
+  resolveHandoffTargetSessions,
+} from '../../lib/handoff-workspace'
 import { strings } from '../../locales/i18n'
 import { useAppStore } from '../../state/store'
 import { selectCustomAcpBackends, type HandoffSessionResult } from '../../state/store-state'
 import type { AgentBackend, ChatItem, RemoteSession, WorkspaceView } from '../../types'
-import { Button, ErrorBanner, GroupCard, GroupRow, IconButton } from '../../ui/components'
+import { ErrorBanner, GroupCard, GroupRow, IconButton } from '../../ui/components'
 import { maskPersonalPath } from '../../ui/mention-helpers'
 import { continuousRadius, monoFontFamily } from '../../ui/platform-style'
 import { SheetModal } from '../../ui/sheet'
@@ -86,7 +97,11 @@ type WorkspaceChoice =
   | { mode: 'register'; path: string }
   | undefined
 
-type HandoffSubView = 'main' | 'target' | 'workspace' | 'preview'
+type SessionChoice =
+  | { mode: 'new' }
+  | { mode: 'existing'; sessionId: string }
+
+type HandoffSubView = 'main' | 'target' | 'workspace' | 'session' | 'preview'
 
 const VISIBLE_EDITED_FILES_CAP = 4
 
@@ -114,6 +129,8 @@ export function HandoffModal({
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
   const handoffSession = useAppStore(state => state.handoffSession)
   const workspaces = useAppStore(state => state.workspaces)
+  const sessions = useAppStore(state => state.sessions)
+  const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
   const selectedDevice = useAppStore(state => state.selectedDevice)
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const codexAvailable = useAppStore(state => state.codexAvailable)
@@ -168,6 +185,7 @@ export function HandoffModal({
   const [reloadToken, setReloadToken] = useState(0)
   const [targetBackend, setTargetBackend] = useState<AgentBackend | undefined>(() => targets[0])
   const [workspaceChoice, setWorkspaceChoice] = useState<WorkspaceChoice>(undefined)
+  const [sessionChoice, setSessionChoice] = useState<SessionChoice>({ mode: 'new' })
   const [refreshingTargetWorkspaces, setRefreshingTargetWorkspaces] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string>()
@@ -179,7 +197,9 @@ export function HandoffModal({
   sourceSessionRef.current = sourceSession
   const targetsRef = useRef(targets)
   targetsRef.current = targets
+  const targetTouchedRef = useRef(false)
   const workspaceTouchedRef = useRef(false)
+  const sessionTouchedRef = useRef(false)
   const refreshedBackendsRef = useRef<Set<AgentBackend>>(new Set())
   const refreshEpochRef = useRef(0)
   const submittingRef = useRef(false)
@@ -200,11 +220,14 @@ export function HandoffModal({
       refreshEpochRef.current += 1
       return
     }
+    targetTouchedRef.current = false
     workspaceTouchedRef.current = false
+    sessionTouchedRef.current = false
     refreshedBackendsRef.current.clear()
     setSubView('main')
     setTargetBackend(targetsRef.current[0])
     setWorkspaceChoice(undefined)
+    setSessionChoice({ mode: 'new' })
     setSubmitting(false)
     setSubmitError(undefined)
   }, [visible, sourceSessionId])
@@ -218,6 +241,7 @@ export function HandoffModal({
     }
     if (targetBackend === undefined || !targets.includes(targetBackend)) {
       workspaceTouchedRef.current = false
+      sessionTouchedRef.current = false
       setTargetBackend(targets[0])
     }
   }, [visible, targets, targetBackend])
@@ -339,12 +363,77 @@ export function HandoffModal({
     )
   }, [workspaceChoice, workspaces, targetBackend])
 
+  const incomingOrigin = useMemo(() => findLatestHandoffOrigin(items), [items])
+
+  // Auto-select the agent that handed context into this conversation so bounce-back flows (e.g. Claude -> Codex -> Claude) take one tap.
+  useEffect(() => {
+    if (!visible || loadingHistory || targetTouchedRef.current || incomingOrigin === undefined) return
+    if (incomingOrigin.sourceSessionId === sourceSessionId) return
+    if (!targets.includes(incomingOrigin.sourceBackend)) return
+    setTargetBackend(current => {
+      if (current === incomingOrigin.sourceBackend) return current
+      workspaceTouchedRef.current = false
+      sessionTouchedRef.current = false
+      return incomingOrigin.sourceBackend
+    })
+  }, [visible, loadingHistory, incomingOrigin, targets, sourceSessionId])
+
   const hasHandoffContent = packet !== undefined && (packet.meta.turnsCount > 0 || packet.editedFiles.length > 0)
   const hasValidWorkspace = workspaceChoice !== undefined && (
     workspaceChoice.mode === 'register'
       ? workspaceChoice.path.trim().length > 0
       : selectedExistingWorkspace !== undefined
   )
+
+  const targetSessionResolution = useMemo(() => {
+    if (targetBackend === undefined || !hasValidWorkspace) {
+      return { originSession: undefined, sessions: [] }
+    }
+    return resolveHandoffTargetSessions({
+      items,
+      sessions,
+      targetBackend,
+      targetWorkspace: selectedExistingWorkspace,
+      registerPath: workspaceChoice?.mode === 'register' ? workspaceChoice.path : undefined,
+      archivedSessionIds,
+      sourceSessionId,
+      hostPlatform: selectedDevice?.platform,
+    })
+  }, [
+    items,
+    sessions,
+    targetBackend,
+    hasValidWorkspace,
+    selectedExistingWorkspace,
+    workspaceChoice,
+    archivedSessionIds,
+    sourceSessionId,
+    selectedDevice?.platform,
+  ])
+
+  useEffect(() => {
+    if (!visible || targetBackend === undefined || !hasValidWorkspace) {
+      setSessionChoice({ mode: 'new' })
+      return
+    }
+    const eligibleIds = new Set(targetSessionResolution.sessions.map(item => item.session.sessionId))
+    setSessionChoice(current => {
+      if (sessionTouchedRef.current) {
+        if (current.mode === 'new') return current
+        if (eligibleIds.has(current.sessionId)) return current
+      }
+      if (targetSessionResolution.originSession !== undefined) {
+        return { mode: 'existing', sessionId: targetSessionResolution.originSession.sessionId }
+      }
+      return { mode: 'new' }
+    })
+  }, [visible, targetBackend, hasValidWorkspace, targetSessionResolution])
+
+  const selectedTargetOption = useMemo(() => {
+    if (sessionChoice.mode !== 'existing') return undefined
+    return targetSessionResolution.sessions.find(item => item.session.sessionId === sessionChoice.sessionId)
+  }, [sessionChoice, targetSessionResolution])
+
   const canSubmit = connected
     && !loadingHistory
     && historyError === undefined
@@ -369,8 +458,10 @@ export function HandoffModal({
 
   const handleSelectTarget = (backend: AgentBackend) => {
     if (submitting) return
+    targetTouchedRef.current = true
     if (backend !== targetBackend) {
       workspaceTouchedRef.current = false
+      sessionTouchedRef.current = false
       setSubmitError(undefined)
       setTargetBackend(backend)
     }
@@ -385,11 +476,13 @@ export function HandoffModal({
     setSubmitting(true)
     setSubmitError(undefined)
     try {
+      const targetSessionId = selectedTargetOption?.session.sessionId
       const result = await handoffSession({
         targetBackend,
         ...(workspaceChoice.mode === 'existing'
           ? { targetWorkspaceId: workspaceChoice.workspaceId }
           : { registerPath: workspaceChoice.path }),
+        ...(targetSessionId !== undefined ? { targetSessionId } : {}),
         instruction: '',
         packet,
         mode: 'draft',
@@ -401,7 +494,11 @@ export function HandoffModal({
       }
       onClose()
       onCompleted?.(result)
-      AccessibilityInfo.announceForAccessibility(strings.handoff.handoffSuccess)
+      AccessibilityInfo.announceForAccessibility(
+        targetSessionId !== undefined
+          ? strings.handoff.handoffExistingSuccess
+          : strings.handoff.handoffSuccess,
+      )
     } catch (error) {
       if (!mountedRef.current || !visibleRef.current) return
       setSubmitError(error instanceof Error ? error.message : strings.errors.unknown)
@@ -453,13 +550,46 @@ export function HandoffModal({
     }
   })()
 
+  const hasSessionOptions = targetSessionResolution.sessions.length > 0
+  const sessionRowInfo = (() => {
+    if (selectedTargetOption !== undefined) {
+      const title = sessionTitle(selectedTargetOption.session)
+      if (selectedTargetOption.isOrigin) {
+        return {
+          value: strings.handoff.originSessionTag,
+          detail: strings.handoff.originSessionDetail(title),
+        }
+      }
+      return {
+        value: strings.handoff.existingSessionTag,
+        detail: title,
+      }
+    }
+    return {
+      value: strings.handoff.newSessionTag,
+      detail: hasSessionOptions
+        ? strings.handoff.newSessionSwitchHint(targetSessionResolution.sessions.length)
+        : strings.handoff.newSessionDetail,
+    }
+  })()
+
+  const submitLabel = targetBackend === undefined
+    ? strings.handoff.continueAction
+    : selectedTargetOption?.isOrigin
+      ? strings.handoff.continueInOrigin(harnessDisplayName(targetBackend))
+      : selectedTargetOption !== undefined
+        ? strings.handoff.continueInExisting(harnessDisplayName(targetBackend))
+        : strings.handoff.continueInTarget(harnessDisplayName(targetBackend))
+
   const headerTitle = subView === 'target'
     ? strings.handoff.targetAgent
     : subView === 'workspace'
       ? strings.handoff.targetWorkspace
-      : subView === 'preview'
-        ? strings.handoff.previewModalTitle
-        : strings.handoff.title
+      : subView === 'session'
+        ? strings.handoff.targetSession
+        : subView === 'preview'
+          ? strings.handoff.previewModalTitle
+          : strings.handoff.title
 
   const scrollMaxHeight = Math.max(
     180,
@@ -541,6 +671,17 @@ export function HandoffModal({
                   chevron={hasWorkspaceOptions}
                   disabled={submitting || !hasWorkspaceOptions}
                   onPress={hasWorkspaceOptions ? () => setSubView('workspace') : undefined}
+                />
+              )}
+              {targetBackend !== undefined && hasValidWorkspace && (
+                <GroupRow
+                  icon={selectedTargetOption?.isOrigin ? History : MessageSquare}
+                  label={strings.handoff.targetSession}
+                  value={sessionRowInfo.value}
+                  detail={sessionRowInfo.detail}
+                  chevron={hasSessionOptions}
+                  disabled={submitting || !hasSessionOptions}
+                  onPress={hasSessionOptions ? () => setSubView('session') : undefined}
                 />
               )}
             </GroupCard>
@@ -672,6 +813,7 @@ export function HandoffModal({
                       accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         workspaceTouchedRef.current = true
+                        sessionTouchedRef.current = false
                         setWorkspaceChoice({ mode: 'existing', workspaceId: matched.workspaceId })
                         setSubView('main')
                       }}
@@ -697,6 +839,7 @@ export function HandoffModal({
                       accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         workspaceTouchedRef.current = true
+                        sessionTouchedRef.current = false
                         setWorkspaceChoice({ mode: 'register', path: sourceCwd })
                         setSubView('main')
                       }}
@@ -726,6 +869,7 @@ export function HandoffModal({
                         accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
                         onPress={() => {
                           workspaceTouchedRef.current = true
+                          sessionTouchedRef.current = false
                           setWorkspaceChoice({ mode: 'existing', workspaceId: workspace.workspaceId })
                           setSubView('main')
                         }}
@@ -735,6 +879,88 @@ export function HandoffModal({
                 </GroupCard>
               </View>
             )}
+          </View>
+        )}
+
+        {subView === 'session' && (
+          <View style={styles.subViewStack}>
+            {targetSessionResolution.originSession !== undefined && (() => {
+              const origin = targetSessionResolution.originSession
+              const selected = sessionChoice.mode === 'existing'
+                && sessionChoice.sessionId === origin.sessionId
+              return (
+                <View style={styles.sectionBlock}>
+                  <Text style={styles.sectionLabel}>{strings.handoff.originSessionSection}</Text>
+                  <GroupCard>
+                    <GroupRow
+                      first
+                      icon={History}
+                      label={sessionTitle(origin)}
+                      detail={strings.handoff.originSessionHint}
+                      selected={selected}
+                      chevron={false}
+                      accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      onPress={() => {
+                        sessionTouchedRef.current = true
+                        setSessionChoice({ mode: 'existing', sessionId: origin.sessionId })
+                        setSubView('main')
+                      }}
+                    />
+                  </GroupCard>
+                </View>
+              )
+            })()}
+
+            <View style={styles.sectionBlock}>
+              <GroupCard>
+                <GroupRow
+                  first
+                  icon={Plus}
+                  label={strings.handoff.newSessionTag}
+                  detail={strings.handoff.newSessionDetail}
+                  selected={sessionChoice.mode === 'new'}
+                  chevron={false}
+                  accessory={sessionChoice.mode === 'new' ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                  onPress={() => {
+                    sessionTouchedRef.current = true
+                    setSessionChoice({ mode: 'new' })
+                    setSubView('main')
+                  }}
+                />
+              </GroupCard>
+            </View>
+
+            {(() => {
+              const nonOriginSessions = targetSessionResolution.sessions.filter(item => !item.isOrigin)
+              if (nonOriginSessions.length === 0) return null
+              return (
+                <View style={styles.sectionBlock}>
+                  <Text style={styles.sectionLabel}>{strings.handoff.existingSessionsSection}</Text>
+                  <GroupCard>
+                    {nonOriginSessions.map((option, index) => {
+                      const selected = sessionChoice.mode === 'existing'
+                        && sessionChoice.sessionId === option.session.sessionId
+                      return (
+                        <GroupRow
+                          key={option.session.sessionId}
+                          first={index === 0}
+                          icon={MessageSquare}
+                          label={sessionTitle(option.session)}
+                          selected={selected}
+                          chevron={false}
+                          accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                          onPress={() => {
+                            sessionTouchedRef.current = true
+                            setSessionChoice({ mode: 'existing', sessionId: option.session.sessionId })
+                            setSubView('main')
+                          }}
+                        />
+                      )
+                    })}
+                  </GroupCard>
+                </View>
+              )
+            })()}
           </View>
         )}
 
@@ -783,15 +1009,32 @@ export function HandoffModal({
               <Text style={styles.submitErrorText}>{submitError}</Text>
             </View>
           )}
-          <Button
-            label={targetBackend !== undefined
-              ? strings.handoff.continueInTarget(harnessDisplayName(targetBackend))
-              : strings.handoff.continueAction}
-            variant="primary"
-            loading={submitting}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={submitLabel}
+            accessibilityState={{ disabled: !canSubmit, busy: submitting }}
             disabled={!canSubmit}
             onPress={() => void handleSubmit()}
-          />
+            style={({ pressed }) => [
+              styles.submitButton,
+              !canSubmit && styles.submitButtonDisabled,
+              pressed && canSubmit && styles.submitButtonPressed,
+            ]}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color={canSubmit ? (colors.onInverse ?? colors.white) : colors.muted} />
+            ) : selectedTargetOption?.isOrigin ? (
+              <RotateCcw size={16} color={canSubmit ? (colors.onInverse ?? colors.white) : colors.muted} strokeWidth={2.2} />
+            ) : (
+              <ArrowRight size={16} color={canSubmit ? (colors.onInverse ?? colors.white) : colors.muted} strokeWidth={2.2} />
+            )}
+            <Text
+              numberOfLines={1}
+              style={[styles.submitButtonText, !canSubmit && styles.submitButtonTextDisabled]}
+            >
+              {submitLabel}
+            </Text>
+          </Pressable>
         </View>
       )}
     </SheetModal>
@@ -903,6 +1146,36 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   footer: {
     marginTop: spacing.md,
     gap: spacing.xs,
+  },
+  submitButton: {
+    alignSelf: 'center',
+    minWidth: 210,
+    maxWidth: '100%',
+    height: 44,
+    paddingHorizontal: spacing.xl,
+    ...continuousRadius(radius.pill),
+    backgroundColor: colors.inverse,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  submitButtonDisabled: {
+    backgroundColor: colors.surfaceStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separator,
+  },
+  submitButtonPressed: {
+    opacity: 0.84,
+  },
+  submitButtonText: {
+    ...type.bodyStrong,
+    fontSize: 15,
+    lineHeight: 20,
+    color: colors.onInverse ?? colors.white,
+  },
+  submitButtonTextDisabled: {
+    color: colors.muted,
   },
   submitErrorBanner: {
     flexDirection: 'row',

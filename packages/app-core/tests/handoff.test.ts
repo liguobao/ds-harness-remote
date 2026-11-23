@@ -136,7 +136,12 @@ import {
   parseHandoffMessage,
   type HandoffMeta,
 } from '../src/lib/handoff-context'
-import { availableHandoffTargets, matchTargetWorkspace } from '../src/lib/handoff-workspace'
+import {
+  availableHandoffTargets,
+  findLatestHandoffOrigin,
+  matchTargetWorkspace,
+  resolveHandoffTargetSessions,
+} from '../src/lib/handoff-workspace'
 import { strings as zhCN } from '../src/locales/i18n'
 import { browseKey, browseScope, saveSessionMessagesSnapshot, useBrowseMemory } from '../src/services/browse-memory'
 import { storeAcpPagedMessages } from '../src/state/session-actions'
@@ -1570,6 +1575,285 @@ describe('session-actions handoff integration', () => {
             })
             expect(res).toEqual({ ok: false, error: zhCN.handoff.noWorkspaceAvailable })
             expect(proxy.sessionCreate).not.toHaveBeenCalled()
+          },
+        },
+      ])
+    })
+
+    it('resolves origin and eligible target sessions in the same worktree and fails closed on ineligible sessions', async () => {
+      const wtPath = 'C:\\Users\\Dev\\Project\\.worktrees\\feat-handoff'
+      const claudeWs: WorkspaceView = {
+        workspaceId: 'claude-wt',
+        backend: 'claude',
+        path: wtPath,
+        title: 'feat-handoff',
+        sessionIds: ['claude:orig', 'claude:other-older', 'claude:blank-draft'],
+        createdAt: '',
+        updatedAt: '',
+      }
+      const otherWs: WorkspaceView = {
+        workspaceId: 'claude-other',
+        backend: 'claude',
+        path: 'C:\\Users\\Dev\\Project',
+        title: 'main-repo',
+        sessionIds: ['claude:wrong-ws'],
+        createdAt: '',
+        updatedAt: '',
+      }
+      const handoffPacket = buildHandoffPacket({
+        items: [
+          msg('m-u1', 'user', 'Implement cross-agent handoff in this worktree'),
+          msg('m-a1', 'assistant', 'Implemented initial changes.'),
+        ],
+        sourceBackend: 'claude',
+        targetBackend: 'codex',
+        sourceSessionId: 'claude:orig',
+        sourceTitle: 'Claude Worktree Session',
+        cwd: wtPath,
+        preset: 'review',
+      })
+      const codexOriginPacket = buildHandoffPacket({
+        items: [msg('m-h1', 'user', 'Earlier harness prompt')],
+        sourceBackend: 'harness',
+        targetBackend: 'codex',
+        sourceSessionId: 'harness-earlier',
+        cwd: wtPath,
+        preset: 'continue',
+      })
+      const codexItems: ChatItem[] = [
+        msg('cx-0', 'user', formatHandoffPayload(codexOriginPacket, 'Old harness handoff'), { sessionId: 'codex:rev-1' }),
+        msg('cx-1', 'user', formatHandoffPayload(handoffPacket, 'Please review worktree diff'), { sessionId: 'codex:rev-1' }),
+        msg('cx-2', 'assistant', 'Found two edge cases in session restoration.', { sessionId: 'codex:rev-1' }),
+      ]
+      const sessions: RemoteSession[] = [
+        { sessionId: 'codex:rev-1', nativeId: 'rev-1', backend: 'codex', cwd: wtPath, updatedAt: 900, running: false, blank: false },
+        { sessionId: 'claude:orig', nativeId: 'orig', backend: 'claude', cwd: 'c:/users/dev/project/.worktrees/feat-handoff/', updatedAt: 500, running: false, blank: false, title: 'Claude Orig' },
+        { sessionId: 'claude:other-older', nativeId: 'other-older', backend: 'claude', cwd: wtPath, updatedAt: 400, running: false, blank: false, title: 'Older Sibling' },
+        { sessionId: 'claude:other-newer-by-cwd', nativeId: 'other-newer', backend: 'claude', cwd: 'C:\\Users\\Dev\\Project\\.worktrees\\feat-handoff\\', updatedAt: 800, running: false, blank: false, title: 'Newer Sibling by CWD' },
+        { sessionId: 'claude:archived', nativeId: 'arch', backend: 'claude', cwd: wtPath, updatedAt: 850, running: false, blank: false, title: 'Archived' },
+        { sessionId: 'claude:subagent', nativeId: 'sub', backend: 'claude', parentSessionId: 'claude:orig', origin: 'subagent', cwd: wtPath, updatedAt: 860, running: false, blank: false },
+        { sessionId: 'claude:blank-draft', nativeId: 'blank', backend: 'claude', cwd: wtPath, updatedAt: 870, running: false, blank: true },
+        { sessionId: 'claude:wrong-ws', nativeId: 'wrong', backend: 'claude', cwd: otherWs.path, updatedAt: 880, running: false, blank: false },
+        { sessionId: 'harness-earlier', backend: 'harness', updatedAt: 300, running: false, blank: false },
+      ]
+
+      await runScenarios([
+        {
+          name: 'findLatestHandoffOrigin returns the newest incoming handoff origin (all or filtered by backend)',
+          run: () => {
+            expect(findLatestHandoffOrigin(codexItems)).toEqual({
+              sourceBackend: 'claude',
+              sourceSessionId: 'claude:orig',
+              sourceTitle: 'Claude Worktree Session',
+            })
+            expect(findLatestHandoffOrigin(codexItems, 'harness')).toEqual({
+              sourceBackend: 'harness',
+              sourceSessionId: 'harness-earlier',
+            })
+          },
+        },
+        {
+          name: 'resolveHandoffTargetSessions puts origin session first and sorts remaining newest-first while excluding archived/subagent/blank/wrong-ws',
+          run: () => {
+            const resolved = resolveHandoffTargetSessions({
+              items: codexItems,
+              sessions,
+              targetBackend: 'claude',
+              targetWorkspace: claudeWs,
+              archivedSessionIds: ['claude:archived'],
+              sourceSessionId: 'codex:rev-1',
+              hostPlatform: 'windows',
+            })
+            expect(resolved.originSession?.sessionId).toBe('claude:orig')
+            expect(resolved.sessions.map(item => [item.session.sessionId, item.isOrigin])).toEqual([
+              ['claude:orig', true],
+              ['claude:other-newer-by-cwd', false],
+              ['claude:other-older', false],
+            ])
+          },
+        },
+        {
+          name: 'resolveHandoffTargetSessions excludes sourceSessionId on same-backend handoff',
+          run: () => {
+            const selfLoopItems = [
+              msg('s-loop', 'user', formatHandoffPayload({
+                meta: sampleMeta({ sourceBackend: 'claude', targetBackend: 'claude', sourceSessionId: 'claude:orig' }),
+                contextBlock: '<!-- dsh-handoff:v1 {"version":1,"sourceBackend":"claude","targetBackend":"claude","sourceSessionId":"claude:orig","preset":"continue","turnsCount":1,"filesCount":0,"omittedTurns":0,"createdAt":1000} -->\n<handoff_context>\nctx\n</handoff_context>',
+              }, 'Check')),
+            ]
+            const resolved = resolveHandoffTargetSessions({
+              items: selfLoopItems,
+              sessions,
+              targetBackend: 'claude',
+              targetWorkspace: claudeWs,
+              archivedSessionIds: ['claude:archived'],
+              sourceSessionId: 'claude:orig',
+              hostPlatform: 'windows',
+            })
+            expect(resolved.originSession).toBeUndefined()
+            expect(resolved.sessions.some(item => item.session.sessionId === 'claude:orig')).toBe(false)
+          },
+        },
+      ])
+    })
+
+    it('handoffSession re-opens existing targetSessionId, preserves pre-existing draft, and fails closed on invalid targets', async () => {
+      const worktreePath = '/repo/app-wt'
+      const claudeWs: WorkspaceView = {
+        workspaceId: 'claude-wt',
+        backend: 'claude',
+        path: worktreePath,
+        title: 'app-wt',
+        sessionIds: ['claude:orig', 'claude:archived-s', 'claude:running-s'],
+        createdAt: '',
+        updatedAt: '',
+      }
+      const otherWs: WorkspaceView = {
+        workspaceId: 'claude-other',
+        backend: 'claude',
+        path: '/repo/other',
+        title: 'other',
+        sessionIds: ['claude:other-ws'],
+        createdAt: '',
+        updatedAt: '',
+      }
+      const origClaude: RemoteSession = {
+        sessionId: 'claude:orig',
+        nativeId: 'orig',
+        backend: 'claude',
+        cwd: worktreePath,
+        title: 'Claude Orig',
+        updatedAt: 500,
+        running: false,
+        blank: false,
+      }
+      const archivedClaude: RemoteSession = {
+        sessionId: 'claude:archived-s',
+        nativeId: 'arch',
+        backend: 'claude',
+        cwd: worktreePath,
+        updatedAt: 400,
+        running: false,
+        blank: false,
+      }
+      const subagentClaude: RemoteSession = {
+        sessionId: 'claude:sub-s',
+        nativeId: 'sub',
+        backend: 'claude',
+        parentSessionId: 'claude:orig',
+        origin: 'subagent',
+        cwd: worktreePath,
+        updatedAt: 450,
+        running: false,
+        blank: false,
+      }
+      const otherWsClaude: RemoteSession = {
+        sessionId: 'claude:other-ws',
+        nativeId: 'other',
+        backend: 'claude',
+        cwd: otherWs.path,
+        updatedAt: 450,
+        running: false,
+        blank: false,
+      }
+      const runningClaude: RemoteSession = {
+        sessionId: 'claude:running-s',
+        nativeId: 'run',
+        backend: 'claude',
+        cwd: worktreePath,
+        updatedAt: 600,
+        running: true,
+        blank: false,
+      }
+      const packet = buildHandoffPacket({
+        items: [
+          msg('cx-1', 'user', 'Audit auth fix', { sessionId: 'codex:rev-1' }),
+          msg('cx-2', 'assistant', 'Issue found in retry lock', { sessionId: 'codex:rev-1' }),
+        ],
+        sourceBackend: 'codex',
+        targetBackend: 'claude',
+        sourceSessionId: 'codex:rev-1',
+        sourceTitle: 'Codex Review',
+        cwd: worktreePath,
+        preset: 'custom',
+      })
+
+      useAppStore.setState({
+        workspaces: [claudeWs, otherWs],
+        sessions: [origClaude, archivedClaude, subagentClaude, otherWsClaude, runningClaude],
+        archivedSessionIds: [archivedClaude.sessionId],
+      })
+
+      const scope = browseScope({
+        config: useAppStore.getState().config,
+        selectedDevice: useAppStore.getState().selectedDevice,
+      })
+
+      await runScenarios([
+        {
+          name: 'existing origin target opens without createSession and preserves existing unsent draft',
+          run: async () => {
+            useBrowseMemory.setState({
+              entries: {
+                [browseKey(scope, origClaude.sessionId)]: { draft: 'my unsent WIP note' },
+              },
+            })
+            acp.transferCall.mockResolvedValueOnce({
+              events: [historyEvent(1, 'user', 'Initial task'), historyEvent(2, 'assistant', 'Initial impl')],
+            })
+
+            const res = await useAppStore.getState().handoffSession({
+              targetBackend: 'claude',
+              targetWorkspaceId: claudeWs.workspaceId,
+              targetSessionId: origClaude.sessionId,
+              instruction: '',
+              packet,
+              mode: 'draft',
+            })
+            expect(res.ok).toBe(true)
+            expect(res.session?.sessionId).toBe(origClaude.sessionId)
+            expect(res.delivered).toBe('draft')
+            expect(acp.createSession).not.toHaveBeenCalled()
+            expect(useAppStore.getState().selectedSession?.sessionId).toBe(origClaude.sessionId)
+
+            const savedEntry = useBrowseMemory.getState().entries[browseKey(scope, origClaude.sessionId)]
+            expect(savedEntry?.draft).toBe('my unsent WIP note')
+            expect(savedEntry?.handoff?.meta.sourceSessionId).toBe('codex:rev-1')
+          },
+        },
+        {
+          name: 'mode=send targeting an already running existing session falls back safely to draft',
+          run: async () => {
+            acp.transferCall.mockResolvedValueOnce({ events: [] })
+            const res = await useAppStore.getState().handoffSession({
+              targetBackend: 'claude',
+              targetWorkspaceId: claudeWs.workspaceId,
+              targetSessionId: runningClaude.sessionId,
+              instruction: 'Apply Codex feedback',
+              packet,
+              mode: 'send',
+            })
+            expect(res.ok).toBe(true)
+            expect(res.delivered).toBe('draft-fallback')
+            expect(acp.transferCall.mock.calls.some(call => call[0] === 'prompt')).toBe(false)
+          },
+        },
+        {
+          name: 'fails closed for archived, subagent, wrong-workspace, or unknown targetSessionId',
+          run: async () => {
+            for (const badId of [archivedClaude.sessionId, subagentClaude.sessionId, otherWsClaude.sessionId, 'claude:missing']) {
+              acp.createSession.mockClear()
+              const res = await useAppStore.getState().handoffSession({
+                targetBackend: 'claude',
+                targetWorkspaceId: claudeWs.workspaceId,
+                targetSessionId: badId,
+                instruction: 'Go',
+                packet,
+                mode: 'draft',
+              })
+              expect(res).toEqual({ ok: false, error: zhCN.errors.SESSION_NOT_FOUND })
+              expect(acp.createSession).not.toHaveBeenCalled()
+            }
           },
         },
       ])

@@ -1,4 +1,5 @@
 import { formatHandoffPayload, type PendingHandoffDraft } from '../lib/handoff-context'
+import { isSessionInTargetWorkspace } from '../lib/handoff-workspace'
 import { isSubagentSession } from '../lib/session-kind'
 import { isAbsoluteHostPath, isAcpManagedBackend } from '../lib/workspace-key'
 import { selectAcpModel } from '../services/acp-models'
@@ -1121,28 +1122,66 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             return { ok: false, error: zhCN.handoff.noWorkspaceAvailable }
           }
 
-          const createdResult = await createOrReuseWorkspaceSession({
-            workspaceId: targetWorkspace.workspaceId,
-            workspace: targetWorkspace,
-            targetBackend: params.targetBackend,
-            generation,
-            excludeSavedDraft: true,
-          })
-          if (!createdResult.ok) {
-            return { ok: false, error: createdResult.error ?? get().error }
-          }
-          if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
-            return { ok: false, error: zhCN.runtime.hostClosed }
+          let created: RemoteSession
+          let isExistingTarget = false
+          if (params.targetSessionId !== undefined) {
+            const trimmedTargetId = params.targetSessionId.trim()
+            const existingTarget = trimmedTargetId.length > 0
+              ? get().sessions.find(item => item.sessionId === trimmedTargetId)
+              : undefined
+            const validExistingTarget = existingTarget !== undefined
+              && (existingTarget.backend ?? 'harness') === params.targetBackend
+              && !isSubagentSession(existingTarget)
+              && !get().archivedSessionIds.includes(existingTarget.sessionId)
+              && existingTarget.sessionId !== params.packet.meta.sourceSessionId
+              && isSessionInTargetWorkspace({
+                session: existingTarget,
+                targetBackend: params.targetBackend,
+                workspace: targetWorkspace,
+                hostPlatform: get().selectedDevice?.platform,
+              })
+            if (!validExistingTarget || existingTarget === undefined) {
+              return { ok: false, error: zhCN.errors.SESSION_NOT_FOUND }
+            }
+            const opened = await get().openSession(existingTarget)
+            if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
+              return { ok: false, error: zhCN.runtime.hostClosed }
+            }
+            if (!opened || get().selectedSession?.sessionId !== existingTarget.sessionId) {
+              return { ok: false, error: get().error ?? zhCN.runtime.hostClosed }
+            }
+            created = get().sessions.find(item => item.sessionId === existingTarget.sessionId) ?? existingTarget
+            isExistingTarget = true
+          } else {
+            const createdResult = await createOrReuseWorkspaceSession({
+              workspaceId: targetWorkspace.workspaceId,
+              workspace: targetWorkspace,
+              targetBackend: params.targetBackend,
+              generation,
+              excludeSavedDraft: true,
+            })
+            if (!createdResult.ok) {
+              return { ok: false, error: createdResult.error ?? get().error }
+            }
+            if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') {
+              return { ok: false, error: zhCN.runtime.hostClosed }
+            }
+            created = createdResult.session
           }
 
-          const created = createdResult.session
           const handoffDraft: PendingHandoffDraft = {
             meta: params.packet.meta,
             contextBlock: params.packet.contextBlock,
           }
           const saveDraftFallback = () => {
+            const existingEntry = isExistingTarget
+              ? useBrowseMemory.getState().entries[browseKey(initialScope, created.sessionId)]
+              : undefined
+            const nextDraft = params.instruction.trim().length > 0
+              ? params.instruction
+              : (existingEntry?.draft ?? params.instruction)
             updateBrowseEntry(initialScope, created.sessionId, {
-              draft: params.instruction,
+              draft: nextDraft,
               handoff: handoffDraft,
             })
           }
@@ -1154,6 +1193,18 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               session: created,
               workspace: targetWorkspace,
               delivered: 'draft',
+            }
+          }
+
+          const targetRunning = isExistingTarget
+            && (get().sessionLifecycles[created.sessionId]?.running ?? created.running)
+          if (targetRunning) {
+            saveDraftFallback()
+            return {
+              ok: true,
+              session: created,
+              workspace: targetWorkspace,
+              delivered: 'draft-fallback',
             }
           }
 
