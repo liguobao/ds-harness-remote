@@ -65808,6 +65808,7 @@ function cryptoRandomId() {
 
 // packages/client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
+var SPEECH_TRANSCRIBE_TIMEOUT_MS = 3 * 6e4;
 function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id7, capability) {
   if (!capabilities.includes(capability))
     return false;
@@ -72995,18 +72996,22 @@ var ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES = [
   "pluginRegistryProbe/",
   "credentials/",
   "llm/",
-  "speech/",
   "account/"
 ];
 var ALLOWED_HOST_CARRIER_DISPATCH_EXACT = /* @__PURE__ */ new Set([
   "pluginInventory/list",
-  "permissionPresets/catalog"
+  "permissionPresets/catalog",
+  "speech/catalog",
+  "speech/transcribe",
+  "speech/prepare",
+  "speech/configure",
+  "speech/cancelPreparation"
 ]);
 function isAllowedHostCarrierDispatch(endpoint) {
   return ALLOWED_HOST_CARRIER_DISPATCH_EXACT.has(endpoint) || ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES.some((prefix) => endpoint.startsWith(prefix));
 }
 function isAllowedHostCarrierOpen(endpoint) {
-  return endpoint === "remoteAccess/follow" || endpoint.startsWith("account/") || endpoint.startsWith("settings/");
+  return endpoint === "remoteAccess/follow" || endpoint === "speech/follow" || endpoint.startsWith("account/") || endpoint.startsWith("settings/");
 }
 
 // packages/plugin/src/account-two-factor-required.ts
@@ -85363,6 +85368,7 @@ function isEventSeq(value) {
 
 // packages/plugin/src/remote-typert-gateway.ts
 var DIRECT_REMOTE_CALL_BYTES2 = 2 * 1024 * 1024;
+var SPEECH_TRANSCRIBE_TIMEOUT_MS2 = 3 * 6e4;
 var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
 var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
 var WELCOME_NOTICE_VERSION = "2026-08-13.1";
@@ -85434,17 +85440,18 @@ var RemoteTypertGateway2 = class {
     return result;
   }
   async dispatchRemote(endpoint, payload, signal) {
+    const rpcOptions = endpoint === "speech/transcribe" ? { timeoutMs: SPEECH_TRANSCRIBE_TIMEOUT_MS2 } : void 0;
     const request2 = { endpoint, payload };
     const encoded = new TextEncoder().encode(JSON.stringify(request2));
     let response;
     if (encoded.byteLength > DIRECT_REMOTE_CALL_BYTES2) {
-      response = await this.callTransferred(encoded, signal);
+      response = await this.callTransferred(encoded, signal, rpcOptions);
     } else {
       try {
-        response = await this.client.rpc("harness.remote.call", request2, signal);
+        response = rpcOptions === void 0 ? await this.client.rpc("harness.remote.call", request2, signal) : await this.client.rpc("harness.remote.call", request2, signal, rpcOptions);
       } catch (error62) {
         if (!hasErrorCode(error62, "RESPONSE_TOO_LARGE")) throw error62;
-        response = await this.callTransferred(encoded, signal);
+        response = await this.callTransferred(encoded, signal, rpcOptions);
       }
     }
     const result = normalizeThemeSettingsResult(endpoint, parseRpcResult(response));
@@ -85769,7 +85776,7 @@ var RemoteTypertGateway2 = class {
     if (isRecord9(error62) && error62.isDSHRemoteError === true) return;
     await new Promise((resolve11) => signal.addEventListener("abort", () => resolve11(), { once: true }));
   }
-  async callTransferred(encoded, signal) {
+  async callTransferred(encoded, signal, rpcOptions) {
     if (encoded.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
       throw new Error("The Harness Remote request exceeds the transfer limit.");
     }
@@ -85792,10 +85799,15 @@ var RemoteTypertGateway2 = class {
           data: bytesToBase642(chunk)
         }, signal);
       }
-      const committed = await this.client.rpc(
+      const committed = rpcOptions === void 0 ? await this.client.rpc(
         "harness.remote.transfer.commit",
         { transferId },
         signal
+      ) : await this.client.rpc(
+        "harness.remote.transfer.commit",
+        { transferId },
+        signal,
+        rpcOptions
       );
       if (committed.kind === "inline") return committed.response;
       if (committed.transferId !== transferId) {
@@ -111432,6 +111444,8 @@ var workspaceSearchPayloadSchema = external_exports.object({ args: external_expo
 var MAX_ACTIVE_STREAMS3 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS3 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
+var DEFAULT_CALL_TIMEOUT_MS = 6e4;
+var SPEECH_TRANSCRIBE_TIMEOUT_MS3 = 3 * 6e4;
 var HARNESS_REMOTE_ALLOWLIST = [
   "$events",
   "$events/result",
@@ -111517,6 +111531,10 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "claudeCodeMods/pressBand",
   "speech/catalog",
   "speech/transcribe",
+  "speech/follow",
+  "speech/prepare",
+  "speech/configure",
+  "speech/cancelPreparation",
   "workspaceFiles/list",
   "workspaceFiles/stat",
   "workspaceFiles/read",
@@ -111610,6 +111628,7 @@ var HarnessRemoteBridge = class {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   compactHistoryEnabled = false;
+  lifetime = new AbortController();
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
@@ -111624,6 +111643,7 @@ var HarnessRemoteBridge = class {
     }
     this.assertAllowed(params.endpoint);
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
+    if (params.endpoint === "speech/follow") throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this speech endpoint.");
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
       const args = requestArgs(params.payload);
       if (args.ns === "ds-harness-remote" || args.ns === "dsh-remote") {
@@ -111656,7 +111676,13 @@ var HarnessRemoteBridge = class {
       await ensureHostWorkspaceDirectory(folder);
     }
     const startedAt = performance.now();
-    const signal = AbortSignal.timeout(6e4);
+    const timeoutMs = params.endpoint === "speech/transcribe" ? SPEECH_TRANSCRIBE_TIMEOUT_MS3 : DEFAULT_CALL_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timer2 = setTimeout(() => {
+      controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+    }, timeoutMs);
+    timer2.unref?.();
+    const signal = AbortSignal.any([this.lifetime.signal, controller.signal]);
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
       nativePayload = await normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion, this.gateway, signal);
@@ -111706,6 +111732,8 @@ var HarnessRemoteBridge = class {
         ...reason === void 0 ? {} : { reason }
       });
       throw error62;
+    } finally {
+      clearTimeout(timer2);
     }
   }
   async dispatchWithOfficeFallback(endpoint, nativePayload, signal) {
@@ -111902,6 +111930,9 @@ var HarnessRemoteBridge = class {
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (params.endpoint === "workspaceFiles/search") throw new RpcError("METHOD_NOT_ALLOWED", "Workspace search is not a stream.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
+    if (params.endpoint.startsWith("speech/") && params.endpoint !== "speech/follow") {
+      throw new RpcError("METHOD_NOT_ALLOWED", "This speech endpoint is not a stream.");
+    }
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness Remote stream is already open.");
     if (this.streams.size >= MAX_ACTIVE_STREAMS3) {
@@ -111974,6 +112005,7 @@ var HarnessRemoteBridge = class {
     return { closed: active2 !== void 0, streamId: params.streamId };
   }
   async closeAll(reason = "peer-disconnected") {
+    if (!this.lifetime.signal.aborted) this.lifetime.abort(reason);
     const streams = [...this.streams.entries()];
     this.streams.clear();
     this.incomingTransfers.clear();
