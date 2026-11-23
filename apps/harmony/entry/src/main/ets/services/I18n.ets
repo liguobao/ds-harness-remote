@@ -79,6 +79,18 @@ function buildEnglish(): Map<string, string> {
   map.set('显示归档', 'Show archived');
   map.set('只看收藏', 'Favorites only');
   map.set('视图选项', 'View options');
+  map.set('全部会话', 'All sessions');
+  map.set('分组方式', 'Group by');
+  map.set('按工作区', 'Workspace');
+  map.set('按工作区树', 'Workspace tree');
+  map.set('单列表', 'Single list');
+  map.set('排序方式', 'Sort by');
+  map.set('手动排序', 'Manual order');
+  map.set('最近更新', 'Recently updated');
+  map.set('筛选会话', 'Filter sessions');
+  map.set('隐藏归档', 'Hide archived');
+  map.set('全部', 'All');
+  map.set('仅归档', 'Archived only');
   map.set('当前鸿蒙客户端暂不支持 DS-Bot。', 'DS-Bot is unavailable in this HarmonyOS client.');
   map.set('智能体', 'Agents');
   map.set('订阅会话事件…', 'Subscribing to conversation updates…');

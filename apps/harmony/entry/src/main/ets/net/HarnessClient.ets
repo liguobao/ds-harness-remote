@@ -502,6 +502,7 @@ export class HarnessAlphaClient {
         workspace.workspaceId = jsonStr(record, 'workspaceId', '');
         workspace.path = jsonStr(record, 'path', '');
         workspace.title = jsonStr(record, 'title', '');
+        workspace.sessionIds = stringListOf(record['sessionIds']);
         const updated: Object | undefined = record['updatedAt'];
         workspace.updatedAt = typeof updated === 'number' ? updated : 0;
         if (workspace.workspaceId.length > 0) {
@@ -649,7 +650,7 @@ export class HarnessAlphaClient {
     try {
       return officeGenerationValue(await this.callValue('officeKit/generation', {}, timeoutMs));
     } catch (error) {
-      if (!officeFallbackAllowed(error)) throw error;
+      if (!officeFallbackAllowed(error)) throw new Error(String(error));
       return officeGenerationValue(await this.callValue('officeToPdf/generation', {}, timeoutMs));
     }
   }
@@ -664,7 +665,7 @@ export class HarnessAlphaClient {
     try {
       value = asRecord(await this.callValue('officeKit/render', args, 120000));
     } catch (error) {
-      if (!officeFallbackAllowed(error)) throw error;
+      if (!officeFallbackAllowed(error)) throw new Error(String(error));
       value = asRecord(await this.callValue('officeToPdf/render', args, 120000));
     }
     return value === undefined ? '' : jsonStr(value, 'data', '');

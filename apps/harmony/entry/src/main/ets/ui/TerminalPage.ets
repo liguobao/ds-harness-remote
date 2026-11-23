@@ -245,7 +245,16 @@ export struct TerminalPage {
         .margin({ left: 16, right: 16 })
       Scroll() {
         Row({ space: 8 }) {
-          Button('+').height(38).backgroundColor(this.palette.primary).accessibilityText(t('新建终端'))
+          Button({ type: ButtonType.Circle }) {
+            Image($r('app.media.ic_plus'))
+              .width(18)
+              .height(18)
+              .fillColor(Color.White)
+          }
+            .height(38)
+            .width(38)
+            .backgroundColor(this.palette.primary)
+            .accessibilityText(t('新建终端'))
             .enabled(this.ready && !this.busy).onClick(() => { this.createFromButton(); })
           ForEach(this.terminals, (item: TerminalInfo) => {
             Button(item.title)

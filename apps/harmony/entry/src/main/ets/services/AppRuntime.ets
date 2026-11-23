@@ -356,6 +356,10 @@ export class AppRuntime {
   splitWidth: number = 0;
   /** 会话列表密度：0 自动 / 1 紧凑 / 2 超紧凑。 */
   layoutDensity: number = 0;
+  /** 会话抽屉视图偏好，与 Android 端保持一致。 */
+  sessionGroupBy: string = 'workspace';
+  sessionOrderBy: string = 'updated';
+  sessionFilterMode: string = 'hideArchived';
   /** 超宽窗口是否显示右侧「会话详情」栏。 */
   showInspector: boolean = true;
   /** 会话收藏与最近访问（sessionId 列表）。 */
@@ -578,6 +582,18 @@ export class AppRuntime {
       this.textScaleMode = this.store.loadTextScale();
       this.splitWidth = this.store.loadSplitWidth();
       this.layoutDensity = this.store.loadLayoutDensity();
+      const sessionView: Record<string, string> = this.store.loadSessionView();
+      if (sessionView['groupBy'] === 'workspace' || sessionView['groupBy'] === 'workspace-tree'
+        || sessionView['groupBy'] === 'list') {
+        this.sessionGroupBy = sessionView['groupBy'];
+      }
+      if (sessionView['orderBy'] === 'manual' || sessionView['orderBy'] === 'updated') {
+        this.sessionOrderBy = sessionView['orderBy'];
+      }
+      if (sessionView['filterMode'] === 'hideArchived' || sessionView['filterMode'] === 'all'
+        || sessionView['filterMode'] === 'archivedOnly') {
+        this.sessionFilterMode = sessionView['filterMode'];
+      }
       this.showInspector = this.store.loadShowInspector();
       this.compactHistory = this.store.loadCompactHistory();
       this.secretMask = this.store.loadSecretMask();
@@ -2354,6 +2370,23 @@ export class AppRuntime {
     this.store.saveLayoutDensity(value).catch((error: Error) => {
       logWarn('save layout density failed');
     });
+    this.notify();
+  }
+
+  setSessionView(groupBy: string, orderBy: string, filterMode: string): void {
+    if (groupBy !== 'workspace' && groupBy !== 'workspace-tree' && groupBy !== 'list') {
+      return;
+    }
+    if (orderBy !== 'manual' && orderBy !== 'updated') {
+      return;
+    }
+    if (filterMode !== 'hideArchived' && filterMode !== 'all' && filterMode !== 'archivedOnly') {
+      return;
+    }
+    this.sessionGroupBy = groupBy;
+    this.sessionOrderBy = orderBy;
+    this.sessionFilterMode = filterMode;
+    this.store.saveSessionView(groupBy, orderBy, filterMode);
     this.notify();
   }
 

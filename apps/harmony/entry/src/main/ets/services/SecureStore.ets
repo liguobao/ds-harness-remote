@@ -22,6 +22,8 @@ const KEY_DRAFTS = 'dshremote.drafts.v1';
 const KEY_PROMPTS = 'dshremote.prompts.v1';
 /** 会话收藏与最近访问：{ favorites: string[], recents: string[] }。 */
 const KEY_SESSION_META = 'dshremote.sessionMeta.v1';
+/** 会话抽屉视图偏好：分组方式、排序方式与归档筛选。 */
+const KEY_SESSION_VIEW = 'dshremote.sessionView.v1';
 /** 上次连着的主机：下次启动自动连它（聊天客户端该有的行为）。 */
 const KEY_LAST_HOST = 'dshremote.lastHost.v1';
 const KEY_AUTO_CONNECT_LAST_HOST = 'dshremote.autoConnectLastHost.v1';
@@ -757,6 +759,34 @@ export class SecureStore {
       this.putSync(KEY_SESSION_META, JSON.stringify({ 'favorites': favorites, 'recents': recents }));
     } catch (error) {
       logWarn('session meta save failed');
+    }
+  }
+
+  loadSessionView(): Record<string, string> {
+    const raw: string = this.getSync(KEY_SESSION_VIEW, '');
+    if (raw.length === 0) {
+      return {};
+    }
+    try {
+      const root: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+      const out: Record<string, string> = {};
+      const groupBy: Object | undefined = root['groupBy'];
+      const orderBy: Object | undefined = root['orderBy'];
+      const filterMode: Object | undefined = root['filterMode'];
+      if (typeof groupBy === 'string') out['groupBy'] = groupBy;
+      if (typeof orderBy === 'string') out['orderBy'] = orderBy;
+      if (typeof filterMode === 'string') out['filterMode'] = filterMode;
+      return out;
+    } catch (error) {
+      return {};
+    }
+  }
+
+  saveSessionView(groupBy: string, orderBy: string, filterMode: string): void {
+    try {
+      this.putSync(KEY_SESSION_VIEW, JSON.stringify({ groupBy, orderBy, filterMode }));
+    } catch (error) {
+      logWarn('session view save failed');
     }
   }
 
