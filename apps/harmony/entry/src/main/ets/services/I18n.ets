@@ -158,6 +158,13 @@ function buildEnglish(): Map<string, string> {
   map.set('插件设置', 'Plugin settings');
   map.set('关闭', 'Close');
   map.set('文件', 'Files');
+  map.set('工作区改动', 'Workspace changes');
+  map.set('已暂存', 'Staged');
+  map.set('未暂存', 'Unstaged');
+  map.set('当前分支未知', 'Current branch unknown');
+  map.set('当前工作区不是 Git 仓库', 'The current workspace is not a Git repository');
+  map.set('没有可显示的改动', 'No changes to display');
+  map.set('返回文件列表', 'Back to file list');
   map.set('根目录', 'Root');
   map.set('目录为空', 'This folder is empty');
   map.set('选择模型', 'Select model');

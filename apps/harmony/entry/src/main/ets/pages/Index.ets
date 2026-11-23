@@ -16,7 +16,7 @@ import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHA
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
   getAppRuntime, errorMessage, maskSecrets } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
-import { DirectoryEntry, HarnessWorkspace, WORKSPACE_TEXT_PAGE_LINES, WorkspaceTextPage } from '../net/HarnessClient';
+import { DirectoryEntry, HarnessWorkspace, WORKSPACE_TEXT_PAGE_LINES, WorkspaceTextPage, WorkspaceGitFile, WorkspaceGitStatus, WorkspaceGitDiff } from '../net/HarnessClient';
 import { HarnessRemoteSession, HarnessSchedule, HarnessScheduleDelivery } from '../net/HarnessClient';
 import { applyTint, darkPalette, lightPalette, Palette } from '../services/Theme';
 import { AccountMembership, OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
@@ -203,6 +203,15 @@ struct Index {
   @State filePreviewLoading: boolean = false;
   @State filePreviewError: string = '';
   @State filePreviewPage: WorkspaceTextPage = new WorkspaceTextPage();
+  @State previewIsOffice: boolean = false;
+  @State workspaceGitOpen: boolean = false;
+  @State workspaceGitStatus: WorkspaceGitStatus = new WorkspaceGitStatus();
+  @State workspaceGitScope: string = 'all';
+  @State workspaceGitLoading: boolean = false;
+  @State workspaceGitError: string = '';
+  @State workspaceGitDiffPath: string = '';
+  @State workspaceGitDiff: WorkspaceGitDiff = new WorkspaceGitDiff();
+  @State workspaceGitDiffLoading: boolean = false;
   /** 预览的是不是 PDF（走系统 PDF Kit 渲染）。 */
   @State previewIsPdf: boolean = false;
   @State pdfError: string = '';
@@ -757,6 +766,13 @@ struct Index {
     this.browseLoading = this.runtime.browseLoading;
     this.browseError = this.runtime.browseError;
     this.directoryEntries = this.runtime.directoryEntries;
+    this.workspaceGitStatus = this.runtime.workspaceGitStatus;
+    this.workspaceGitScope = this.runtime.workspaceGitScope;
+    this.workspaceGitLoading = this.runtime.workspaceGitLoading;
+    this.workspaceGitError = this.runtime.workspaceGitError;
+    this.workspaceGitDiffPath = this.runtime.workspaceGitDiffPath;
+    this.workspaceGitDiff = this.runtime.workspaceGitDiff;
+    this.workspaceGitDiffLoading = this.runtime.workspaceGitDiffLoading;
     if (this.sessionSearchActive) {
       const found: HarnessRemoteSession[] | undefined = this.runtime.searchResults;
       this.sessionSearchResults = found !== undefined ? found : [];
@@ -2343,6 +2359,9 @@ struct Index {
       }
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
+      }
+      if (this.workspaceGitOpen) {
+        this.WorkspaceGitOverlay()
       }
       if (this.inSessionSearchOpen) {
         this.InSessionSearchOverlay()
@@ -5884,6 +5903,11 @@ struct Index {
                 this.showSessionPanel = false;
                 this.openWorkspaceFiles(this.sessionFileRoot(), this.currentSessionId);
               })
+              this.SettingsRow(this.tr('工作区改动'), '', false, () => {
+                this.showSessionPanel = false;
+                this.workspaceGitOpen = true;
+                this.runtime.loadWorkspaceGitStatus();
+              })
             }
 
             this.SettingsRow(this.tr('终端'), '', false, () => { this.openTerminalPage(); })
@@ -7076,7 +7100,10 @@ struct Index {
   private openFilePreview(path: string, offset: number = 1): void {
     this.releasePdfPreview();
     const request: number = this.pdfRequest;
-    this.previewIsPdf = path.toLowerCase().endsWith('.pdf');
+    const lowerPath = path.toLowerCase();
+    this.previewIsOffice = ['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx']
+      .some((extension: string) => lowerPath.endsWith(extension));
+    this.previewIsPdf = lowerPath.endsWith('.pdf') || this.previewIsOffice;
     this.pdfError = '';
     if (!this.previewIsPdf) {
       const requestPath = this.browseSessionId.length > 0 && path.startsWith(this.browsePrefix())
@@ -7089,7 +7116,10 @@ struct Index {
     this.runtime.filePreviewLoading = true;
     this.runtime.filePreviewError = '';
     this.runtime.notify();
-    this.runtime.readFileBuffer(path).then(async (buffer: ArrayBuffer) => {
+    const source = this.previewIsOffice
+      ? this.runtime.readOfficePdfBuffer(path)
+      : this.runtime.readFileBuffer(path);
+    source.then(async (buffer: ArrayBuffer) => {
       if (request !== this.pdfRequest) {
         return;
       }
@@ -7365,6 +7395,141 @@ struct Index {
   }
 
   /** 文本文件预览：主机上读回来直接显示，二进制给提示。 */
+  @Builder
+  WorkspaceGitOverlay() {
+    Column() {
+      ScreenHeader({
+        palette: this.pal(),
+        title: this.tr('工作区改动'),
+        onBack: () => {
+          this.workspaceGitOpen = false;
+          this.workspaceGitDiffPath = '';
+          this.workspaceGitDiff = new WorkspaceGitDiff();
+        }
+      })
+        .margin({ left: 16, right: 16 })
+      Row({ space: 10 }) {
+        Text(this.workspaceGitStatus.branch.length > 0 ? this.workspaceGitStatus.branch : this.tr('当前分支未知'))
+          .fontSize(this.fs(14))
+          .fontColor(this.pal().text)
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text('+' + this.workspaceGitStatus.totalAdditions + ' / −' + this.workspaceGitStatus.totalDeletions)
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text2)
+        Image($r('app.media.ic_refresh'))
+          .width(20)
+          .height(20)
+          .fillColor(this.pal().primary)
+          .onClick(() => { this.runtime.loadWorkspaceGitStatus(); })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+      Row({ space: 6 }) {
+        this.WorkspaceGitScopeButton('all', this.tr('全部'))
+        this.WorkspaceGitScopeButton('staged', this.tr('已暂存'))
+        this.WorkspaceGitScopeButton('unstaged', this.tr('未暂存'))
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: 8 })
+      if (this.workspaceGitLoading) {
+        LoadingProgress().width(24).height(24).color(this.pal().primary).margin(18)
+      } else if (this.workspaceGitError.length > 0) {
+        Text(this.workspaceGitError).fontSize(this.fs(13)).fontColor(this.pal().danger).padding(16)
+      } else if (!this.workspaceGitStatus.isGitRepo) {
+        Text(this.tr('当前工作区不是 Git 仓库')).fontSize(this.fs(13)).fontColor(this.pal().text3).padding(16)
+      } else if (this.workspaceGitDiffPath.length > 0) {
+        Row({ space: 8 }) {
+          Text(this.workspaceGitDiffPath)
+            .fontSize(this.fs(13))
+            .fontColor(this.pal().text)
+            .layoutWeight(1)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.tr('返回文件列表'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().primary)
+            .onClick(() => {
+              this.workspaceGitDiffPath = '';
+              this.workspaceGitDiff = new WorkspaceGitDiff();
+            })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 8 })
+        if (this.workspaceGitDiffLoading) {
+          LoadingProgress().width(24).height(24).color(this.pal().primary).margin(18)
+        } else {
+          Scroll() {
+            Text(this.workspaceGitDiff.diff.length > 0 ? this.workspaceGitDiff.diff : this.tr('没有可显示的改动'))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text)
+              .fontFamily('monospace')
+              .width('100%')
+              .copyOption(CopyOptions.LocalDevice)
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .scrollBar(BarState.Auto)
+          .padding({ left: 16, right: 16, bottom: 16 })
+        }
+      } else {
+        List() {
+          ForEach(this.workspaceGitStatus.files, (file: WorkspaceGitFile) => {
+            ListItem() {
+              Row({ space: 8 }) {
+                Text(file.status.substring(0, 1).toUpperCase())
+                  .fontSize(this.fs(11))
+                  .fontColor(file.status === 'deleted' ? this.pal().danger : this.pal().primary)
+                  .width(22)
+                  .textAlign(TextAlign.Center)
+                Text(file.path)
+                  .fontSize(this.fs(13))
+                  .fontColor(this.pal().text)
+                  .layoutWeight(1)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(this.gitCountLabel(file.additions, '+') + ' / ' + this.gitCountLabel(file.deletions, '−'))
+                  .fontSize(this.fs(10))
+                  .fontColor(this.pal().text3)
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .onClick(() => { this.runtime.loadWorkspaceGitDiff(file.path); })
+            }
+          }, (file: WorkspaceGitFile) => file.path)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .divider({ strokeWidth: 0.5, color: this.pal().border, startMargin: 16, endMargin: 16 })
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.pal().bg)
+  }
+
+  @Builder
+  WorkspaceGitScopeButton(scope: string, label: string) {
+    Text(label)
+      .fontSize(this.fs(12))
+      .fontColor(this.workspaceGitScope === scope ? this.pal().primary : this.pal().text2)
+      .backgroundColor(this.workspaceGitScope === scope ? this.pal().primarySoft : this.pal().card)
+      .borderRadius(10)
+      .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+      .onClick(() => {
+        if (this.workspaceGitScope !== scope) {
+          this.workspaceGitDiffPath = '';
+          this.workspaceGitDiff = new WorkspaceGitDiff();
+          this.runtime.loadWorkspaceGitStatus(scope);
+        }
+      })
+  }
+
+  private gitCountLabel(value: number, prefix: string): string {
+    return value < 0 ? '—' : prefix + value;
+  }
+
   @Builder
   FilePreviewOverlay() {
     Column() {

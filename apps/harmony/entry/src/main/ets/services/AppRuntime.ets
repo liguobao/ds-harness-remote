@@ -19,7 +19,7 @@ import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
   DirectoryEntry, HarnessSchedule, HarnessScheduleDelivery, HarnessSessionEvent, HarnessWorkspace,
-  HarnessWorkspaceSnapshot, HistoryPage, PromptImagePart, WorkspaceTextPage } from '../net/HarnessClient';
+  HarnessWorkspaceSnapshot, HistoryPage, PromptImagePart, WorkspaceTextPage, WorkspaceGitStatus, WorkspaceGitDiff } from '../net/HarnessClient';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -277,6 +277,13 @@ export class AppRuntime {
   directoryEntries: DirectoryEntry[] = [];
   /** Host 上的工作区列表。 */
   workspaces: HarnessWorkspace[] = [];
+  workspaceGitStatus: WorkspaceGitStatus = new WorkspaceGitStatus();
+  workspaceGitScope: string = 'all';
+  workspaceGitLoading: boolean = false;
+  workspaceGitError: string = '';
+  workspaceGitDiffPath: string = '';
+  workspaceGitDiff: WorkspaceGitDiff = new WorkspaceGitDiff();
+  workspaceGitDiffLoading: boolean = false;
   /** 新建会话时使用的工作区；空表示沿用当前会话的 cwd。 */
   selectedWorkspaceId: string = '';
   /** 可选模型列表（来自主机模型目录）。 */
@@ -1392,6 +1399,62 @@ export class AppRuntime {
     const helper: util.Base64Helper = new util.Base64Helper();
     const bytes: Uint8Array = helper.decodeSync(base64);
     return bytes.buffer as ArrayBuffer;
+  }
+
+  /** Render an Office document on the Host and return the generated PDF bytes. */
+  async readOfficePdfBuffer(path: string): Promise<ArrayBuffer> {
+    const harness = this.harness;
+    const sessionId = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      throw new Error(t('未连接'));
+    }
+    const generation = await harness.officeGeneration();
+    if (generation.length === 0) {
+      throw new Error('Office preview unavailable');
+    }
+    const base64 = await harness.renderOfficePdf(sessionId, path);
+    if (base64.length === 0) {
+      throw new Error('Office preview returned no PDF');
+    }
+    const helper: util.Base64Helper = new util.Base64Helper();
+    return helper.decodeSync(base64).buffer as ArrayBuffer;
+  }
+
+  async loadWorkspaceGitStatus(scope: string = this.workspaceGitScope): Promise<void> {
+    const harness = this.harness;
+    const sessionId = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) return;
+    this.workspaceGitLoading = true;
+    this.workspaceGitScope = scope;
+    this.workspaceGitError = '';
+    this.notify();
+    try {
+      this.workspaceGitStatus = await harness.workspaceGitStatus(sessionId, scope);
+    } catch (error) {
+      this.workspaceGitError = errorMessage(error);
+    } finally {
+      this.workspaceGitLoading = false;
+      this.notify();
+    }
+  }
+
+  async loadWorkspaceGitDiff(path: string): Promise<void> {
+    const harness = this.harness;
+    const sessionId = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0 || path.length === 0) return;
+    this.workspaceGitDiffPath = path;
+    this.workspaceGitDiff = new WorkspaceGitDiff();
+    this.workspaceGitDiffLoading = true;
+    this.notify();
+    try {
+      this.workspaceGitDiff = await harness.workspaceGitDiff(sessionId, path, this.workspaceGitScope);
+    } catch (error) {
+      this.workspaceGitDiff = new WorkspaceGitDiff();
+      this.workspaceGitDiff.diff = errorMessage(error);
+    } finally {
+      this.workspaceGitDiffLoading = false;
+      this.notify();
+    }
   }
 
   async previewFile(path: string, requestPath: string, offset: number): Promise<void> {
