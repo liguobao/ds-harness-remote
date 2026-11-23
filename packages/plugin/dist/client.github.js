@@ -1633,7 +1633,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
         body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
         signal
       });
-      if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`);
+      if (!response.ok) {
+        if (response.status === 404 || response.status === 405) return { mode: "local" };
+        throw new Error(`Remote upload control failed (HTTP ${response.status}).`);
+      }
       let envelope = await response.json();
       if (envelope.type !== "server-response" || envelope.rpcId !== rpcId || envelope.result?.ok !== !0)
         throw new Error(envelope.result?.error?.message ?? "Remote upload requires an updated Host plugin.");

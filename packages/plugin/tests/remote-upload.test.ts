@@ -109,6 +109,21 @@ describe('Remote attachment upload', () => {
     expect(await (await upload(`${base}api/session/uploadFileBinary?sessionId=s&mediaType=image/png`, { method: 'POST', body: 'local-image' })).text()).toBe('local-response')
     expect(original).toHaveBeenCalledTimes(2)
   })
+  it('keeps the upload on the original carrier when the Host exposes no control route', async () => {
+    const seen: string[] = []
+    const original = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      seen.push(new URL(url, base).pathname)
+      if (url.endsWith('/status')) return new Response('method not allowed', { status: 405 })
+      return Response.json({ ok: true, value: { receiptId: 'local-receipt' } })
+    }) as unknown as typeof fetch
+    const upload = createRemoteUploadFetch(original, base)
+    const response = await upload(`${base}api/session/uploadFileBinary?sessionId=s&mediaType=image/png`, {
+      method: 'POST', body: new Uint8Array([1, 2, 3]),
+    })
+    expect(await response.json()).toEqual({ ok: true, value: { receiptId: 'local-receipt' } })
+    expect(seen).toEqual(['/ds-harness-remote/status', '/api/session/uploadFileBinary'])
+  })
   it('fails closed offline and bounds input before any upload mutation', async () => {
     const offline = carrier('remote', false)
     await expect(offline.upload(`${base}api/session/uploadFileBinary?sessionId=s&mediaType=image/png`, { method: 'POST', body: 'x' })).rejects.toThrow('disconnected')

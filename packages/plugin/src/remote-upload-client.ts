@@ -13,7 +13,13 @@ export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch
       method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'client-request', rpcId, method, payload }), signal,
     })
-    if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`)
+    if (!response.ok) {
+      // A Host that exposes only the legacy RPC channel owns POST on the prefix
+      // itself, so a sub-path request answers 404/405. Keep the attachment on the
+      // original carrier instead of failing the whole upload.
+      if (response.status === 404 || response.status === 405) return { mode: 'local' }
+      throw new Error(`Remote upload control failed (HTTP ${response.status}).`)
+    }
     const envelope = await response.json() as { type?: string; rpcId?: string; result?: { ok?: boolean; value?: unknown; error?: { message?: string } } }
     if (envelope.type !== 'server-response' || envelope.rpcId !== rpcId || envelope.result?.ok !== true) {
       throw new Error(envelope.result?.error?.message ?? 'Remote upload requires an updated Host plugin.')
