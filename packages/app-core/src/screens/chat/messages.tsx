@@ -477,11 +477,13 @@ function HandoffContextCard({
           <Text style={[styles.handoffCardTitle, { color: palette.ink }]} numberOfLines={2}>
             {title}
           </Text>
-          <View style={[styles.handoffCardPresetChip, { backgroundColor: chipBg }]}>
-            <Text style={[styles.handoffCardPresetText, { color: chipText }]}>
-              {handoffPresetLabel(meta.preset)}
-            </Text>
-          </View>
+          {meta.preset !== 'custom' && (
+            <View style={[styles.handoffCardPresetChip, { backgroundColor: chipBg }]}>
+              <Text style={[styles.handoffCardPresetText, { color: chipText }]}>
+                {handoffPresetLabel(meta.preset)}
+              </Text>
+            </View>
+          )}
         </View>
         <View style={styles.handoffCardMetaRow}>
           <Text
