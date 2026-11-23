@@ -126,7 +126,7 @@ DSH 0.2.2 以降では、npm からインストールしたプラグインのバ
 ライト／ダークの両テーマに対応し、ドロワーからオンライン Host・ACP バックエンド・DS-Bot を切り替えられます。テキスト／画像プロンプト、モデル切替、ファイルカード表示、ネイティブ Git Diff レビュー、リモートターミナルに対応しています。
 
 <p align="center">
-  <img src="docs/images/mobile-showcase-en.png" alt="マルチ Host・ACP ドロワー、ファイル配信対応チャット、ダークモード Git Diff レビューを備えた Android クライアント" width="100%">
+  <img src="docs/images/mobile-showcase-en.png" alt="マルチ Host・ACP ドロワー、ファイル配信対応チャット、ネイティブ Git Diff レビューを備えた Android クライアント" width="100%">
 </p>
 
 モバイルの設定には、全体に適用される **Compact conversations**（会話のコンパクト表示）スイッチがあります。デフォルトは無効で、次に会話を開くときに反映されます。

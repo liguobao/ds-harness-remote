@@ -130,7 +130,7 @@ DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更
 支持浅色/深色双主题，在抽屉内快速切换在线主机、多引擎 ACP 工作区与 DS-Bot；支持文字/图片 Prompt、模型与思考深度切换、文件卡片预览、原生 Git Diff 变更审查及远程终端。
 
 <p align="center">
-  <img src="docs/images/mobile-showcase-zh.png" alt="Android 客户端多主机与 ACP 抽屉、原生对话与文件交付、深色模式原生 Git Diff 审查界面" width="100%">
+  <img src="docs/images/mobile-showcase-zh.png" alt="Android 客户端多主机与 ACP 抽屉、原生对话与文件交付、原生 Git Diff 审查界面" width="100%">
 </p>
 
 移动端设置提供默认关闭的全局「会话精简模式」，下次打开会话生效。
