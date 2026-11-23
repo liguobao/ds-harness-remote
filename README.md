@@ -128,7 +128,7 @@ To prevent this computer from controlling other Hosts, open the Host list at [ht
 Switch across online Hosts, ACP backends, and DS-Bot rooms in one drawer; send text or image prompts, preview delivered files, inspect native Git diffs, and open remote terminals in light or dark mode.
 
 <p align="center">
-  <img src="docs/images/mobile-showcase-en.png" alt="Android client showcasing multi-host ACP drawer, native chat with file delivery, and dark-mode Git diff review" width="100%">
+  <img src="docs/images/mobile-showcase-en.png" alt="Android client showcasing multi-host ACP drawer, native chat with file delivery, and native Git diff review" width="100%">
 </p>
 
 Mobile Settings includes a global **Compact conversations** switch, off by default and applied when a conversation is next opened.
