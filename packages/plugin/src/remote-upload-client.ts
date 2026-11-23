@@ -13,6 +13,11 @@ export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch
       method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'client-request', rpcId, method, payload }), signal,
     })
+    // A Host that never registered this prefix — an older plugin build on a newer DSH, or a
+    // Remote UI whose Host runs no plugin — answers 404/405 here. Uploading then is not a
+    // remote transfer at all, so fall back to the plain local request instead of failing the
+    // user's upload before a single byte is sent.
+    if (response.status === 404 || response.status === 405) return { mode: 'local' }
     if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`)
     const envelope = await response.json() as { type?: string; rpcId?: string; result?: { ok?: boolean; value?: unknown; error?: { message?: string } } }
     if (envelope.type !== 'server-response' || envelope.rpcId !== rpcId || envelope.result?.ok !== true) {

@@ -1633,6 +1633,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
         signal
       });
+      if (response.status === 404 || response.status === 405) return { mode: "local" };
       if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`);
       let envelope = await response.json();
       if (envelope.type !== "server-response" || envelope.rpcId !== rpcId || envelope.result?.ok !== !0)
