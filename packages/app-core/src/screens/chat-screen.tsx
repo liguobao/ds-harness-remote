@@ -34,6 +34,7 @@ import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
 import { chatImageConnectionGeneration, requireConnectionRpc, requireSessionTools, sessionChatImageLoader, useAppStore } from '../state/store'
 import { type UiArtifact } from '../state/ui-artifacts'
 import type {
+  ChatFile,
   ChatItem,
   ModelCatalogModel,
   ModelProviderGroup,
@@ -102,6 +103,7 @@ import { sessionTitle } from './chat/presentation'
 import { SessionActivityDock } from './chat/session-activity'
 import { SessionInfo } from './chat/session-info'
 import { createStyles } from './chat/styles'
+import { formatUploadedChatFiles } from './chat/submitted-files'
 import { useChatAttachments } from './chat/use-chat-attachments'
 import { useChatBackHandler } from './chat/use-chat-back-handler'
 import { useChatMentions } from './chat/use-chat-mentions'
@@ -115,6 +117,7 @@ import { PluginsModal } from './plugins-modal'
 import { ReferenceChatModal, ReferencedChatPills } from './bot/reference-chat-modal'
 import type { ReferenceChatCandidate } from './bot/at-menu'
 import { SessionToolsPanel, type SessionToolsMode } from './session-tools-panel'
+import { FileViewerModal } from './workspace-file-viewer'
 
 import { browseKey, browseScope, updateBrowseEntry, useBrowseMemory } from '../services/browse-memory'
 import { formatQuoteText, QuotePreview } from '../ui/quote-preview'
@@ -351,6 +354,8 @@ export function ChatScreen({
   useEffect(() => () => plusMenuActions.cancel(), [plusMenuActions])
   const sessionInfoActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
   useEffect(() => () => sessionInfoActions.cancel(), [sessionInfoActions])
+  const fileViewerActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
+  useEffect(() => () => fileViewerActions.cancel(), [fileViewerActions])
   const quoteFocusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => {
     if (quoteFocusTimerRef.current !== undefined) {
@@ -366,7 +371,8 @@ export function ChatScreen({
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
   const [toolsMode, setToolsMode] = useState<SessionToolsMode>()
-  const [fileLinkPath, setFileLinkPath] = useState<string>()
+  const [filesInitialPath, setFilesInitialPath] = useState<string>()
+  const [previewFilePath, setPreviewFilePath] = useState<string>()
   const { promptsPickerOpen, setPromptsPickerOpen, customPrompts, promptEditing,
     setPromptEditing, promptsManagerOpen, setPromptsManagerOpen, promptsLoading, savePromptEdit, deletePrompt } = useChatPrompts(connection.phase)
   const [permissionOptions, setPermissionOptions] = useState<PermissionSelect['options']>()
@@ -391,7 +397,11 @@ export function ChatScreen({
   }, [session?.sessionId, session?.backend, inlinePermissionOptions, connection.phase, permissionPickerOpen, permissionRevision])
   // A carrier drop must not close the full-screen editor: the draft stays
   // editable offline, so only a conversation change collapses it.
-  useEffect(() => { setToolsMode(undefined) }, [session?.sessionId, connection.phase])
+  useEffect(() => {
+    setToolsMode(undefined)
+    setPreviewFilePath(undefined)
+    setFilesInitialPath(undefined)
+  }, [session?.sessionId, connection.phase])
   useEffect(() => { setComposerExpanded(false) }, [session?.sessionId])
   // Fetch mode options only when a non-Codex session is active.
   // ACP sessions already receive modes from dsh/sessionHistory during openSession,
@@ -416,7 +426,7 @@ export function ChatScreen({
   const lastNewSessionTimeRef = useRef(0)
   const { visibleMessages, visibleSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState } = useChatTranscript({ session, sessions, messages, hostId })
   const panelOpen = composerExpanded || plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
-    || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
+    || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || previewFilePath !== undefined || trajectory || mentionType !== null
     || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || sessionInfoOpen
   const { listRef, viewability, awayFromLatest, newContent, jumpToLatest, beginSendScroll,
     onListLayout, onListContentSizeChange, onListScroll, onListDragEnd, onListMomentumEnd,
@@ -556,11 +566,21 @@ export function ChatScreen({
     { open: promptEditing !== null, close: () => { setPromptEditing(null); setPromptsManagerOpen(true) } },
     { open: promptsManagerOpen, close: () => { setPromptsManagerOpen(false); setPromptsPickerOpen(true) } },
     { open: promptsPickerOpen, close: () => setPromptsPickerOpen(false) },
-    { open: toolsMode !== undefined, close: () => { setToolsMode(undefined); setFileLinkPath(undefined) } },
+    { open: previewFilePath !== undefined, close: () => setPreviewFilePath(undefined) },
+    { open: toolsMode !== undefined, close: () => { setToolsMode(undefined); setFilesInitialPath(undefined) } },
     { open: trajectory, close: () => setTrajectory(false) },
   ], active)
 
   const botTeamState = useBotTeamStore(state => state.state)
+  const connected = connection.phase === 'connected' && !reconnectingSession
+
+  const openWorkspaceFile = useCallback((path: string) => {
+    if (!connected) {
+      Alert.alert(strings.tools.files, strings.chat.offlineNotice)
+      return
+    }
+    setPreviewFilePath(path)
+  }, [connected])
 
   const openLink = useCallback((href: string) => {
     // 1. Session reference navigation: dsh-session:<base64url>
@@ -585,11 +605,9 @@ export function ChatScreen({
     // 3. Workspace file link
     const path = markdownFilePath(href)
     if (path === undefined) return
-    setFileLinkPath(path)
-    setToolsMode('files')
-  }, [openSession, session?.backend, sessions, botTeamState?.bots, onBotModeChange, onSelectBot])
+    openWorkspaceFile(path)
+  }, [openSession, openWorkspaceFile, sessions, botTeamState?.bots, onBotModeChange, onSelectBot])
 
-  const connected = connection.phase === 'connected' && !reconnectingSession
   const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
   const replyActive = connected && (busy === 'send-message' || busy === 'stop-session' || (session?.running ?? false) || hasActiveChatItem)
 
@@ -706,7 +724,7 @@ export function ChatScreen({
 
   const wrapChatShell = (mainPane: ReactNode, extraOverlays?: ReactNode) => (
     <ChatImageProvider value={imageLoader}>
-      <MarkdownLinkProvider onLinkPress={openLink}>
+      <MarkdownLinkProvider onLinkPress={openLink} onFilePress={openWorkspaceFile} canStatFiles={connected}>
         <View style={styles.flex}>
           <NavigationFocusProvider value={active && (!sessionsOpen || splitNav) && !composerExpanded}>
             <KeyboardInset>
@@ -845,6 +863,7 @@ export function ChatScreen({
       promptWithQuotes = text.length > 0 ? `${formattedQuotes}\n\n${text}` : formattedQuotes
     }
     let promptText = promptWithQuotes
+    let uploadedFiles: ChatFile[] = []
     const targetSessionId = session.sessionId
     const sendSessionGen = sessionGenerationRef.current
     if (submittedFiles.length > 0) {
@@ -902,6 +921,7 @@ export function ChatScreen({
           Alert.alert(strings.messageActions.failed, strings.messageActions.unavailable)
           return
         }
+        uploadedFiles = formatUploadedChatFiles(uploaded)
         promptText = formatUploadedFilesReferencePrompt(promptWithQuotes, uploaded)
       } catch (uploadError) {
         // Aborted uploads already restored (or discarded) their composer state;
@@ -947,7 +967,7 @@ export function ChatScreen({
     setMentionType(null)
     resetSelection()
     const restoreScrollAfterRejectedSend = beginSendScroll()
-    const outcome = await sendMessage(promptText, submittedImages)
+    const outcome = await sendMessage(promptText, submittedImages, undefined, uploadedFiles)
     if (outcome === 'rejected') {
       restoreScrollAfterRejectedSend()
       // Nothing was persisted (command failure): restore the draft without
@@ -1117,7 +1137,7 @@ export function ChatScreen({
 
   const pickToolMode = (mode: SessionToolsMode) => {
     setToolPickerOpen(false)
-    setFileLinkPath(undefined)
+    setFilesInitialPath(undefined)
     setToolsMode(mode)
   }
 
@@ -1132,7 +1152,6 @@ export function ChatScreen({
     setMentionType(null)
     const generation = sessionGenerationRef.current
     setToolsMode(undefined)
-    setFileLinkPath(undefined)
     if (quoteFocusTimerRef.current !== undefined) clearTimeout(quoteFocusTimerRef.current)
     quoteFocusTimerRef.current = setTimeout(() => {
       quoteFocusTimerRef.current = undefined
@@ -1639,15 +1658,33 @@ export function ChatScreen({
       />
       {toolsMode !== undefined && connected && (
         <SessionToolsPanel
-          key={`${session.sessionId}:${fileLinkPath ?? ''}`}
+          key={`${session.sessionId}:${filesInitialPath ?? ''}`}
           mode={toolsMode}
           sessionId={session.sessionId}
-          initialFile={toolsMode === 'files' ? fileLinkPath : undefined}
+          initialPath={toolsMode === 'files' ? filesInitialPath : undefined}
           changesSupported={hostWorkspaceGit}
-          onClose={() => { setToolsMode(undefined); setFileLinkPath(undefined) }}
+          onClose={() => { setToolsMode(undefined); setFilesInitialPath(undefined) }}
           onQuoteToComposer={quoteChangeToComposer}
         />
       )}
+      <FileViewerModal
+        visible={previewFilePath !== undefined && connected}
+        sessionId={session.sessionId}
+        file={previewFilePath ?? ''}
+        onClose={() => setPreviewFilePath(undefined)}
+        onDismiss={fileViewerActions.onDismiss}
+        onOpenDirectory={dir => {
+          const generation = sessionGenerationRef.current
+          fileViewerActions.run(
+            () => setPreviewFilePath(undefined),
+            () => {
+              if (sessionGenerationRef.current !== generation) return
+              setFilesInitialPath(dir)
+              setToolsMode('files')
+            },
+          )
+        }}
+      />
       <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
       <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
       <SessionInfo

@@ -634,10 +634,18 @@ export function mergeAcpHistoryAndLive(history: ChatItem[], live: ChatItem[]): C
             arguments: item.arguments ?? previous.arguments,
             callDetail: item.callDetail ?? previous.callDetail, resultDetail: item.resultDetail ?? previous.resultDetail }
         }
-        if (item.kind === 'message' && previous.kind === 'message'
-          && previous.images !== undefined && previous.images.length > 0
-          && (item.images === undefined || !item.images.some(img => img.attachmentId !== undefined || img.uri?.startsWith('data:')))) {
-          return { ...item, ...(nativeTime === undefined ? {} : { nativeTime }), images: previous.images }
+        if (item.kind === 'message' && previous.kind === 'message') {
+          const preserveImages = previous.images !== undefined && previous.images.length > 0
+            && (item.images === undefined || !item.images.some(img => img.attachmentId !== undefined || img.uri?.startsWith('data:')))
+          const mergedFiles = item.files !== undefined && item.files.length > 0 ? item.files : previous.files
+          if (preserveImages || mergedFiles !== item.files) {
+            return {
+              ...item,
+              ...(nativeTime === undefined ? {} : { nativeTime }),
+              ...(preserveImages ? { images: previous.images } : {}),
+              ...(mergedFiles === undefined ? {} : { files: mergedFiles }),
+            }
+          }
         }
         return nativeTime === undefined ? item : { ...item, nativeTime }
       })

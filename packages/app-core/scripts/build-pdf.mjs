@@ -10,7 +10,8 @@ const PDFJS_VERSION = '6.3.289'
 /** Bindings scripts/pdf-viewer.js resolves from the module scope of the bundled pdf.js module. */
 const REQUIRED_EXPORTS = ['AnnotationMode', 'Util', 'VerbosityLevel', 'getDocument']
 /** Must match PAGE_MARGIN in scripts/pdf-viewer.js. */
-const PAGE_MARGIN = 8
+const PAGE_MARGIN = 12
+const PAGE_GAP = 12
 
 const pdfjsPackage = require.resolve('pdfjs-dist/package.json')
 const { version } = JSON.parse(await read(pdfjsPackage))
@@ -18,9 +19,10 @@ if (version !== PDFJS_VERSION) {
   throw new Error(`build-pdf.mjs bundles pdfjs-dist ${PDFJS_VERSION} but resolved ${version}.`)
 }
 
-const [api, worker, viewer] = await Promise.all([
+const [api, worker, viewportMath, viewer] = await Promise.all([
   read(resolve(dirname(pdfjsPackage), 'legacy/build/pdf.mjs')),
   read(resolve(dirname(pdfjsPackage), 'legacy/build/pdf.worker.mjs')),
+  read(resolve(import.meta.dirname, 'pdf-viewport-math.js')),
   read(resolve(import.meta.dirname, 'pdf-viewer.js')),
 ])
 
@@ -69,21 +71,24 @@ const html = `<!doctype html>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'">
 <title>PDF</title>
 <style>
-:root{--pdf-backdrop:#e9ebef;--pdf-edge:rgba(0,0,0,.16)}
-@media (prefers-color-scheme:dark){:root{--pdf-backdrop:#111418;--pdf-edge:rgba(0,0,0,.5)}}
+:root{--pdf-backdrop:#f2f3f5;--pdf-edge:rgba(15,15,15,.08);--pdf-border:rgba(15,15,15,.08);--pdf-top-pad:12px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--pdf-backdrop:#111418;--pdf-edge:rgba(0,0,0,.48);--pdf-border:rgba(255,255,255,.08)}}
+html[data-theme="dark"]{--pdf-backdrop:#111418;--pdf-edge:rgba(0,0,0,.48);--pdf-border:rgba(255,255,255,.08)}
 html,body{height:100%;margin:0;background:var(--pdf-backdrop);-webkit-text-size-adjust:100%;overflow:hidden}
-#pdf-root{height:100%;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
-#pdf-page{position:relative;width:0;height:0;margin:${PAGE_MARGIN}px auto;background:#fff;box-shadow:0 1px 3px var(--pdf-edge);overflow:hidden}
-#pdf-canvas{display:block;width:100%;height:100%;user-select:none;-webkit-tap-highlight-color:transparent}
-#pdf-text{position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;pointer-events:none;user-select:none;color:transparent;line-height:1}
-#pdf-text span{position:absolute;white-space:pre;transform-origin:0 0}
+#pdf-root{height:100%;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}
+#pdf-stack{display:flex;flex-direction:column;align-items:center;gap:${PAGE_GAP}px;padding:var(--pdf-top-pad) ${PAGE_MARGIN}px 28px;box-sizing:border-box;min-width:100%;transform-origin:0 0}
+.pdf-slot{position:relative;background:#fff;box-shadow:0 2px 8px var(--pdf-edge);border:1px solid var(--pdf-border);border-radius:4px;overflow:hidden;flex:0 0 auto;contain:layout style paint}
+.pdf-slot canvas{display:block;width:100%;height:100%;user-select:none;-webkit-tap-highlight-color:transparent}
+.pdf-text{position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;pointer-events:none;user-select:none;color:transparent;line-height:1}
+.pdf-text span{position:absolute;white-space:pre;transform-origin:0 0}
 </style>
 </head>
 <body>
-<div id="pdf-root"><div id="pdf-page"><canvas id="pdf-canvas" aria-hidden="true"></canvas><div id="pdf-text" role="document"></div></div></div>
+<div id="pdf-root"><div id="pdf-stack"></div></div>
 <script>${boot}</script>
 <script type="module">${inline(worker)}</script>
 <script type="module">${inline(api)}
+${inline(viewportMath)}
 ${inline(viewer)}</script>
 </body>
 </html>`

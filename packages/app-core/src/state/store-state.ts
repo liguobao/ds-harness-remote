@@ -174,7 +174,7 @@ export interface AppState {
   reconnect(options?: { forceRelay?: boolean; restoreSession?: boolean }): Promise<boolean>
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>
-  sendMessage(text: string, images?: PromptImage[], reuseRpcId?: string): Promise<SendMessageResult>
+  sendMessage(text: string, images?: PromptImage[], reuseRpcId?: string, files?: import('../types').ChatFile[]): Promise<SendMessageResult>
   retrySendMessage(itemId: string): Promise<boolean>
   updateQueueItem(itemId: string, action: 'remove' | 'steer', rpcId?: string): Promise<boolean>
   forkChatMessage(message: ChatMessage): Promise<boolean>

@@ -423,6 +423,7 @@ export function mergeCodexLive(current: ChatItem[], live: ChatItem[]): ChatItem[
       if (optimistic >= 0) {
         const local = next[optimistic]
         if (local?.kind === 'message' && local.images !== undefined) item = { ...item, images: local.images }
+        if (local?.kind === 'message' && local.files !== undefined) item = { ...item, files: local.files }
         if (local !== undefined && item.createdAt <= 0) item = { ...item, createdAt: local.createdAt }
         next.splice(optimistic, 1)
       }
@@ -446,6 +447,15 @@ export function mergeCodexLive(current: ChatItem[], live: ChatItem[]): ChatItem[
 function preserveLocalOutcome(current: ChatItem, incoming: ChatItem): ChatItem {
   if (current.kind === 'approval' && incoming.kind === 'approval' && current.outcome !== undefined) {
     return { ...incoming, outcome: current.outcome }
+  }
+  if (
+    current.kind === 'message'
+    && incoming.kind === 'message'
+    && current.files !== undefined
+    && current.files.length > 0
+    && (incoming.files === undefined || incoming.files.length === 0)
+  ) {
+    return { ...incoming, files: current.files }
   }
   return incoming
 }

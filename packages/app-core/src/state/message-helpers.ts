@@ -207,6 +207,10 @@ export function reconcileDeliveryStates(
 
 export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throughSeq?: number): ChatItem[] {
   const liveById = new Map(live.map(item => [item.id, item]))
+  const liveByRpcId = new Map(live.flatMap(item =>
+    item.kind === 'message' && item.role === 'user' && item.requestRpcId !== undefined
+      ? [[item.requestRpcId, item] as const]
+      : []))
   const historyIds = new Set(history.map(item => item.id))
   const boundary = throughSeq ?? Math.max(-1, ...history.map(item => item.nativeSeq ?? item.nativeOrderSeq ?? -1))
   const requests = new Set(history.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : []))
@@ -243,13 +247,17 @@ export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throu
   const result = [
     ...history.map(item => {
       const cached = liveById.get(item.id)
+        ?? (item.kind === 'message' && item.role === 'user' && item.requestRpcId !== undefined
+          ? liveByRpcId.get(item.requestRpcId)
+          : undefined)
       if (cached === undefined) return item
       const historySeq = item.nativeRevisionSeq ?? item.nativeSeq ?? item.nativeOrderSeq ?? -1
       const liveSeq = cached.nativeRevisionSeq ?? cached.nativeSeq ?? cached.nativeOrderSeq ?? -1
       const authoritative = liveSeq > historySeq ? cached : item
       return authoritative.kind === 'message' && cached.kind === 'message'
         ? { ...authoritative, ...(authoritative.feedback === undefined && cached.feedback !== undefined ? { feedback: cached.feedback } : {}),
-            ...(authoritative.role === 'user' && authoritative.images === undefined && cached.images !== undefined ? { images: cached.images } : {}) }
+            ...(authoritative.role === 'user' && authoritative.images === undefined && cached.images !== undefined ? { images: cached.images } : {}),
+            ...(authoritative.role === 'user' && authoritative.files === undefined && cached.files !== undefined ? { files: cached.files } : {}) }
         : authoritative
     }),
     ...live.filter(item => {
@@ -570,9 +578,10 @@ export function computeStreamingSignature(items: readonly ChatItem[]): string {
   const last = items[items.length - 1]
   if (last === undefined) return ''
   if (last.kind === 'message') {
-    // streaming/images/sendState/sendError change without shifting text length,
+    // streaming/images/files/sendState/sendError change without shifting text length,
     // so include cheap scalar facets of them.
-    return `${last.id}:${last.text.length}:${last.reasoning?.length ?? 0}:${last.turnEnd ? last.turnEnd.reason : ''}:${last.sendState ?? ''}:${last.streaming ? 1 : 0}:${last.images?.length ?? 0}:${last.sendError?.length ?? 0}`
+    const filesFacet = (last.files?.length ?? 0) > 0 ? `:${last.files!.length}` : ''
+    return `${last.id}:${last.text.length}:${last.reasoning?.length ?? 0}:${last.turnEnd ? last.turnEnd.reason : ''}:${last.sendState ?? ''}:${last.streaming ? 1 : 0}:${last.images?.length ?? 0}:${last.sendError?.length ?? 0}${filesFacet}`
   }
   // Non-message items mutate in place (tool state, approval/question outcomes,
   // turn end stamps); append their cheap discriminant facets so these

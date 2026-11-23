@@ -36,9 +36,11 @@ import type {
 } from '../../types'
 import { Button, IconButton } from '../../ui/components'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
-import { NativeMarkdown, useMarkdownLink } from '../../ui/markdown'
+import { NativeMarkdown, useWorkspaceFilePress } from '../../ui/markdown'
 import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-preview'
 import { PresentedFileGroup } from '../../ui/file-card'
+import { extractUserSubmittedFiles } from './submitted-files'
+import { SubmittedFileStack } from './submitted-file-stack'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from '../../ui/syntax-highlight'
@@ -105,7 +107,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     && segment.items.some(item => item.kind === 'tool'))
   const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
     : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
-  const onFilePress = useMarkdownLink()
+  const onFilePress = useWorkspaceFilePress()
   const editedFiles = useMemo(() => {
     const files: { path: string; name?: string; action?: 'created' | 'edited' }[] = []
     const seen = new Set<string>()
@@ -375,6 +377,8 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
 }) {
   const { colors, appearance } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const fallbackFilePress = useWorkspaceFilePress()
+  const resolvedFilePress = onFilePress ?? fallbackFilePress
   const user = item.role === 'user'
   const remote = item.role === 'assistant'
   const showReasoning = !compact && remote && hasVisibleMessageText(item.reasoning ?? '')
@@ -382,6 +386,15 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
   const showImages = item.images !== undefined && item.images.length > 0
   const showStreaming = item.streaming === true && item.streamingPhase !== 'reasoning'
   const hasArtifacts = artifacts !== undefined && artifacts.length > 0
+  const userMessageParts = useMemo(() => {
+    if (!user) return undefined
+    const heartbeatBody = heartbeatMessageBody(item.text, 'user')
+    const { quotes, body } = parseMessageQuotes(item.text)
+    const extracted = heartbeatBody === undefined
+      ? extractUserSubmittedFiles(body, item.files)
+      : { files: [], displayText: body }
+    return { heartbeatBody, quotes, extracted }
+  }, [user, item.text, item.files])
 
   // Harness renders assistant prose directly on the conversation canvas.
   if (remote) {
@@ -407,12 +420,14 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
     )
   }
 
-  if (user) {
+  if (user && userMessageParts !== undefined) {
     const undelivered = item.sendState === 'failed' || item.sendState === 'unconfirmed'
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
-    const heartbeatBody = heartbeatMessageBody(item.text, 'user')
-    const { quotes, body } = parseMessageQuotes(item.text)
-    const hasBubbleText = heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(body)
+    const { heartbeatBody, quotes, extracted } = userMessageParts
+    const submittedFiles = extracted.files
+    const displayBody = extracted.displayText
+    const hasBubbleText = heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(displayBody)
+    const showBubbleContent = hasBubbleText || showImages
     const solidText = colors.onPrimary ?? colors.white
     const isSolid = !userBubble && appearance.bubbleStyle === 'solid'
     const bubblePalette = { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse }
@@ -431,30 +446,35 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
               : styles.userSoftBubble
     const quoteTint = userBubble ? colors.onInverse : isSolid ? solidText : colors.primary
     return <View style={styles.userBlock}>
-      <View style={[styles.userContent, userBubbleStyle]}>
-        {showImages && <ChatImages images={item.images!} alignEnd />}
-        {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
-          <View style={styles.userMessageInlineWrap}>
-            {quotes.map((quoteText, index) => (
-              <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
-                <QuoteMarkIcon size={14} color={quoteTint} />
-                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: quoteTint, maxWidth: 200 }]}>
-                  “{formatQuoteDraftSnippet(quoteText, 16)}”
-                </Text>
-              </View>
-            ))}
-            {hasVisibleMessageText(body) && (
-              <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{body}</Text>
-            )}
-          </View>
-        ) : (
-          hasVisibleMessageText(body) && (
-            <View style={styles.userMarkdownWrap}>
-              <NativeMarkdown text={body} colors={userBubble ? bubblePalette : isSolid ? solidPalette : softBubblePalette} />
+      {submittedFiles.length > 0 && (
+        <SubmittedFileStack files={submittedFiles} sessionId={item.sessionId} onFilePress={resolvedFilePress} />
+      )}
+      {showBubbleContent && (
+        <View style={[styles.userContent, userBubbleStyle]}>
+          {showImages && <ChatImages images={item.images!} alignEnd />}
+          {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
+            <View style={styles.userMessageInlineWrap}>
+              {quotes.map((quoteText, index) => (
+                <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
+                  <QuoteMarkIcon size={14} color={quoteTint} />
+                  <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: quoteTint, maxWidth: 200 }]}>
+                    “{formatQuoteDraftSnippet(quoteText, 16)}”
+                  </Text>
+                </View>
+              ))}
+              {hasVisibleMessageText(displayBody) && (
+                <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{displayBody}</Text>
+              )}
             </View>
-          )
-        )}
-      </View>
+          ) : (
+            hasVisibleMessageText(displayBody) && (
+              <View style={styles.userMarkdownWrap}>
+                <NativeMarkdown text={displayBody} colors={userBubble ? bubblePalette : isSolid ? solidPalette : softBubblePalette} />
+              </View>
+            )
+          )}
+        </View>
+      )}
       {item.sendState === 'canceled'
         ? <Text style={styles.canceledText}>{zhCN.chat.sendCanceled}</Text>
         : undelivered
