@@ -36,7 +36,7 @@ Session tools require explicit `hostId`, `backend` and `workspaceId`; existing-s
 
 For example, ask: “On the Linux Host, create a Harness session in my project, run its tests, and report the result here.” The Agent discovers the target, creates and messages a session, then waits and reads its history. An `idle` status does not prove the task objective succeeded. Pending approval/question detection is limited to retained history; use the native UI to handle those requests. Waiting never approves or interrupts work automatically.
 
-CodeX/ACP currently support workspace discovery only through these tools. This entry does not register an external MCP server. Terminal-only profiles are not a supported Host surface in this release; dsh-TUI integration is planned for a later version.
+CodeX/ACP currently support workspace discovery only through these tools. This entry does not register an external MCP server. For a dsh-TUI Host, install the matching standalone bundle. [dsh-TUI package guide](https://github.com/liguobao/ds-harness-remote/tree/main/packages/tui#readme)
 
 ## Install
 
@@ -46,13 +46,13 @@ In DeepSeek Harness Desktop, open **Extensions / Plugin management**, choose ins
 from **npm**, and enter:
 
 ```text
-ds-harness-remote@0.6.7
+ds-harness-remote@0.6.8
 ```
 
 Restart Desktop after installation. Its official `dsh` launcher can also install the package:
 
 ```sh
-dsh plugin --profile desktop add -w ds-harness-remote@0.6.7
+dsh plugin --profile desktop add -w ds-harness-remote@0.6.8
 ```
 
 Use Desktop's official launcher to manage its reserved `desktop` profile.
@@ -62,8 +62,13 @@ Use Desktop's official launcher to manage its reserved `desktop` profile.
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.6.7
+dsh plugin --profile web add -w ds-harness-remote@0.6.8
 ```
+
+## What’s new in 0.6.8
+
+- The Host loads even when the optional `@deepseek-ai/dsh-client-connection` package is absent. When the running Harness provides a Connection service, the Host can use it to create owner peers.
+- Mobile clients can hand a conversation to another agent, review a workspace Git diff, and select changes for follow-up. The attention inbox brings pending approvals and questions together. [Release notes](https://github.com/liguobao/ds-harness-remote/blob/main/docs/CHANGELOG.md#068)
 
 ## Highlights
 
