@@ -307,6 +307,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       set(state => ({
         busyAction: `session:${session.sessionId}`,
         codexReadySessionId: undefined,
+        acpReadOnlySessionId: undefined,
         selectedSession: session,
         ...(preservedMessages !== undefined && state.messages[session.sessionId] !== preservedMessages ? {
           messages: {
@@ -554,7 +555,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               : {}),
           }))
           const acpClient = acpClientForBackend(runtime.connection, acpBackend)
-          const [details] = await Promise.all([
+          const [details, readOnly] = await Promise.all([
             (async () => {
               if (typeof acpClient.loadSessionDetails === 'function') {
                 try {
@@ -572,7 +573,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 : [] as unknown[]
               return { events }
             })(),
-            runtime.ensureCursorStream(session, current),
+            runtime.ensureCursorStream(session, current).catch((error: unknown) => {
+              if (!(error instanceof Error) || !('code' in error) || error.code !== 'CURSOR_SESSION_OWNED') throw error
+              return true
+            }),
           ])
           if (!current()) return
           const items = foldAcpHistory(details.events, session.sessionId)
@@ -636,6 +640,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               historyHasMore: paged.historyHasMore,
               oldestLoadedSeq: paged.oldestLoadedSeq,
               busyAction: undefined,
+              acpReadOnlySessionId: readOnly ? session.sessionId : undefined,
               ...(details.modes?.availableModes
                 ? {
                     agentPresetOptions: details.modes.availableModes.map(m => ({
@@ -648,6 +653,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 : {}),
             }
           })
+          if (readOnly) return
           if (acpBackend === 'antigravity') void runtime.refreshAntigravityModels(enrichedSession, current)
           else if (acpBackend === 'pi') void runtime.refreshPiModels(enrichedSession, current)
           else if (acpBackend === 'opencode') void runtime.refreshOpencodeModels(enrichedSession, current)
@@ -1364,6 +1370,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const loadGeneration = runtime.sessionLoadGeneration
       const session = get().selectedSession
       if (session === undefined || get().connection.phase !== 'connected') return false
+      if (get().acpReadOnlySessionId === session.sessionId) return false
       const token = ++modelSelectToken
       const isCurrent = () => token === modelSelectToken
         && generation === runtime.connectionGeneration
@@ -1439,6 +1446,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     async selectPermission(preset) {
       const session = get().selectedSession
       if (session === undefined || get().connection.phase !== 'connected' || get().permissionSelecting) return false
+      if (get().acpReadOnlySessionId === session.sessionId) return false
       const generation = runtime.connectionGeneration
       const loadGeneration = runtime.sessionLoadGeneration
       const token = ++permissionSelectToken
@@ -1529,6 +1537,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const session = get().selectedSession
       const backend = session?.backend
       if (get().connection.phase !== 'connected' || session === undefined || backend === 'codex') return false
+      if (get().acpReadOnlySessionId === session.sessionId) return false
       if (get().agentPresetLoading) return false
       const sessionId = session.sessionId
       const generation = runtime.connectionGeneration
@@ -1584,6 +1593,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     async selectAgentPreset(preset) {
       const session = get().selectedSession
       if (session === undefined || get().connection.phase !== 'connected') return false
+      if (get().acpReadOnlySessionId === session.sessionId) return false
       if (session.backend === 'codex') return false
       const generation = runtime.connectionGeneration
       const loadGeneration = runtime.sessionLoadGeneration
