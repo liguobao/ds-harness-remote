@@ -262,6 +262,12 @@ export function createRemoteServer(config: Config) {
     if (method === 'GET' && path === '/api/v1/account/devices') {
       accountAuth(req); json(res, 200, { items: store.list().map(descriptor), serverUrl: url.origin, transport: 'webrtc' }); return
     }
+    const accountDeviceMatch = /^\/api\/v1\/account\/devices\/([^/]+)$/.exec(path)
+    if (method === 'DELETE' && accountDeviceMatch) {
+      accountAuth(req)
+      store.revoke(accountDeviceMatch[1]!)
+      json(res, 200, { status: 'revoked' }); return
+    }
     if (method === 'POST' && (path === '/api/v1/devices/register' || path === '/api/v1/devices/register-owned-role')) {
       const source = path.endsWith('register-owned-role') ? deviceAuth(req) : undefined
       if (!source) accountAuth(req)

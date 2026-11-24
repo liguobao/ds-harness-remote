@@ -10,6 +10,8 @@ This remains a small self-hosted Server that we intend to maintain. The product 
 
 The `/` landing page links to `/app/login`; a successful sign-in continues to `/app/remote`. Point both Host and Client at the same Server URL and use the same account and password. Device credentials are persisted by the Server, while Web sessions use an HttpOnly cookie.
 
+The device list lets you rename a device and revoke ones you no longer use (`DELETE /api/v1/account/devices/:id`, requires a Web session). A revoked device disappears from the list immediately and all of its access/refresh credentials stop working; the record is kept as a revoked tombstone, so the same `deviceId` cannot register again with either the original or a new key. The device itself clears its local credentials on `DEVICE_REVOKED` and registers a rotated identity the next time you sign in.
+
 ## Refresh response recovery
 
 If a refresh succeeds but its response is lost, retrying the previous refresh token returns the same successor pair, including after a Server restart. Recovery remains available until that successor is rotated again, revoked, or expired; it does not extend either token's lifetime. An expired recovered access token can be replaced by rotating the recovered refresh token. Older tokens are rejected without revoking current credentials.
