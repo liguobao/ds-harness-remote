@@ -5233,11 +5233,10 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
   function installStyle(clientModuleId2) {
     let style = document.createElement("style");
     return style.dataset.plugin = clientModuleId2, style.dataset.pluginCss = "dsh-remote", style.textContent = [
-      ".dshRemoteWebFooter{position:fixed;inset-inline:8px;bottom:env(safe-area-inset-bottom,0px);z-index:10;text-align:center;font-size:11px;line-height:1.4;color:var(--dsw-alias-label-secondary);pointer-events:none}",
-      ".dshRemoteWebFooter a{color:inherit;text-decoration:underline;text-underline-offset:2px;pointer-events:auto;white-space:nowrap}",
-      ".dshRemoteWebFooter .dshRemoteMembershipLink{color:var(--dsw-alias-brand-primary,LinkText);font-weight:600}",
+      ".dshRemoteWebFooter{position:fixed;inset-inline:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 4px);z-index:10;text-align:center;font-size:11px;line-height:1.4;color:var(--dsw-alias-label-secondary);pointer-events:none}",
+      ".dshRemoteWebFooter a{color:inherit;text-decoration:none;text-underline-offset:2px;pointer-events:auto;white-space:nowrap}",
+      ".dshRemoteWebFooter a:is(:hover,:focus-visible){color:var(--dsw-alias-brand-primary,LinkText);text-decoration:underline}",
       ".dshRemoteWebFooter button{min-width:24px;min-height:24px;margin-inline-start:3px;vertical-align:middle;border:0;border-radius:4px;background:transparent;color:inherit;font:inherit;font-size:15px;cursor:pointer;pointer-events:auto}.dshRemoteWebFooter button:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteWebFooter button:focus-visible{outline:2px solid currentColor;outline-offset:-2px}",
-      "@media(max-width:760px){.dshRemoteWebFooterDetail{display:none}}",
       ".dshRemoteConnectedPanelHeader{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;margin-bottom:6px}.dshRemoteConnectedPanelHeader .dshRemoteConnectedPanelTitle{margin-bottom:0}",
       ".dshRemoteHostNameLine{display:flex;align-items:center;flex-wrap:wrap;gap:8px}",
       ".dshRemoteServerNotice{font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}.dshRemoteServerNotice.isWarning{color:var(--dsw-alias-state-warning-primary,#946200)}.dshRemoteServerNotice.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteServerNotice.isRestored{color:var(--dsw-alias-state-success-primary)}",
@@ -7998,16 +7997,9 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
             return renderBodyPortal(portal, React.createElement(
               "footer",
               { className: "dshRemoteWebFooter" },
-              "Power by ",
-              React.createElement(
-                "a",
-                { ...linkProps, href: "https://github.com/liguobao/ds-harness-remote" },
-                React.createElement("span", { className: "dshRemoteWebFooterDetail" }, "liguobao/"),
-                "ds-harness-remote"
-              ),
-              " - ",
-              React.createElement("span", { className: "dshRemoteWebFooterDetail" }, "\u66F4\u5FEB\u66F4\u5F3A\uFF1F"),
-              React.createElement("a", { ...linkProps, className: "dshRemoteMembershipLink", href: "https://dsh.r2049.cn" }, "\u4F1A\u5458\u8BA1\u5212"),
+              React.createElement("a", { ...linkProps, href: "https://github.com/liguobao/ds-harness-remote" }, "ds-harness-remote"),
+              " \xB7 ",
+              React.createElement("a", { ...linkProps, href: "https://dsh.r2049.cn" }, "\u4F1A\u5458\u8BA1\u5212"),
               React.createElement("button", { type: "button", onClick: dismiss, "aria-label": t("close"), title: t("close") }, "\xD7")
             ));
           };
