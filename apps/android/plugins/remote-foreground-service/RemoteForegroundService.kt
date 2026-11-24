@@ -11,6 +11,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.drawable.Icon
+import android.provider.Settings
+import org.json.JSONObject
 import android.graphics.Color
 import android.net.Uri
 import android.net.wifi.WifiManager
@@ -183,6 +186,30 @@ class RemoteForegroundService : Service() {
     }
   }
 
+  private fun addXiaomiFocus(notification: Notification, version: Int, status: String, title: String) {
+    val params = JSONObject()
+      .put("protocol", 1)
+      .put("business", "remote_task")
+      .put("updatable", true)
+      .put("reopen", "reopen")
+      .put("islandFirstFloat", false)
+      .put("ticker", status)
+      .put("baseInfo", JSONObject().put("type", 2).put("title", status).put("content", title))
+    if (version >= 3) {
+      val iconKey = "miui.focus.pic_task"
+      notification.extras.putBundle("miui.focus.pics", Bundle().apply {
+        putParcelable(iconKey, Icon.createWithResource(this@RemoteForegroundService, R.mipmap.ic_launcher_foreground))
+      })
+      val pic = JSONObject().put("type", 1).put("pic", iconKey)
+      val label = JSONObject().put("type", 1).put("picInfo", pic)
+        .put("textInfo", JSONObject().put("title", status))
+      params.put("param_island", JSONObject()
+        .put("bigIslandArea", JSONObject().put("imageTextInfoLeft", label).put("picInfo", pic))
+        .put("smallIslandArea", JSONObject().put("picInfo", pic)))
+    }
+    notification.extras.putString("miui.focus.param", JSONObject().put("param_v2", params).toString())
+  }
+
   private fun notification(): Notification {
     val task = liveTask
     if (connectionStatus == "connected" && task != null) {
@@ -215,39 +242,11 @@ class RemoteForegroundService : Service() {
       val timeColor = if (night) Color.parseColor("#99FFFFFF") else Color.parseColor("#99000000")
 
       try {
-        val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
-          setImageViewResource(R.id.live_task_status_dot, dotRes)
-          setTextViewText(R.id.live_task_status_text, status)
-          setTextColor(R.id.live_task_status_text, statusColor)
-          setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
-          setTextColor(R.id.live_task_time, timeColor)
-          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
-          setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
-          setTextColor(R.id.live_task_title, titleColor)
-          setTextViewText(R.id.live_task_summary, task.summary)
-          setTextColor(R.id.live_task_summary, timeColor)
-          setViewVisibility(R.id.live_task_summary, if (task.summary.isBlank()) View.GONE else View.VISIBLE)
-          setOnClickPendingIntent(R.id.live_task_card, pendingIntent)
-        }
-
-        val collapsedViews = RemoteViews(packageName, R.layout.notification_live_task_collapsed).apply {
-          setImageViewResource(R.id.live_task_status_dot, dotRes)
-          setTextViewText(R.id.live_task_status_text, status)
-          setTextColor(R.id.live_task_status_text, statusColor)
-          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
-          setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
-          setTextColor(R.id.live_task_title, titleColor)
-          setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
-        }
-
         val builder = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
           .setSmallIcon(R.mipmap.ic_launcher_foreground)
           .setContentTitle(status)
           .setContentText(task.title.ifBlank { getString(R.string.app_name) })
-          .setCustomContentView(collapsedViews)
-          .setCustomBigContentView(expandedViews)
-          .setStyle(NotificationCompat.DecoratedCustomViewStyle())
           .setContentIntent(pendingIntent)
           .setCategory(NotificationCompat.CATEGORY_SERVICE)
           .setOngoing(true)
@@ -257,11 +256,55 @@ class RemoteForegroundService : Service() {
           .setGroupSummary(false)
           .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
+        if (Build.VERSION.SDK_INT >= 36) {
+          builder.setRequestPromotedOngoing(true).setShortCriticalText(status)
+          if (task.summary.isNotBlank()) {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(task.title, task.summary)
+              .filter { it.isNotBlank() }.joinToString("\n")))
+          }
+        } else {
+          val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
+            setImageViewResource(R.id.live_task_status_dot, dotRes)
+            setTextViewText(R.id.live_task_status_text, status)
+            setTextColor(R.id.live_task_status_text, statusColor)
+            setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
+            setTextColor(R.id.live_task_time, timeColor)
+            setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+            setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+            setTextColor(R.id.live_task_title, titleColor)
+            setTextViewText(R.id.live_task_summary, task.summary)
+            setTextColor(R.id.live_task_summary, timeColor)
+            setViewVisibility(R.id.live_task_summary, if (task.summary.isBlank()) View.GONE else View.VISIBLE)
+            setOnClickPendingIntent(R.id.live_task_card, pendingIntent)
+          }
+
+          val collapsedViews = RemoteViews(packageName, R.layout.notification_live_task_collapsed).apply {
+            setImageViewResource(R.id.live_task_status_dot, dotRes)
+            setTextViewText(R.id.live_task_status_text, status)
+            setTextColor(R.id.live_task_status_text, statusColor)
+            setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+            setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+            setTextColor(R.id.live_task_title, titleColor)
+            setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
+          }
+
+          builder.setCustomContentView(collapsedViews)
+            .setCustomBigContentView(expandedViews)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+        }
+
         if (task.updatedAtMs > 0) {
           builder.setWhen(task.updatedAtMs).setShowWhen(true)
         }
 
-        return builder.build()
+        val notification = builder.build()
+        val focusVersion = runCatching {
+          Settings.System.getInt(contentResolver, "notification_focus_protocol", 0)
+        }.getOrDefault(0)
+        if (focusVersion >= 2) {
+          addXiaomiFocus(notification, focusVersion, status, task.title.ifBlank { getString(R.string.app_name) })
+        }
+        return notification
       } catch (e: Exception) {
         Log.w("RemoteForegroundService", "Failed to build custom live task notification, falling back", e)
       }
