@@ -1,3 +1,6 @@
+import { compareAttentionItems, type AttentionStatus } from '@dsh-remote/protocol'
+import { AttentionInboxPill, attentionStatusVisual } from './attention-inbox-sheet'
+import { useAttentionStore } from '../state/attention-store'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   ActivityIndicator,
@@ -182,6 +185,7 @@ export interface HostSessionsDrawerProps {
   onOpenAutomationTasks?: () => void
   onOpenPlugins?: () => void
   onOpenHostSwitcher?: () => void
+  onOpenAttentionInbox?: () => void
   onOpenSettings?: () => void
   onOpenAbout?: () => void
   botMode?: boolean
@@ -250,7 +254,8 @@ interface SessionListRowProps {
   isSelected: boolean
   isFirstInList: boolean
   isLastInCard: boolean
-  isRunning: boolean
+  attentionStatus?: AttentionStatus
+  scheme: Parameters<typeof attentionStatusVisual>[2]
   isPinned: boolean
   isArchived: boolean
   depth: number
@@ -278,7 +283,8 @@ const SessionListRow = memo(function SessionListRow({
   isSelected,
   isFirstInList,
   isLastInCard,
-  isRunning,
+  attentionStatus,
+  scheme,
   isPinned,
   isArchived,
   depth,
@@ -298,9 +304,8 @@ const SessionListRow = memo(function SessionListRow({
   onMorePress,
 }: SessionListRowProps) {
   const displayTitle = resolveSessionDisplayTitle(item) ?? strings.sessions.untitled
-  const accessibilityLabel = isPinned
-    ? `${displayTitle}, ${strings.sessions.pinned}`
-    : displayTitle
+  const status = attentionStatus && attentionStatusVisual(attentionStatus, colors, scheme)
+  const accessibilityLabel = [displayTitle, status?.label, isPinned ? strings.sessions.pinned : undefined].filter(Boolean).join(', ')
 
   return (
     <Pressable
@@ -327,7 +332,7 @@ const SessionListRow = memo(function SessionListRow({
       ]}
     >
       <View style={styles.statusIndicatorSlot}>
-        {isRunning && <View style={styles.runningDot} />}
+        {status && <status.Icon size={13} color={status.fg} strokeWidth={2.2} />}
       </View>
       <Text
         style={[
@@ -553,6 +558,7 @@ interface HostSessionsDrawerBodyProps {
   onOpenAutomationTasks?: () => void
   onOpenPlugins?: () => void
   onOpenHostSwitcher?: () => void
+  onOpenAttentionInbox?: () => void
   onOpenSettings?: () => void
   onOpenAbout?: () => void
   onBotModeChange?: (botMode: boolean) => void
@@ -580,6 +586,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   onOpenAutomationTasks,
   onOpenPlugins,
   onOpenHostSwitcher,
+  onOpenAttentionInbox,
   onOpenSettings,
   onOpenAbout,
   onBotModeChange,
@@ -612,6 +619,18 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
     state.opencodeAvailable && 'opencode', state.claudeAvailable && 'claude',
     state.hermesAvailable && 'hermes', ...selectCustomAcpBackends(state),
   ].filter(Boolean).join(','), gate)
+  const attentionItems = useStoreGateSelector(useAttentionStore, state => state.items, gate)
+  const attentionStatusBySession = useMemo(() => {
+    const map = new Map<string, AttentionStatus>()
+    const sorted = [...attentionItems].sort(compareAttentionItems)
+    for (const entry of sorted) {
+      if (!map.has(entry.sessionId)) {
+        map.set(entry.sessionId, entry.status)
+      }
+    }
+    return map
+  }, [attentionItems])
+  const hasTrustedHost = useStoreGateSelector(useAppStore, state => state.devices.some(d => d.trusted), gate)
   const lifecycles = useStoreGateSelector(useAppStore, state => state.sessionLifecycles, gate)
   const selected = useStoreGateSelector(useAppStore, state => state.selectedSession, gate)
   const archivedIds = useStoreGateSelector(useAppStore, state => state.archivedSessionIds, gate)
@@ -954,7 +973,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   const toolbarRef = useRef<View>(null)
   const containerRef = useRef<View>(null)
 
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
   const styles = useThemedStyles(createStyles)
 
   useEffect(() => {
@@ -1716,7 +1735,8 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
           isSelected={isSelected}
           isFirstInList={isFirstInList}
           isLastInCard={isLastInCard}
-          isRunning={isRunning}
+          attentionStatus={attentionStatusBySession.get(item.sessionId) ?? (isRunning ? 'running' : undefined)}
+          scheme={scheme}
           isPinned={isPinned}
           isArchived={isArchived}
           depth={depth}
@@ -1738,6 +1758,8 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
       )
     },
     [
+      attentionStatusBySession,
+      scheme,
       selectedSessionId,
       groupBy,
       lifecycles,
@@ -2091,23 +2113,35 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
         </>
       )}
 
-      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧轻量设置按钮 */}
+      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧收件箱入口与设置按钮 */}
       <View style={styles.hostFooterBar}>
         <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
-        {onOpenSettings !== undefined && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.settings.title}
-            android_ripple={androidRipple(colors, true)}
-            onPress={() => {
-              Keyboard.dismiss()
-              onOpenSettings()
-            }}
-            hitSlop={8}
-            style={({ pressed }) => [styles.footerSettingsBtn, pressed && styles.pressedBg]}
-          >
-            <Settings size={17} color={colors.ink} strokeWidth={1.9} />
-          </Pressable>
+        {(((connected || hasTrustedHost) && onOpenAttentionInbox !== undefined) || onOpenSettings !== undefined) && (
+          <View style={styles.hostFooterRight}>
+            {(connected || hasTrustedHost) && onOpenAttentionInbox !== undefined && (
+              <AttentionInboxPill
+                onPress={() => {
+                  Keyboard.dismiss()
+                  onOpenAttentionInbox()
+                }}
+              />
+            )}
+            {onOpenSettings !== undefined && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.settings.title}
+                android_ripple={androidRipple(colors, true)}
+                onPress={() => {
+                  Keyboard.dismiss()
+                  onOpenSettings()
+                }}
+                hitSlop={8}
+                style={({ pressed }) => [styles.footerSettingsBtn, pressed && styles.pressedBg]}
+              >
+                <Settings size={17} color={colors.ink} strokeWidth={1.9} />
+              </Pressable>
+            )}
+          </View>
         )}
       </View>
       </View>
@@ -2590,6 +2624,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
   onOpenAutomationTasks,
   onOpenPlugins,
   onOpenHostSwitcher,
+  onOpenAttentionInbox,
   onOpenSettings,
   onOpenAbout,
   botMode,
@@ -2923,6 +2958,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
       onOpenAutomationTasks={onOpenAutomationTasks}
       onOpenPlugins={onOpenPlugins}
       onOpenHostSwitcher={onOpenHostSwitcher}
+      onOpenAttentionInbox={onOpenAttentionInbox}
       onOpenSettings={onOpenSettings}
       onOpenAbout={onOpenAbout}
       onBotModeChange={onBotModeChange}
@@ -3150,6 +3186,7 @@ const createStyles = (colors: ThemeColors) =>
     listContainer: { paddingBottom: spacing.xl },
 
     // 底部常驻栏：左侧当前远程主机状态/切换入口，右侧轻量设置按钮
+    hostFooterRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
     hostFooterBar: {
       flexDirection: 'row',
       alignItems: 'center',

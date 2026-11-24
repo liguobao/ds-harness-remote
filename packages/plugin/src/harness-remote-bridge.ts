@@ -321,6 +321,13 @@ const PUBLIC_SCHEDULE_ERRORS: Record<string, string> = {
 
 const allowedEndpoints = new Set<string>(HARNESS_REMOTE_ALLOWLIST)
 
+export interface HarnessForwardedEventsObserver {
+  onStreamOpened?(): void
+  onFrame(frame: unknown): void
+  onEventResult?(eventId: string, outcomeKind?: string): void
+  onStreamClosed?(): void
+}
+
 /** Host-side adapter from the encrypted peer channel to the official alpha Gateway carrier. */
 export class HarnessRemoteBridge {
   compactHistoryEnabled = false
@@ -344,6 +351,7 @@ export class HarnessRemoteBridge {
     private readonly schedule?: ScheduleCreateService,
     private readonly uploadAttachment?: (body: unknown) => Promise<unknown>,
     private readonly attachmentHostPath?: (ref: MessageFileAttachment) => string | undefined,
+    private readonly forwardedEventsObserver?: HarnessForwardedEventsObserver,
   ) {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
   }
@@ -421,6 +429,18 @@ export class HarnessRemoteBridge {
       if (params.endpoint === 'session/page' && nativeResult.ok) {
         const sessionId = journalSessionId(nativePayload)
         if (sessionId !== undefined) this.messageFiles.observe(sessionId, nativeResult.value)
+      }
+      if (params.endpoint === '$events/result' && nativeResult.ok && this.forwardedEventsObserver?.onEventResult !== undefined) {
+        const args = requestArgs(params.payload)
+        const eventId = typeof args.eventId === 'string' && args.eventId.length > 0 ? args.eventId : undefined
+        const outcomeKind = isRecord(args.outcome) && typeof args.outcome.kind === 'string' ? args.outcome.kind : undefined
+        if (eventId !== undefined) {
+          try {
+            this.forwardedEventsObserver.onEventResult(eventId, outcomeKind)
+          } catch {
+            // Read-only event observation must never disrupt RPC settlement.
+          }
+        }
       }
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
@@ -702,7 +722,15 @@ export class HarnessRemoteBridge {
     if (params.endpoint === 'terminal/watch') source = this.terminal.watch(params.payload, source)
     const historyFollow = params.endpoint === 'session/follow'
     const sessionId = historyFollow ? journalSessionId(params.payload) : undefined
-    void this.pump(params.streamId, source, controller.signal, historyFollow, params.transferFrames, sessionId)
+    void this.pump(
+      params.streamId,
+      source,
+      controller.signal,
+      historyFollow,
+      params.transferFrames,
+      params.endpoint === '$events',
+      sessionId,
+    )
     return { opened: true, streamId: params.streamId }
   }
 
@@ -826,13 +854,47 @@ export class HarnessRemoteBridge {
     }
   }
 
-  private async pump(streamId: string, source: AsyncIterable<unknown>, signal: AbortSignal, historyFollow = false, transferFrames = false, sessionId?: string): Promise<void> {
+  private async pump(
+    streamId: string,
+    source: AsyncIterable<unknown>,
+    signal: AbortSignal,
+    historyFollow = false,
+    transferFrames = false,
+    forwardedEvents = false,
+    sessionId?: string,
+  ): Promise<void> {
     let reason: HarnessRemoteStreamClosedData['reason'] = 'completed'
     let failure: HarnessRemoteStreamClosedData['failure']
+    let closedNotified = false
+    const notifyClosed = () => {
+      if (!forwardedEvents || closedNotified) return
+      closedNotified = true
+      try {
+        this.forwardedEventsObserver?.onStreamClosed?.()
+      } catch {
+        // Read-only event observation must never disrupt stream teardown.
+      }
+    }
+    if (forwardedEvents) {
+      try {
+        this.forwardedEventsObserver?.onStreamOpened?.()
+      } catch {
+        // Read-only event observation must never disrupt stream open.
+      }
+      if (signal.aborted) notifyClosed()
+      else signal.addEventListener('abort', notifyClosed, { once: true })
+    }
     try {
       for await (const value of source) {
         if (signal.aborted) break
         if (sessionId !== undefined) this.messageFiles.observe(sessionId, value)
+        if (forwardedEvents && this.forwardedEventsObserver !== undefined) {
+          try {
+            this.forwardedEventsObserver.onFrame(value)
+          } catch {
+            // Read-only event observation must never disrupt the forwarded stream.
+          }
+        }
         const frame: HarnessRemoteFrameData = {
           streamId,
           hasValue: true,
@@ -850,6 +912,10 @@ export class HarnessRemoteBridge {
       reason = signal.aborted ? 'cancelled' : 'failed'
       if (!signal.aborted) failure = this.gateway.failure(error)
     } finally {
+      if (forwardedEvents) {
+        signal.removeEventListener('abort', notifyClosed)
+        notifyClosed()
+      }
       this.streams.delete(streamId)
       await this.publish('harness.remote.stream.closed', {
         streamId,

@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema, parseWireJson } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
+import { AttentionWebhookDispatcher, type AttentionWebhookOptions } from './attention-webhook.js'
 import { buildIceServers, parseIceConfig, type IceConfig } from './ice.js'
 import { Logger, type LogLevel } from './logger.js'
 import {
@@ -22,6 +23,7 @@ import {
   normalizeHeartbeatIntervalMs,
   normalizeHelloTimeoutMs,
   normalizeMaxFramesPerSec,
+  parseAttentionWebhookUrl,
 } from './config.js'
 
 export interface Config {
@@ -37,6 +39,8 @@ export interface Config {
   maxFramesPerSec?: number
   logLevel?: LogLevel
   ice?: IceConfig
+  attentionWebhookUrl?: string
+  attentionWebhookOptions?: Omit<AttentionWebhookOptions, 'logger'>
 }
 
 /**
@@ -72,6 +76,7 @@ export {
   normalizeHeartbeatDisconnectMs,
   normalizeForceTerminateGraceMs,
   normalizeMaxFramesPerSec,
+  parseAttentionWebhookUrl,
   HELLO_TIMEOUT_MS_RANGE,
   HEARTBEAT_INTERVAL_MS_RANGE,
   HEARTBEAT_DISCONNECT_MS_MAX,
@@ -166,6 +171,7 @@ export function createRemoteServer(config: Config) {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('DSH_SERVER_PUBLIC_URL must be an HTTP(S) origin.')
   const trustedProxyIps = normalizeTrustedProxyIps(config.trustedProxyIps)
   const ice = config.ice ?? parseIceConfig({})
+  const attentionWebhookUrl = parseAttentionWebhookUrl(config.attentionWebhookUrl)
   const store = new Store(config.dataFile, config.account.trim(), config.password)
   const assets = readAssets()
   const sessions = new Map<string, number>()
@@ -204,6 +210,12 @@ export function createRemoteServer(config: Config) {
     })
   })
   const logger = new Logger('server', config.logLevel ?? 'info')
+  const attentionWebhook = attentionWebhookUrl
+    ? new AttentionWebhookDispatcher(attentionWebhookUrl, {
+        ...config.attentionWebhookOptions,
+        logger: logger.child('attention-webhook'),
+      })
+    : undefined
   // Normalize at this boundary as well: a programmatic caller may pass NaN,
   // Infinity or a negative value straight through the Config object.
   const timing = normalizeGatewayOptions({
@@ -218,9 +230,22 @@ export function createRemoteServer(config: Config) {
     logLevel: config.logLevel,
     logger: logger.child('gateway'),
     turnEnabled: ice.turnUrls.length > 0,
+    onAttentionSignal: attentionWebhook
+      ? (hostId, hostName, digest) => attentionWebhook.notify(hostId, hostName, digest)
+      : undefined,
+    onAttentionClear: attentionWebhook
+      ? hostId => attentionWebhook.cancel(hostId)
+      : undefined,
   })
   function descriptor(d: ReturnType<Store['get']>) {
-    return { ...d.descriptor, membershipId: `account:${hash(store.account).slice(0, 16)}`, online: gateway.peers.has(d.descriptor.deviceId), lastSeenAt: d.lastSeenAt }
+    const attentionDigest = gateway.attentionDigest(d.descriptor.deviceId)
+    return {
+      ...d.descriptor,
+      membershipId: `account:${hash(store.account).slice(0, 16)}`,
+      online: gateway.peers.has(d.descriptor.deviceId),
+      lastSeenAt: d.lastSeenAt,
+      ...(attentionDigest !== undefined ? { attentionDigest } : {}),
+    }
   }
   async function route(req: IncomingMessage, res: ServerResponse) {
     const requestUrl = new URL(req.url ?? '/', url)
@@ -311,11 +336,18 @@ export function createRemoteServer(config: Config) {
       const source = deviceAuth(req), target = store.get(match[1]!)
       if (source.descriptor.role === target.descriptor.role) throw new ApiError('MEMBERSHIP_REQUIRED', 403)
       const d = descriptor(target)
-      json(res, 200, match[2] ? { deviceId: d.deviceId, online: d.online, lastSeenAt: d.lastSeenAt } : d); return
+      json(res, 200, match[2]
+        ? {
+            deviceId: d.deviceId,
+            online: d.online,
+            lastSeenAt: d.lastSeenAt,
+            ...(d.attentionDigest !== undefined ? { attentionDigest: d.attentionDigest } : {}),
+          }
+        : d); return
     }
     throw new ApiError('METHOD_NOT_FOUND', 404)
   }
-  return { server, store, gateway, logger, close: async () => { gateway.close(); server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) } }
+  return { server, store, gateway, logger, close: async () => { attentionWebhook?.close(); gateway.close(); server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) } }
 }
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value))

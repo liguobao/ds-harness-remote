@@ -1,4 +1,4 @@
-import type { TransportStats } from '@dsh-remote/protocol'
+import type { AttentionDigest, TransportStats } from '@dsh-remote/protocol'
 import type { AdaptiveConnectionDetails } from '@dsh-remote/webrtc'
 import { strings as zhCN } from './locales/i18n'
 
@@ -64,12 +64,14 @@ export interface RemoteDevice {
   lastSeenAt?: number
   fingerprint?: string
   trusted: boolean
+  attentionDigest?: AttentionDigest
 }
 
 export interface DevicePresence {
   deviceId: string
   online: boolean
   lastSeenAt?: number
+  attentionDigest?: AttentionDigest
 }
 
 export interface HostDescriptor {

@@ -1,3 +1,4 @@
+import { useAttentionStore } from '../state/attention-store'
 import * as Haptics from 'expo-haptics'
 import { ArrowDown, ArrowLeft, ArrowRightLeft, FileText, Film, Menu, MessageSquare, MoreHorizontal, RefreshCw, X } from 'lucide-react-native'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react'
@@ -267,6 +268,7 @@ export function ChatScreen({
   onOpenWorkspaces,
   onOpenDeviceInfo,
   onOpenHostSwitcher,
+  onOpenAttentionInbox,
   onOpenSettings,
   onOpenAbout,
   botMode = false,
@@ -283,6 +285,7 @@ export function ChatScreen({
   onOpenWorkspaces?: (focusWorkspaceKey?: string) => void
   onOpenDeviceInfo?: () => void
   onOpenHostSwitcher?: () => void
+  onOpenAttentionInbox?: () => void
   onOpenSettings?: () => void
   onOpenAbout?: () => void
   botMode?: boolean
@@ -556,6 +559,12 @@ export function ChatScreen({
   const hasNewSession = onNewSession !== undefined
   const hasBotModeChange = onBotModeChange !== undefined
 
+  const openAttentionInbox = useCallback(() => {
+    Keyboard.dismiss()
+    if (onOpenAttentionInbox) onOpenAttentionInbox()
+    else useAttentionStore.getState().setInboxOpen(true)
+  }, [onOpenAttentionInbox])
+
   const renderDrawer = (inlineMode: boolean) => (
     <HostSessionsDrawer
       key={inlineMode ? 'inline-navigation' : 'navigation-drawer'}
@@ -578,6 +587,7 @@ export function ChatScreen({
       onOpenPlugins={pluginsAvailable ? handleDrawerOpenPlugins : undefined}
       onOpenHostSwitcher={hasOpenHostSwitcher ? handleDrawerOpenHostSwitcher : undefined}
       onOpenAbout={hasOpenAbout ? stableOnOpenAbout : undefined}
+      onOpenAttentionInbox={openAttentionInbox}
       onOpenSettings={handleDrawerOpenSettings}
       onSelect={handleDrawerSelect}
       onHandoffSession={handleOpenHandoff}

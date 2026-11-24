@@ -1,8 +1,19 @@
+import type { AttentionMode } from '@dsh-remote/protocol'
+
 export type AppRoute =
   | { name: 'server' }
   | { name: 'remote-hosts' }
   | { name: 'device'; deviceId: string }
-  | { name: 'connecting'; deviceId: string; sheet?: boolean; focusWorkspaceKey?: string; sessionId?: string }
+  | {
+      name: 'connecting'
+      deviceId: string
+      sheet?: boolean
+      focusWorkspaceKey?: string
+      sessionId?: string
+      sessionMode?: AttentionMode
+      attentionToken?: string
+      openAttentionInbox?: boolean
+    }
   | { name: 'chat'; botConversationId?: string; externalOpenRevision?: number }
   | { name: 'settings' }
   | { name: 'appearance' }
@@ -83,6 +94,7 @@ export function shouldSuppressAutoSessionSelect(params: {
 
 export type HardwareBackOutcome =
   | { action: 'consume' }
+  | { action: 'close-attention-inbox' }
   | { action: 'close-host-switcher' }
   | { action: 'close-home-menu' }
   | { action: 'delegate' }
@@ -94,12 +106,14 @@ export type HardwareBackOutcome =
  */
 export function resolveTopLevelHardwareBack(params: {
   signingOut?: boolean
+  attentionInboxOpen?: boolean
   hostSwitcherOpen: boolean
   homeMenuOpen: boolean
   route: AppRoute
   routesLength: number
 }): HardwareBackOutcome {
   if (params.signingOut) return { action: 'consume' }
+  if (params.attentionInboxOpen) return { action: 'close-attention-inbox' }
   if (params.hostSwitcherOpen) return { action: 'close-host-switcher' }
   if (params.homeMenuOpen) return { action: 'close-home-menu' }
   if (params.route.name === 'connecting') return { action: 'delegate' }

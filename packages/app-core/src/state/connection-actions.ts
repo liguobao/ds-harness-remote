@@ -8,6 +8,7 @@ import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
 import { sessionFileStatCache } from '../services/file-stat-cache'
 import { saveLastConnectedDeviceId } from '../services/storage'
+import { useAttentionStore } from './attention-store'
 import { isTerminalLocalMessage } from './message-helpers'
 import { acpClientForBackend, storeAcpPagedMessages } from './session-actions'
 import type { SessionAccess } from './session-runtime'
@@ -32,7 +33,10 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       const scope = browseScope({...get(), selectedDevice: device})
       const cached = device.trusted ? memory.catalogs[scope] : undefined
       const sameHost = get().selectedDevice?.deviceId === device.deviceId
-      if (!sameHost) runtime.webRtcFallbackStreak = 0
+      if (!sameHost) {
+        runtime.webRtcFallbackStreak = 0
+        void useAttentionStore.getState().detachConnection()
+      }
       // reconnect() marks recovery before delegating here. A direct connect starts
       // a new usage lifecycle even when choosing the same Host again.
       const recovering = sameHost && get().connection.phase === 'reconnecting'
@@ -134,6 +138,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             onClose: closeOptions => {
               if (generation !== runtime.connectionGeneration) return
               // Drop local stream handles so reconnect opens a fresh stream.
+              void useAttentionStore.getState().detachConnection(generation)
               void runtime.closeActiveCodexStream(false)
               void runtime.closeActiveCursorStream(false)
               runtime.clearHarnessCatalogSync()
@@ -199,6 +204,12 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           ...(connectedStats.mode !== 'Relay' && connectedStats.mode !== 'Disconnected' ? { relayOnlyUntil: undefined } : {}),
         })
         runtime.connectionStartedAt = Date.now()
+        void useAttentionStore.getState().attachConnection({
+          hostId: device.deviceId,
+          generation,
+          advertisedSupported: runtime.connection.hasAttentionInbox?.() === true,
+          client: runtime.connection.getAttentionClient?.(),
+        })
         await saveLastConnectedDeviceId(device.deviceId)
         return true
       } catch (error) {
@@ -397,6 +408,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       runtime.reconnectFlight = undefined
       runtime.clearPendingMuxFrames()
       runtime.clearHarnessCatalogSync()
+      void useAttentionStore.getState().detachConnection()
       sessionFileStatCache.clear()
       await runtime.closeActiveCodexStream(false)
       await runtime.closeActiveCursorStream(false)
@@ -449,6 +461,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         ++runtime.sessionLoadGeneration
         runtime.clearPendingMuxFrames()
         runtime.clearHarnessCatalogSync()
+        void useAttentionStore.getState().detachConnection()
         sessionFileStatCache.clear()
         void runtime.closeActiveCodexStream(false)
         void runtime.closeActiveCursorStream(false)

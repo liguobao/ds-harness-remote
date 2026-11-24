@@ -55,6 +55,7 @@ import {
 import type { ServerConfig, WorkspaceShortcut } from '../types'
 import type { AppState, QrLoginStart, QrProviderList, StoreAccess } from './store-state'
 import { clearBrowseMemory } from '../services/browse-memory'
+import { useAttentionStore } from './attention-store'
 import { initialData } from './store-state'
 
 type AccountActions = Pick<AppState,
@@ -160,6 +161,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
 
     async requireReauth(message) {
       await get().disconnect()
+      useAttentionStore.getState().reset()
       await clearDeviceCredentials()
       const config = get().config
       const nextConfig = config === undefined
@@ -185,6 +187,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         await new RemoteServerApi(baseUrl).health()
         if (baseUrl !== get().config?.baseUrl) {
           await get().disconnect()
+          useAttentionStore.getState().reset()
           await clearDeviceCredentials()
           for (const host of await loadTrustedHosts()) {
             await forgetHost(host.deviceId)
@@ -504,6 +507,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         await api.removeAccountDevice(deviceId)
         if (get().selectedDevice?.deviceId === deviceId) await get().disconnect()
         await forgetHost(deviceId)
+        useAttentionStore.getState().evictHost(deviceId)
         await clearCodexPermissionPresets(deviceId)
         const clearedLast = get().lastConnectedDeviceId === deviceId
         if (clearedLast) await clearLastConnectedDeviceId()
@@ -534,6 +538,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
 
     async resetLocalData() {
       await get().disconnect()
+      useAttentionStore.getState().reset()
       await clearBrowseMemory()
       await clearLocalData()
       const identity = await loadOrCreateIdentity()
@@ -561,6 +566,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async signOut() {
       const { config, identity, languagePreference, themePreference, chatAppearance, activityDockMode, quickPromptActionMode, busySendMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
       await get().disconnect()
+      useAttentionStore.getState().reset()
       await clearBrowseMemory()
       if (config !== undefined && identity !== undefined) {
         try {

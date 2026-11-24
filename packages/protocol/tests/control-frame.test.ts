@@ -49,6 +49,19 @@ const validPayloads: Record<string, unknown> = {
   'connection.lease.request': { connectionId: 'conn-1', requestId: 'request-1', ticket: 'signed-ticket' },
   'connection.lease.ack': { connectionId: 'conn-1', requestId: 'request-1', ticket: 'signed-ticket', leaseMs: 300000 },
   'connection.lease.close': { connectionId: 'conn-1' },
+  'host.attention.signal': {
+    digest: {
+      revision: 1,
+      pendingApprovals: 1,
+      pendingQuestions: 0,
+      runningSessions: 2,
+      completedUnread: 0,
+      urgentKind: 'approval_needed',
+      urgency: 'critical',
+      attentionToken: '0123456789abcdef0123456789abcdef',
+      updatedAt: 1786000000000,
+    },
+  },
   'ping': { nonce: 'nonce-1' },
   'pong': { nonce: 'nonce-1' },
   'error': { code: 'ERROR', message: 'Something failed' },
@@ -696,7 +709,7 @@ describe('golden vectors', () => {
       'hello', 'hello.ack', 'connect.request', 'connect.incoming',
       'connect.accepted', 'connect.rejected', 'secure.handshake',
       'relay', 'signal.offer', 'signal.answer', 'signal.ice',
-      'transport.selected', 'connection.lease.request', 'connection.lease.ack', 'connection.lease.close', 'ping', 'pong', 'error',
+      'transport.selected', 'connection.lease.request', 'connection.lease.ack', 'connection.lease.close', 'host.attention.signal', 'ping', 'pong', 'error',
     ]
     expect([...expected].sort()).toEqual([...Array.from(controlFrameTypes)].sort())
   })

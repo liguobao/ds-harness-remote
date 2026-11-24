@@ -57,6 +57,9 @@ export class AndroidRemoteRuntime {
   }
 
   supportsBinaryUpload(): boolean { return this.connected && this.client.supportsBinaryUpload?.() === true }
+  supportsPushWake(): boolean { return this.connected && this.client.supportsPushWake?.() === true }
+  hasAttentionInbox(): boolean { return this.connected && this.client.hasAttentionInbox?.() === true }
+  getAttentionClient() { return this.connected ? this.client.getAttentionClient?.() : undefined }
 
   /** A file upload must not continue against a replacement Host/carrier. */
   createRpcCaller() {

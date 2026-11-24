@@ -859,6 +859,7 @@ function editableConfig(config: ResolvedConfig): Config {
     hostControl: config.hostControl ?? { enabled: true },
     loopback: config.loopback,
     forceRelay: config.forceRelay,
+    detachedApprovalGraceSec: config.detachedApprovalGraceSec,
     logLevel: config.logLevel,
     reconnect: config.reconnect.enabled
       ? {

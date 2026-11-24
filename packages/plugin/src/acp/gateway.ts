@@ -7,7 +7,14 @@ import { randomUUID } from 'node:crypto'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
-import type { ResolvedAcpConfig, ResolvedAcpBackendConfig } from '../config.js'
+import {
+  clampDetachedApprovalGraceSec,
+  DEFAULT_DETACHED_APPROVAL_GRACE_SEC,
+  type ResolvedAcpConfig,
+  type ResolvedAcpBackendConfig,
+} from '../config.js'
+import { acpApprovalItemId, type AttentionBackendObserver } from '../attention-tracker.js'
+import { DetachedApprovalBudget } from '../detached-approval-budget.js'
 import type { PeerConnectionContext } from '../connection-controller.js'
 import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
@@ -40,6 +47,11 @@ import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 import { AcpWorkspaceStore } from './workspace-store.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
+const MAX_SESSION_TITLE_ENTRIES = 256
+const DETACHED_ACP_APPROVAL_METHODS: ReadonlySet<string> = new Set([
+  'session/request_permission',
+  'cursor/ask_question',
+])
 // A backend that stayed up this long before failing starts a fresh retry budget.
 const BACKEND_STABLE_MS = 30_000
 
@@ -61,10 +73,12 @@ const CATCH_UP_SESSION_UPDATES = new Set([
 
 interface PendingApproval {
   upstreamId: string | number
-  connectionId: string
+  ownerConnectionId: string | null
   sessionId: string
   method: string
+  params: unknown
   expiresAt: number
+  detachedExpiresAt?: number
   backend: string
   client: CursorAcpLike
   options: Array<{ kind: string; optionId: string }>
@@ -151,6 +165,8 @@ export class AcpRemoteGateway {
   private readonly backendHistoryChains = new Map<string, Promise<void>>()
   private readonly backendDiagnostics = new Map<string, AcpAuthDiagnostic>()
   private readonly backendErrors = new Map<string, string>()
+  private readonly sessionTitles = new Map<string, string>()
+  private readonly detachedApprovalGraceMs: number
   private readonly customCreateAcp: boolean
 
   constructor(
@@ -161,7 +177,11 @@ export class AcpRemoteGateway {
     private readonly terminalEnabled: () => boolean = () => false,
     private readonly terminalSpawner?: RemoteTerminalSpawner,
     private readonly workspaceStore: AcpWorkspaceStore = new AcpWorkspaceStore(),
+    detachedApprovalGraceSec: number = DEFAULT_DETACHED_APPROVAL_GRACE_SEC,
+    private readonly attention?: AttentionBackendObserver,
+    private readonly detachedApprovalBudget: DetachedApprovalBudget = new DetachedApprovalBudget(),
   ) {
+    this.detachedApprovalGraceMs = clampDetachedApprovalGraceSec(detachedApprovalGraceSec) * 1_000
     this.customCreateAcp = createAcp !== undefined
     this.createAcp = createAcp ?? ((binary, targetLogger, backend) => {
       if (backend.id === 'antigravity') {
@@ -931,6 +951,7 @@ export class AcpRemoteGateway {
         })
       }
       this.turnCatchUp.set(sessionId, [])
+      this.attention?.onSessionRunning(this.attentionSessionInfo(backend, sessionId))
       void this.runPromptInBackground(sessionId, call.params, task)
       return { accepted: true, stopReason: 'in_progress' }
     }
@@ -938,6 +959,7 @@ export class AcpRemoteGateway {
     if (call.method === 'session/cancel' && sessionId !== undefined) {
       this.invalidateSessionHistory(sessionId)
       this.cancelledSessions.add(sessionId)
+      const cancelBackend = this.sessionBackends.get(sessionId)
       const preparation = this.preparingPrompts.get(sessionId)
       if (preparation) {
         // No turn exists upstream yet. Do not send a late cancel into a retry
@@ -945,14 +967,20 @@ export class AcpRemoteGateway {
         preparation.cancelled = true
         this.preparingPrompts.delete(sessionId)
         this.promptsInProgress.delete(sessionId)
+        if (cancelBackend !== undefined) this.attention?.onSessionCancelled('acp', `${cancelBackend}:${sessionId}`, cancelBackend)
         return { stopReason: 'cancelled' }
       }
-      const pending = [...this.approvals].filter(([, approval]) => approval.sessionId === sessionId && approval.backend === this.sessionBackends.get(sessionId))
-      for (const [handle] of pending) this.approvals.delete(handle)
+      const pending = [...this.approvals].filter(([, approval]) => approval.sessionId === sessionId && approval.backend === cancelBackend)
+      for (const [handle, approval] of pending) {
+        this.deleteApproval(handle)
+        this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle))
+      }
+      if (pending.length > 0) this.scheduleApprovalExpiry()
+      if (cancelBackend !== undefined) this.attention?.onSessionCancelled('acp', `${cancelBackend}:${sessionId}`, cancelBackend)
       // Send cancellation before rejecting approvals: rejecting a blocked tool first
       // can otherwise complete the turn as end_turn before upstream sees cancel.
       try {
-        return sanitizeSessionResult(await this.requireAcp(this.sessionBackends.get(sessionId)).call(call.method, call.params))
+        return sanitizeSessionResult(await this.requireAcp(cancelBackend).call(call.method, call.params))
       } finally {
         await Promise.all(pending.map(([, approval]) => approval.client.respondError(approval.upstreamId, -32800, 'ACP session cancelled.').catch(() => undefined)))
       }
@@ -989,6 +1017,14 @@ export class AcpRemoteGateway {
         stopReason,
         ...(usage ? { usage } : {}),
       }, catchUp))
+      if (stopReason === 'cancelled' || this.cancelledSessions.has(sessionId)) {
+        this.attention?.onSessionCancelled('acp', `${task.backend}:${sessionId}`, task.backend)
+      } else {
+        this.attention?.onSessionCompleted({
+          ...this.attentionSessionInfo(task.backend, sessionId),
+          failed: false,
+        })
+      }
     } catch (error) {
       if (!accepted()) return
       this.logger?.warn('ACP session/prompt failed', { code: errorCode(error) })
@@ -999,6 +1035,11 @@ export class AcpRemoteGateway {
         sessionUpdate: 'prompt_failed',
         code: errorCode(error),
       }, catchUp)).catch(() => undefined)
+      this.attention?.onSessionCompleted({
+        ...this.attentionSessionInfo(task.backend, sessionId),
+        failed: true,
+        summary: errorCode(error),
+      })
     } finally {
       if (this.promptsInProgress.get(sessionId) === task) {
         this.promptsInProgress.delete(sessionId)
@@ -1093,21 +1134,45 @@ export class AcpRemoteGateway {
 
   async respond(connectionId: string, input: unknown): Promise<{ resolved: true }> {
     const params = parseRespondEnvelope(input)
+    if (!this.peers.has(connectionId)) {
+      throw new RpcError('ACP_CONNECTION_CLOSED', 'The ACP connection is closed.')
+    }
     const pending = this.approvals.get(params.requestHandle)
-    if (pending === undefined || pending.expiresAt <= Date.now()) {
-      this.approvals.delete(params.requestHandle)
+    if (pending === undefined) {
       throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The Cursor approval is missing, expired, or belongs to another connection.')
     }
-    if (pending.connectionId !== connectionId) {
+    if (pending.expiresAt <= Date.now()) {
+      this.deleteApproval(params.requestHandle)
+      this.scheduleApprovalExpiry()
+      this.attention?.onInteractionResolved(acpApprovalItemId(pending.backend, params.requestHandle))
+      void pending.client.respondError(pending.upstreamId, -32800, 'Cursor approval expired.').catch(() => undefined)
       throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The Cursor approval is missing, expired, or belongs to another connection.')
     }
-    if (this.sessionOwners.get(pending.sessionId) !== connectionId
-      || this.sessionBackends.get(pending.sessionId) !== pending.backend
+    if (pending.ownerConnectionId !== null) {
+      if (pending.ownerConnectionId !== connectionId) {
+        throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The Cursor approval is missing, expired, or belongs to another connection.')
+      }
+      if (this.sessionOwners.get(pending.sessionId) !== connectionId) {
+        throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The ACP approval scope is no longer active.')
+      }
+    } else {
+      const currentOwner = this.sessionOwners.get(pending.sessionId)
+      if (currentOwner !== undefined && currentOwner !== connectionId && this.peers.has(currentOwner)) {
+        throw new RpcError('REQUEST_CONFLICT', 'Another Remote connection currently owns this ACP session.')
+      }
+    }
+    if (this.sessionBackends.get(pending.sessionId) !== pending.backend
       || this.requireAcp(pending.backend) !== pending.client) {
       throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The ACP approval scope is no longer active.')
     }
     const result = mapPermissionDecision(params, pending)
-    this.approvals.delete(params.requestHandle)
+    // True single-assignment: synchronously remove BEFORE the first await.
+    this.deleteApproval(params.requestHandle)
+    if (pending.ownerConnectionId === null) {
+      this.sessionOwners.set(pending.sessionId, connectionId)
+    }
+    this.scheduleApprovalExpiry()
+    this.attention?.onInteractionResolved(acpApprovalItemId(pending.backend, params.requestHandle))
     const acp = pending.client
     if (params.decision === 'cancel') {
       await acp.respondError(pending.upstreamId, -32800, 'Cancelled by Remote client.')
@@ -1124,11 +1189,54 @@ export class AcpRemoteGateway {
     for (const [sessionId, owner] of this.sessionOwners) {
       if (owner === connectionId) this.sessionOwners.delete(sessionId)
     }
-    for (const [handle, approval] of this.approvals) {
-      if (approval.connectionId === connectionId) {
-        this.approvals.delete(handle)
+    for (const [handle, approval] of [...this.approvals.entries()]) {
+      if (approval.ownerConnectionId !== connectionId) continue
+      if (this.detachedApprovalGraceMs > 0
+        && DETACHED_ACP_APPROVAL_METHODS.has(approval.method)
+        && this.detachedApprovalBudget.tryAcquire(acpDetachedBudgetKey(approval.backend, handle))) {
+        const detachedExpiresAt = Date.now() + this.detachedApprovalGraceMs
+        approval.ownerConnectionId = null
+        approval.detachedExpiresAt = detachedExpiresAt
+        approval.expiresAt = detachedExpiresAt
+        this.attention?.onInteractionDetached(acpApprovalItemId(approval.backend, handle), detachedExpiresAt)
+      } else {
+        this.deleteApproval(handle)
+        this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle))
         void approval.client.respondError(approval.upstreamId, -32800, 'Remote peer disconnected.').catch(() => undefined)
       }
+    }
+    this.scheduleApprovalExpiry()
+  }
+
+  /** Synthesize live pending approvals on stream re-open without polluting `recentFrames`. */
+  async deliverPendingApprovals(connectionId: string, sessionId: string): Promise<void> {
+    const peer = this.peers.get(connectionId)
+    if (peer === undefined) return
+    const now = Date.now()
+    const expired: Array<[string, PendingApproval]> = []
+    for (const [handle, approval] of [...this.approvals.entries()]) {
+      if (approval.expiresAt <= now) {
+        this.deleteApproval(handle)
+        this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle))
+        expired.push([handle, approval])
+      }
+    }
+    if (expired.length > 0) {
+      this.scheduleApprovalExpiry()
+      for (const [, approval] of expired) {
+        void approval.client.respondError(approval.upstreamId, -32800, 'Cursor approval expired.').catch(() => undefined)
+      }
+    }
+    const currentOwner = this.sessionOwners.get(sessionId)
+    if (currentOwner !== undefined && currentOwner !== connectionId && this.peers.has(currentOwner)) return
+    const live = [...this.approvals.entries()].filter(([, approval]) =>
+      approval.sessionId === sessionId
+      && (approval.ownerConnectionId === null || approval.ownerConnectionId === connectionId))
+    for (const [requestHandle, approval] of live) {
+      await peer.publishInbound(sessionId, {
+        method: approval.method,
+        params: buildAcpApprovalFrameParams(approval.params, requestHandle, sessionId, approval.method),
+      })
     }
   }
 
@@ -1268,7 +1376,21 @@ export class AcpRemoteGateway {
       this.recentFrames.delete(id)
       this.turnCatchUp.delete(id)
     }
-    for (const [id, approval] of this.approvals) if (approval.backend !== undefined && changed.has(approval.backend)) this.approvals.delete(id)
+    const removedApprovals: Array<[string, PendingApproval]> = []
+    for (const [id, approval] of [...this.approvals.entries()]) {
+      if (approval.backend !== undefined && changed.has(approval.backend)) {
+        this.deleteApproval(id)
+        this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, id))
+        removedApprovals.push([id, approval])
+      }
+    }
+    for (const id of changed) this.detachedApprovalBudget.releasePrefix(`acp:${id}:`)
+    this.scheduleApprovalExpiry()
+    for (const id of changed) this.attention?.onBackendCleared('acp', id)
+    if (removedApprovals.length > 0) {
+      await Promise.allSettled(removedApprovals.map(([, approval]) =>
+        approval.client.respondError(approval.upstreamId, -32800, 'ACP backend reconfigured.')))
+    }
     // A terminal cleanup failure must not prevent stopping any changed backend.
     // Keep failed backend instances fenced from RPC/startup until a later retry.
     const processes = await Promise.allSettled([...changed].map(async id => {
@@ -1297,10 +1419,24 @@ export class AcpRemoteGateway {
     if (this.closed) return
     this.closed = true
     this.clearBackendRestarts()
-    if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
+    if (this.approvalExpiryTimer !== undefined) {
+      clearTimeout(this.approvalExpiryTimer)
+      this.approvalExpiryTimer = undefined
+    }
+    // Synchronously drain & clear all pending approvals BEFORE any await,
+    // then reject upstream JSON-RPC requests cleanly before closing adapters.
+    const pendingOnClose = [...this.approvals.entries()]
+    this.approvals.clear()
+    this.detachedApprovalBudget.releasePrefix('acp:')
+    this.attention?.onBackendCleared('acp')
+    if (pendingOnClose.length > 0) {
+      await Promise.allSettled(pendingOnClose.map(([, approval]) =>
+        approval.client.respondError(approval.upstreamId, -32800, 'ACP gateway closed.')))
+    }
     for (const peer of this.peers.values()) await peer.closeAll()
     this.peers.clear()
     this.sessionCwds.clear()
+    this.sessionTitles.clear()
     const terminals = this.workspaceState.dispose().then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped.'))
     this.sessionOwners.clear()
     this.sessionBackends.clear()
@@ -1309,7 +1445,6 @@ export class AcpRemoteGateway {
     this.promptsInProgress.clear()
     for (const preparation of this.preparingPrompts.values()) preparation.cancelled = true
     this.preparingPrompts.clear()
-    this.approvals.clear()
     const processes = await Promise.allSettled([...this.startingClients.keys()].map(client => client.close()).concat(this.disposeAllInstances()))
     const terminalError = await terminals
     if (!terminalError) this.terminalOwners.clear()
@@ -1469,9 +1604,18 @@ export class AcpRemoteGateway {
     const owner = sessionId === undefined ? undefined : this.sessionOwners.get(sessionId)
     const peer = owner === undefined ? undefined : this.peers.get(owner)
     const client = this.requireAcp(backend)
-    if (sessionId === undefined || this.cancelledSessions.has(sessionId) || owner === undefined || peer === undefined || boundBackend !== backend
-      || !['session/request_permission', 'cursor/create_plan', 'cursor/ask_question'].includes(message.method)
-      || (message.method.startsWith('cursor/') && backend !== 'cursor')) {
+    const supportedMethod = ['session/request_permission', 'cursor/create_plan', 'cursor/ask_question'].includes(message.method)
+      && !(message.method.startsWith('cursor/') && backend !== 'cursor')
+    const hasLiveOwner = owner !== undefined && peer !== undefined
+    const canHoldDetached = owner === undefined
+      && sessionId !== undefined
+      && this.promptsInProgress.has(sessionId)
+      && !this.cancelledSessions.has(sessionId)
+      && this.detachedApprovalGraceMs > 0
+      && DETACHED_ACP_APPROVAL_METHODS.has(message.method)
+      && this.detachedApprovalBudget.hasCapacity()
+    if (sessionId === undefined || this.cancelledSessions.has(sessionId) || boundBackend !== backend
+      || !supportedMethod || (!hasLiveOwner && !canHoldDetached)) {
       await client.respondError(message.id, -32602, 'The ACP request has no active owner or supported method.')
       return
     }
@@ -1490,22 +1634,65 @@ export class AcpRemoteGateway {
       return
     }
     const requestHandle = randomUUID()
+    const interactionStatus = message.method === 'cursor/ask_question' ? 'waiting_question' : 'waiting_approval'
+    const summary = acpApprovalSummary(message.method, message.params)
+    if (!hasLiveOwner) {
+      if (!this.detachedApprovalBudget.tryAcquire(acpDetachedBudgetKey(backend, requestHandle))) {
+        await client.respondError(message.id, -32602, 'The ACP request has no active owner or supported method.')
+        return
+      }
+      const detachedExpiresAt = Date.now() + this.detachedApprovalGraceMs
+      this.approvals.set(requestHandle, {
+        upstreamId: message.id,
+        ownerConnectionId: null,
+        sessionId,
+        method: message.method,
+        params: message.params,
+        expiresAt: detachedExpiresAt,
+        detachedExpiresAt,
+        backend,
+        client,
+        options,
+      })
+      this.scheduleApprovalExpiry()
+      this.attention?.onInteractionPending({
+        ...this.attentionSessionInfo(backend, sessionId),
+        id: acpApprovalItemId(backend, requestHandle),
+        status: interactionStatus,
+        detachedExpiresAt,
+        ...(summary === undefined ? {} : { summary }),
+      })
+      return
+    }
     this.approvals.set(requestHandle, {
-      upstreamId: message.id, connectionId: owner, sessionId, method: message.method,
-      expiresAt: Date.now() + APPROVAL_TTL_MS, backend, client, options,
+      upstreamId: message.id,
+      ownerConnectionId: owner,
+      sessionId,
+      method: message.method,
+      params: message.params,
+      expiresAt: Date.now() + APPROVAL_TTL_MS,
+      backend,
+      client,
+      options,
     })
     this.scheduleApprovalExpiry()
+    this.attention?.onInteractionPending({
+      ...this.attentionSessionInfo(backend, sessionId),
+      id: acpApprovalItemId(backend, requestHandle),
+      status: interactionStatus,
+      ...(summary === undefined ? {} : { summary }),
+    })
     try {
       await peer.publishInbound(sessionId, {
         method: message.method,
-        params: {
-          ...(isRecord(message.params) ? message.params : {}),
-          requestHandle, sessionId, upstreamMethod: message.method,
-        },
+        params: buildAcpApprovalFrameParams(message.params, requestHandle, sessionId, message.method),
       })
     } catch {
-      this.approvals.delete(requestHandle)
-      await client.respondError(message.id, -32800, 'Remote approval delivery failed.')
+      if (this.deleteApproval(requestHandle)) {
+        this.scheduleApprovalExpiry()
+        this.attention?.onInteractionResolved(acpApprovalItemId(backend, requestHandle))
+        await client.respondError(message.id, -32800, 'Remote approval delivery failed.')
+      }
     }
   }
 
@@ -1627,6 +1814,20 @@ export class AcpRemoteGateway {
 
   private async handleUnavailable(backend: string, code: string): Promise<void> {
     if (this.closed) return
+    // Synchronously drain pending approvals for the failed backend before any await.
+    const failedApprovals: Array<[string, PendingApproval]> = []
+    for (const [handle, approval] of [...this.approvals.entries()]) {
+      if (approval.backend !== backend) continue
+      this.deleteApproval(handle)
+      this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle))
+      failedApprovals.push([handle, approval])
+    }
+    this.detachedApprovalBudget.releasePrefix(`acp:${backend}:`)
+    if (failedApprovals.length > 0) this.scheduleApprovalExpiry()
+    this.attention?.onBackendCleared('acp', backend)
+    for (const [, approval] of failedApprovals) {
+      void approval.client.respondError(approval.upstreamId, -32800, 'ACP backend unavailable.').catch(() => undefined)
+    }
     // Scope and close the failed backend's streams before any await: a restart can
     // install a replacement adapter while this handler is suspended, and its own
     // streams must not be failed by the previous generation.
@@ -1715,24 +1916,67 @@ export class AcpRemoteGateway {
     this.restartAttempts.clear()
   }
 
-    private scheduleApprovalExpiry(): void {
-    if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
+  private scheduleApprovalExpiry(): void {
+    if (this.approvalExpiryTimer !== undefined) {
+      clearTimeout(this.approvalExpiryTimer)
+      this.approvalExpiryTimer = undefined
+    }
     const next = [...this.approvals.values()].reduce<number | undefined>((min, item) => {
       if (min === undefined || item.expiresAt < min) return item.expiresAt
       return min
     }, undefined)
     if (next === undefined) return
     this.approvalExpiryTimer = setTimeout(() => {
+      this.approvalExpiryTimer = undefined
       const now = Date.now()
-      for (const [handle, approval] of this.approvals) {
+      const expired: Array<[string, PendingApproval]> = []
+      for (const [handle, approval] of [...this.approvals.entries()]) {
         if (approval.expiresAt <= now) {
-          this.approvals.delete(handle)
-          void approval.client.respondError(approval.upstreamId, -32800, 'Cursor approval expired.').catch(() => undefined)
+          this.deleteApproval(handle)
+          this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle))
+          expired.push([handle, approval])
         }
       }
       this.scheduleApprovalExpiry()
+      for (const [, approval] of expired) {
+        void approval.client.respondError(approval.upstreamId, -32800, 'Cursor approval expired.').catch(() => undefined)
+      }
     }, Math.max(0, next - Date.now()))
     this.approvalExpiryTimer.unref?.()
+  }
+
+  private deleteApproval(handle: string): boolean {
+    const existing = this.approvals.get(handle)
+    if (existing === undefined) return false
+    this.approvals.delete(handle)
+    this.detachedApprovalBudget.release(acpDetachedBudgetKey(existing.backend, handle))
+    return true
+  }
+
+  private rememberSessionTitle(sessionId: string, title: string | undefined): void {
+    if (title === undefined || title.trim().length === 0) return
+    this.sessionTitles.delete(sessionId)
+    this.sessionTitles.set(sessionId, title.trim())
+    while (this.sessionTitles.size > MAX_SESSION_TITLE_ENTRIES) {
+      const oldest = this.sessionTitles.keys().next().value
+      if (oldest === undefined) break
+      this.sessionTitles.delete(oldest)
+    }
+  }
+
+  private attentionSessionInfo(backend: string, sessionId: string) {
+    const cwd = this.sessionCwds.get(sessionId)?.cwd
+    const title = this.sessionTitles.get(sessionId)
+    const workspaceLabel = cwd === undefined ? undefined : (basename(cwd) || cwd)
+    return {
+      backend: 'acp' as const,
+      acpAdapter: backend,
+      mode: 'agent' as const,
+      sessionId: `${backend}:${sessionId}`,
+      ...(title === undefined ? {} : { sessionTitle: title }),
+      ...(cwd === undefined ? {} : { workspaceId: `${backend}:cwd:${cwd}` }),
+      ...(workspaceLabel === undefined ? {} : { workspaceLabel }),
+    }
   }
 
   private requireAcp(backend?: string): CursorAcpLike {
@@ -1899,6 +2143,7 @@ export class AcpRemoteGateway {
         if (trusted && (trusted.backend !== backend || trusted.cwd !== canonical)) continue
         this.sessionCwds.set(item.sessionId, { backend, cwd: canonical })
         this.sessionBackends.set(item.sessionId, backend)
+        if (typeof item.title === 'string') this.rememberSessionTitle(item.sessionId, item.title)
         if (backend === 'opencode' && item.archived === true) continue
         items.push({ sessionId: item.sessionId, cwd: canonical,
           ...(typeof item.title === 'string' ? { title: item.title } : {}),
@@ -2287,4 +2532,38 @@ function takeTurnCatchUp(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function buildAcpApprovalFrameParams(
+  rawParams: unknown,
+  requestHandle: string,
+  sessionId: string,
+  method: string,
+): Record<string, unknown> {
+  return {
+    ...(isRecord(rawParams) ? rawParams : {}),
+    requestHandle,
+    sessionId,
+    upstreamMethod: method,
+  }
+}
+
+function acpApprovalSummary(method: string, params: unknown): string | undefined {
+  if (isRecord(params)) {
+    if (isRecord(params.toolCall)) {
+      const title = typeof params.toolCall.title === 'string' && params.toolCall.title.trim().length > 0
+        ? params.toolCall.title.trim()
+        : undefined
+      if (title !== undefined) return title
+    }
+    for (const key of ['question', 'title', 'reason', 'command', 'prompt', 'message']) {
+      const candidate = params[key]
+      if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate.trim()
+    }
+  }
+  return method === 'cursor/ask_question' ? 'Question requires input' : 'Permission required'
+}
+
+function acpDetachedBudgetKey(backend: string, handle: string): string {
+  return `acp:${backend}:${handle}`
 }

@@ -1,6 +1,6 @@
 import { heartbeatMessageBody } from '../../ui/heartbeat-message'
 import { ChatImageView } from '../../ui/chat-image'
-import { ArrowRightLeft, ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
+import { ArrowRightLeft, ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, HelpCircle, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -951,21 +951,21 @@ function ApprovalCard({ item, busy, onRespond }: {
   return (
     <View style={styles.permissionCard} accessibilityRole="alert">
       <View style={styles.permissionHeader}>
-        <View style={styles.permissionIcon}><ShieldAlert size={20} color={colors.warning} /></View>
+        <View style={styles.permissionIcon}><ShieldAlert size={18} color={colors.ink} strokeWidth={1.9} /></View>
         <View style={styles.permissionHeaderCopy}>
           <Text style={styles.permissionTitle}>{zhCN.chat.permissionTitle}</Text>
           <Text style={styles.permissionKind}>{zhCN.chat.hostOperation(item.toolName)}</Text>
         </View>
       </View>
-      {item.reason !== undefined && (
+      {item.reason !== undefined && item.reason.trim().length > 0 && (
         <View style={styles.permissionDetail}>
           <Text selectable style={styles.permissionText}>{item.reason}</Text>
         </View>
       )}
       <Text style={styles.permissionScope}>{zhCN.chat.permissionScope}</Text>
       <View style={styles.permissionActions}>
-        <Button label={zhCN.chat.allowOnce} onPress={() => void onRespond(item.id, 'allowed-once')} loading={isBusy} />
-        <Button label={zhCN.chat.deny} variant="quiet" onPress={() => void onRespond(item.id, 'rejected')} disabled={isBusy} />
+        <Button label={zhCN.chat.allowOnce} variant="inverse" onPress={() => void onRespond(item.id, 'allowed-once')} loading={isBusy} />
+        <Button label={zhCN.chat.deny} variant="secondary" onPress={() => void onRespond(item.id, 'rejected')} disabled={isBusy} />
       </View>
     </View>
   )
@@ -1020,7 +1020,7 @@ function QuestionCard({ item, busy, onRespond }: {
   return (
     <View style={styles.questionCard} accessibilityRole="alert">
       <View style={styles.permissionHeader}>
-        <View style={styles.permissionIcon}><ShieldAlert size={20} color={colors.accent} /></View>
+        <View style={styles.permissionIcon}><HelpCircle size={18} color={colors.ink} strokeWidth={1.9} /></View>
         <View style={styles.permissionHeaderCopy}>
           <Text style={styles.permissionTitle}>{zhCN.chat.questionTitle}</Text>
           <Text style={styles.permissionKind}>{item.questionState === 'continued' ? zhCN.chat.questionContinued : remaining === undefined ? zhCN.chat.answerToContinue : zhCN.chat.questionRemaining(remaining)}</Text>
@@ -1029,7 +1029,7 @@ function QuestionCard({ item, busy, onRespond }: {
       {item.questions.map(question => (
         <View key={question.id} style={styles.questionBlock}>
           <Text style={styles.questionText}>{question.question}</Text>
-          {question.detail !== undefined && <Text selectable style={styles.questionDetail}>{question.detail}</Text>}
+          {question.detail !== undefined && question.detail.trim().length > 0 && <Text selectable style={styles.questionDetail}>{question.detail}</Text>}
           {(question.options ?? []).map(option => {
             const chosen = (selected[question.id] ?? []).includes(option.label)
             return (
@@ -1040,10 +1040,10 @@ function QuestionCard({ item, busy, onRespond }: {
                 onPress={() => toggle(question.id, option.label, question.multiSelect === true)}
                 style={[styles.optionRow, chosen && styles.optionChosen]}
               >
-                <View style={[styles.optionDot, chosen && styles.optionDotChosen]}>{chosen && <Check size={12} color={colors.white} />}</View>
+                <View style={[styles.optionDot, chosen && styles.optionDotChosen]}>{chosen && <Check size={11} color={colors.onInverse} strokeWidth={2.5} />}</View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.optionLabel}>{option.label}</Text>
-                  {option.description !== undefined && (
+                  {option.description !== undefined && option.description.trim().length > 0 && (
                     <Text style={styles.optionDescription}>{option.description}</Text>
                   )}
                 </View>
@@ -1068,7 +1068,7 @@ function QuestionCard({ item, busy, onRespond }: {
           />
         </View>
       ))}
-      <Button label={zhCN.chat.submitAnswer} onPress={() => void onRespond(item.id, selected, custom)} loading={isBusy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
+      <Button label={zhCN.chat.submitAnswer} variant="inverse" onPress={() => void onRespond(item.id, selected, custom)} loading={isBusy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
     </View>
   )
 }

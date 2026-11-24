@@ -3,7 +3,7 @@ import { connectionLog } from './connection-log'
 // equal expo.version in both apps/android/app.json and apps/ios/app.json, so
 // this stays correct for either platform without importing an app's config.
 import appPackage from '../../package.json'
-import { MAX_DEVICE_NAME_LENGTH, deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
+import { MAX_DEVICE_NAME_LENGTH, attentionDigestSchema, deviceTokenPairSchema, type AttentionDigest, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import { RemoteApiError } from '../lib/errors'
 import { normalizeServerUrl } from '../lib/server-url'
 import type {
@@ -52,6 +52,7 @@ export interface AuthorizedPeerDevice {
   lastSeenAt?: number
   clientVersion?: string
   harnessVersion?: string
+  attentionDigest?: AttentionDigest
 }
 
 export interface RtcIceServer {
@@ -321,10 +322,12 @@ export class RemoteServerApi {
       || (body.lastSeenAt !== null && body.lastSeenAt !== undefined && !Number.isSafeInteger(body.lastSeenAt))) {
       invalidResponse('device presence')
     }
+    const attentionDigest = body.online ? parseAttentionDigest(body.attentionDigest) : undefined
     return {
       deviceId: body.deviceId,
       online: body.online,
       ...(typeof body.lastSeenAt === 'number' ? { lastSeenAt: body.lastSeenAt } : {}),
+      ...(attentionDigest !== undefined ? { attentionDigest } : {}),
     }
   }
 
@@ -412,6 +415,12 @@ function parseTokenPair(input: unknown): TokenPair {
   return parsed.data
 }
 
+function parseAttentionDigest(value: unknown): AttentionDigest | undefined {
+  if (value === undefined || value === null) return undefined
+  const parsed = attentionDigestSchema.safeParse(value)
+  return parsed.success ? parsed.data : undefined
+}
+
 function parseHostDevice(input: unknown): RemoteDevice[] {
   if (!isRecord(input)
     || typeof input.deviceId !== 'string'
@@ -422,6 +431,8 @@ function parseHostDevice(input: unknown): RemoteDevice[] {
     || input.membershipId.length === 0) {
     return []
   }
+  const online = input.online === true
+  const attentionDigest = online ? parseAttentionDigest(input.attentionDigest) : undefined
   return [{
     deviceId: input.deviceId,
     name: input.name,
@@ -429,11 +440,12 @@ function parseHostDevice(input: unknown): RemoteDevice[] {
     role: 'host',
     membershipId: input.membershipId,
     identityKey: '',
-    online: input.online === true,
+    online,
     trusted: false,
     ...(typeof input.clientVersion === 'string' ? { clientVersion: input.clientVersion } : {}),
     ...(typeof input.harnessVersion === 'string' ? { harnessVersion: input.harnessVersion } : {}),
     ...(typeof input.lastSeenAt === 'number' ? { lastSeenAt: input.lastSeenAt } : {}),
+    ...(attentionDigest !== undefined ? { attentionDigest } : {}),
   }]
 }
 
@@ -447,6 +459,7 @@ function parseAuthorizedPeer(input: unknown): AuthorizedPeerDevice {
     || typeof input.membershipId !== 'string' || input.membershipId.length === 0) {
     invalidResponse('authorized peer')
   }
+  const attentionDigest = input.online !== false ? parseAttentionDigest(input.attentionDigest) : undefined
   return {
     deviceId: input.deviceId,
     name: input.name,
@@ -458,6 +471,7 @@ function parseAuthorizedPeer(input: unknown): AuthorizedPeerDevice {
     ...(typeof input.lastSeenAt === 'number' ? { lastSeenAt: input.lastSeenAt } : {}),
     ...(typeof input.clientVersion === 'string' ? { clientVersion: input.clientVersion } : {}),
     ...(typeof input.harnessVersion === 'string' ? { harnessVersion: input.harnessVersion } : {}),
+    ...(attentionDigest !== undefined ? { attentionDigest } : {}),
   }
 }
 

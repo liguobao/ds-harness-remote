@@ -138,6 +138,9 @@ export class AcpPeerBridge {
       }
     } else {
       await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId)
+      if (typeof this.domain.deliverPendingApprovals === 'function') {
+        await this.domain.deliverPendingApprovals(this.context.connectionId, params.sessionId)
+      }
       // Replay gives a reconnecting Client the frames it missed; when the adapter
       // behind the session is gone it must not then wait for a producer that no
       // longer exists, so the stream closes as failed.

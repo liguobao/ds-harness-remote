@@ -98,6 +98,7 @@ node --env-file=.env dist/main.js
 | `DSH_SERVER_TURN_USERNAME` | 无法使用共享密钥的部署的静态 TURN 用户名；与 `DSH_SERVER_TURN_SECRET` 互斥 |
 | `DSH_SERVER_TURN_PASSWORD` | 静态 TURN 密码；必须与 `DSH_SERVER_TURN_USERNAME` 同时配置 |
 | `DSH_SERVER_TURN_TTL_SECONDS` | TURN credential 有效期秒数，60–3600，默认 `300`（仅对短期凭据生效） |
+| `DSH_SERVER_ATTENTION_WEBHOOK_URL` | 可选，零明文盲唤醒 Webhook 地址；留空（默认）关闭。仅允许 `https:` 或本机回环 `http://127.0.0.1` / `http://localhost` / `http://[::1]`，禁止内嵌用户名/密码且不跟随 HTTP 重定向 |
 
 公网使用 HTTPS 反向代理，并将 `DSH_SERVER_PUBLIC_URL` 设为实际域名；代理需支持 `/ws/v1/connect` 的 WebSocket Upgrade，空闲超时大于 75 秒。
 

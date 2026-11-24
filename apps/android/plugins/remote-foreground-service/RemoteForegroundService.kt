@@ -26,6 +26,7 @@ import android.view.View
 import android.text.format.DateUtils
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.facebook.react.ReactApplication
 import com.facebook.react.bridge.Arguments
@@ -33,6 +34,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.jstasks.HeadlessJsTaskConfig
 import com.facebook.react.jstasks.HeadlessJsTaskContext
+import java.security.MessageDigest
 import java.util.UUID
 
 /** Snapshot of the remote task displayed as a live activity card on lock screen. */
@@ -45,6 +47,8 @@ data class LiveTaskData(
   val isWaitingInput: Boolean,
   val updatedAtMs: Long,
   val summary: String = "",
+  val deepLinkUrl: String? = null,
+  val extraCount: Int = 0,
 )
 
 /** Owns CPU and RN timer eligibility for the lifetime of the remote carrier. */
@@ -88,6 +92,13 @@ class RemoteForegroundService : Service() {
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    if (liveTask != null) {
+      getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification())
+    }
+  }
 
   @SuppressLint("WakelockTimeout")
   private fun startRuntime() {
@@ -186,43 +197,57 @@ class RemoteForegroundService : Service() {
   private fun notification(): Notification {
     val task = liveTask
     if (connectionStatus == "connected" && task != null) {
-      val uri = Uri.Builder().scheme("dshremote").authority("conversation")
-        .appendQueryParameter("host", task.hostId)
-        .appendQueryParameter("session", task.sessionId)
-        .build()
-      val intent = Intent(this, MainActivity::class.java).apply {
-        action = Intent.ACTION_VIEW
-        data = uri
-        addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      val (intent, reqId) = if (task.deepLinkUrl != null) {
+        val (safeIntent, targetKey) = buildSafeDeepLinkTarget(this, task.hostId, task.deepLinkUrl)
+        Pair(safeIntent, pendingIntentRequestCode("live", task.hostId.trim(), targetKey))
+      } else {
+        val uri = Uri.Builder().scheme("dshremote").authority("conversation")
+          .appendQueryParameter("host", task.hostId)
+          .appendQueryParameter("session", task.sessionId)
+          .build()
+        val legacyIntent = Intent(this, MainActivity::class.java).apply {
+          action = Intent.ACTION_VIEW
+          data = uri
+          addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        Pair(legacyIntent, (task.hostId + task.sessionId).hashCode() and 0x3fffffff)
       }
-      val reqId = (task.hostId + task.sessionId).hashCode() and 0x3fffffff
       val pendingIntent = PendingIntent.getActivity(
         this, reqId, intent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
       )
 
-      val status = if (task.statusText.isNotBlank()) task.statusText else {
+      val baseStatus = if (task.statusText.isNotBlank()) task.statusText else {
         try {
           if (task.isWaitingInput) getString(R.string.live_task_status_waiting) else getString(R.string.live_task_status_running)
         } catch (_: Exception) {
           if (task.isWaitingInput) "Waiting" else "Running"
         }
       }
-      val statusColor = if (task.isWaitingInput) Color.parseColor("#FFAA00") else Color.parseColor("#00C2FF")
-      val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running
+      val safeExtraCount = task.extraCount.coerceAtLeast(0)
+      val displayStatus = if (safeExtraCount > 0) "$baseStatus · +$safeExtraCount" else baseStatus
+      val safeTitle = task.title.ifBlank { getString(R.string.app_name) }
       val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+      val statusColor = if (task.isWaitingInput) {
+        Color.parseColor(if (night) "#F5C45E" else "#B45309")
+      } else {
+        Color.parseColor(if (night) "#6F89FF" else "#3A56E6")
+      }
+      val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running
+      val badgeColor = Color.parseColor(if (night) "#6F89FF" else "#4D6BFE")
       val titleColor = if (night) Color.WHITE else Color.parseColor("#1F1F1F")
       val timeColor = if (night) Color.parseColor("#99FFFFFF") else Color.parseColor("#99000000")
 
       try {
         val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
           setImageViewResource(R.id.live_task_status_dot, dotRes)
-          setTextViewText(R.id.live_task_status_text, status)
+          setTextViewText(R.id.live_task_status_text, displayStatus)
           setTextColor(R.id.live_task_status_text, statusColor)
           setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
           setTextColor(R.id.live_task_time, timeColor)
           setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
-          setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+          setTextColor(R.id.live_task_badge, badgeColor)
+          setTextViewText(R.id.live_task_title, safeTitle)
           setTextColor(R.id.live_task_title, titleColor)
           setTextViewText(R.id.live_task_summary, task.summary)
           setTextColor(R.id.live_task_summary, timeColor)
@@ -232,22 +257,32 @@ class RemoteForegroundService : Service() {
 
         val collapsedViews = RemoteViews(packageName, R.layout.notification_live_task_collapsed).apply {
           setImageViewResource(R.id.live_task_status_dot, dotRes)
-          setTextViewText(R.id.live_task_status_text, status)
+          setTextViewText(R.id.live_task_status_text, displayStatus)
           setTextColor(R.id.live_task_status_text, statusColor)
           setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
-          setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+          setTextColor(R.id.live_task_badge, badgeColor)
+          setTextViewText(R.id.live_task_title, safeTitle)
           setTextColor(R.id.live_task_title, titleColor)
           setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
         }
 
+        val publicNotification = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
+          .setSmallIcon(R.mipmap.ic_launcher_foreground)
+          .setContentTitle(displayStatus)
+          .setCategory(NotificationCompat.CATEGORY_SERVICE)
+          .setOngoing(true)
+          .setOnlyAlertOnce(true)
+          .build()
+
         val builder = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
           .setSmallIcon(R.mipmap.ic_launcher_foreground)
-          .setContentTitle(status)
-          .setContentText(task.title.ifBlank { getString(R.string.app_name) })
+          .setContentTitle(displayStatus)
+          .setContentText(safeTitle)
           .setCustomContentView(collapsedViews)
           .setCustomBigContentView(expandedViews)
           .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+          .setPublicVersion(publicNotification)
           .setContentIntent(pendingIntent)
           .setCategory(NotificationCompat.CATEGORY_SERVICE)
           .setOngoing(true)
@@ -313,11 +348,108 @@ class RemoteForegroundService : Service() {
     private const val EXTRA_RESULT = "result"
     private const val CHANNEL_ID = "remote_connection"
     private const val LIVE_CHANNEL_ID = "live_tasks"
+    private const val TASK_CHANNEL_ID = "remote_tasks"
     private const val LIVE_GROUP = "dsh_remote_live_task"
     private const val TASK_GROUP = "dsh_remote_task_alerts"
+    private const val ATTENTION_GROUP = "dsh_remote_attention_alerts"
     private const val NOTIFICATION_ID = 7401
+    private const val ATTENTION_NOTIFICATION_ID = 7402
+    private const val ATTENTION_TAG_PREFIX = "dsh-attention:"
+    private const val EXTRA_ATTENTION_HOST_ID = "dsh_attention_host_id"
+    private const val DEEP_LINK_PREFIX = "dshremote://"
+    private const val MAX_DEEP_LINK_LENGTH = 2048
+    private const val MAX_ATTENTION_TAGS_PER_HOST = 64
+    private const val MAX_TRACKED_ATTENTION_HOSTS = 64
+    private const val HEX_CHARS = "0123456789abcdef"
+    private val SAFE_TAG_REGEX = Regex("^[A-Za-z0-9._:-]{1,100}$")
+    private val UNSAFE_TAG_CHARS = Regex("[^A-Za-z0-9._:-]")
+    private val attentionTagsLock = Any()
+    private val activeAttentionTags = LinkedHashMap<String, LinkedHashSet<String>>()
     private var running: RemoteForegroundService? = null
     private var currentLiveTask: LiveTaskData? = null
+
+    private fun shortSha256Hex(input: String): String {
+      return try {
+        val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+        val hex = StringBuilder(12)
+        for (i in 0 until 6) {
+          val b = digest[i].toInt() and 0xff
+          hex.append(HEX_CHARS[b ushr 4])
+          hex.append(HEX_CHARS[b and 0x0f])
+        }
+        hex.toString()
+      } catch (_: Exception) {
+        (input.hashCode() and 0x7fffffff).toString(16)
+      }
+    }
+
+    private fun parseSafeDeepLinkUri(deepLinkUrl: String): Uri? {
+      val trimmed = deepLinkUrl.trim()
+      if (trimmed.length > MAX_DEEP_LINK_LENGTH) return null
+      if (!trimmed.startsWith(DEEP_LINK_PREFIX)) return null
+      if (trimmed.any { ch -> ch.code < 0x20 || ch.code == 0x7f }) return null
+      val uri = try {
+        Uri.parse(trimmed)
+      } catch (_: Exception) {
+        return null
+      }
+      if (uri.scheme != "dshremote") return null
+      if (uri.host.isNullOrBlank() || uri.userInfo != null || uri.port != -1) return null
+      return uri
+    }
+
+    private fun buildSafeDeepLinkTarget(
+      context: Context,
+      hostId: String,
+      deepLinkUrl: String,
+    ): Pair<Intent, String> {
+      val trimmedHost = hostId.trim()
+      val safeUri = parseSafeDeepLinkUri(deepLinkUrl) ?: if (trimmedHost.isNotEmpty()) {
+        Uri.Builder()
+          .scheme("dshremote")
+          .authority("conversation")
+          .appendQueryParameter("host", trimmedHost)
+          .build()
+      } else {
+        null
+      }
+      if (safeUri != null) {
+        val intent = Intent(context, MainActivity::class.java).apply {
+          action = Intent.ACTION_VIEW
+          data = safeUri
+          addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        return Pair(intent, safeUri.toString())
+      }
+      val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        ?: Intent(context, MainActivity::class.java).apply {
+          addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+      return Pair(launchIntent, "launch")
+    }
+
+    private fun pendingIntentRequestCode(namespace: String, hostId: String, targetKey: String): Int {
+      val seed = "$namespace\u0000$hostId\u0000$targetKey"
+      val hash = try {
+        val digest = MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(Charsets.UTF_8))
+        ((digest[0].toInt() and 0x3f) shl 24) or
+          ((digest[1].toInt() and 0xff) shl 16) or
+          ((digest[2].toInt() and 0xff) shl 8) or
+          (digest[3].toInt() and 0xff)
+      } catch (_: Exception) {
+        seed.hashCode() and 0x3fffffff
+      }
+      return if (hash == 0) 1 else hash
+    }
+
+    private fun sanitizeAttentionTag(rawTag: String, hostKey: String, targetKey: String): String {
+      if (SAFE_TAG_REGEX.matches(rawTag)) return rawTag
+      if (rawTag.isNotBlank()) {
+        val cleaned = rawTag.replace(UNSAFE_TAG_CHARS, "_").trim('_').take(64).ifBlank { "item" }
+        return "$cleaned-${shortSha256Hex(rawTag)}"
+      }
+      return "item-${shortSha256Hex("$hostKey\u0000$targetKey")}"
+    }
 
     fun updateLiveTask(
       hostId: String,
@@ -337,6 +469,46 @@ class RemoteForegroundService : Service() {
         .notify(NOTIFICATION_ID, service.notification())
     }
 
+    fun updateLiveTaskV2(
+      hostId: String,
+      deepLinkUrl: String,
+      badge: String,
+      title: String,
+      statusText: String,
+      isWaitingInput: Boolean,
+      updatedAtMs: Long,
+      summary: String = "",
+      extraCount: Int = 0,
+    ) {
+      val safeExtraCount = extraCount.coerceAtLeast(0)
+      val data = LiveTaskData(
+        hostId = hostId,
+        sessionId = "",
+        badge = badge,
+        title = title,
+        statusText = statusText,
+        isWaitingInput = isWaitingInput,
+        updatedAtMs = updatedAtMs,
+        summary = summary,
+        deepLinkUrl = deepLinkUrl,
+        extraCount = safeExtraCount,
+      )
+      currentLiveTask = data
+      val service = running ?: return
+      val previousTask = service.liveTask
+      service.liveTask = data
+      try {
+        val manager = service.getSystemService(NotificationManager::class.java)
+          ?: error("NotificationManager is unavailable")
+        manager.notify(NOTIFICATION_ID, service.notification())
+      } catch (e: Throwable) {
+        // Never remove ongoing FGS notification 7401 on update failure.
+        service.liveTask = previousTask
+        currentLiveTask = previousTask
+        throw e
+      }
+    }
+
     fun clearLiveTask() {
       currentLiveTask = null
       val service = running ?: return
@@ -348,7 +520,7 @@ class RemoteForegroundService : Service() {
     fun notifyTask(context: Context, hostId: String, sessionId: String, title: String, body: String) {
       if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
       val manager = context.getSystemService(NotificationManager::class.java)
-      val channel = "remote_tasks"
+      val channel = TASK_CHANNEL_ID
       if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(channel, "Remote tasks", NotificationManager.IMPORTANCE_DEFAULT))
       val uri = Uri.Builder().scheme("dshremote").authority("conversation").appendQueryParameter("host", hostId).appendQueryParameter("session", sessionId).build()
       val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -359,6 +531,150 @@ class RemoteForegroundService : Service() {
         .setGroup(TASK_GROUP).setGroupSummary(false)
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
       try {manager.notify("remote_task", id, notification)} catch (_: SecurityException) { }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun notifyAttention(
+      context: Context,
+      hostId: String,
+      deepLinkUrl: String,
+      tag: String,
+      title: String,
+      body: String,
+    ) {
+      if (Build.VERSION.SDK_INT >= 33 &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+      ) {
+        return
+      }
+      val manager = context.getSystemService(NotificationManager::class.java) ?: return
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        manager.createNotificationChannel(
+          NotificationChannel(TASK_CHANNEL_ID, "Remote tasks", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+      }
+
+      val hostKey = hostId.trim()
+      val (intent, targetKey) = buildSafeDeepLinkTarget(context, hostKey, deepLinkUrl)
+      val safeTag = sanitizeAttentionTag(tag, hostKey, targetKey)
+      val notificationTag = "$ATTENTION_TAG_PREFIX$safeTag"
+      val reqId = pendingIntentRequestCode("attn", hostKey, targetKey)
+      val pending = PendingIntent.getActivity(
+        context,
+        reqId,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+
+      val boundedTitle = title.take(150).ifBlank { context.getString(R.string.app_name) }
+      val boundedBody = body.take(400)
+      val extras = Bundle().apply {
+        putString(EXTRA_ATTENTION_HOST_ID, hostKey)
+      }
+
+      val notification = NotificationCompat.Builder(context, TASK_CHANNEL_ID)
+        .setSmallIcon(R.mipmap.ic_launcher_foreground)
+        .setContentTitle(boundedTitle)
+        .setContentText(boundedBody)
+        .setContentIntent(pending)
+        .setAutoCancel(true)
+        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        .setGroup(ATTENTION_GROUP)
+        .setGroupSummary(false)
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        .addExtras(extras)
+        .build()
+
+      val nm = NotificationManagerCompat.from(context)
+      try {
+        nm.notify(notificationTag, ATTENTION_NOTIFICATION_ID, notification)
+      } catch (_: SecurityException) {
+        return
+      }
+
+      val evictedTags = mutableListOf<String>()
+      synchronized(attentionTagsLock) {
+        // Ensure each notificationTag is owned by at most one host bucket.
+        val hostIter = activeAttentionTags.entries.iterator()
+        while (hostIter.hasNext()) {
+          val entry = hostIter.next()
+          if (entry.key != hostKey && entry.value.remove(notificationTag) && entry.value.isEmpty()) {
+            hostIter.remove()
+          }
+        }
+        if (!activeAttentionTags.containsKey(hostKey) && activeAttentionTags.size >= MAX_TRACKED_ATTENTION_HOSTS) {
+          val oldestHostIter = activeAttentionTags.entries.iterator()
+          if (oldestHostIter.hasNext()) {
+            val oldestHost = oldestHostIter.next()
+            evictedTags.addAll(oldestHost.value)
+            oldestHostIter.remove()
+          }
+        }
+        val tags = activeAttentionTags.getOrPut(hostKey) { LinkedHashSet() }
+        if (tags.contains(notificationTag)) {
+          tags.remove(notificationTag)
+          tags.add(notificationTag)
+        } else {
+          while (tags.size >= MAX_ATTENTION_TAGS_PER_HOST) {
+            val tagIter = tags.iterator()
+            if (!tagIter.hasNext()) break
+            val oldestTag = tagIter.next()
+            tagIter.remove()
+            evictedTags.add(oldestTag)
+          }
+          tags.add(notificationTag)
+        }
+      }
+
+      for (evicted in evictedTags) {
+        try {
+          nm.cancel(evicted, ATTENTION_NOTIFICATION_ID)
+        } catch (_: Exception) {
+        }
+      }
+    }
+
+    fun clearAttentionAlerts(context: Context, hostId: String) {
+      val hostKey = hostId.trim()
+      val tagsToCancel = LinkedHashSet<String>()
+      synchronized(attentionTagsLock) {
+        if (hostKey.isEmpty()) {
+          for (tags in activeAttentionTags.values) {
+            tagsToCancel.addAll(tags)
+          }
+          activeAttentionTags.clear()
+        } else {
+          activeAttentionTags.remove(hostKey)?.let { tagsToCancel.addAll(it) }
+        }
+      }
+
+      // Best-effort sweep of active attention alerts (ID 7402 only) that may have
+      // outlived a process restart; never touch ongoing FGS notification 7401.
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        try {
+          val manager = context.getSystemService(NotificationManager::class.java)
+          if (manager != null) {
+            for (sbn in manager.activeNotifications) {
+              if (sbn.id != ATTENTION_NOTIFICATION_ID) continue
+              val sbnTag = sbn.tag ?: continue
+              if (!sbnTag.startsWith(ATTENTION_TAG_PREFIX)) continue
+              if (hostKey.isEmpty() || sbn.notification.extras?.getString(EXTRA_ATTENTION_HOST_ID) == hostKey) {
+                tagsToCancel.add(sbnTag)
+              }
+            }
+          }
+        } catch (_: Throwable) {
+        }
+      }
+
+      if (tagsToCancel.isEmpty()) return
+      val nm = NotificationManagerCompat.from(context)
+      for (tag in tagsToCancel) {
+        try {
+          nm.cancel(tag, ATTENTION_NOTIFICATION_ID)
+        } catch (_: Exception) {
+        }
+      }
     }
 
     fun start(context: Context, promise: Promise) {

@@ -261,7 +261,7 @@ describe('AcpRemoteGateway', () => {
   })
 
   it('rejects orphan, mismatched and malformed upstream approvals without broadcasting or trusting upstream handles', async () => {
-    const fixture = await approvalFixture()
+    const fixture = await approvalFixture('cursor', 0)
     try {
       for (const params of [
         { sessionId: 'orphan', options: fixture.options },
@@ -2004,12 +2004,21 @@ describe('AcpRemoteGateway', () => {
   })
 })
 
-async function approvalFixture(backend = 'cursor') {
+async function approvalFixture(backend = 'cursor', detachedApprovalGraceSec?: number) {
   const acp = readyAcp()
   let inbound!: (message: CursorAcpInbound) => void
   acp.onInbound = listener => { inbound = listener; return () => undefined }
   acp.call = vi.fn(async () => ({ sessionId: 'session' }))
-  const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: backend, enabled: true, command: 'agent', args: [] }] }, silentLogger(), () => acp)
+  const gateway = new AcpRemoteGateway(
+    { enabled: true, backends: [{ id: backend, enabled: true, command: 'agent', args: [] }] },
+    silentLogger(),
+    () => acp,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    detachedApprovalGraceSec,
+  )
   await gateway.start()
   const publish = vi.fn(async () => undefined), observer = vi.fn(async () => undefined)
   const peer = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, publish)!

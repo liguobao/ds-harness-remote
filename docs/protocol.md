@@ -2344,6 +2344,54 @@ The browser opens `/__remote/browser` and signals its opener with `dsh.web.ready
 
 Opening another session on this connection replaces the first. `dsh.web.lan.direct.close({sessionId})`, disconnect, expiry, or loss of LAN closes the listener and streams. Session lifetime is capped at 30 minutes after the grant deadline. HTTP and WS on the LAN are plaintext. Non-LAN connections and Hosts lacking the capability use the existing hostc flow.
 
+### Attention Inbox 与零明文盲信号（`attention.signal.v1` / `attention.inbox.v1`）
+
+当 Host 与 Server 在 `hello` / `hello.ack` 协商 `attention.signal.v1` 时，Host 可通过 Control WebSocket 发送零明文盲汇总帧 `host.attention.signal`；未协商该能力时不得发送，旧 Server 与旧 Client 保持原行为不变。
+
+#### Control 帧：`host.attention.signal`
+
+```json
+{
+  "v": 1,
+  "id": "01K...",
+  "type": "host.attention.signal",
+  "timestamp": 1786000000000,
+  "payload": {
+    "digest": {
+      "revision": 7,
+      "pendingApprovals": 1,
+      "pendingQuestions": 0,
+      "runningSessions": 2,
+      "completedUnread": 1,
+      "urgentKind": "approval_needed",
+      "urgency": "critical",
+      "attentionToken": "0123456789abcdef0123456789abcdef",
+      "updatedAt": 1786000000000
+    }
+  }
+}
+```
+
+- `payload` 只允许唯一字段 `digest`，禁止包含 `connectionId`、`sessionId` 或任何自由文本。
+- **零明文规则（`AttentionDigest`）**：`digest` 必须严格校验（`.strict()`），仅允许下列字段，任何额外字段（如 `title`、`prompt`、`sessionId`、`path`、`command`、`summary`）必须 fail-closed 拒绝：
+  - `revision`：非负安全整数，在单次 Host 进程生命周期内单调递增。
+  - `pendingApprovals`、`pendingQuestions`、`runningSessions`、`completedUnread`：整数 `0..99`（上限 `MAX_ATTENTION_COUNT = 99`）。
+  - `urgentKind`：`'approval_needed' | 'question_needed' | 'turn_completed' | 'turn_failed' | 'clear' | null`。
+  - `urgency`：`'critical' | 'normal' | 'silent'`。
+  - `attentionToken`（可选）：必须匹配 `/^[a-f0-9]{32}$/`（128-bit 随机小写十六进制不透明令牌，严禁塞入 `sessionId` 或可读文本）。
+  - `updatedAt`：非负安全整数（Unix epoch ms）。
+- `AttentionDigest` 是唯一允许出现在 Control WS、`GET /api/v1/devices`、`GET /api/v1/devices/{id}`、`GET /api/v1/devices/{id}/presence`（可选字段 `attentionDigest`，缺省时完全兼容旧实现）、Server 可选盲 Webhook 与 APNs/FCM 唤醒负载（`push.wake.v1`，见 [server.md](server.md)）中的注意力元数据。
+
+#### Noise 加密隧道 RPC（`attention.inbox.v1`）
+
+当 Host 在 `harness.transport.describe` 中宣告 `attention.inbox.v1` 时，仅允许在已认证 Noise 加密隧道内调用下列方法（严禁暴露在 Control WS 或 Server REST）：
+
+- `attention.list`（入参 `{}`）：返回 `{ revision, digest, items }`。`items` 最多 `64` 条（`MAX_ATTENTION_ITEMS`）；每条 `AttentionItem` 包含稳定去重键 `id`（≤256）、`backend`（`'harness' | 'codex' | 'acp' | 'ds-bot'`）、可选 `acpAdapter`（≤64）、`mode`（`'agent' | 'bot'`）、可选 `workspaceId`（≤256）与 `workspaceLabel`（≤160）、`sessionId`（≤256）、`sessionTitle`（≤160，`MAX_ATTENTION_TITLE_CHARS`）、`status`（`'waiting_approval' | 'waiting_question' | 'running' | 'failed_unread' | 'completed_unread'`）、可选 `summary`（≤120，`MAX_ATTENTION_SUMMARY_CHARS`）、可选 `detachedExpiresAt`（审批断线宽限截止 epoch ms）与 `updatedAt`。
+- `attention.follow`（入参 `{ enabled?: boolean }`，默认 `true`；`enabled: false`、`attention.unfollow` `{}` 或连接断开停止推送）：返回初始 `{ revision, digest, items }`（`AttentionListResult`），并在当前认证连接上通过 `attention.follow.event` 事件持续推送 `AttentionFollowEvent`（`{ type: 'snapshot', revision, digest, items }` | `{ type: 'upsert', revision, digest, item }` | `{ type: 'remove', revision, digest, itemId }`）。
+- `attention.resolveToken`（入参 `{ token }`，必须匹配 `/^[a-f0-9]{32}$/`）：在加密隧道内将盲令牌解析为 `AttentionTarget`（`{ kind: 'session', backend, acpAdapter?, mode, workspaceId?, sessionId, itemId? }`；令牌过期、已处理或不存在时安全降级返回 `{ kind: 'inbox' }`）。
+- `attention.ackUnread`（入参 `{ itemIds: string[] }`，最多 64 项）：标记对应未读完成/失败条目已读，返回 `{ ok: true, revision }`。
+- **确定性排序规则**：条目按状态优先级 `waiting_question (0) > waiting_approval (1) > running (2) > failed_unread (3) > completed_unread (4)` 排序，同优先级按 `updatedAt` 降序，再按 `id` 字典序升序。审批与问答动作仍必须通过既有加密隧道 RPC 执行，禁止在盲信号或推送通知层直接提交审批决策。
+
 ### Read-only workspace Git review (`workspace.git.read.v1`)
 
 A Host that exposes read-only Git change inspection advertises `workspace.git.read.v1` in `harness.transport.describe`. Both RPCs run only over the authenticated Noise channel, resolve the session workspace root strictly from Host-side session authority (Harness, CodeX, or ACP; never a Client-supplied path), verify bidirectional gitdir ownership for linked worktrees/submodules (rejecting forged `.git` gitfiles, `--separate-git-dir` layouts without a host backlink, and external `.git` symlinks as `WORKSPACE_GIT_UNSAFE_REPO`), neutralize repository `filter.<name>.*`, disable partial-clone lazy fetch / network protocols (`GIT_NO_LAZY_FETCH=1`, `protocol.allow=never`, rejecting promisor/partial-clone configs), and never invoke write Git subcommands, external diff/textconv hooks, `core.fsmonitor`, or optional index locks (`--no-optional-locks`).

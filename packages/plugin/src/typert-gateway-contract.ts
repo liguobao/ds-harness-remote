@@ -54,7 +54,7 @@ export interface LocalTypertGateway extends TypertGatewayLike {
   failure(error: unknown): { code: string; message: string; details: Record<string, unknown> }
   supportsCarrier: boolean
   peer?: unknown
-  createPeer?(): LocalTypertGateway
+  createPeer?(options?: { interactions?: 'answer' | 'none' }): LocalTypertGateway | undefined
   dispose?(): Promise<void>
 }
 

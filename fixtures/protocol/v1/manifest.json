@@ -36,6 +36,10 @@
       "path": "control/remaining-control.json"
     },
     {
+      "name": "control-attention-signal",
+      "path": "control/attention-signal.json"
+    },
+    {
       "name": "protocol-errors",
       "path": "control/errors.json"
     },

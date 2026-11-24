@@ -1,9 +1,37 @@
-import { dshWebLanGrantSchema, DSH_WEB_LAN_CAPABILITY, DSH_WEB_LAN_IPV6_CAPABILITY, DSH_WEB_CAPABILITY, WORKSPACE_GIT_CAPABILITY, sameLinkIpv6PairSchema } from '@dsh-remote/protocol'
+import {
+  WORKSPACE_GIT_CAPABILITY,
+  ATTENTION_INBOX_CAPABILITY,
+  ATTENTION_SIGNAL_CAPABILITY,
+  DSH_WEB_CAPABILITY,
+  DSH_WEB_LAN_CAPABILITY,
+  DSH_WEB_LAN_IPV6_CAPABILITY,
+  LAN_UPLOAD_CAPABILITY,
+  PUSH_WAKE_CAPABILITY,
+  RELAY_RESUME_CAPABILITY,
+  TRANSPORT_UPGRADE_CAPABILITY,
+  WEBRTC_RESUME_CAPABILITY,
+  classifyControlClose,
+  dshWebLanGrantSchema,
+  sameLinkIpv6PairSchema,
+  wireFromTransportTier,
+} from '@dsh-remote/protocol'
 import { LanUploadRoutes } from './lan-upload'
 import { nativeWebSocketSender } from './native-websocket-binary'
-import { AgentAcpClient, ClientLiveTransportUpgrader, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
-import { LAN_UPLOAD_CAPABILITY, TRANSPORT_UPGRADE_CAPABILITY, classifyControlClose, wireFromTransportTier } from '@dsh-remote/protocol'
-import { AdaptiveTransport, type RtcIceServer } from '@dsh-remote/webrtc'
+import {
+  AgentAcpClient,
+  ClientLiveTransportUpgrader,
+  CodexRemoteClient,
+  HarnessAlphaClient,
+  RemoteClientCore,
+  RemoteTypertGateway,
+  createAttentionRpcTransport,
+  createRemoteAttentionClient,
+  probeRemoteHostFeatures,
+  remoteWorkspaceTypeAvailable,
+  type RemoteAttentionClient,
+  type RemoteHostFeatures,
+} from '@dsh-remote/client-core'
+import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { registerAcpBackendId } from '../lib/session-backend'
 import { connectionFailure, connectionLog } from './connection-log'
@@ -59,6 +87,9 @@ export class AndroidRemoteConnection {
   private sessionEventsSupported = false
   private workspaceGitSupported = false
   private pluginRouteSupported = false
+  private attentionInboxSupported = false
+  private pushWakeSupported = false
+  private attentionClient?: RemoteAttentionClient
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
   private codex?: CodexRemoteClient
@@ -110,6 +141,18 @@ export class AndroidRemoteConnection {
       accessToken,
       refreshAccessToken: options.refreshAccessToken,
       targetDeviceId: host.deviceId,
+      capabilities: [
+        WEBRTC_RESUME_CAPABILITY,
+        RELAY_RESUME_CAPABILITY,
+        'transport.lan',
+        'transport.p2p',
+        'transport.turn',
+        'transport.relay',
+        'transport.relay.attach',
+        'harness.api.v1',
+        ATTENTION_SIGNAL_CAPABILITY,
+        PUSH_WAKE_CAPABILITY,
+      ],
       forceRelay: options.forceRelay === true,
       preferredTransports: options.forceRelay
         ? ['relay']
@@ -190,7 +233,10 @@ export class AndroidRemoteConnection {
         this.codex = undefined
         this.sessionEventsSupported = false
         this.workspaceGitSupported = false
-    this.codexAvailable = false
+        this.attentionInboxSupported = false
+        this.pushWakeSupported = false
+        this.attentionClient = undefined
+        this.codexAvailable = false
         this.cursor = undefined
         this.acpBackends.clear()
         this.sessionTools = undefined
@@ -206,6 +252,11 @@ export class AndroidRemoteConnection {
       // second relay-only connection doubled every fallback into two full
       // handshakes and added 10s+ to mobile connections.
       const core = await connectCore()
+      const initialDetails = typeof this.transport?.connectionDetails === 'function'
+        ? await this.transport.connectionDetails().catch(() => undefined)
+        : undefined
+      this.pushWakeSupported = Array.isArray(initialDetails?.negotiatedCapabilities)
+        && initialDetails.negotiatedCapabilities.includes(PUSH_WAKE_CAPABILITY)
       const features = await probeRemoteHostFeatures(core, host.clientVersion)
       if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
       // Only Relay fallback needs an in-band upgrade. Initial WebRTC legs use
@@ -315,6 +366,8 @@ export class AndroidRemoteConnection {
     this.lanWebIpv6 = features.capabilities.includes(DSH_WEB_LAN_IPV6_CAPABILITY)
     this.sameLinkIpv6Endpoints = features.sameLinkIpv6Endpoints?.map(endpoint => endpoint.toLowerCase()) ?? []
     this.sameLinkIpv6PairProbe = features.sameLinkIpv6PairProbe === true
+    this.attentionInboxSupported = features.capabilities.includes(ATTENTION_INBOX_CAPABILITY)
+    this.attentionClient = createRemoteAttentionClient(createAttentionRpcTransport(core))
     this.dshWeb = features.capabilities.includes(DSH_WEB_CAPABILITY)
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
@@ -423,6 +476,12 @@ export class AndroidRemoteConnection {
   supportsDshWebTunnel(): boolean { return this.core !== undefined && this.dshWeb }
 
   supportsBinaryUpload(): boolean { return this.core !== undefined && this.binaryUploads }
+
+  supportsPushWake(): boolean { return this.core !== undefined && this.pushWakeSupported }
+
+  hasAttentionInbox(): boolean { return this.core !== undefined && this.attentionInboxSupported }
+
+  getAttentionClient(): RemoteAttentionClient | undefined { return this.core !== undefined ? this.attentionClient : undefined }
 
   async rpc<T = unknown>(method: string, params: unknown, signal?: AbortSignal): Promise<T> {
     if (this.core === undefined) throw new Error(strings.runtime.connectHostFirst)
@@ -668,6 +727,9 @@ export class AndroidRemoteConnection {
     this.codex = undefined
     this.codexAvailable = false
     this.workspaceGitSupported = false
+    this.attentionInboxSupported = false
+    this.pushWakeSupported = false
+    this.attentionClient = undefined
     this.cursor = undefined
     this.acpBackends.clear()
     this.sessionTools = undefined
