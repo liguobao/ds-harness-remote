@@ -682,7 +682,9 @@ window.__ModuleLoader__.load({
             React.createElement('a', { ...linkProps, href: 'https://github.com/liguobao/ds-harness-remote' }, 'ds-harness-remote'),
             ' · ',
             React.createElement('a', { ...linkProps, href: 'https://dsh.r2049.cn' }, '会员计划'),
-            React.createElement('button', { type: 'button', onClick: dismiss, 'aria-label': t('close'), title: t('close') }, '×')))
+            React.createElement('button', { type: 'button', onClick: dismiss, 'aria-label': t('close') },
+              React.createElement('svg', { width: 10, height: 10, viewBox: '0 0 12 12', 'aria-hidden': true },
+                React.createElement('path', { d: 'M3 3l6 6m0-6L3 9', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' })))))
         }
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
