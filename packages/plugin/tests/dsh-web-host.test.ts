@@ -5,6 +5,7 @@ import type { Duplex } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type RawData, WebSocket, WebSocketServer } from 'ws'
 import { authorizeUpstream, DshWebPeer, type DshWebBrowserAuth } from '../src/dsh-web-host.js'
+import { openDshWebUpstream } from '../src/dsh-web-upstream.js'
 import { Connection } from '../src/hostc/connection.js'
 import {
   CLOSE_SHUTDOWN,
@@ -912,5 +913,107 @@ describe('LAN Web connection ownership', () => {
       wsServer.close()
       await upstream.close()
     }
+  })
+})
+
+describe('DSH Web upstream authentication', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('supports DSH 0.2.3 admit-only connections and fails closed on invalid or throwing admissions', async () => {
+    const { runScenarios } = await import('../../../scripts/test-scenarios.mjs')
+    const scenarios = [
+      'admitOwner',
+      'admitStringOwner',
+      'admitRejected',
+      'admitShareViewer',
+      'admitAbortedOwner',
+      'admitNull',
+      'admitUndefined',
+      'admitEmptyObject',
+      'admitThrows',
+      'dualMethodPrefersRequestRejection',
+      'noAuthMethods',
+    ] as const
+    await runScenarios(scenarios.map(mode => ({
+      name: mode,
+      run: async () => {
+        const fetchMock = vi.fn(async () => new Response('<html>ok</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        const admitSpy = vi.fn(() => {
+          switch (mode) {
+            case 'admitOwner':
+              return { peer: { principal: { kind: 'owner' }, signal: new AbortController().signal } }
+            case 'admitStringOwner':
+              return { peer: { principal: 'owner' } }
+            case 'admitRejected':
+              return { rejection: 401 }
+            case 'admitShareViewer':
+              return { peer: { principal: { kind: 'share-viewer' } } }
+            case 'admitAbortedOwner': {
+              const controller = new AbortController()
+              controller.abort()
+              return { peer: { principal: { kind: 'owner' }, signal: controller.signal } }
+            }
+            case 'admitNull':
+              return null as unknown as undefined
+            case 'admitUndefined':
+              return undefined
+            case 'admitEmptyObject':
+              return {}
+            case 'admitThrows':
+              throw new Error('cannot get property "authentication" without inject')
+            case 'dualMethodPrefersRequestRejection':
+              return { peer: { principal: { kind: 'owner' } } }
+            default:
+              return undefined
+          }
+        })
+
+        const auth: DshWebBrowserAuth = {
+          authenticatedUrl: origin => `${origin}?token=boot`,
+          authorizeIndex: (_req, res) => {
+            res.writeHead(303, { 'set-cookie': 'dsh=local; Path=/; HttpOnly' })
+            res.end()
+            return true
+          },
+          ...(mode === 'dualMethodPrefersRequestRejection' ? { requestRejection: () => undefined } : {}),
+          ...(mode === 'noAuthMethods' ? {} : { admit: admitSpy }),
+        }
+
+        const expectedSuccess = mode === 'admitOwner'
+          || mode === 'admitStringOwner'
+          || mode === 'dualMethodPrefersRequestRejection'
+        const pending = openDshWebUpstream(
+          () => ({ origin: new URL('http://127.0.0.1:4173/'), auth }),
+          new AbortController().signal,
+        )
+
+        if (expectedSuccess) {
+          const upstream = await pending
+          const authorized = upstream.authorize(
+            { method: 'GET', path: '/', headers: [], body: false },
+            new URL('https://example.test/'),
+          )
+          expect(authorized?.headers).toEqual([['cookie', 'dsh=local']])
+          expect(fetchMock).toHaveBeenCalledOnce()
+          if (mode === 'dualMethodPrefersRequestRejection') {
+            expect(admitSpy).not.toHaveBeenCalled()
+          } else {
+            expect(admitSpy).toHaveBeenCalledOnce()
+          }
+          return
+        }
+
+        await expect(pending).rejects.toMatchObject({ code: 'DSH_WEB_NOT_READY' })
+        expect(fetchMock).not.toHaveBeenCalled()
+      },
+    })))
   })
 })

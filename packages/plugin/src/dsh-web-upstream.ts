@@ -7,7 +7,8 @@ export interface DshWebBrowserAuth {
     request: { headers: Record<string, string>; url: string; method: string },
     response: { writeHead(status: number, headers?: Readonly<Record<string, string>>): void; end(): void },
   ): boolean
-  requestRejection(request: { headers: Record<string, string> }): number | undefined
+  requestRejection?(request: { headers: Record<string, string> }): number | undefined
+  admit?(request: { headers: Record<string, string> }): { rejection?: number; peer?: unknown } | undefined
 }
 
 export type DshWebRuntime = { origin: URL; auth: DshWebBrowserAuth }
@@ -50,9 +51,41 @@ function browserCookie({ origin, auth }: DshWebRuntime): string {
     writeHead(status, headers) { if (status === 303) cookie = headers?.['set-cookie']?.split(';')[0] },
     end() {},
   })
-  if (!cookie || auth.requestRejection({ headers: { host: origin.host, cookie } }) !== undefined)
+  if (!cookie || !isLocalCookieAuthorized(auth, { headers: { host: origin.host, cookie } }))
     throw new RpcError('DSH_WEB_NOT_READY', 'The local Web GUI authentication is unavailable.', undefined, true)
   return cookie
+}
+
+function isLocalCookieAuthorized(auth: DshWebBrowserAuth, request: { headers: Record<string, string> }): boolean {
+  if (typeof auth.requestRejection === 'function') {
+    try {
+      return auth.requestRejection(request) === undefined
+    } catch {
+      return false
+    }
+  }
+  if (typeof auth.admit === 'function') {
+    let admission: { rejection?: number; peer?: unknown } | undefined
+    try {
+      admission = auth.admit(request)
+    } catch {
+      return false
+    }
+    if (typeof admission !== 'object' || admission === null) return false
+    if (typeof admission.rejection === 'number') return false
+    return isOwnerPeer(admission.peer)
+  }
+  return false
+}
+
+function isOwnerPeer(peer: unknown): boolean {
+  if (typeof peer !== 'object' || peer === null) return false
+  const candidate = peer as { readonly principal?: { readonly kind?: unknown } | string; readonly signal?: { readonly aborted?: boolean } }
+  if (candidate.signal?.aborted === true) return false
+  const principal = candidate.principal
+  if (typeof principal === 'string') return principal === 'owner'
+  if (typeof principal === 'object' && principal !== null) return principal.kind === 'owner'
+  return false
 }
 
 export function authorizeUpstream(request: OpenMessage, publicUrl: URL, cookie: string): OpenMessage | undefined {

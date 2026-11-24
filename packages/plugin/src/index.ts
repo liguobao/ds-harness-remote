@@ -132,12 +132,16 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   // The default entry uses the browser/Desktop Host connection service.
   // The separate dsh-TUI entry starts through applyTuiHost.
   const activateWhenCarrierReady = async (runtimeContext: Context): Promise<void> => {
-    const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
-    const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
+    const connection = safeGetService(runtimeContext, 'connection') as HostConnectionHandle | undefined
     let disposePendingControl: (() => Promise<void>) | undefined
     const installPendingControl = async (): Promise<void> => {
       if (connection === undefined || disposePendingControl !== undefined) return
-      let identityDirectory = new IdentityStore().directory
+      let identityDirectory = ''
+      try {
+        identityDirectory = new IdentityStore().directory
+      } catch {
+        // Surfaced by prepareDefaultIdentityDirectory below.
+      }
       let storageError: unknown
       try {
         identityDirectory = await prepareDefaultIdentityDirectory()
@@ -186,10 +190,18 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
       disposePendingControl = undefined
       await activate(activeContext, readConfig, entryId)
     }
-    if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
-      return startActiveRuntime(runtimeContext)
+    try {
+      const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
+      if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
+        await startActiveRuntime(runtimeContext)
+        return
+      }
+      await installPendingControl()
+    } catch (error) {
+      await disposePendingControl?.().catch(() => undefined)
+      disposePendingControl = undefined
+      await reportActivationFailure(runtimeContext, connection, readConfig, error)
     }
-    await installPendingControl()
   }
 
   ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
@@ -226,7 +238,12 @@ async function activate(
     () => settingsBinding?.get() ?? readConfig(),
     fallbackLogLevel,
   ))
-  let defaultIdentityDirectory = new IdentityStore().directory
+  let defaultIdentityDirectory = ''
+  try {
+    defaultIdentityDirectory = new IdentityStore().directory
+  } catch {
+    // Resolved during startup or surfaced via handleEarlyFailure.
+  }
   let storageAvailable = false
 
   const handleEarlyFailure = async (failure: unknown): Promise<void> => {
@@ -296,22 +313,8 @@ async function activate(
 
   // Startup and daily npm dist-tags lookup backing the client update notice.
   // Lives for the whole activation so Server switches keep its snapshot.
-  const updateChecker = new PluginUpdateChecker(logger)
-  // Harness 0.2.2 updates a registry-installed third-party bundle in place.
-  // The manager is a Host boot service, so it keeps running after this plugin
-  // is removed and replaced. GitHub and path installs are left on the releases link.
-  const pluginUpgrade = new LocalPluginUpgrade(
-    updateChecker,
-    () => readPluginManager(ctx),
-    listener => {
-      // The manager emits on its own context. Desktop puts that service on the
-      // profile root; a nested context with its own bus still needs to hear it.
-      const root = rootContext(ctx)
-      const buses = root === undefined || ctx.events === root.events ? [ctx.events] : [root.events, ctx.events]
-      const dispose = buses.map(events => events.on('plugin-manager/update-state', listener, { global: true }))
-      return () => { for (const stop of dispose) stop() }
-    },
-  )
+  let updateChecker!: PluginUpdateChecker
+  let pluginUpgrade!: LocalPluginUpgrade
   // The official Typert gateway (`typertGateway` from dsh-api-gateway) is the
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
   // activation dependency so a peer bridge never silently omits commands.
@@ -326,6 +329,22 @@ async function activate(
   let replacement: Promise<{ client: ClientModeRuntime | undefined; host: HostPluginRuntime }> | undefined
   let controlRuntime: PluginControlRuntime | undefined
   try {
+    updateChecker = new PluginUpdateChecker(logger)
+    // Harness 0.2.2 updates a registry-installed third-party bundle in place.
+    // The manager is a Host boot service, so it keeps running after this plugin
+    // is removed and replaced. GitHub and path installs are left on the releases link.
+    pluginUpgrade = new LocalPluginUpgrade(
+      updateChecker,
+      () => readPluginManager(ctx),
+      listener => {
+        // The manager emits on its own context. Desktop puts that service on the
+        // profile root; a nested context with its own bus still needs to hear it.
+        const root = rootContext(ctx)
+        const buses = root === undefined || ctx.events === root.events ? [ctx.events] : [root.events, ctx.events]
+        const dispose = buses.map(events => events.on('plugin-manager/update-state', listener, { global: true }))
+        return () => { for (const stop of dispose) stop() }
+      },
+    )
     const nativeTypertGateway = ctx.get('typertGateway') as TypertGatewayLike
     // Only the authenticated ConnectionController callback creates per-connection
     // owner peers. Never share a browser Peer or accept a principal from the tunnel.
@@ -401,11 +420,12 @@ async function activate(
           workspaces: ctx.get('workspaceRegistry', false) as TransferServices['workspaces'],
         }),
         () => {
-          if (!ctx.get('webApp', false)) return
-          const listener = ctx.get('webServer', false) as { getOrigin?(): string } | undefined
-          const auth = ctx.get('connection', false) as DshWebBrowserAuth | undefined
+          if (!safeGetService(ctx, 'webApp')) return
+          const listener = safeGetService(ctx, 'webServer') as { getOrigin?(): string } | undefined
+          const auth = safeGetService(ctx, 'connection') as DshWebBrowserAuth | undefined
           if (typeof listener?.getOrigin !== 'function' || typeof auth?.authenticatedUrl !== 'function'
-            || typeof auth.authorizeIndex !== 'function' || typeof auth.requestRejection !== 'function') return
+            || typeof auth.authorizeIndex !== 'function'
+            || (typeof auth.requestRejection !== 'function' && typeof auth.admit !== 'function')) return
           try {
             const origin = new URL(listener.getOrigin())
             if (['http:', 'https:'].includes(origin.protocol) && origin.href === origin.origin + '/') return { origin, auth }
@@ -579,7 +599,57 @@ async function activate(
       await logStore.flush()
     }
   }, 'ds-harness-remote lifecycle')
-  if (config.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? undefined : clientRuntime)
+  if (config.remoteTools?.enabled) {
+    try {
+      installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? undefined : clientRuntime)
+    } catch (error) {
+      logger.warn('Remote discovery tools installation failed', safeStartupError(error))
+    }
+  }
+}
+
+async function reportActivationFailure(
+  ctx: Context,
+  connection: HostConnectionHandle | undefined,
+  readConfig: () => ConfigInput,
+  failure: unknown,
+): Promise<void> {
+  let logStore: HostLogStore
+  try {
+    logStore = createHostLogStore(ctx)
+  } catch {
+    logStore = new HostLogStore()
+  }
+  const logger = createSafeLogger(ctx, logStore, () => readSafeLogLevel(readConfig, 'info'))
+  logger.error('Remote plugin startup failed', safeStartupError(failure))
+  if (connection === undefined || !isFiberActive(ctx)) {
+    await logStore.flush()
+    return
+  }
+  let identityDirectory = ''
+  try {
+    identityDirectory = new IdentityStore().directory
+  } catch {
+    // Fall back to empty path when identity root cannot be resolved.
+  }
+  const control = new PluginControlRuntime(
+    resolveFallbackConfig(readConfig),
+    identityDirectory,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    false,
+    logStore,
+  )
+  control.setStartupFailure(failure, { storageAvailable: false })
+  try {
+    mountControlEffect(ctx, control, connection, logStore, logger, 'ds-harness-remote startup failure control')
+  } catch (mountError) {
+    logger.error('Remote control route registration failed', safeStartupError(mountError))
+    await logStore.flush()
+  }
 }
 
 function mountControlEffect(
@@ -840,7 +910,7 @@ function readPluginManager(ctx: Context): PluginManagerUpdate | undefined {
 
 /** Entry id whose live Config backs this plugin instance's settings writes. */
 function locateEntryId(ctx: Context): string {
-  const loader = ctx.get('loader') as LoaderLike | undefined
+  const loader = safeGetService(ctx, 'loader') as LoaderLike | undefined
   // `Entry.id` is the tree path (`include:<row>` for a direct profile row, or
   // `<include>:<group>:<row>` under a group), while `ctx.settings` and
   // configEditor address an entry by its own `options.id` (DSH-0.1.7-RC1-04).
@@ -916,7 +986,7 @@ function isLegacySettingsProvider(value: unknown): value is LegacySettingsProvid
 }
 
 async function disableLegacyLoaderEntries(ctx: Context, logger: SafeLogger): Promise<void> {
-  const loader = ctx.get('loader') as LoaderLike | undefined
+  const loader = safeGetService(ctx, 'loader') as LoaderLike | undefined
   if (!isLoaderLike(loader)) return
 
   const currentEntryId = loader.locate?.(ctx.fiber)

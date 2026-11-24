@@ -944,6 +944,167 @@ describe('Cordis plugin lifecycle', () => {
       },
     })))
   })
+
+  it('surfaces unexpected activateWhenCarrierReady failures on control status and HostLogStore instead of swallowing them', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-outer-activation-fail-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubEnv('DSH_PROFILE', 'outer-fail')
+
+    const errorCalls: string[] = []
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errorCalls.push(args.map(String).join(' '))
+    })
+
+    let registeredRoute: {
+      path: string
+      auth?: string
+      handler(req: unknown, res: unknown, peer?: unknown): Promise<void> | void
+    } | undefined
+    const ctx = new Context()
+    ctx.provide('settings', settings({}))
+    ctx.provide('typertGateway', {
+      get dispatchRpc() {
+        throw new Error('carrier probe boom')
+      },
+    } as never)
+    ctx.provide('connection', { rpc: {} } as never)
+    ctx.provide('webServer', {
+      register: (route: typeof registeredRoute) => {
+        registeredRoute = route
+        return async () => undefined
+      },
+    } as never)
+
+    const fiber = await ctx.plugin(remotePlugin, disabledAgentDomains)
+    const ownerPeer = { principal: { kind: 'owner' }, signal: new AbortController().signal }
+    const callHttp = async (method: string) => {
+      const { Readable } = await import('node:stream')
+      const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({
+        type: 'client-request', rpcId: 'outer-1', method, payload: {},
+      }))]), {
+        method: 'POST',
+        url: `/ds-harness-remote/${method}`,
+        headers: { 'content-type': 'application/json' },
+      })
+      let status = 0
+      let text = ''
+      await registeredRoute!.handler(req, {
+        writeHead: (code: number) => { status = code },
+        end: (chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) },
+      }, ownerPeer)
+      return { status, body: JSON.parse(text) }
+    }
+
+    try {
+      await vi.waitFor(() => {
+        expect(registeredRoute?.path).toBe('/ds-harness-remote')
+        expect(errorCalls.some(line => line.includes('Remote plugin startup failed'))).toBe(true)
+      })
+      expect(registeredRoute?.auth).toBe('required')
+      await expect(callHttp('status')).resolves.toMatchObject({
+        status: 200,
+        body: {
+          result: {
+            ok: true,
+            value: {
+              available: false,
+              controlUnavailable: false,
+              startupError: { code: 'INTERNAL_ERROR' },
+            },
+          },
+        },
+      })
+      const logsRes = await callHttp('settings.logs.get')
+      expect(logsRes.body.result).toMatchObject({ ok: true })
+      expect(logsRes.body.result.value.entries.some((entry: { level: string; line: string }) =>
+        entry.level === 'error' && entry.line.includes('Remote plugin startup failed'))).toBe(true)
+    } finally {
+      errorSpy.mockRestore()
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps control route healthy when remote discovery tools installation throws', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-tools-fail-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubEnv('DSH_PROFILE', 'tools-fail')
+
+    let registerCount = 0
+    let toolsRegisterCalls = 0
+    let registeredRoute: {
+      path: string
+      auth?: string
+      handler(req: unknown, res: unknown, peer?: unknown): Promise<void> | void
+    } | undefined
+    const ctx = new Context()
+    ctx.provide('settings', settings({ remoteTools: { enabled: true } }))
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', {
+      authenticatedUrl: (origin: string) => `${origin}?token=boot`,
+      authorizeIndex: () => true,
+      admit: () => ({ peer: { principal: { kind: 'owner' }, signal: new AbortController().signal } }),
+      rpc: {},
+    } as never)
+    ctx.provide('webApp', {} as never)
+    ctx.provide('webServer', {
+      getOrigin: () => 'http://127.0.0.1:4173/',
+      register: (route: typeof registeredRoute) => {
+        registerCount += 1
+        registeredRoute = route
+        return async () => undefined
+      },
+    } as never)
+    ctx.provide('tools', {
+      register: () => {
+        toolsRegisterCalls += 1
+        throw new Error('tools registry unavailable')
+      },
+    } as never)
+
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, remoteTools: { enabled: true } })
+    try {
+      await vi.waitFor(() => {
+        expect(registeredRoute?.path).toBe('/ds-harness-remote')
+        expect(toolsRegisterCalls).toBeGreaterThan(0)
+        expect(ctx.dshRemote.currentIdentity()).toBeDefined()
+      })
+      expect(registerCount).toBe(1)
+
+      const { Readable } = await import('node:stream')
+      const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({
+        type: 'client-request', rpcId: 'tools-1', method: 'status', payload: {},
+      }))]), {
+        method: 'POST',
+        url: '/ds-harness-remote/status',
+        headers: { 'content-type': 'application/json' },
+      })
+      let status = 0
+      let text = ''
+      const ownerPeer = { principal: { kind: 'owner' }, signal: new AbortController().signal }
+      await registeredRoute!.handler(req, {
+        writeHead: (code: number) => { status = code },
+        end: (chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) },
+      }, ownerPeer)
+      expect(status).toBe(200)
+      const parsed = JSON.parse(text) as { result?: { ok?: boolean; value?: { hostAuthorizationAvailable?: boolean; host?: { deviceId?: string }; startupError?: unknown } } }
+      expect(parsed).toMatchObject({
+        result: {
+          ok: true,
+          value: {
+            hostAuthorizationAvailable: true,
+            host: { deviceId: ctx.dshRemote.currentIdentity().deviceId },
+          },
+        },
+      })
+      expect(parsed.result?.value?.startupError).toBeUndefined()
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
 })
 
 function settings(value: Record<string, unknown>) {

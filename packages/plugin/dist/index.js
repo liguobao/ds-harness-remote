@@ -104707,9 +104707,39 @@ function browserCookie({ origin, auth }) {
     end() {
     }
   });
-  if (!cookie || auth.requestRejection({ headers: { host: origin.host, cookie } }) !== void 0)
+  if (!cookie || !isLocalCookieAuthorized(auth, { headers: { host: origin.host, cookie } }))
     throw new RpcError("DSH_WEB_NOT_READY", "The local Web GUI authentication is unavailable.", void 0, true);
   return cookie;
+}
+function isLocalCookieAuthorized(auth, request2) {
+  if (typeof auth.requestRejection === "function") {
+    try {
+      return auth.requestRejection(request2) === void 0;
+    } catch {
+      return false;
+    }
+  }
+  if (typeof auth.admit === "function") {
+    let admission;
+    try {
+      admission = auth.admit(request2);
+    } catch {
+      return false;
+    }
+    if (typeof admission !== "object" || admission === null) return false;
+    if (typeof admission.rejection === "number") return false;
+    return isOwnerPeer(admission.peer);
+  }
+  return false;
+}
+function isOwnerPeer(peer) {
+  if (typeof peer !== "object" || peer === null) return false;
+  const candidate = peer;
+  if (candidate.signal?.aborted === true) return false;
+  const principal = candidate.principal;
+  if (typeof principal === "string") return principal === "owner";
+  if (typeof principal === "object" && principal !== null) return principal.kind === "owner";
+  return false;
 }
 function authorizeUpstream(request2, publicUrl, cookie) {
   let path;
@@ -114978,12 +115008,15 @@ function apply(ctx, entry = void 0) {
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber));
   });
   const activateWhenCarrierReady = async (runtimeContext) => {
-    const gateway = runtimeContext.get("typertGateway");
-    const connection = runtimeContext.get("connection");
+    const connection = safeGetService(runtimeContext, "connection");
     let disposePendingControl;
     const installPendingControl = async () => {
       if (connection === void 0 || disposePendingControl !== void 0) return;
-      let identityDirectory = new IdentityStore().directory;
+      let identityDirectory = "";
+      try {
+        identityDirectory = new IdentityStore().directory;
+      } catch {
+      }
       let storageError;
       try {
         identityDirectory = await prepareDefaultIdentityDirectory();
@@ -115032,10 +115065,18 @@ function apply(ctx, entry = void 0) {
       disposePendingControl = void 0;
       await activate(activeContext, readConfig, entryId);
     };
-    if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
-      return startActiveRuntime(runtimeContext);
+    try {
+      const gateway = runtimeContext.get("typertGateway");
+      if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
+        await startActiveRuntime(runtimeContext);
+        return;
+      }
+      await installPendingControl();
+    } catch (error62) {
+      await disposePendingControl?.().catch(() => void 0);
+      disposePendingControl = void 0;
+      await reportActivationFailure(runtimeContext, connection, readConfig, error62);
     }
-    await installPendingControl();
   };
   ctx.inject(["settings", "connection", "typertGateway"], activateWhenCarrierReady);
 }
@@ -115060,7 +115101,11 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     () => settingsBinding?.get() ?? readConfig(),
     fallbackLogLevel
   ));
-  let defaultIdentityDirectory = new IdentityStore().directory;
+  let defaultIdentityDirectory = "";
+  try {
+    defaultIdentityDirectory = new IdentityStore().directory;
+  } catch {
+  }
   let storageAvailable = false;
   const handleEarlyFailure = async (failure5) => {
     logger2.error("Remote plugin startup failed", safeStartupError(failure5));
@@ -115122,19 +115167,8 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     }
     return;
   }
-  const updateChecker = new PluginUpdateChecker(logger2);
-  const pluginUpgrade = new LocalPluginUpgrade(
-    updateChecker,
-    () => readPluginManager(ctx),
-    (listener) => {
-      const root2 = rootContext(ctx);
-      const buses = root2 === void 0 || ctx.events === root2.events ? [ctx.events] : [root2.events, ctx.events];
-      const dispose = buses.map((events) => events.on("plugin-manager/update-state", listener, { global: true }));
-      return () => {
-        for (const stop of dispose) stop();
-      };
-    }
-  );
+  let updateChecker;
+  let pluginUpgrade;
   let localTypertGateway;
   let runtime;
   let clientRuntime;
@@ -115146,6 +115180,19 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   let replacement;
   let controlRuntime;
   try {
+    updateChecker = new PluginUpdateChecker(logger2);
+    pluginUpgrade = new LocalPluginUpgrade(
+      updateChecker,
+      () => readPluginManager(ctx),
+      (listener) => {
+        const root2 = rootContext(ctx);
+        const buses = root2 === void 0 || ctx.events === root2.events ? [ctx.events] : [root2.events, ctx.events];
+        const dispose = buses.map((events) => events.on("plugin-manager/update-state", listener, { global: true }));
+        return () => {
+          for (const stop of dispose) stop();
+        };
+      }
+    );
     const nativeTypertGateway = ctx.get("typertGateway");
     const connectionExports = DshConnection;
     const connectionService = ctx.get("connection", false);
@@ -115201,10 +115248,10 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
           workspaces: ctx.get("workspaceRegistry", false)
         }),
         () => {
-          if (!ctx.get("webApp", false)) return;
-          const listener = ctx.get("webServer", false);
-          const auth = ctx.get("connection", false);
-          if (typeof listener?.getOrigin !== "function" || typeof auth?.authenticatedUrl !== "function" || typeof auth.authorizeIndex !== "function" || typeof auth.requestRejection !== "function") return;
+          if (!safeGetService(ctx, "webApp")) return;
+          const listener = safeGetService(ctx, "webServer");
+          const auth = safeGetService(ctx, "connection");
+          if (typeof listener?.getOrigin !== "function" || typeof auth?.authenticatedUrl !== "function" || typeof auth.authorizeIndex !== "function" || typeof auth.requestRejection !== "function" && typeof auth.admit !== "function") return;
           try {
             const origin = new URL(listener.getOrigin());
             if (["http:", "https:"].includes(origin.protocol) && origin.href === origin.origin + "/") return { origin, auth };
@@ -115362,7 +115409,50 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       await logStore.flush();
     };
   }, "ds-harness-remote lifecycle");
-  if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? void 0 : clientRuntime);
+  if (config2.remoteTools?.enabled) {
+    try {
+      installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? void 0 : clientRuntime);
+    } catch (error62) {
+      logger2.warn("Remote discovery tools installation failed", safeStartupError(error62));
+    }
+  }
+}
+async function reportActivationFailure(ctx, connection, readConfig, failure5) {
+  let logStore;
+  try {
+    logStore = createHostLogStore(ctx);
+  } catch {
+    logStore = new HostLogStore();
+  }
+  const logger2 = createSafeLogger(ctx, logStore, () => readSafeLogLevel(readConfig, "info"));
+  logger2.error("Remote plugin startup failed", safeStartupError(failure5));
+  if (connection === void 0 || !isFiberActive(ctx)) {
+    await logStore.flush();
+    return;
+  }
+  let identityDirectory = "";
+  try {
+    identityDirectory = new IdentityStore().directory;
+  } catch {
+  }
+  const control = new PluginControlRuntime(
+    resolveFallbackConfig(readConfig),
+    identityDirectory,
+    void 0,
+    void 0,
+    void 0,
+    void 0,
+    void 0,
+    false,
+    logStore
+  );
+  control.setStartupFailure(failure5, { storageAvailable: false });
+  try {
+    mountControlEffect(ctx, control, connection, logStore, logger2, "ds-harness-remote startup failure control");
+  } catch (mountError) {
+    logger2.error("Remote control route registration failed", safeStartupError(mountError));
+    await logStore.flush();
+  }
 }
 function mountControlEffect(ctx, control, connection, logStore, logger2, label) {
   ctx.effect(() => {
@@ -115572,7 +115662,7 @@ function readPluginManager(ctx) {
   return candidate;
 }
 function locateEntryId(ctx) {
-  const loader = ctx.get("loader");
+  const loader = safeGetService(ctx, "loader");
   const located = loader?.locate?.(ctx.fiber);
   if (located === void 0) return DEFAULT_ENTRY_ID;
   if (typeof loader?.entries === "function") {
@@ -115613,7 +115703,7 @@ function isLegacySettingsProvider(value) {
   return typeof value === "object" && value !== null && typeof value.register === "function";
 }
 async function disableLegacyLoaderEntries(ctx, logger2) {
-  const loader = ctx.get("loader");
+  const loader = safeGetService(ctx, "loader");
   if (!isLoaderLike(loader)) return;
   const currentEntryId = loader.locate?.(ctx.fiber);
   for (const entry of loader.entries()) {
