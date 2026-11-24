@@ -112,7 +112,7 @@ export struct ServerSetupScreen {
               .fontColor(this.palette.text)
               .letterSpacing(-0.6)
 
-            Text(t('请选择与远端设备相同的登录方式，继续你的工作。'))
+            Text(t('请选择与远端设备相同的登录方式'))
               .fontSize(14)
               .fontColor(this.palette.text2)
               .textAlign(TextAlign.Center)
@@ -145,7 +145,7 @@ export struct ServerSetupScreen {
                       this.onProvider(item.id);
                     })
                 }, (item: OAuthProvider) => item.id)
-                Text(t('将在浏览器中完成授权，然后自动返回此处。'))
+                Text(t('浏览器授权后将自动返回'))
                   .fontSize(12)
                   .fontColor(this.palette.text2)
                   .textAlign(TextAlign.Center)

@@ -44,7 +44,7 @@ export struct LoginServerEditor {
         if (this.loginServerError.length > 0) {
           Text(this.loginServerError).fontSize(13).fontColor(this.palette.danger).width('100%')
         }
-        Text(t('保存后会切换服务器，需要重新登录。'))
+        Text(t('切换服务器后需重新登录'))
           .fontSize(13)
           .fontColor(this.palette.text2)
           .width('100%')

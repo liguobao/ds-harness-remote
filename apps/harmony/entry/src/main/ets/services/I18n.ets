@@ -198,7 +198,7 @@ function buildEnglish(): Map<string, string> {
   map.set('管理远程主机', 'Manage remote hosts');
   map.set('系统', 'System');
   map.set('保存服务器', 'Save server');
-  map.set('保存后会切换服务器，需要重新登录。', 'Saving switches servers and requires signing in again.');
+  map.set('切换服务器后需重新登录', 'Saving switches servers and requires signing in again.');
   map.set('服务器地址', 'Server address');
   map.set('使用邮箱登录', 'Sign in with email');
   map.set('收起邮箱登录', 'Hide email sign-in');
@@ -208,11 +208,11 @@ function buildEnglish(): Map<string, string> {
   map.set('重新输入密码', 'Enter password again');
   map.set('输入邮箱', 'Enter your email');
   map.set('或', 'or');
-  map.set('将在浏览器中完成授权，然后自动返回此处。', 'A browser will open to finish authorization, then return here automatically.');
+  map.set('浏览器授权后将自动返回', 'A browser will open to finish authorization, then return here automatically.');
   map.set('使用 GitHub 继续', 'Continue with GitHub');
   map.set('使用知乎继续', 'Continue with Zhihu');
   map.set('使用 Google 继续', 'Continue with Google');
-  map.set('请选择与远端设备相同的登录方式，继续你的工作。', 'Choose the same sign-in method as on your remote device to continue your work.');
+  map.set('请选择与远端设备相同的登录方式', 'Choose the same sign-in method as on your remote device to continue your work.');
   map.set('一次只连接一台主机，切换时会断开上一台主机。', 'Connects to one host at a time; switching disconnects the previous host.');
   map.set('新对话', 'New chat');
   map.set('保存', 'Save');
