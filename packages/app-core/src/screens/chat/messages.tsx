@@ -52,9 +52,50 @@ import { aggregateTurnUsage, processSummary, processDetail, processSegments, sam
 import { MessageActions } from '../message-actions'
 import { IntelligentUiCard } from '../intelligent-ui-card'
 import { createStyles } from './styles'
+import type { MarkdownChunkSection } from './transcript-chunks'
+
+function collectEditedFiles(items: readonly ChatItem[]): { path: string; name?: string; action?: 'created' | 'edited' }[] {
+  const files: { path: string; name?: string; action?: 'created' | 'edited' }[] = []
+  const seen = new Set<string>()
+  for (const item of items) {
+    if (item.kind !== 'tool' || item.state !== 'finished') continue
+    const name = (item.toolKey ?? item.toolName).toLowerCase()
+    if (!item.arguments) continue
+    try {
+      const args = JSON.parse(item.arguments) as Record<string, unknown>
+      let path: string | undefined
+      let action: 'created' | 'edited' = 'edited'
+      if (name === 'write' || name === 'write_file') {
+        path = (args.file_path || args.path || args.filename) as string | undefined
+        action = 'created'
+      } else if (name === 'edit' || name === 'edit_file' || name === 'patch') {
+        path = (args.file_path || args.path || args.filename) as string | undefined
+        action = 'edited'
+      } else if (name === 'str_replace_editor') {
+        const cmd = args.command as string | undefined
+        if (cmd === 'view') continue // Read-only command does not modify files
+        path = (args.path || args.file_path) as string | undefined
+        action = cmd === 'create' ? 'created' : 'edited'
+      }
+      if (typeof path === 'string' && path.trim() && !seen.has(path.trim())) {
+        seen.add(path.trim())
+        files.push({ path: path.trim(), action })
+      }
+    } catch {}
+  }
+  return files
+}
+
+function collectUnavailableUi(items: readonly ChatItem[], availableUiIds: ReadonlySet<string>) {
+  return items.filter(item => item.kind === 'tool' && item.state === 'finished'
+    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget' || item.toolKey === 'ui_compose')
+    && !availableUiIds.has(item.id)
+    && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
+      || (item.uiResultMeta as { ok?: unknown }).ok !== false))
+}
 
 /** Only activity ranges fold; completing a turn must never hide spoken replies. */
-export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, isTurnRunning = false, turnUsage, onApproval, onQuestion }: {
+export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, isTurnRunning = false, turnUsage, hiddenResponseItemId, onApproval, onQuestion }: {
   items: ChatItem[]
   artifacts: UiArtifact[]
   updatedArtifacts: UiArtifact[]
@@ -62,6 +103,8 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   busyAction?: string
   isTurnRunning?: boolean
   turnUsage?: ChatMessage['usage']
+  /** When the final assistant response is split into markdown-chunk FlatList rows, hide it here. */
+  hiddenResponseItemId?: string
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
@@ -97,48 +140,20 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending })
     return result
   }), [items])
-  const unavailableUi = items.filter(item => item.kind === 'tool' && item.state === 'finished'
-    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget' || item.toolKey === 'ui_compose')
-    && !availableUiIds.has(item.id)
-    && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
-      || (item.uiResultMeta as { ok?: unknown }).ok !== false))
+  const unavailableUi = useMemo(
+    () => (hiddenResponseItemId !== undefined ? [] : collectUnavailableUi(items, availableUiIds)),
+    [hiddenResponseItemId, items, availableUiIds],
+  )
   const hasGroupRelayReplies = segments.some(segment => segment.kind === 'botReplies' && segment.groupRelay)
   const hasToolSummary = segments.some(segment => segment.kind === 'activity'
     && segment.items.some(item => item.kind === 'tool'))
   const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
     : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   const onFilePress = useWorkspaceFilePress()
-  const editedFiles = useMemo(() => {
-    const files: { path: string; name?: string; action?: 'created' | 'edited' }[] = []
-    const seen = new Set<string>()
-    for (const item of items) {
-      if (item.kind !== 'tool' || item.state !== 'finished') continue
-      const name = (item.toolKey ?? item.toolName).toLowerCase()
-      if (!item.arguments) continue
-      try {
-        const args = JSON.parse(item.arguments) as Record<string, unknown>
-        let path: string | undefined
-        let action: 'created' | 'edited' = 'edited'
-        if (name === 'write' || name === 'write_file') {
-          path = (args.file_path || args.path || args.filename) as string | undefined
-          action = 'created'
-        } else if (name === 'edit' || name === 'edit_file' || name === 'patch') {
-          path = (args.file_path || args.path || args.filename) as string | undefined
-          action = 'edited'
-        } else if (name === 'str_replace_editor') {
-          const cmd = args.command as string | undefined
-          if (cmd === 'view') continue // Read-only command does not modify files
-          path = (args.path || args.file_path) as string | undefined
-          action = cmd === 'create' ? 'created' : 'edited'
-        }
-        if (typeof path === 'string' && path.trim() && !seen.has(path.trim())) {
-          seen.add(path.trim())
-          files.push({ path: path.trim(), action })
-        }
-      } catch {}
-    }
-    return files
-  }, [items])
+  const editedFiles = useMemo(
+    () => (hiddenResponseItemId !== undefined ? [] : collectEditedFiles(items)),
+    [hiddenResponseItemId, items],
+  )
   const lastResponseIndex = segments.map(s => s.kind).lastIndexOf('response')
   return <View style={styles.processGroup}>
     {end !== undefined && !(end.reason === 'completed' && (hasGroupRelayReplies || hasToolSummary)) && <View style={styles.turnProcessHeader}>
@@ -146,6 +161,9 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     </View>}
     {segments.map((segment, index) => {
       if (segment.kind === 'response') {
+        if (hiddenResponseItemId !== undefined && segment.item.id === hiddenResponseItemId && index === lastResponseIndex) {
+          return null
+        }
         const showActions = shouldShowTurnResponseActions({
           segmentIndex: index,
           lastResponseIndex,
@@ -178,14 +196,15 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
         />
       )
     })}
-    {lastResponseIndex === -1 && <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />}
-    {lastResponseIndex === -1 && artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
-    {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
-    {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
+    {hiddenResponseItemId === undefined && lastResponseIndex === -1 && <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />}
+    {hiddenResponseItemId === undefined && lastResponseIndex === -1 && artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
+    {hiddenResponseItemId === undefined && updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
+    {hiddenResponseItemId === undefined && unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
   </View>
 }, (prev, next) => {
   // Every field below is a reference that streaming rebuilds, so compare their
   // contents: a group whose text did not change keeps its rendered subtree.
+  if (prev.hiddenResponseItemId !== next.hiddenResponseItemId) return false
   if (prev.busyAction !== next.busyAction) {
     const needsBusy = next.items.some(
       item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined,
@@ -209,6 +228,94 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     if (before.size !== after.size) return false
     for (const id of before) {
       if (!after.has(id)) return false
+    }
+  }
+  return true
+})
+
+export const MarkdownChunkRow = memo(function MarkdownChunkRow({
+  section,
+  artifacts,
+  updatedArtifacts,
+  availableUiIds,
+  turnUsage,
+}: {
+  section: MarkdownChunkSection
+  artifacts: UiArtifact[]
+  updatedArtifacts: UiArtifact[]
+  availableUiIds: ReadonlySet<string>
+  turnUsage?: ChatMessage['usage']
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const onFilePress = useWorkspaceFilePress()
+  const { item, nodes, referencedFiles, chunkIndex, chunkCount, compact, showActions, isProcessSection, processItems } = section
+  const isFirst = chunkIndex === 0
+  const isLast = chunkIndex === chunkCount - 1
+  const showReasoning = isFirst && !compact && hasVisibleMessageText(item.reasoning ?? '')
+  const showImages = isFirst && item.images !== undefined && item.images.length > 0
+  const fallbackTurnUsage = useMemo(
+    () => (isLast && isProcessSection && processItems !== undefined ? aggregateTurnUsage(processItems) : undefined),
+    [isLast, isProcessSection, processItems],
+  )
+  const resolvedTurnUsage = turnUsage ?? fallbackTurnUsage
+  const editedFiles = useMemo(
+    () => (isLast && isProcessSection && processItems !== undefined ? collectEditedFiles(processItems) : []),
+    [isLast, isProcessSection, processItems],
+  )
+  const unavailableUi = useMemo(
+    () => (isLast && isProcessSection && processItems !== undefined ? collectUnavailableUi(processItems, availableUiIds) : []),
+    [isLast, isProcessSection, processItems, availableUiIds],
+  )
+  const actionsItem = resolvedTurnUsage === undefined || resolvedTurnUsage === item.usage
+    ? item
+    : { ...item, usage: resolvedTurnUsage }
+
+  return (
+    <View
+      style={[
+        styles.assistantBlock,
+        !isFirst && { marginTop: -2 },
+        !isLast && { marginBottom: 0, gap: 0 },
+      ]}
+    >
+      {showReasoning && <ReasoningDisclosure item={item} />}
+      {showImages && <ChatImages images={item.images!} />}
+      <View style={styles.assistantProseWrap}>
+        <NativeMarkdown
+          text=""
+          preparsedNodes={nodes}
+          suppressReferencedFiles={!isLast}
+          referencedFilesOverride={isLast ? referencedFiles : undefined}
+        />
+      </View>
+      {isLast && artifacts.map(ui => (
+        <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />
+      ))}
+      {isLast && editedFiles.length > 0 && onFilePress ? <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} /> : null}
+      {isLast && showActions && !item.streaming && <MessageActions item={actionsItem} />}
+      {isLast && updatedArtifacts.map(ui => (
+        <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>
+          {ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.
+        </Text>
+      ))}
+      {isLast && unavailableUi.map(missing => (
+        <Text key={'ui-missing:' + missing.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>
+          Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.
+        </Text>
+      ))}
+    </View>
+  )
+}, (prev, next) => {
+  if (prev.section !== next.section) return false
+  if (prev.section.chunkIndex !== prev.section.chunkCount - 1) return true
+  if (!sameUsage(prev.turnUsage, next.turnUsage)) return false
+  if (prev.artifacts !== next.artifacts) return false
+  if (prev.updatedArtifacts !== next.updatedArtifacts) return false
+  if (prev.availableUiIds !== next.availableUiIds) {
+    if (prev.availableUiIds.size !== next.availableUiIds.size) return false
+    for (const id of prev.availableUiIds) {
+      if (!next.availableUiIds.has(id)) return false
     }
   }
   return true

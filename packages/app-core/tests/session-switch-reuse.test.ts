@@ -394,26 +394,26 @@ describe('reuseUnchangedChatItems', () => {
 })
 
 describe('resolveDisplaySections tail window boundary', () => {
-  it('returns the original reference untouched when section count is <= 4', () => {
-    for (const count of [0, 1, 3, 4]) {
+  it('returns the original reference untouched when section count is <= TAIL_WINDOW_SIZE', () => {
+    for (const count of [0, 1, TAIL_WINDOW_SIZE]) {
       const sections = makeSections(count)
       const resolved = resolveDisplaySections(sections, TAIL_WINDOW_SIZE)
       expect(resolved).toBe(sections)
     }
   })
 
-  it('slices to the last 3 sections when section count exceeds 4', () => {
+  it('slices to the last TAIL_WINDOW_SIZE sections when section count exceeds it', () => {
     const five = makeSections(5)
     const slicedFive = resolveDisplaySections(five, TAIL_WINDOW_SIZE)
     expect(slicedFive).not.toBe(five)
-    expect(slicedFive.map(s => s.key)).toEqual(['u-2', 'u-3', 'u-4'])
-    expect(slicedFive[0]).toBe(five[2])
-    expect(slicedFive[2]).toBe(five[4])
+    expect(slicedFive.map(s => s.key)).toEqual(['u-3', 'u-4'])
+    expect(slicedFive[0]).toBe(five[3])
+    expect(slicedFive[1]).toBe(five[4])
 
     const twelve = makeSections(12)
     const slicedTwelve = resolveDisplaySections(twelve, TAIL_WINDOW_SIZE)
     expect(slicedTwelve).toHaveLength(TAIL_WINDOW_SIZE)
-    expect(slicedTwelve.map(s => s.key)).toEqual(['u-9', 'u-10', 'u-11'])
+    expect(slicedTwelve.map(s => s.key)).toEqual(['u-10', 'u-11'])
   })
 
   it('returns the original reference when tail window is disabled (non-bottom restore or expanded)', () => {
@@ -423,10 +423,9 @@ describe('resolveDisplaySections tail window boundary', () => {
 
   it('advances progressive tail expansion in bounded chunks until all sections fit', () => {
     expect(nextTailWindowLimit(TAIL_WINDOW_SIZE, 14, TAIL_EXPAND_STEP)).toBe(6)
-    expect(nextTailWindowLimit(6, 14, TAIL_EXPAND_STEP)).toBe(9)
-    expect(nextTailWindowLimit(9, 14, TAIL_EXPAND_STEP)).toBe(12)
-    expect(nextTailWindowLimit(12, 14, TAIL_EXPAND_STEP)).toBeUndefined()
-    expect(nextTailWindowLimit(TAIL_WINDOW_SIZE, 7, TAIL_EXPAND_STEP)).toBeUndefined()
+    expect(nextTailWindowLimit(6, 14, TAIL_EXPAND_STEP)).toBe(10)
+    expect(nextTailWindowLimit(10, 14, TAIL_EXPAND_STEP)).toBeUndefined()
+    expect(nextTailWindowLimit(TAIL_WINDOW_SIZE, 6, TAIL_EXPAND_STEP)).toBeUndefined()
     expect(nextTailWindowLimit(undefined, 14, TAIL_EXPAND_STEP)).toBeUndefined()
   })
 })

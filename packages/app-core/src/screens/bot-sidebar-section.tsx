@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Modal,
@@ -623,7 +623,11 @@ export function BotSidebarSection({
 }
 
 /** Shared modals for DS-Bot (Editor, Context Menu, Full-Screen Profile Page, Usage/Schedules Report). */
-export function BotModalsHost() {
+export function BotModalsHost({
+  onDeleteConfirmChange,
+}: {
+  onDeleteConfirmChange?: (active: boolean) => void
+} = {}) {
   const styles = useThemedStyles(createStyles)
   const { sheetMaxHeight } = useResponsiveLayout()
   const state = useBotTeamStore(store => store.state)
@@ -665,6 +669,16 @@ export function BotModalsHost() {
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ kind: 'bot' | 'room'; id: string } | undefined>()
   const confirmDelete = (kind: 'bot' | 'room', id: string) => setDeleteConfirm({ kind, id })
+  const onDeleteConfirmChangeRef = useRef(onDeleteConfirmChange)
+  onDeleteConfirmChangeRef.current = onDeleteConfirmChange
+
+  useEffect(() => {
+    onDeleteConfirmChangeRef.current?.(deleteConfirm !== undefined)
+  }, [deleteConfirm])
+
+  useEffect(() => () => {
+    onDeleteConfirmChangeRef.current?.(false)
+  }, [])
 
   const menuBot = contextMenu?.kind === 'bot' ? state?.bots.find(b => b.id === contextMenu.id) : undefined
   const menuRoom = contextMenu?.kind === 'room' ? state?.rooms.find(r => r.id === contextMenu.id) : undefined

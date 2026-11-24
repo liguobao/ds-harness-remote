@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -82,7 +82,7 @@ import {
   type SessionOrderBy,
 } from '../services/storage'
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
-import { shouldAllowDrawerClose, useGatedStore } from '../lib/gated-store'
+import { createStoreGate, shouldAllowDrawerClose, useStoreGateSelector, type StoreGate } from '../lib/gated-store'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
 import { BotModalsHost, BotSidebarSection, useBotTeamLoad } from './bot-sidebar-section'
 import { HomeActionsMenu } from './setup-screens'
@@ -91,6 +91,10 @@ import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } fro
 const SESSION_PAGE_SIZE = 3
 /** Padding inside the Agent / DS-Bot underline tab track. */
 const MODE_SWITCHER_INSET = 0
+/** Keep BotModalsHost alive briefly after store modals close so popover action delays, ConfirmDialog fade/onDismiss, and BotProfilePage slide-out can finish cleanly. */
+const BOT_MODALS_LINGER_MS = 500
+const EMPTY_SECTIONS: DrawerSection[] = []
+const sessionKeyExtractor = (item: RemoteSession) => item.sessionId
 
 /** 浮窗相对工具栏底部的间距 */
 const POPOVER_OFFSET = 4
@@ -208,80 +212,442 @@ export interface HostSessionsDrawerProps {
   onUnlockDismissible?: () => void
 }
 
-export const HostSessionsDrawer = memo(function HostSessionsDrawer({
-  onBack,
+type DrawerStyles = ReturnType<typeof createStyles>
+
+const BotTeamLoadBridge = memo(function BotTeamLoadBridge({ enabled }: { enabled: boolean }) {
+  useBotTeamLoad(enabled)
+  return null
+})
+
+const BotModalsGate = memo(function BotModalsGate({ visible, gate }: { visible: boolean; gate: StoreGate }) {
+  const hasStoreModal = useStoreGateSelector(
+    useBotTeamStore,
+    store =>
+      store.editor !== undefined
+      || store.detailsOpen
+      || store.report !== undefined
+      || store.contextMenu !== undefined,
+    gate,
+  )
+  const [deleteConfirmActive, setDeleteConfirmActive] = useState(false)
+  const active = visible && (hasStoreModal || deleteConfirmActive)
+  const [lingerMounted, setLingerMounted] = useState(false)
+
+  useEffect(() => {
+    if (!visible) {
+      if (lingerMounted) setLingerMounted(false)
+      if (deleteConfirmActive) setDeleteConfirmActive(false)
+      return
+    }
+    if (active) {
+      if (!lingerMounted) setLingerMounted(true)
+      return
+    }
+    if (!lingerMounted) return
+    const timer = setTimeout(() => setLingerMounted(false), BOT_MODALS_LINGER_MS)
+    return () => clearTimeout(timer)
+  }, [visible, active, lingerMounted, deleteConfirmActive])
+
+  if (!visible || (!active && !lingerMounted)) return null
+  return <BotModalsHost onDeleteConfirmChange={setDeleteConfirmActive} />
+})
+
+interface SessionListRowProps {
+  item: RemoteSession
+  sectionId: string
+  accountKey: string
+  index: number
+  isSelected: boolean
+  isFirstInList: boolean
+  isLastInCard: boolean
+  isRunning: boolean
+  isPinned: boolean
+  isArchived: boolean
+  depth: number
+  isDragging: boolean
+  dropAbove: boolean
+  dropBelow: boolean
+  timeStr: string
+  language: string
+  styles: DrawerStyles
+  colors: ThemeColors
+  onPress: (item: RemoteSession, isSelected: boolean) => void
+  onLongPress: (item: RemoteSession, sectionId: string, accountKey: string, index: number, isPinned: boolean) => void
+  onTouchStart: (pageY: number) => void
+  onTouchMove: (item: RemoteSession, sectionId: string, pageY: number) => void
+  onTouchEnd: (item: RemoteSession, sectionId: string, isPinned: boolean) => void
+  onTouchCancel: () => void
+  onMorePress: (item: RemoteSession) => void
+}
+
+const SessionListRow = memo(function SessionListRow({
+  item,
+  sectionId,
+  accountKey,
+  index,
+  isSelected,
+  isFirstInList,
+  isLastInCard,
+  isRunning,
+  isPinned,
+  isArchived,
+  depth,
+  isDragging,
+  dropAbove,
+  dropBelow,
+  timeStr,
+  language: _language,
+  styles,
+  colors,
+  onPress,
+  onLongPress,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd,
+  onTouchCancel,
+  onMorePress,
+}: SessionListRowProps) {
+  const displayTitle = resolveSessionDisplayTitle(item) ?? strings.sessions.untitled
+  const accessibilityLabel = isPinned
+    ? `${displayTitle}, ${strings.sessions.pinned}`
+    : displayTitle
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected: isSelected }}
+      onPress={() => onPress(item, isSelected)}
+      onLongPress={() => onLongPress(item, sectionId, accountKey, index, isPinned)}
+      delayLongPress={300}
+      onTouchStart={e => onTouchStart(e.nativeEvent.pageY)}
+      onTouchMove={e => onTouchMove(item, sectionId, e.nativeEvent.pageY)}
+      onTouchEnd={() => onTouchEnd(item, sectionId, isPinned)}
+      onTouchCancel={onTouchCancel}
+      style={({ pressed }) => [
+        styles.sessionRow,
+        isFirstInList && styles.sessionRowCardTop,
+        isLastInCard && styles.sessionRowCardBottom,
+        depth > 0 && { paddingLeft: spacing.lg + spacing.xs + depth * 14 },
+        isSelected && styles.sessionRowSelected,
+        pressed && styles.pressedBg,
+        isDragging && styles.sessionRowDragging,
+        dropAbove && styles.dropTargetAbove,
+        dropBelow && styles.dropTargetBelow,
+      ]}
+    >
+      <View style={styles.statusIndicatorSlot}>
+        {isRunning && <View style={styles.runningDot} />}
+      </View>
+      <Text
+        style={[
+          styles.sessionText,
+          isSelected && styles.sessionTextSelected,
+          isArchived && styles.archivedText,
+        ]}
+        numberOfLines={1}
+      >
+        {displayTitle}
+      </Text>
+      {timeStr ? <Text style={styles.timeText}>{timeStr}</Text> : null}
+      {isPinned && (
+        <View style={styles.pinIndicator} accessibilityLabel={strings.sessions.pinned}>
+          <OfficialMenuIcons.pinFill size={13} color={colors.ink} />
+        </View>
+      )}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={strings.sessions.moreActions}
+        hitSlop={8}
+        onPress={e => {
+          e.stopPropagation()
+          onMorePress(item)
+        }}
+        style={styles.moreActionBtn}
+      >
+        <OfficialMenuIcons.ellipsis size={16} color={colors.muted} />
+      </Pressable>
+    </Pressable>
+  )
+})
+
+interface WorkspaceSectionHeaderProps {
+  sectionId: string
+  title: string
+  total: number
+  expanded: boolean
+  hasItems: boolean
+  depth: number
+  workspace: WorkspaceView | undefined
+  language: string
+  styles: DrawerStyles
+  colors: ThemeColors
+  onToggle: (sectionId: string) => void
+  onLongPress: (workspace: WorkspaceView) => void
+  onCreateSession: (workspace: WorkspaceView) => void
+}
+
+const WorkspaceSectionHeader = memo(function WorkspaceSectionHeader({
+  sectionId,
+  title,
+  total,
+  expanded,
+  hasItems,
+  depth,
+  workspace,
+  language: _language,
+  styles,
+  colors,
+  onToggle,
+  onLongPress,
+  onCreateSession,
+}: WorkspaceSectionHeaderProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityHint={workspace ? strings.workspaces.options : undefined}
+      android_ripple={androidRipple(colors)}
+      onPress={() => onToggle(sectionId)}
+      onLongPress={() => {
+        if (workspace) onLongPress(workspace)
+      }}
+      style={({ pressed }) => [
+        styles.workspaceRow,
+        hasItems ? styles.workspaceRowCardTop : styles.workspaceRowCardSingle,
+        pressed && styles.pressedBg,
+        depth > 0 && { paddingLeft: spacing.md + depth * 14 },
+      ]}
+    >
+      <View style={styles.workspaceRowLeft}>
+        {expanded
+          ? <FolderOpen size={18} color={colors.primary} strokeWidth={1.8} />
+          : <Folder size={18} color={colors.muted} strokeWidth={1.8} />}
+        <Text style={styles.workspaceRowTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {total > 0 && (
+          <Text style={styles.workspaceCountText}>{total}</Text>
+        )}
+      </View>
+      <View style={styles.workspaceRowRight}>
+        {workspace !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.workspaces.newSessionIn(title)}
+            android_ripple={androidRipple(colors, true)}
+            hitSlop={8}
+            onPress={e => {
+              e.stopPropagation()
+              onCreateSession(workspace)
+            }}
+            style={({ pressed }) => [styles.workspaceSmallBtn, pressed && styles.pressedBg]}
+          >
+            <Plus size={16} color={colors.muted} strokeWidth={2} />
+          </Pressable>
+        )}
+        {expanded ? <ChevronDown size={16} color={colors.subtle} /> : <ChevronRight size={16} color={colors.subtle} />}
+      </View>
+    </Pressable>
+  )
+})
+
+interface WorkspaceSectionFooterProps {
+  countKey: string
+  remaining: number
+  depth: number
+  language: string
+  styles: DrawerStyles
+  onShowMore: (countKey: string) => void
+}
+
+const WorkspaceSectionFooter = memo(function WorkspaceSectionFooter({
+  countKey,
+  remaining,
+  depth,
+  language: _language,
+  styles,
+  onShowMore,
+}: WorkspaceSectionFooterProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={() => onShowMore(countKey)}
+      style={[
+        styles.showMoreRow,
+        depth > 0 && { paddingLeft: spacing.lg + spacing.md + depth * 14 },
+      ]}
+    >
+      <Text style={styles.showMoreText}>{strings.sessions.showMoreSessions(remaining)}</Text>
+    </Pressable>
+  )
+})
+
+const HarnessPickerModal = memo(function HarnessPickerModal({
+  visible,
+  backend,
+  backends,
+  customAcpBackends,
+  colors,
+  styles,
   onClose,
-  onOpenWorkspaces,
+  onSelect,
+}: {
+  visible: boolean
+  backend: AgentBackend
+  backends: AgentBackend[]
+  customAcpBackends: readonly string[]
+  colors: ThemeColors
+  styles: DrawerStyles
+  onClose: () => void
+  onSelect: (target: AgentBackend) => void
+}) {
+  const layout = useResponsiveLayout()
+  const sheetMaxHeight = Math.min(modalSheetMaxHeight(layout.height), 520)
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <View style={styles.harnessBackdrop}>
+        <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} />
+        <View style={[styles.harnessDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+          <View style={styles.harnessHeader}>
+            <Text style={styles.harnessTitle} accessibilityRole="header">{strings.sessions.switchHarness}</Text>
+            <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.harnessList}>
+            <GroupCard>
+              {[
+                ...HARNESS_OPTIONS,
+                ...customAcpBackends.map(id => ({ value: id as AgentBackend, name: harnessDisplayName(id) })),
+              ].filter(option => backends.includes(option.value)).map((option, index) => {
+                const chosen = option.value === backend
+                const descriptionMap = strings.sessions.backendDescriptions as Record<string, string | undefined>
+                return (
+                  <GroupRow
+                    key={option.value}
+                    first={index === 0}
+                    label={option.name}
+                    detail={descriptionMap[option.value] ?? strings.sessions.customAcpDescription}
+                    selected={chosen}
+                    chevron={false}
+                    accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                    onPress={() => onSelect(option.value)}
+                  />
+                )
+              })}
+            </GroupCard>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  )
+})
+
+interface HostSessionsDrawerBodyProps {
+  inline: boolean
+  gate: StoreGate
+  fullWidthCentered: boolean
+  showBackButton: boolean
+  backLabel?: string
+  botMode?: boolean
+  onHeaderBack: () => void
+  onClose: () => void
+  onOpenDeviceInfo?: () => void
+  onSelect: (session: RemoteSession) => Promise<void>
+  onOpenAutomationTasks?: () => void
+  onOpenPlugins?: () => void
+  onOpenHostSwitcher?: () => void
+  onOpenSettings?: () => void
+  onOpenAbout?: () => void
+  onBotModeChange?: (botMode: boolean) => void
+  onSelectBot?: (botId: string) => void
+  smoothClose: (withHaptic?: boolean, force?: boolean, unlockOnComplete?: boolean) => void
+  releaseFreeze: () => void
+  resetRef: MutableRefObject<(() => void) | undefined>
+  backOverlayRef: MutableRefObject<(() => boolean) | undefined>
+  dragActiveRef: MutableRefObject<boolean>
+  onBotTabActiveChange: (active: boolean) => void
+}
+
+const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
+  inline,
+  gate,
+  fullWidthCentered,
+  showBackButton,
+  backLabel,
+  botMode,
+  onHeaderBack,
+  onClose,
   onOpenDeviceInfo,
   onSelect,
-  onNewSession: _onNewSession,
   onOpenAutomationTasks,
   onOpenPlugins,
   onOpenHostSwitcher,
   onOpenSettings,
   onOpenAbout,
-  botMode,
   onBotModeChange,
   onSelectBot,
-  inline = false,
-  open = true,
-  backLabel,
-  dismissible = true,
-  entrance = 'immediate',
-  backRef,
-  closeRef,
-  onUnlockDismissible,
-}: HostSessionsDrawerProps) {
-  const visible = inline || open
-  const language = useGatedStore(useAppStore, state => state.language, visible)
-  const deviceId = useGatedStore(useAppStore, state => state.selectedDevice?.deviceId, visible)
-  const deviceName = useGatedStore(useAppStore, state => state.selectedDevice?.name, visible)
-  const platform = useGatedStore(useAppStore, state => state.selectedDevice?.platform, visible)
-  const connectionPhase = useGatedStore(useAppStore, state => state.connection.phase, visible)
-  const sessions = useGatedStore(useAppStore, state => state.sessions, visible)
-  const recentIds = useGatedStore(useAppStore, state => state.currentWorkSessionIds, visible)
-  const codexAvailable = useGatedStore(useAppStore, state => state.codexAvailable, visible)
-  const cursorAvailable = useGatedStore(useAppStore, state => state.cursorAvailable, visible)
-  const antigravityAvailable = useGatedStore(useAppStore, state => state.antigravityAvailable, visible)
-  const piAvailable = useGatedStore(useAppStore, state => state.piAvailable, visible)
-  const opencodeAvailable = useGatedStore(useAppStore, state => state.opencodeAvailable, visible)
-  const claudeAvailable = useGatedStore(useAppStore, state => state.claudeAvailable, visible)
-  const hermesAvailable = useGatedStore(useAppStore, state => state.hermesAvailable, visible)
-  const customAcpBackends = useGatedStore(useAppStore, selectCustomAcpBackends, visible)
-  const availableBackends = useGatedStore(useAppStore, state => [
+  smoothClose,
+  releaseFreeze,
+  resetRef,
+  backOverlayRef,
+  dragActiveRef,
+  onBotTabActiveChange,
+}: HostSessionsDrawerBodyProps) {
+  const language = useStoreGateSelector(useAppStore, state => state.language, gate)
+  const deviceId = useStoreGateSelector(useAppStore, state => state.selectedDevice?.deviceId, gate)
+  const deviceName = useStoreGateSelector(useAppStore, state => state.selectedDevice?.name, gate)
+  const platform = useStoreGateSelector(useAppStore, state => state.selectedDevice?.platform, gate)
+  const connectionPhase = useStoreGateSelector(useAppStore, state => state.connection.phase, gate)
+  const sessions = useStoreGateSelector(useAppStore, state => state.sessions, gate)
+  const recentIds = useStoreGateSelector(useAppStore, state => state.currentWorkSessionIds, gate)
+  const codexAvailable = useStoreGateSelector(useAppStore, state => state.codexAvailable, gate)
+  const cursorAvailable = useStoreGateSelector(useAppStore, state => state.cursorAvailable, gate)
+  const antigravityAvailable = useStoreGateSelector(useAppStore, state => state.antigravityAvailable, gate)
+  const piAvailable = useStoreGateSelector(useAppStore, state => state.piAvailable, gate)
+  const opencodeAvailable = useStoreGateSelector(useAppStore, state => state.opencodeAvailable, gate)
+  const claudeAvailable = useStoreGateSelector(useAppStore, state => state.claudeAvailable, gate)
+  const hermesAvailable = useStoreGateSelector(useAppStore, state => state.hermesAvailable, gate)
+  const customAcpBackends = useStoreGateSelector(useAppStore, selectCustomAcpBackends, gate)
+  const availableBackends = useStoreGateSelector(useAppStore, state => [
     'harness', state.codexAvailable && 'codex', state.cursorAvailable && 'cursor',
     state.antigravityAvailable && 'antigravity', state.piAvailable && 'pi',
     state.opencodeAvailable && 'opencode', state.claudeAvailable && 'claude',
     state.hermesAvailable && 'hermes', ...selectCustomAcpBackends(state),
-  ].filter(Boolean).join(','), visible)
-  const lifecycles = useGatedStore(useAppStore, state => state.sessionLifecycles, visible)
-  const selected = useGatedStore(useAppStore, state => state.selectedSession, visible)
-  const archivedIds = useGatedStore(useAppStore, state => state.archivedSessionIds, visible)
-  const pinnedSessionIds = useGatedStore(useAppStore, state => state.pinnedSessionIds, visible)
-  const workspaces = useGatedStore(useAppStore, state => state.workspaces, visible)
-  const favoriteWorkspaces = useGatedStore(useAppStore, state => state.favoriteWorkspaces, visible)
-  const toggleFavoriteWorkspace = useGatedStore(useAppStore, state => state.toggleFavoriteWorkspace, visible)
-  const removeFavoriteWorkspace = useGatedStore(useAppStore, state => state.removeFavoriteWorkspace, visible)
-  const createWorkspace = useGatedStore(useAppStore, state => state.workspaceCreate, visible)
-  const renameWorkspace = useGatedStore(useAppStore, state => state.workspaceRename, visible)
-  const moveWorkspace = useGatedStore(useAppStore, state => state.workspaceMove, visible)
-  const deleteWorkspace = useGatedStore(useAppStore, state => state.workspaceDelete, visible)
-  const busy = useGatedStore(useAppStore, state => state.busyAction, visible)
-  const connected = useGatedStore(useAppStore, state => state.connection.phase === 'connected', visible)
-  const error = useGatedStore(useAppStore, state => state.error, visible)
-  const clearError = useGatedStore(useAppStore, state => state.clearError, visible)
-  const devicesRefreshing = useGatedStore(useAppStore, state => state.refreshing, visible)
-  const refreshDevices = useGatedStore(useAppStore, state => state.refreshDevices, visible)
-  const createSession = useGatedStore(useAppStore, state => state.createSession, visible)
-  const pinSession = useGatedStore(useAppStore, state => state.pinSession, visible)
-  const unpinSession = useGatedStore(useAppStore, state => state.unpinSession, visible)
-  const renameSession = useGatedStore(useAppStore, state => state.renameSession, visible)
-  const forkSession = useGatedStore(useAppStore, state => state.forkSession, visible)
-  const archiveSession = useGatedStore(useAppStore, state => state.archiveSession, visible)
-  const unarchiveSession = useGatedStore(useAppStore, state => state.unarchiveSession, visible)
+  ].filter(Boolean).join(','), gate)
+  const lifecycles = useStoreGateSelector(useAppStore, state => state.sessionLifecycles, gate)
+  const selected = useStoreGateSelector(useAppStore, state => state.selectedSession, gate)
+  const archivedIds = useStoreGateSelector(useAppStore, state => state.archivedSessionIds, gate)
+  const pinnedSessionIds = useStoreGateSelector(useAppStore, state => state.pinnedSessionIds, gate)
+  const workspaces = useStoreGateSelector(useAppStore, state => state.workspaces, gate)
+  const favoriteWorkspaces = useStoreGateSelector(useAppStore, state => state.favoriteWorkspaces, gate)
+  const toggleFavoriteWorkspace = useStoreGateSelector(useAppStore, state => state.toggleFavoriteWorkspace, gate)
+  const removeFavoriteWorkspace = useStoreGateSelector(useAppStore, state => state.removeFavoriteWorkspace, gate)
+  const createWorkspace = useStoreGateSelector(useAppStore, state => state.workspaceCreate, gate)
+  const renameWorkspace = useStoreGateSelector(useAppStore, state => state.workspaceRename, gate)
+  const moveWorkspace = useStoreGateSelector(useAppStore, state => state.workspaceMove, gate)
+  const deleteWorkspace = useStoreGateSelector(useAppStore, state => state.workspaceDelete, gate)
+  const busy = useStoreGateSelector(useAppStore, state => state.busyAction, gate)
+  const connected = useStoreGateSelector(useAppStore, state => state.connection.phase === 'connected', gate)
+  const error = useStoreGateSelector(useAppStore, state => state.error, gate)
+  const clearError = useStoreGateSelector(useAppStore, state => state.clearError, gate)
+  const devicesRefreshing = useStoreGateSelector(useAppStore, state => state.refreshing, gate)
+  const refreshDevices = useStoreGateSelector(useAppStore, state => state.refreshDevices, gate)
+  const createSession = useStoreGateSelector(useAppStore, state => state.createSession, gate)
+  const pinSession = useStoreGateSelector(useAppStore, state => state.pinSession, gate)
+  const unpinSession = useStoreGateSelector(useAppStore, state => state.unpinSession, gate)
+  const renameSession = useStoreGateSelector(useAppStore, state => state.renameSession, gate)
+  const forkSession = useStoreGateSelector(useAppStore, state => state.forkSession, gate)
+  const archiveSession = useStoreGateSelector(useAppStore, state => state.archiveSession, gate)
+  const unarchiveSession = useStoreGateSelector(useAppStore, state => state.unarchiveSession, gate)
 
-  const hostScope = useGatedStore(useAppStore, browseScope, visible)
-  const persistedBotMode = useGatedStore(useBrowseMemory, state => state.hostModes[hostScope] === 'bot', visible)
+  const hostScope = useStoreGateSelector(useAppStore, browseScope, gate)
+  const persistedBotMode = useStoreGateSelector(useBrowseMemory, state => state.hostModes[hostScope] === 'bot', gate)
   const activeBotMode = botMode ?? persistedBotMode
   const [drawerMode, setDrawerMode] = useState<'agent' | 'bot'>(activeBotMode ? 'bot' : 'agent')
   const reduceMotion = useReduceMotion()
@@ -306,7 +672,9 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     setDrawerMode(activeBotMode ? 'bot' : 'agent')
   }, [activeBotMode, hostScope])
 
-  useBotTeamLoad(visible && drawerMode === 'bot')
+  useEffect(() => {
+    onBotTabActiveChange(drawerMode === 'bot')
+  }, [drawerMode, onBotTabActiveChange])
 
   const handleSwitchMode = (nextMode: 'agent' | 'bot') => {
     setDrawerMode(nextMode)
@@ -325,8 +693,11 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
   }
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false)
+  const [createWorkspaceEverOpened, setCreateWorkspaceEverOpened] = useState(false)
   const [workspaceActionTarget, setWorkspaceActionTarget] = useState<WorkspaceView | undefined>(undefined)
+  const [workspaceActionsEverOpened, setWorkspaceActionsEverOpened] = useState(false)
   const [renameWorkspaceTarget, setRenameWorkspaceTarget] = useState<WorkspaceView | undefined>(undefined)
+  const [renameWorkspaceEverOpened, setRenameWorkspaceEverOpened] = useState(false)
   const [showBotSearch, setShowBotSearch] = useState(false)
   const [botSearchQuery, setBotSearchQuery] = useState('')
 
@@ -337,28 +708,22 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
   const [renaming, setRenaming] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
+  const archivedSet = useMemo(() => new Set(archivedIds), [archivedIds])
+  const pinnedSet = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
+
   const menuBackend = menuSession?.backend ?? 'harness'
   const canUseHarnessActions = !!menuSession && menuBackend === 'harness'
   const canPinSession = !!menuSession && (menuBackend === 'harness' || isAcpManagedBackend(menuBackend))
   const canForkSession = !!menuSession && (menuBackend === 'harness' || isAcpManagedBackend(menuBackend))
-  const menuIsPinned = !!menuSession && canPinSession && pinnedSessionIds.includes(menuSession.sessionId)
-  const menuIsArchived = !!menuSession && canUseHarnessActions && archivedIds.includes(menuSession.sessionId)
-
-  const closeDrawer = () => {
-    setMenuSession(null)
-    setRenameTarget(null)
-    setRenameError(null)
-    setRenaming(false)
-    setToastMessage(null)
-    onClose()
-  }
+  const menuIsPinned = !!menuSession && canPinSession && pinnedSet.has(menuSession.sessionId)
+  const menuIsArchived = !!menuSession && canUseHarnessActions && archivedSet.has(menuSession.sessionId)
 
   const [backend, setBackend] = useState<AgentBackend>(selected?.backend ?? useAppStore.getState().workspaceCatalog?.backend ?? 'harness')
-  const backends = [...new Set<AgentBackend>([
+  const backends = useMemo(() => [...new Set<AgentBackend>([
     ...availableBackends.split(',') as AgentBackend[],
     ...workspaces.map(workspace => workspace.backend ?? 'harness'),
     ...(selected ? [selected.backend ?? 'harness'] : []),
-  ])]
+  ])], [availableBackends, workspaces, selected])
   const backendWorkspaces = useMemo(() => workspaces.filter(workspace => (workspace.backend ?? 'harness') === backend), [workspaces, backend])
   const backendWorkspaceById = useMemo(() => {
     const map = new Map<string, WorkspaceView>()
@@ -374,8 +739,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
   }, [backend, connected, deviceId])
 
   const [harnessPickerOpen, setHarnessPickerOpen] = useState(false)
-  const layout = useResponsiveLayout()
-  const sheetMaxHeight = Math.min(modalSheetMaxHeight(layout.height), 520)
+  const [harnessPickerEverOpened, setHarnessPickerEverOpened] = useState(false)
 
   const isBackendAvailable = (target: AgentBackend) => {
     switch (target) {
@@ -440,7 +804,6 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     isPinned: boolean
   } | null>(null)
   const touchStartY = useRef(0)
-  const dragActiveRef = useRef(false)
   const justDraggedRef = useRef(false)
   const [filterMode, setFilterMode] = useState<SessionFilterMode>(() => {
     const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
@@ -590,9 +953,8 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
   const toolbarRef = useRef<View>(null)
   const containerRef = useRef<View>(null)
 
-  const { colors, scheme } = useTheme()
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const insets = useSafeAreaInsets()
 
   useEffect(() => {
     if (renameTarget) {
@@ -680,8 +1042,13 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
       if (wsSessions[0]) {
         activateAgentMode()
-        await onSelect(wsSessions[0])
-        if (!inline) closeDrawer()
+        if (!inline) gate.setActive(false)
+        try {
+          await onSelect(wsSessions[0])
+          if (!inline) closeDrawer()
+        } finally {
+          if (!inline) releaseFreeze()
+        }
         return
       }
     }
@@ -742,10 +1109,9 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     })
   }
 
-  const botTeamState = useGatedStore(useBotTeamStore, state => state.state, visible)
+  const botTeamState = useStoreGateSelector(useBotTeamStore, state => state.state, gate)
 
   const filteredSessions = useMemo(() => {
-    const archivedSet = new Set(archivedIds)
     const known = selected && !sessions.some(session => session.sessionId === selected.sessionId)
       ? [selected, ...sessions] : sessions
     let list = known.filter(session => (session.backend ?? 'harness') === backend
@@ -764,11 +1130,9 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
       list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
     }
     return list
-  }, [sessions, selected, backend, archivedIds, filterMode, searchQuery, orderBy, botTeamState, hostScope])
+  }, [sessions, selected, backend, archivedSet, filterMode, searchQuery, orderBy, botTeamState, hostScope])
 
   const sections = useMemo<DrawerSection[]>(() => {
-    const pinnedSet = new Set(pinnedSessionIds)
-    const archivedSet = new Set(archivedIds)
     const isRowPinned = (s: RemoteSession) => {
       const b = s.backend ?? 'harness'
       return (b === 'harness' || isAcpManagedBackend(b)) && pinnedSet.has(s.sessionId) && !archivedSet.has(s.sessionId)
@@ -880,43 +1244,109 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     })
 
     return [...recentSections, ...treeSections]
-  }, [groupBy, backendWorkspaces, backend, filteredSessions, recentIds, selected, expandedWorkspaces, visibleCounts, language, pinnedSessionIds, archivedIds, orderBy, manualOrders, searchQuery])
+  }, [groupBy, backendWorkspaces, backend, filteredSessions, recentIds, selected, expandedWorkspaces, visibleCounts, language, pinnedSet, archivedSet, orderBy, manualOrders, searchQuery])
 
-  // 手势与抽屉动画。宽窗口下抽屉宽度封顶（DRAWER_MAX_WIDTH），手机仍全宽。
-  // 不可关闭态（冷启动/切 Host）保持全宽背景并用居中列限宽，避免右侧露出
-  // 点不动的假遮罩，也不把列表行拉成超长白条。
-  const screenWidth = layout.width
-  const drawerWidth = !dismissible ? Math.round(screenWidth) : Math.round(drawerWidthForWindow(screenWidth))
-  const cappedDrawer = !inline && drawerWidth < Math.round(screenWidth)
-  const fullWidthCentered = !inline && !dismissible && screenWidth >= WINDOW_SIZE_MEDIUM
-  // Extra travel clears the right-edge elevation shadow off-screen during exit.
-  const closedTranslateX = -(drawerWidth + (cappedDrawer ? 24 : 0))
-  const immediateMount = entrance === 'immediate'
-  const initialOpen = !inline && open
-  const translateX = useRef(new Animated.Value(initialOpen && immediateMount ? 0 : closedTranslateX)).current
-  const overlayOpacity = useRef(new Animated.Value(initialOpen && immediateMount ? 1 : 0)).current
-  const hasSettledOpenRef = useRef(initialOpen && immediateMount)
-  const dragStartX = useRef(0)
-  const closingRef = useRef(false)
-  const animSeq = useRef(0)
-  const currentAnim = useRef<Animated.CompositeAnimation | null>(null)
-  const gestureSeq = useRef(0)
-  const dragReady = useRef(false)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-  const dismissibleRef = useRef(dismissible)
-  dismissibleRef.current = dismissible
-  const openRef = useRef(open)
-  openRef.current = open
-  const closedTranslateXRef = useRef(closedTranslateX)
-  closedTranslateXRef.current = closedTranslateX
-  const onUnlockDismissibleRef = useRef(onUnlockDismissible)
-  onUnlockDismissibleRef.current = onUnlockDismissible
-  const pendingUnlockRef = useRef(false)
-  const backOverlayStateRef = useRef({ showConfigModal, showSearch, showBotSearch })
-  backOverlayStateRef.current = { showConfigModal, showSearch, showBotSearch }
+  const transientStateRef = useRef({
+    menuSession,
+    renameTarget,
+    renameError,
+    renaming,
+    toastMessage,
+    showConfigModal,
+    harnessPickerOpen,
+    appMenuOpen,
+    dragState,
+    showSearch,
+    searchQuery,
+    searchMounted,
+    showBotSearch,
+    botSearchQuery,
+    createWorkspaceOpen,
+    workspaceActionTarget,
+    renameWorkspaceTarget,
+  })
+  transientStateRef.current = {
+    menuSession,
+    renameTarget,
+    renameError,
+    renaming,
+    toastMessage,
+    showConfigModal,
+    harnessPickerOpen,
+    appMenuOpen,
+    dragState,
+    showSearch,
+    searchQuery,
+    searchMounted,
+    showBotSearch,
+    botSearchQuery,
+    createWorkspaceOpen,
+    workspaceActionTarget,
+    renameWorkspaceTarget,
+  }
+
+  const closeDrawer = useCallback(() => {
+    const state = transientStateRef.current
+    if (state.menuSession !== null) setMenuSession(null)
+    if (state.renameTarget !== null) setRenameTarget(null)
+    if (state.renameError !== null) setRenameError(null)
+    if (state.renaming) setRenaming(false)
+    if (state.toastMessage !== null) setToastMessage(null)
+    onClose()
+  }, [onClose])
+
+  resetRef.current = () => {
+    const state = transientStateRef.current
+    if (state.menuSession !== null) setMenuSession(null)
+    if (state.renameTarget !== null) setRenameTarget(null)
+    if (state.renameError !== null) setRenameError(null)
+    if (state.renaming) setRenaming(false)
+    if (state.toastMessage !== null) setToastMessage(null)
+    if (state.showConfigModal) setShowConfigModal(false)
+    if (state.harnessPickerOpen) setHarnessPickerOpen(false)
+    if (state.appMenuOpen) setAppMenuOpen(false)
+    if (state.dragState !== null) setDragState(null)
+    if (state.showSearch) setShowSearch(false)
+    if (state.searchQuery !== '') setSearchQuery('')
+    if (state.searchMounted) {
+      setSearchMounted(false)
+      searchMotion.setValue(0)
+    } else if (state.showSearch) {
+      searchMotion.setValue(0)
+    }
+    if (state.showBotSearch) setShowBotSearch(false)
+    if (state.botSearchQuery !== '') setBotSearchQuery('')
+    if (state.createWorkspaceOpen) setCreateWorkspaceOpen(false)
+    if (state.workspaceActionTarget !== undefined) setWorkspaceActionTarget(undefined)
+    if (state.renameWorkspaceTarget !== undefined) setRenameWorkspaceTarget(undefined)
+  }
+
+  backOverlayRef.current = () => {
+    const state = transientStateRef.current
+    if (state.showConfigModal) {
+      setShowConfigModal(false)
+      return true
+    }
+    if (state.showSearch) {
+      setShowSearch(false)
+      if (state.searchQuery !== '') setSearchQuery('')
+      return true
+    }
+    if (state.showBotSearch) {
+      setShowBotSearch(false)
+      if (state.botSearchQuery !== '') setBotSearchQuery('')
+      return true
+    }
+    return false
+  }
+
+  useEffect(() => () => {
+    resetRef.current = undefined
+    backOverlayRef.current = undefined
+  }, [resetRef, backOverlayRef])
 
   useEffect(() => {
+    if (!showSearch && !transientStateRef.current.searchMounted) return
     if (showSearch) setSearchMounted(true)
     const animation = Animated.timing(searchMotion, {
       toValue: showSearch ? 1 : 0,
@@ -945,235 +1375,384 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     return () => animation.stop()
   }, [showConfigModal, configMotion, reduceMotion])
 
-  const smoothClose = useCallback((withHaptic = true, force = false, unlockOnComplete = false) => {
-    if (!shouldAllowDrawerClose({
-      inline,
-      open: openRef.current,
-      closing: closingRef.current,
-      dismissible: dismissibleRef.current,
-      force,
-    })) {
-      return
-    }
-    closingRef.current = true
-    if (unlockOnComplete) pendingUnlockRef.current = true
-    gestureSeq.current++
-    dragReady.current = false
-    if (withHaptic) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
-    const seq = ++animSeq.current
-    currentAnim.current?.stop()
-
-    const anim = Animated.parallel([
-      Animated.timing(translateX, { toValue: closedTranslateXRef.current, duration: 200, useNativeDriver: true }),
-      Animated.timing(overlayOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-    ])
-    currentAnim.current = anim
-    anim.start(({ finished }) => {
-      if (!finished || seq !== animSeq.current) return
-      currentAnim.current = null
-      hasSettledOpenRef.current = false
-      closingRef.current = false
-      if (pendingUnlockRef.current) {
-        pendingUnlockRef.current = false
-        onUnlockDismissibleRef.current?.()
-      }
-      onCloseRef.current()
-    })
-  }, [inline, translateX, overlayOpacity])
-
-  const handleBack = () => {
-    Keyboard.dismiss()
-    if (!inline) {
-      if (!dismissibleRef.current) return
-      smoothClose(true)
-      return
-    }
-    onBack?.()
+  const listCtxRef = useRef({
+    dragState,
+    botMode,
+    onSelect,
+    searchQuery,
+    sections,
+    pinnedSet,
+    archivedSet,
+    sessions,
+    backend,
+    groupBy,
+    backendWorkspaces,
+    orderBy,
+    manualOrders,
+    updateManualOrders,
+    toggleWorkspace,
+    handleCreateSessionInWorkspace,
+    handleRefresh,
+    handleOpenFavorite,
+    removeFavoriteWorkspace,
+  })
+  listCtxRef.current = {
+    dragState,
+    botMode,
+    onSelect,
+    searchQuery,
+    sections,
+    pinnedSet,
+    archivedSet,
+    sessions,
+    backend,
+    groupBy,
+    backendWorkspaces,
+    orderBy,
+    manualOrders,
+    updateManualOrders,
+    toggleWorkspace,
+    handleCreateSessionInWorkspace,
+    handleRefresh,
+    handleOpenFavorite,
+    removeFavoriteWorkspace,
   }
 
-  useEffect(() => {
-    if (inline) return
-    if (!open) {
-      animSeq.current++
-      currentAnim.current?.stop()
-      currentAnim.current = null
-      closingRef.current = false
-      pendingUnlockRef.current = false
-      hasSettledOpenRef.current = false
-      gestureSeq.current++
-      dragReady.current = false
-      dragActiveRef.current = false
-      translateX.setValue(closedTranslateXRef.current)
-      overlayOpacity.setValue(0)
-      setMenuSession(null)
-      setRenameTarget(null)
-      setRenameError(null)
-      setRenaming(false)
-      setToastMessage(null)
-      setShowConfigModal(false)
-      setHarnessPickerOpen(false)
-      setAppMenuOpen(false)
-      setDragState(null)
-      setShowSearch(false)
-      setSearchQuery('')
-      setSearchMounted(false)
-      searchMotion.setValue(0)
-      setShowBotSearch(false)
-      setBotSearchQuery('')
-      setCreateWorkspaceOpen(false)
-      setWorkspaceActionTarget(undefined)
-      setRenameWorkspaceTarget(undefined)
+  const handleRowPress = useCallback((item: RemoteSession, isSelected: boolean) => {
+    const ctx = listCtxRef.current
+    if (justDraggedRef.current || ctx.dragState !== null) return
+    if (isSelected && !ctx.botMode) {
+      if (inline) {
+        closeDrawer()
+      } else {
+        smoothClose(true, true, true)
+      }
+    } else {
+      if (!inline) gate.setActive(false)
+      let pending: Promise<void> | undefined
+      try {
+        pending = ctx.onSelect(item)
+      } catch {
+        if (!inline) releaseFreeze()
+        return
+      }
+      void Promise.resolve(pending)
+        .catch(() => undefined)
+        .finally(() => {
+          if (!inline) releaseFreeze()
+        })
+    }
+  }, [inline, gate, closeDrawer, smoothClose, releaseFreeze])
+
+  const handleRowLongPress = useCallback((
+    item: RemoteSession,
+    sectionId: string,
+    accountKey: string,
+    index: number,
+    isPinned: boolean,
+  ) => {
+    if (listCtxRef.current.searchQuery.trim() || sectionId.startsWith('recent:')) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
+      setMenuSession(item)
       return
     }
-    const seq = ++animSeq.current
-    currentAnim.current?.stop()
-    currentAnim.current = null
-    closingRef.current = false
-    if (immediateMount || hasSettledOpenRef.current) {
-      translateX.setValue(0)
-      overlayOpacity.setValue(1)
-      hasSettledOpenRef.current = true
-      return
-    }
-    translateX.setValue(closedTranslateXRef.current)
-    overlayOpacity.setValue(0)
-    const anim = Animated.parallel([
-      Animated.timing(translateX, { toValue: 0, duration: 220, useNativeDriver: true }),
-      Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
-    ])
-    currentAnim.current = anim
-    anim.start(({ finished }) => {
-      if (!finished || seq !== animSeq.current) return
-      currentAnim.current = null
-      hasSettledOpenRef.current = true
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
+    setDragState({
+      sessionId: item.sessionId,
+      sectionId,
+      accountKey,
+      fromIndex: index,
+      overIndex: index,
+      isPinned,
     })
-    return () => {
-      if (currentAnim.current === anim) {
-        anim.stop()
-        currentAnim.current = null
-      }
-    }
-  }, [inline, open, immediateMount, translateX, overlayOpacity, searchMotion])
+    dragActiveRef.current = true
+  }, [dragActiveRef])
 
-  useEffect(() => {
-    if (!inline && !open && !closingRef.current) {
-      translateX.setValue(closedTranslateX)
-    }
-  }, [inline, open, closedTranslateX, translateX])
+  const handleRowTouchStart = useCallback((pageY: number) => {
+    touchStartY.current = pageY
+  }, [])
 
-  useEffect(() => {
-    if (closeRef === undefined) return
-    if (inline || !open) {
-      closeRef.current = undefined
-      return
+  const handleRowTouchMove = useCallback((item: RemoteSession, sectionId: string, pageY: number) => {
+    const ctx = listCtxRef.current
+    const activeDrag = ctx.dragState
+    if (!dragActiveRef.current || !activeDrag || activeDrag.sessionId !== item.sessionId) return
+    const section = ctx.sections.find(s => s.id === sectionId)
+    if (!section) return
+    const dy = pageY - touchStartY.current
+    const rowHeight = 46
+    const deltaSlots = Math.round(dy / rowHeight)
+    const pinnedCount = section.data.filter(s => {
+      const b = s.backend ?? 'harness'
+      return (b === 'harness' || isAcpManagedBackend(b)) && ctx.pinnedSet.has(s.sessionId) && !ctx.archivedSet.has(s.sessionId)
+    }).length
+    const minSlot = activeDrag.isPinned ? 0 : pinnedCount
+    const maxSlot = activeDrag.isPinned ? Math.max(0, pinnedCount - 1) : Math.max(minSlot, section.data.length - 1)
+    const newIndex = Math.max(minSlot, Math.min(maxSlot, activeDrag.fromIndex + deltaSlots))
+    if (newIndex !== activeDrag.overIndex) {
+      setDragState(curr => curr ? { ...curr, overIndex: newIndex } : null)
     }
-    closeRef.current = options => {
-      smoothClose(options?.withHaptic ?? true, options?.force ?? false)
-    }
-    return () => {
-      closeRef.current = undefined
-    }
-  }, [closeRef, inline, open, smoothClose])
+  }, [dragActiveRef])
 
-  useEffect(() => {
-    if (backRef === undefined) return
-    if (inline || !open) {
-      backRef.current = undefined
-      return
-    }
-    backRef.current = () => {
-      if (backOverlayStateRef.current.showConfigModal) {
-        setShowConfigModal(false)
-        return true
-      }
-      if (backOverlayStateRef.current.showSearch) {
-        setShowSearch(false)
-        setSearchQuery('')
-        return true
-      }
-      if (backOverlayStateRef.current.showBotSearch) {
-        setShowBotSearch(false)
-        setBotSearchQuery('')
-        return true
-      }
-      if (!dismissibleRef.current) return false
-      smoothClose(true)
-      return true
-    }
-    return () => {
-      backRef.current = undefined
-    }
-  }, [backRef, inline, open, smoothClose])
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_e, g) => (!inline && openRef.current && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
-        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && openRef.current && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => {
-          if (closingRef.current || !openRef.current) return
-          currentAnim.current?.stop()
-          const seq = ++gestureSeq.current
-          dragReady.current = false
-          translateX.stopAnimation(value => {
-            if (seq !== gestureSeq.current || closingRef.current || !openRef.current) return
-            dragStartX.current = value
-            dragReady.current = true
+  const handleRowTouchEnd = useCallback((item: RemoteSession, sectionId: string, isPinned: boolean) => {
+    const ctx = listCtxRef.current
+    const activeDrag = ctx.dragState
+    if (dragActiveRef.current && activeDrag && activeDrag.sessionId === item.sessionId) {
+      justDraggedRef.current = true
+      setTimeout(() => { justDraggedRef.current = false }, 250)
+      dragActiveRef.current = false
+      setDragState(null)
+      const { fromIndex, overIndex, accountKey: currentAccountKey } = activeDrag
+      const section = ctx.sections.find(s => s.id === sectionId)
+      if (fromIndex !== overIndex && section) {
+        const targetSession = section.data[overIndex]
+        const targetBackend = targetSession?.backend ?? 'harness'
+        const targetIsPinned = !!targetSession
+          && (targetBackend === 'harness' || isAcpManagedBackend(targetBackend))
+          && ctx.pinnedSet.has(targetSession.sessionId)
+          && !ctx.archivedSet.has(targetSession.sessionId)
+        if (targetSession && targetIsPinned === isPinned) {
+          const allGroupSessions = ctx.sessions.filter(s => {
+            if ((s.backend ?? 'harness') !== ctx.backend) return false
+            if (ctx.groupBy === 'list') return true
+            const isDefault = section.workspaceId === 'default'
+            return isDefault
+              ? !ctx.backendWorkspaces.some(w => w.sessionIds.includes(s.sessionId))
+              : section.workspaceId ? ctx.backendWorkspaces.find(w => w.workspaceId === section.workspaceId)?.sessionIds.includes(s.sessionId) : false
           })
-        },
-        onPanResponderMove: (_e, g) => {
-          if (closingRef.current || !openRef.current || !dragReady.current) return
-          const next = clampDrawerTranslate(dragStartX.current + g.dx, drawerWidth)
-          translateX.setValue(next)
-          overlayOpacity.setValue(Math.max(0, 1 + next / drawerWidth))
-        },
-        onPanResponderRelease: (_e, g) => {
-          if (closingRef.current || !openRef.current) return
-          if (shouldConfirmSwipeLeftClose({ dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx })) {
-            smoothClose(true)
-          } else {
-            const seq = ++animSeq.current
-            currentAnim.current?.stop()
-            const anim = Animated.parallel([
-              Animated.spring(translateX, { toValue: 0, bounciness: 0, speed: 18, useNativeDriver: true }),
-              Animated.timing(overlayOpacity, { toValue: 1, duration: 160, useNativeDriver: true }),
-            ])
-            currentAnim.current = anim
-            anim.start(({ finished }) => {
-              if (!finished || seq !== animSeq.current) return
-              currentAnim.current = null
-            })
+          if (ctx.orderBy === 'updated') {
+            allGroupSessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
           }
-        },
-      }),
-    [inline, drawerWidth, translateX, overlayOpacity, smoothClose]
+          const baselineSessions = ctx.orderBy === 'manual'
+            ? applyManualOrder(allGroupSessions, ctx.manualOrders[currentAccountKey])
+            : allGroupSessions
+          const fullIds = baselineSessions.map(s => s.sessionId)
+          const direction = fromIndex < overIndex ? 'after' : 'before'
+          const next = reorderSessionIds(fullIds, item.sessionId, targetSession.sessionId, direction)
+          ctx.updateManualOrders(currentAccountKey, next, ctx.orderBy === 'updated')
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+        }
+      }
+    }
+  }, [dragActiveRef])
+
+  const handleRowTouchCancel = useCallback(() => {
+    dragActiveRef.current = false
+    if (listCtxRef.current.dragState !== null) setDragState(null)
+  }, [dragActiveRef])
+
+  const handleRowMorePress = useCallback((item: RemoteSession) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+    setMenuSession(item)
+  }, [])
+
+  const handleToggleWorkspace = useCallback((sectionId: string) => {
+    listCtxRef.current.toggleWorkspace(sectionId)
+  }, [])
+
+  const handleWorkspaceLongPress = useCallback((workspace: WorkspaceView) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
+    setWorkspaceActionsEverOpened(true)
+    setWorkspaceActionTarget(workspace)
+  }, [])
+
+  const handleWorkspaceCreateSession = useCallback((workspace: WorkspaceView) => {
+    void listCtxRef.current.handleCreateSessionInWorkspace(workspace)
+  }, [])
+
+  const handleShowMoreSessions = useCallback((countKey: string) => {
+    setVisibleCounts(c => ({
+      ...c,
+      [countKey]: (c[countKey] ?? SESSION_PAGE_SIZE) + SESSION_PAGE_SIZE,
+    }))
+  }, [])
+
+  const handleRefreshStable = useCallback(() => {
+    void listCtxRef.current.handleRefresh()
+  }, [])
+
+  const isListRefreshing = connected ? refreshing : devicesRefreshing
+  const listRefreshControl = useMemo(
+    () => (
+      <RefreshControl
+        refreshing={isListRefreshing}
+        onRefresh={handleRefreshStable}
+        tintColor={colors.primary}
+        colors={[colors.primary]}
+      />
+    ),
+    [isListRefreshing, handleRefreshStable, colors.primary],
   )
 
-  const touchSwipeStartRef = useRef<{ x0: number; y0: number; t0: number } | undefined>(undefined)
-  const drawerTouchProps = {
-    ...panResponder.panHandlers,
-    onTouchStart: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
-      touchSwipeStartRef.current = { x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, t0: Date.now() }
+  const listHeaderComponent = useMemo(
+    () =>
+      hostFavorites.length > 0 ? (
+        <View style={styles.favoritesWrap}>
+          <SectionTitle>{strings.devices.favorites}</SectionTitle>
+          <GroupCard>
+            {hostFavorites.map((fav, idx) => (
+              <GroupRow
+                key={fav.key}
+                first={idx === 0}
+                icon={Star}
+                label={fav.title}
+                detail={fav.path || undefined}
+                onPress={() => void listCtxRef.current.handleOpenFavorite(fav.workspaceId, fav.backend)}
+                accessory={
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={strings.devices.removeFavorite(fav.title)}
+                    hitSlop={8}
+                    onPress={e => {
+                      e.stopPropagation()
+                      void listCtxRef.current.removeFavoriteWorkspace(fav.deviceId, fav.key)
+                    }}
+                    style={styles.workspaceSmallBtn}
+                  >
+                    <X size={14} color={colors.muted} />
+                  </Pressable>
+                }
+              />
+            ))}
+          </GroupCard>
+        </View>
+      ) : null,
+    [hostFavorites, language, styles, colors.muted],
+  )
+
+  const listEmptyComponent = useMemo(
+    () => (groupsReady ? null : <ActivityIndicator color={colors.muted} accessibilityLabel={strings.workspaces.loading} />),
+    [groupsReady, language, colors.muted],
+  )
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: DrawerSection }) => {
+      if (groupBy === 'list' || !section.title) return null
+      const isExp = section.expanded
+      const hasItems = isExp && section.data.length > 0
+      const depth = section.depth ?? 0
+      const matchedWorkspace = section.workspaceId && section.workspaceId !== 'default'
+        ? backendWorkspaceById.get(section.workspaceId)
+        : undefined
+      return (
+        <WorkspaceSectionHeader
+          sectionId={section.id}
+          title={section.title}
+          total={section.total}
+          expanded={isExp}
+          hasItems={hasItems}
+          depth={depth}
+          workspace={matchedWorkspace}
+          language={language}
+          styles={styles}
+          colors={colors}
+          onToggle={handleToggleWorkspace}
+          onLongPress={handleWorkspaceLongPress}
+          onCreateSession={handleWorkspaceCreateSession}
+        />
+      )
     },
-    onTouchEnd: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
-      const start = touchSwipeStartRef.current
-      touchSwipeStartRef.current = undefined
-      if (start === undefined || inline || !openRef.current || !dismissibleRef.current || closingRef.current) return
-      const dx = e.nativeEvent.pageX - start.x0
-      const dy = e.nativeEvent.pageY - start.y0
-      const dt = Math.max(16, Date.now() - start.t0)
-      const vx = dx / dt
-      if (
-        shouldStartSwipeLeftToClose({ dx, dy, x0: start.x0 })
-        && shouldConfirmSwipeLeftClose({ dx, dy, x0: start.x0, vx })
-      ) {
-        smoothClose(true)
-      }
+    [
+      groupBy,
+      backendWorkspaceById,
+      language,
+      styles,
+      colors,
+      handleToggleWorkspace,
+      handleWorkspaceLongPress,
+      handleWorkspaceCreateSession,
+    ],
+  )
+
+  const renderSectionFooter = useCallback(
+    ({ section }: { section: DrawerSection }) => {
+      if (groupBy === 'list' || !section.expanded || section.hasMoreFooter === false || section.data.length >= section.total) return null
+      const remaining = section.total - section.data.length
+      const countKey = section.workspaceId ? `workspace:${backend}:${section.workspaceId}` : section.id
+      const depth = section.depth ?? 0
+      return (
+        <WorkspaceSectionFooter
+          countKey={countKey}
+          remaining={remaining}
+          depth={depth}
+          language={language}
+          styles={styles}
+          onShowMore={handleShowMoreSessions}
+        />
+      )
     },
-  }
+    [groupBy, backend, language, styles, handleShowMoreSessions],
+  )
+
+  const selectedSessionId = selected?.sessionId
+  const renderItem = useCallback(
+    ({ item, section, index }: { item: RemoteSession; section: DrawerSection; index: number }) => {
+      const isSelected = item.sessionId === selectedSessionId && !section.id.startsWith('recent:')
+      const hasFooter = groupBy !== 'list' && section.expanded && section.hasMoreFooter !== false && section.data.length < section.total
+      const isFirstInList = groupBy === 'list' && index === 0
+      const isLastInCard = index === section.data.length - 1 && !hasFooter
+      const isRunning = browseStatus(item, lifecycles[item.sessionId]) === 'running'
+      const isHarness = (item.backend ?? 'harness') === 'harness'
+      const canPin = isHarness || isAcpManagedBackend(item.backend ?? 'harness')
+      const isPinned = canPin && pinnedSet.has(item.sessionId) && !archivedSet.has(item.sessionId)
+      const isArchived = isHarness && archivedSet.has(item.sessionId)
+      const timeStr = formatRelativeTime(item.updatedAt)
+      const depth = section.depth ?? 0
+      const accountKey = section.workspaceId ? `workspace:${backend}:${section.workspaceId}` : section.id
+      const isDragging = dragState?.sessionId === item.sessionId && dragState.sectionId === section.id
+      const isDragTarget = dragState !== null && dragState.sectionId === section.id && dragState.overIndex === index && !isDragging && isPinned === dragState.isPinned
+      const dropAbove = isDragTarget && dragState.fromIndex > index
+      const dropBelow = isDragTarget && dragState.fromIndex < index
+
+      return (
+        <SessionListRow
+          item={item}
+          sectionId={section.id}
+          accountKey={accountKey}
+          index={index}
+          isSelected={isSelected}
+          isFirstInList={isFirstInList}
+          isLastInCard={isLastInCard}
+          isRunning={isRunning}
+          isPinned={isPinned}
+          isArchived={isArchived}
+          depth={depth}
+          isDragging={isDragging}
+          dropAbove={dropAbove}
+          dropBelow={dropBelow}
+          timeStr={timeStr}
+          language={language}
+          styles={styles}
+          colors={colors}
+          onPress={handleRowPress}
+          onLongPress={handleRowLongPress}
+          onTouchStart={handleRowTouchStart}
+          onTouchMove={handleRowTouchMove}
+          onTouchEnd={handleRowTouchEnd}
+          onTouchCancel={handleRowTouchCancel}
+          onMorePress={handleRowMorePress}
+        />
+      )
+    },
+    [
+      selectedSessionId,
+      groupBy,
+      lifecycles,
+      pinnedSet,
+      archivedSet,
+      backend,
+      dragState,
+      language,
+      styles,
+      colors,
+      handleRowPress,
+      handleRowLongPress,
+      handleRowTouchStart,
+      handleRowTouchMove,
+      handleRowTouchEnd,
+      handleRowTouchCancel,
+      handleRowMorePress,
+    ],
+  )
 
   const closeConfig = () => setShowConfigModal(false)
 
@@ -1319,8 +1898,8 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
               <MoreVertical size={18} color={colors.ink} strokeWidth={1.9} />
             </Pressable>
           )}
-          {Boolean(onBack) && (inline || dismissible) && (
-            <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? strings.chat.backToChat} onPress={handleBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
+          {showBackButton && (
+            <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? strings.chat.backToChat} onPress={onHeaderBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
               <ArrowLeft size={18} color={colors.ink} strokeWidth={1.9} />
             </Pressable>
           )}
@@ -1393,17 +1972,22 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
 
       {drawerMode === 'bot' ? (
         <BotSidebarSection
-          refreshing={connected ? refreshing : devicesRefreshing}
-          onRefresh={() => void handleRefresh()}
+          refreshing={isListRefreshing}
+          onRefresh={handleRefreshStable}
           searchQuery={botSearchQuery}
           onSearchChange={setBotSearchQuery}
           showSearch={showBotSearch}
           onSelectBot={id => {
             saveHostMode(hostScope, 'bot')
             onBotModeChange?.(true)
-            useBotTeamStore.getState().setSelectedId(id)
-            onSelectBot?.(id)
-            if (!inline) closeDrawer()
+            if (!inline) gate.setActive(false)
+            try {
+              useBotTeamStore.getState().setSelectedId(id)
+              onSelectBot?.(id)
+              if (!inline) closeDrawer()
+            } finally {
+              if (!inline) releaseFreeze()
+            }
           }}
         />
       ) : (
@@ -1417,7 +2001,10 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
                   accessibilityRole="button"
                   accessibilityLabel={`${strings.sessions.agentPlatform} · ${harnessDisplayName(backend)}`}
                   hitSlop={6}
-                  onPress={() => setHarnessPickerOpen(true)}
+                  onPress={() => {
+                    setHarnessPickerEverOpened(true)
+                    setHarnessPickerOpen(true)
+                  }}
                   style={({ pressed }) => [styles.platformChip, pressed && styles.pressedFade]}
                 >
                   <Text style={styles.platformChipText} numberOfLines={1}>{harnessDisplayName(backend)}</Text>
@@ -1447,7 +2034,10 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
                   accessibilityRole="button"
                   accessibilityLabel={strings.sessions.addWorkspace}
                   hitSlop={6}
-                  onPress={() => setCreateWorkspaceOpen(true)}
+                  onPress={() => {
+                    setCreateWorkspaceEverOpened(true)
+                    setCreateWorkspaceOpen(true)
+                  }}
                   style={styles.iconBtn}
                 >
                   <FolderPlus size={17} color={colors.muted} />
@@ -1479,305 +2069,21 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
           {groupStorageError && <Text accessibilityRole="alert" style={{ color: colors.muted, paddingHorizontal: spacing.md }}>{groupStorageError}</Text>}
           {/* 会话树状列表 */}
           <SectionList<RemoteSession, DrawerSection>
-            refreshControl={
-              <RefreshControl
-                refreshing={connected ? refreshing : devicesRefreshing}
-                onRefresh={() => void handleRefresh()}
-                tintColor={colors.primary}
-                colors={[colors.primary]}
-              />
-            }
+            refreshControl={listRefreshControl}
             alwaysBounceVertical
             scrollEnabled={dragState === null}
-            sections={groupsReady ? sections : []}
-            ListHeaderComponent={
-              hostFavorites.length > 0 ? (
-                <View style={styles.favoritesWrap}>
-                  <SectionTitle>{strings.devices.favorites}</SectionTitle>
-                  <GroupCard>
-                    {hostFavorites.map((fav, idx) => (
-                      <GroupRow
-                        key={fav.key}
-                        first={idx === 0}
-                        icon={Star}
-                        label={fav.title}
-                        detail={fav.path || undefined}
-                        onPress={() => void handleOpenFavorite(fav.workspaceId, fav.backend)}
-                        accessory={
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={strings.devices.removeFavorite(fav.title)}
-                            hitSlop={8}
-                            onPress={e => {
-                              e.stopPropagation()
-                              void removeFavoriteWorkspace(fav.deviceId, fav.key)
-                            }}
-                            style={styles.workspaceSmallBtn}
-                          >
-                            <X size={14} color={colors.muted} />
-                          </Pressable>
-                        }
-                      />
-                    ))}
-                  </GroupCard>
-                </View>
-              ) : null
-            }
-            ListEmptyComponent={groupsReady ? null : <ActivityIndicator color={colors.muted} accessibilityLabel={strings.workspaces.loading} />}
-            keyExtractor={item => item.sessionId}
+            sections={groupsReady ? sections : EMPTY_SECTIONS}
+            ListHeaderComponent={listHeaderComponent}
+            ListEmptyComponent={listEmptyComponent}
+            keyExtractor={sessionKeyExtractor}
             keyboardShouldPersistTaps="handled"
             style={styles.sectionList}
             contentContainerStyle={styles.listContainer}
             stickySectionHeadersEnabled={false}
-            renderSectionHeader={({ section }) => {
-              if (groupBy === 'list' || !section.title) return null
-              const isExp = section.expanded
-              const hasItems = isExp && section.data.length > 0
-              const depth = section.depth ?? 0
-              const matchedWorkspace = section.workspaceId && section.workspaceId !== 'default'
-                ? backendWorkspaceById.get(section.workspaceId)
-                : undefined
-              return (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityHint={matchedWorkspace ? strings.workspaces.options : undefined}
-                  android_ripple={androidRipple(colors)}
-                  onPress={() => toggleWorkspace(section.id)}
-                  onLongPress={() => {
-                    if (!matchedWorkspace) return
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
-                    setWorkspaceActionTarget(matchedWorkspace)
-                  }}
-                  style={({ pressed }) => [
-                    styles.workspaceRow,
-                    hasItems ? styles.workspaceRowCardTop : styles.workspaceRowCardSingle,
-                    pressed && styles.pressedBg,
-                    depth > 0 && { paddingLeft: spacing.md + depth * 14 },
-                  ]}
-                >
-                  <View style={styles.workspaceRowLeft}>
-                    {isExp
-                      ? <FolderOpen size={18} color={colors.primary} strokeWidth={1.8} />
-                      : <Folder size={18} color={colors.muted} strokeWidth={1.8} />}
-                    <Text style={styles.workspaceRowTitle} numberOfLines={1}>
-                      {section.title}
-                    </Text>
-                    {section.total > 0 && (
-                      <Text style={styles.workspaceCountText}>{section.total}</Text>
-                    )}
-                  </View>
-                  <View style={styles.workspaceRowRight}>
-                    {matchedWorkspace !== undefined && (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={strings.workspaces.newSessionIn(section.title)}
-                        android_ripple={androidRipple(colors, true)}
-                        hitSlop={8}
-                        onPress={e => {
-                          e.stopPropagation()
-                          void handleCreateSessionInWorkspace(matchedWorkspace)
-                        }}
-                        style={({ pressed }) => [styles.workspaceSmallBtn, pressed && styles.pressedBg]}
-                      >
-                        <Plus size={16} color={colors.muted} strokeWidth={2} />
-                      </Pressable>
-                    )}
-                    {isExp ? <ChevronDown size={16} color={colors.subtle} /> : <ChevronRight size={16} color={colors.subtle} />}
-                  </View>
-                </Pressable>
-              )
-            }}
-        renderSectionFooter={({ section }) => {
-          if (groupBy === 'list' || !section.expanded || section.hasMoreFooter === false || section.data.length >= section.total) return null
-          const remaining = section.total - section.data.length
-          const countKey = section.workspaceId ? `workspace:${backend}:${section.workspaceId}` : section.id
-          const depth = section.depth ?? 0
-          return (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() =>
-                setVisibleCounts(c => ({
-                  ...c,
-                  [countKey]: (c[countKey] ?? SESSION_PAGE_SIZE) + SESSION_PAGE_SIZE,
-                }))
-              }
-              style={[
-                styles.showMoreRow,
-                depth > 0 && { paddingLeft: spacing.lg + spacing.md + depth * 14 },
-              ]}
-            >
-              <Text style={styles.showMoreText}>{strings.sessions.showMoreSessions(remaining)}</Text>
-            </Pressable>
-          )
-        }}
-        renderItem={({ item, section, index }) => {
-          const isSelected = item.sessionId === selected?.sessionId && !section.id.startsWith('recent:')
-          const hasFooter = groupBy !== 'list' && section.expanded && section.hasMoreFooter !== false && section.data.length < section.total
-          const isFirstInList = groupBy === 'list' && index === 0
-          const isLastInCard = index === section.data.length - 1 && !hasFooter
-          const isRunning = browseStatus(item, lifecycles[item.sessionId]) === 'running'
-          const isHarness = (item.backend ?? 'harness') === 'harness'
-          const canPin = isHarness || isAcpManagedBackend(item.backend ?? 'harness')
-          const isPinned = canPin && pinnedSessionIds.includes(item.sessionId) && !archivedIds.includes(item.sessionId)
-          const isArchived = isHarness && archivedIds.includes(item.sessionId)
-          const timeStr = formatRelativeTime(item.updatedAt)
-          const displayTitle = resolveSessionDisplayTitle(item) ?? strings.sessions.untitled
-          const accessibilityLabel = isPinned
-            ? `${displayTitle}, ${strings.sessions.pinned}`
-            : displayTitle
-          const depth = section.depth ?? 0
-          const accountKey = section.workspaceId ? `workspace:${backend}:${section.workspaceId}` : section.id
-          const isDragging = dragState?.sessionId === item.sessionId && dragState.sectionId === section.id
-          const isDragTarget = dragState !== null && dragState.sectionId === section.id && dragState.overIndex === index && !isDragging && isPinned === dragState.isPinned
-          const dropAbove = isDragTarget && dragState.fromIndex > index
-          const dropBelow = isDragTarget && dragState.fromIndex < index
-
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={accessibilityLabel}
-              accessibilityState={{ selected: isSelected }}
-              onPress={() => {
-                if (justDraggedRef.current || dragState !== null) return
-                if (isSelected && !botMode) {
-                  if (inline) {
-                    closeDrawer()
-                  } else {
-                    smoothClose(true, true, true)
-                  }
-                } else {
-                  void onSelect(item)
-                }
-              }}
-              onLongPress={() => {
-                if (searchQuery.trim() || section.id.startsWith('recent:')) {
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
-                  setMenuSession(item)
-                  return
-                }
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
-                setDragState({
-                  sessionId: item.sessionId,
-                  sectionId: section.id,
-                  accountKey,
-                  fromIndex: index,
-                  overIndex: index,
-                  isPinned,
-                })
-                dragActiveRef.current = true
-              }}
-              delayLongPress={300}
-              onTouchStart={(e) => {
-                touchStartY.current = e.nativeEvent.pageY
-              }}
-              onTouchMove={(e) => {
-                if (!dragActiveRef.current || !dragState || dragState.sessionId !== item.sessionId) return
-                const currentY = e.nativeEvent.pageY
-                const dy = currentY - touchStartY.current
-                const rowHeight = 46
-                const deltaSlots = Math.round(dy / rowHeight)
-                const pinnedCount = section.data.filter(s => {
-                  const b = s.backend ?? 'harness'
-                  return (b === 'harness' || isAcpManagedBackend(b)) && pinnedSessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId)
-                }).length
-                const minSlot = dragState.isPinned ? 0 : pinnedCount
-                const maxSlot = dragState.isPinned ? Math.max(0, pinnedCount - 1) : Math.max(minSlot, section.data.length - 1)
-                const newIndex = Math.max(minSlot, Math.min(maxSlot, dragState.fromIndex + deltaSlots))
-                if (newIndex !== dragState.overIndex) {
-                  setDragState(curr => curr ? { ...curr, overIndex: newIndex } : null)
-                }
-              }}
-              onTouchEnd={() => {
-                if (dragActiveRef.current && dragState && dragState.sessionId === item.sessionId) {
-                  justDraggedRef.current = true
-                  setTimeout(() => { justDraggedRef.current = false }, 250)
-                  const activeDrag = dragState
-                  dragActiveRef.current = false
-                  setDragState(null)
-                  const { fromIndex, overIndex, accountKey: currentAccountKey } = activeDrag
-                  if (fromIndex !== overIndex) {
-                    const targetSession = section.data[overIndex]
-                    const targetBackend = targetSession?.backend ?? 'harness'
-                    const targetIsPinned = !!targetSession
-                      && (targetBackend === 'harness' || isAcpManagedBackend(targetBackend))
-                      && pinnedSessionIds.includes(targetSession.sessionId)
-                      && !archivedIds.includes(targetSession.sessionId)
-                    if (targetSession && targetIsPinned === isPinned) {
-                      const allGroupSessions = sessions.filter(s => {
-                        if ((s.backend ?? 'harness') !== backend) return false
-                        if (groupBy === 'list') return true
-                        const isDefault = section.workspaceId === 'default'
-                        return isDefault
-                          ? !backendWorkspaces.some(w => w.sessionIds.includes(s.sessionId))
-                          : section.workspaceId ? backendWorkspaces.find(w => w.workspaceId === section.workspaceId)?.sessionIds.includes(s.sessionId) : false
-                      })
-                      if (orderBy === 'updated') {
-                        allGroupSessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-                      }
-                      const baselineSessions = orderBy === 'manual'
-                        ? applyManualOrder(allGroupSessions, manualOrders[currentAccountKey])
-                        : allGroupSessions
-                      const fullIds = baselineSessions.map(s => s.sessionId)
-                      const direction = fromIndex < overIndex ? 'after' : 'before'
-                      const next = reorderSessionIds(fullIds, item.sessionId, targetSession.sessionId, direction)
-                      updateManualOrders(currentAccountKey, next, orderBy === 'updated')
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
-                    }
-                  }
-                }
-              }}
-              onTouchCancel={() => {
-                dragActiveRef.current = false
-                setDragState(null)
-              }}
-              style={({ pressed }) => [
-                styles.sessionRow,
-                isFirstInList && styles.sessionRowCardTop,
-                isLastInCard && styles.sessionRowCardBottom,
-                depth > 0 && { paddingLeft: spacing.lg + spacing.xs + depth * 14 },
-                isSelected && styles.sessionRowSelected,
-                pressed && styles.pressedBg,
-                isDragging && styles.sessionRowDragging,
-                dropAbove && styles.dropTargetAbove,
-                dropBelow && styles.dropTargetBelow,
-              ]}
-            >
-              <View style={styles.statusIndicatorSlot}>
-                {isRunning && <View style={styles.runningDot} />}
-              </View>
-              <Text
-                style={[
-                  styles.sessionText,
-                  isSelected && styles.sessionTextSelected,
-                  isArchived && styles.archivedText,
-                ]}
-                numberOfLines={1}
-              >
-                {displayTitle}
-              </Text>
-              {timeStr ? <Text style={styles.timeText}>{timeStr}</Text> : null}
-              {isPinned && (
-                <View style={styles.pinIndicator} accessibilityLabel={strings.sessions.pinned}>
-                  <OfficialMenuIcons.pinFill size={13} color={colors.ink} />
-                </View>
-              )}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.sessions.moreActions}
-                hitSlop={8}
-                onPress={(e) => {
-                  e.stopPropagation()
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
-                  setMenuSession(item)
-                }}
-                style={styles.moreActionBtn}
-              >
-                <OfficialMenuIcons.ellipsis size={16} color={colors.muted} />
-              </Pressable>
-            </Pressable>
-          )
-        }}
-      />
+            renderSectionHeader={renderSectionHeader}
+            renderSectionFooter={renderSectionFooter}
+            renderItem={renderItem}
+          />
         </>
       )}
 
@@ -2062,200 +2368,556 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
       )}
 
       {/* 切换 Harness 模态弹窗 */}
-      <Modal
-        visible={harnessPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setHarnessPickerOpen(false)}
-        statusBarTranslucent
-      >
-        <View style={styles.harnessBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={() => setHarnessPickerOpen(false)} />
-          <View style={[styles.harnessDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
-            <View style={styles.harnessHeader}>
-              <Text style={styles.harnessTitle} accessibilityRole="header">{strings.sessions.switchHarness}</Text>
-              <IconButton label={strings.common.close} icon={X} onPress={() => setHarnessPickerOpen(false)} />
-            </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.harnessList}>
-              <GroupCard>
-                {[
-                  ...HARNESS_OPTIONS,
-                  ...customAcpBackends.map(id => ({ value: id as AgentBackend, name: harnessDisplayName(id) })),
-                ].filter(option => backends.includes(option.value)).map((option, index) => {
-                  const chosen = option.value === backend
-                  const descriptionMap = strings.sessions.backendDescriptions as Record<string, string | undefined>
-                  return (
-                    <GroupRow
-                      key={option.value}
-                      first={index === 0}
-                      label={option.name}
-                      detail={descriptionMap[option.value] ?? strings.sessions.customAcpDescription}
-                      selected={chosen}
-                      chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
-                      onPress={() => void handleSelectHarness(option.value)}
-                    />
-                  )
-                })}
-              </GroupCard>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      {(harnessPickerEverOpened || harnessPickerOpen) && (
+        <HarnessPickerModal
+          visible={harnessPickerOpen}
+          backend={backend}
+          backends={backends}
+          customAcpBackends={customAcpBackends}
+          colors={colors}
+          styles={styles}
+          onClose={() => setHarnessPickerOpen(false)}
+          onSelect={target => void handleSelectHarness(target)}
+        />
+      )}
 
       {/* 工作区新建 / 管理 / 重命名弹窗 */}
-      <CreateWorkspaceModal
-        visible={createWorkspaceOpen}
-        codexAvailable={codexAvailable}
-        cursorAvailable={cursorAvailable}
-        antigravityAvailable={antigravityAvailable}
-        piAvailable={piAvailable}
-        opencodeAvailable={opencodeAvailable}
-        claudeAvailable={claudeAvailable}
-        hermesAvailable={hermesAvailable}
-        customAcpBackends={customAcpBackends}
-        initialBackend={backend}
-        busy={
-          busy === 'create-workspace'
-          || busy === 'create-codex-workspace'
-          || busy === 'create-cursor-workspace'
-          || busy === 'create-antigravity-workspace'
-          || busy === 'create-pi-workspace'
-          || busy === 'create-opencode-workspace'
-          || busy === 'create-claude-workspace'
-          || busy === 'create-hermes-workspace'
-        }
-        onClose={() => setCreateWorkspaceOpen(false)}
-        onCreate={(path, targetBackend) => createWorkspace(path, targetBackend)}
-        onCreated={workspace => {
-          const expectedDeviceId = deviceId
-          if (useAppStore.getState().selectedDevice?.deviceId !== expectedDeviceId) return
-          const nextBackend = workspace.backend ?? 'harness'
-          setBackend(nextBackend)
-          if (expectedDeviceId !== undefined) void saveWorkspaceBackend(expectedDeviceId, nextBackend)
-          const groupId = `workspace:${nextBackend}:${workspace.workspaceId}`
-          if (expectedDeviceId !== undefined && groupScopeKey !== undefined) {
-            memoryGroupsByDevice[groupScopeKey] = { ...memoryGroupsByDevice[groupScopeKey], [groupId]: true }
-            setGroupsByDevice(current => ({
-              ...current,
-              [groupScopeKey]: { ...current[groupScopeKey], [groupId]: true },
-            }))
-            void saveHostSessionsDrawerGroup(expectedDeviceId, groupId, true).catch(() => undefined)
+      {(createWorkspaceEverOpened || createWorkspaceOpen) && (
+        <CreateWorkspaceModal
+          visible={createWorkspaceOpen}
+          codexAvailable={codexAvailable}
+          cursorAvailable={cursorAvailable}
+          antigravityAvailable={antigravityAvailable}
+          piAvailable={piAvailable}
+          opencodeAvailable={opencodeAvailable}
+          claudeAvailable={claudeAvailable}
+          hermesAvailable={hermesAvailable}
+          customAcpBackends={customAcpBackends}
+          initialBackend={backend}
+          busy={
+            busy === 'create-workspace'
+            || busy === 'create-codex-workspace'
+            || busy === 'create-cursor-workspace'
+            || busy === 'create-antigravity-workspace'
+            || busy === 'create-pi-workspace'
+            || busy === 'create-opencode-workspace'
+            || busy === 'create-claude-workspace'
+            || busy === 'create-hermes-workspace'
           }
-          const latestSession = [...useAppStore.getState().sessions]
-            .filter(item => workspace.sessionIds.includes(item.sessionId) && !useAppStore.getState().archivedSessionIds.includes(item.sessionId))
-            .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
-          if (latestSession !== undefined) {
-            void onSelect(latestSession).then(() => {
-              if (useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+          onClose={() => setCreateWorkspaceOpen(false)}
+          onCreate={(path, targetBackend) => createWorkspace(path, targetBackend)}
+          onCreated={workspace => {
+            const expectedDeviceId = deviceId
+            if (useAppStore.getState().selectedDevice?.deviceId !== expectedDeviceId) return
+            const nextBackend = workspace.backend ?? 'harness'
+            setBackend(nextBackend)
+            if (expectedDeviceId !== undefined) void saveWorkspaceBackend(expectedDeviceId, nextBackend)
+            const groupId = `workspace:${nextBackend}:${workspace.workspaceId}`
+            if (expectedDeviceId !== undefined && groupScopeKey !== undefined) {
+              memoryGroupsByDevice[groupScopeKey] = { ...memoryGroupsByDevice[groupScopeKey], [groupId]: true }
+              setGroupsByDevice(current => ({
+                ...current,
+                [groupScopeKey]: { ...current[groupScopeKey], [groupId]: true },
+              }))
+              void saveHostSessionsDrawerGroup(expectedDeviceId, groupId, true).catch(() => undefined)
+            }
+            const latestSession = [...useAppStore.getState().sessions]
+              .filter(item => workspace.sessionIds.includes(item.sessionId) && !useAppStore.getState().archivedSessionIds.includes(item.sessionId))
+              .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+            if (latestSession !== undefined) {
+              if (!inline) gate.setActive(false)
+              let pending: Promise<void> | undefined
+              try {
+                pending = onSelect(latestSession)
+              } catch {
+                if (!inline) releaseFreeze()
+                return
+              }
+              void Promise.resolve(pending)
+                .then(() => {
+                  if (useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+                    closeDrawer()
+                  }
+                })
+                .catch(() => undefined)
+                .finally(() => {
+                  if (!inline) releaseFreeze()
+                })
+              return
+            }
+            void createSession(workspace.workspaceId, nextBackend).then(ok => {
+              if (ok && useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+                activateAgentMode()
                 closeDrawer()
               }
             })
-            return
-          }
-          void createSession(workspace.workspaceId, nextBackend).then(ok => {
-            if (ok && useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
-              activateAgentMode()
-              closeDrawer()
+          }}
+        />
+      )}
+      {(renameWorkspaceEverOpened || renameWorkspaceTarget !== undefined) && (
+        <RenameWorkspaceModal
+          target={renameWorkspaceTarget}
+          busy={renameWorkspaceTarget !== undefined && busy === `rename-workspace:${renameWorkspaceTarget.workspaceId}`}
+          onClose={() => setRenameWorkspaceTarget(undefined)}
+          onRename={renameWorkspace}
+        />
+      )}
+      {(workspaceActionsEverOpened || workspaceActionTarget !== undefined) && (
+        <WorkspaceActionsModal
+          target={workspaceActionTarget}
+          favorited={actionTargetFavorited}
+          canMoveUp={actionTargetIndex > 0}
+          canMoveDown={actionTargetIndex >= 0 && actionTargetIndex < backendWorkspaces.length - 1}
+          busy={busy !== undefined}
+          onClose={() => setWorkspaceActionTarget(undefined)}
+          onNewSession={() => {
+            const target = workspaceActionTarget
+            setWorkspaceActionTarget(undefined)
+            if (target !== undefined) void handleCreateSessionInWorkspace(target)
+          }}
+          onToggleFavorite={() => {
+            const target = workspaceActionTarget
+            setWorkspaceActionTarget(undefined)
+            if (target !== undefined) void toggleFavoriteWorkspace(target)
+          }}
+          onRename={() => {
+            const target = workspaceActionTarget
+            setWorkspaceActionTarget(undefined)
+            if (target !== undefined) setRenameWorkspaceEverOpened(true)
+            setRenameWorkspaceTarget(target)
+          }}
+          onMoveUp={() => {
+            const target = workspaceActionTarget
+            const beforeId = actionTargetIndex > 0 ? backendWorkspaces[actionTargetIndex - 1]?.workspaceId : undefined
+            setWorkspaceActionTarget(undefined)
+            if (target !== undefined && beforeId !== undefined) void moveWorkspace(target.workspaceId, beforeId)
+          }}
+          onMoveDown={() => {
+            const target = workspaceActionTarget
+            const beforeId = actionTargetIndex >= 0 ? backendWorkspaces[actionTargetIndex + 2]?.workspaceId : undefined
+            setWorkspaceActionTarget(undefined)
+            if (target !== undefined && actionTargetIndex >= 0 && actionTargetIndex < backendWorkspaces.length - 1) {
+              void moveWorkspace(target.workspaceId, beforeId)
             }
-          })
-        }}
-      />
-      <RenameWorkspaceModal
-        target={renameWorkspaceTarget}
-        busy={renameWorkspaceTarget !== undefined && busy === `rename-workspace:${renameWorkspaceTarget.workspaceId}`}
-        onClose={() => setRenameWorkspaceTarget(undefined)}
-        onRename={renameWorkspace}
-      />
-      <WorkspaceActionsModal
-        target={workspaceActionTarget}
-        favorited={actionTargetFavorited}
-        canMoveUp={actionTargetIndex > 0}
-        canMoveDown={actionTargetIndex >= 0 && actionTargetIndex < backendWorkspaces.length - 1}
-        busy={busy !== undefined}
-        onClose={() => setWorkspaceActionTarget(undefined)}
-        onNewSession={() => {
-          const target = workspaceActionTarget
-          setWorkspaceActionTarget(undefined)
-          if (target !== undefined) void handleCreateSessionInWorkspace(target)
-        }}
-        onToggleFavorite={() => {
-          const target = workspaceActionTarget
-          setWorkspaceActionTarget(undefined)
-          if (target !== undefined) void toggleFavoriteWorkspace(target)
-        }}
-        onRename={() => {
-          const target = workspaceActionTarget
-          setWorkspaceActionTarget(undefined)
-          setRenameWorkspaceTarget(target)
-        }}
-        onMoveUp={() => {
-          const target = workspaceActionTarget
-          const beforeId = actionTargetIndex > 0 ? backendWorkspaces[actionTargetIndex - 1]?.workspaceId : undefined
-          setWorkspaceActionTarget(undefined)
-          if (target !== undefined && beforeId !== undefined) void moveWorkspace(target.workspaceId, beforeId)
-        }}
-        onMoveDown={() => {
-          const target = workspaceActionTarget
-          const beforeId = actionTargetIndex >= 0 ? backendWorkspaces[actionTargetIndex + 2]?.workspaceId : undefined
-          setWorkspaceActionTarget(undefined)
-          if (target !== undefined && actionTargetIndex >= 0 && actionTargetIndex < backendWorkspaces.length - 1) {
-            void moveWorkspace(target.workspaceId, beforeId)
-          }
-        }}
-        onDelete={() => {
-          const target = workspaceActionTarget
-          if (target !== undefined) confirmDeleteWorkspace(target)
-        }}
-      />
+          }}
+          onDelete={() => {
+            const target = workspaceActionTarget
+            if (target !== undefined) confirmDeleteWorkspace(target)
+          }}
+        />
+      )}
 
-      <Modal
-        visible={appMenuOpen}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setAppMenuOpen(false)}
-      >
-        <View style={{ flex: 1 }}>
-          <HomeActionsMenu
-            visible={appMenuOpen}
-            onClose={() => setAppMenuOpen(false)}
-            onPlugins={() => {
-              setAppMenuOpen(false)
-              onOpenPlugins?.()
-            }}
-            pluginsDisabled={!connected || onOpenPlugins === undefined}
-            onAutomationTasks={() => {
-              setAppMenuOpen(false)
-              if (onOpenAutomationTasks) {
-                onOpenAutomationTasks()
-              } else {
-                Alert.alert(strings.automation.title, strings.automation.empty)
-              }
-            }}
-            onSettings={() => {
-              setAppMenuOpen(false)
-              onOpenSettings?.()
-            }}
-            onAbout={() => {
-              setAppMenuOpen(false)
-              onOpenAbout?.()
-            }}
-          />
-        </View>
-      </Modal>
-
-      {/* DS-Bot 弹窗宿主 (创建/编辑 Bot & 群聊、上下文菜单、用量/日程报表) */}
-      {visible && <BotModalsHost />}
+      {appMenuOpen && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => setAppMenuOpen(false)}
+        >
+          <View style={{ flex: 1 }}>
+            <HomeActionsMenu
+              visible
+              onClose={() => setAppMenuOpen(false)}
+              onPlugins={() => {
+                setAppMenuOpen(false)
+                onOpenPlugins?.()
+              }}
+              pluginsDisabled={!connected || onOpenPlugins === undefined}
+              onAutomationTasks={() => {
+                setAppMenuOpen(false)
+                if (onOpenAutomationTasks) {
+                  onOpenAutomationTasks()
+                } else {
+                  Alert.alert(strings.automation.title, strings.automation.empty)
+                }
+              }}
+              onSettings={() => {
+                setAppMenuOpen(false)
+                onOpenSettings?.()
+              }}
+              onAbout={() => {
+                setAppMenuOpen(false)
+                onOpenAbout?.()
+              }}
+            />
+          </View>
+        </Modal>
+      )}
     </View>
   )
 
+  return content
+})
+
+export const HostSessionsDrawer = memo(function HostSessionsDrawer({
+  onBack,
+  onClose,
+  onOpenWorkspaces: _onOpenWorkspaces,
+  onOpenDeviceInfo,
+  onSelect,
+  onNewSession: _onNewSession,
+  onOpenAutomationTasks,
+  onOpenPlugins,
+  onOpenHostSwitcher,
+  onOpenSettings,
+  onOpenAbout,
+  botMode,
+  onBotModeChange,
+  onSelectBot,
+  inline = false,
+  open = true,
+  backLabel,
+  dismissible = true,
+  entrance = 'immediate',
+  backRef,
+  closeRef,
+  onUnlockDismissible,
+}: HostSessionsDrawerProps) {
+  const visible = inline || open
+  const gateRef = useRef<StoreGate | null>(null)
+  if (gateRef.current === null) {
+    gateRef.current = createStoreGate(visible)
+  }
+  const gate = gateRef.current
+
+  // React runs child layout effects before parent layout effects, so
+  // `HostSessionsDrawerBody` must not assume store-derived values are already
+  // refreshed inside a child `useLayoutEffect`; `useSyncExternalStore` forces a
+  // synchronous pre-paint re-render here when `gate.setActive(true)` flushes.
+  useLayoutEffect(() => {
+    gate.setActive(visible)
+  }, [gate, visible])
+
+  const bodyResetRef = useRef<(() => void) | undefined>(undefined)
+  const bodyBackRef = useRef<(() => boolean) | undefined>(undefined)
+  const dragActiveRef = useRef(false)
+  const [botTabActive, setBotTabActive] = useState(Boolean(botMode))
+
+  const layout = useResponsiveLayout()
+  const { scheme } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const insets = useSafeAreaInsets()
+
+  // 手势与抽屉动画。宽窗口下抽屉宽度封顶（DRAWER_MAX_WIDTH），手机仍全宽。
+  // 不可关闭态（冷启动/切 Host）保持全宽背景并用居中列限宽，避免右侧露出
+  // 点不动的假遮罩，也不把列表行拉成超长白条。
+  const screenWidth = layout.width
+  const drawerWidth = !dismissible ? Math.round(screenWidth) : Math.round(drawerWidthForWindow(screenWidth))
+  const cappedDrawer = !inline && drawerWidth < Math.round(screenWidth)
+  const fullWidthCentered = !inline && !dismissible && screenWidth >= WINDOW_SIZE_MEDIUM
+  const showBackButton = Boolean(onBack) && (inline || dismissible)
+  // Extra travel clears the right-edge elevation shadow off-screen during exit.
+  const closedTranslateX = -(drawerWidth + (cappedDrawer ? 24 : 0))
+  const immediateMount = entrance === 'immediate'
+  const initialOpen = !inline && open
+  const translateX = useRef(new Animated.Value(initialOpen && immediateMount ? 0 : closedTranslateX)).current
+  const overlayOpacity = useRef(new Animated.Value(initialOpen && immediateMount ? 1 : 0)).current
+  const hasSettledOpenRef = useRef(initialOpen && immediateMount)
+  const dragStartX = useRef(0)
+  const closingRef = useRef(false)
+  const animSeq = useRef(0)
+  const currentAnim = useRef<Animated.CompositeAnimation | null>(null)
+  const gestureSeq = useRef(0)
+  const dragReady = useRef(false)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const stableOnClose = useCallback(() => {
+    onCloseRef.current()
+  }, [])
+  const onBackRef = useRef(onBack)
+  onBackRef.current = onBack
+  const dismissibleRef = useRef(dismissible)
+  dismissibleRef.current = dismissible
+  const openRef = useRef(open)
+  openRef.current = open
+  const closedTranslateXRef = useRef(closedTranslateX)
+  closedTranslateXRef.current = closedTranslateX
+  const onUnlockDismissibleRef = useRef(onUnlockDismissible)
+  onUnlockDismissibleRef.current = onUnlockDismissible
+  const pendingUnlockRef = useRef(false)
+  const releaseFreezeRafRef = useRef<number | null>(null)
+  const cancelReleaseFreeze = useCallback(() => {
+    if (releaseFreezeRafRef.current !== null) {
+      cancelAnimationFrame(releaseFreezeRafRef.current)
+      releaseFreezeRafRef.current = null
+    }
+  }, [])
+  // Safety net for pre-freeze actions (`onSelect`, `onSelectBot`, workspace
+  // auto-open): if the action fails or stays open without closing the drawer,
+  // re-activate the store gate on the next frame so the open drawer never
+  // remains permanently frozen.
+  const releaseFreeze = useCallback(() => {
+    cancelReleaseFreeze()
+    releaseFreezeRafRef.current = requestAnimationFrame(() => {
+      releaseFreezeRafRef.current = null
+      if (!inline && openRef.current && !closingRef.current) {
+        gate.setActive(true)
+      }
+    })
+  }, [cancelReleaseFreeze, gate, inline])
+
+  useEffect(() => cancelReleaseFreeze, [cancelReleaseFreeze])
+
+  const smoothClose = useCallback((withHaptic = true, force = false, unlockOnComplete = false) => {
+    if (!shouldAllowDrawerClose({
+      inline,
+      open: openRef.current,
+      closing: closingRef.current,
+      dismissible: dismissibleRef.current,
+      force,
+    })) {
+      return
+    }
+    cancelReleaseFreeze()
+    closingRef.current = true
+    if (unlockOnComplete) pendingUnlockRef.current = true
+    gestureSeq.current++
+    dragReady.current = false
+    if (withHaptic) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
+    const seq = ++animSeq.current
+    currentAnim.current?.stop()
+
+    const anim = Animated.parallel([
+      Animated.timing(translateX, { toValue: closedTranslateXRef.current, duration: 200, useNativeDriver: true }),
+      Animated.timing(overlayOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+    ])
+    currentAnim.current = anim
+    anim.start(({ finished }) => {
+      if (!finished || seq !== animSeq.current) return
+      currentAnim.current = null
+      hasSettledOpenRef.current = false
+      closingRef.current = false
+      if (pendingUnlockRef.current) {
+        pendingUnlockRef.current = false
+        onUnlockDismissibleRef.current?.()
+      }
+      onCloseRef.current()
+    })
+  }, [inline, translateX, overlayOpacity, cancelReleaseFreeze])
+
+  const handleBack = useCallback(() => {
+    if (typeof Keyboard.isVisible !== 'function' || Keyboard.isVisible()) Keyboard.dismiss()
+    if (!inline) {
+      if (!dismissibleRef.current) return
+      smoothClose(true)
+      return
+    }
+    onBackRef.current?.()
+  }, [inline, smoothClose])
+
+  const handleBackdropPress = useCallback(() => {
+    smoothClose(true)
+  }, [smoothClose])
+
+  const skippedInitialHiddenRef = useRef(!inline && !open)
+  useEffect(() => {
+    if (inline) {
+      skippedInitialHiddenRef.current = false
+      return
+    }
+    if (!open) {
+      if (skippedInitialHiddenRef.current) {
+        skippedInitialHiddenRef.current = false
+        return
+      }
+      animSeq.current++
+      cancelReleaseFreeze()
+      currentAnim.current?.stop()
+      currentAnim.current = null
+      closingRef.current = false
+      pendingUnlockRef.current = false
+      hasSettledOpenRef.current = false
+      gestureSeq.current++
+      dragReady.current = false
+      dragActiveRef.current = false
+      translateX.setValue(closedTranslateXRef.current)
+      overlayOpacity.setValue(0)
+      bodyResetRef.current?.()
+      return
+    }
+    skippedInitialHiddenRef.current = false
+    const seq = ++animSeq.current
+    currentAnim.current?.stop()
+    currentAnim.current = null
+    closingRef.current = false
+    if (immediateMount || hasSettledOpenRef.current) {
+      translateX.setValue(0)
+      overlayOpacity.setValue(1)
+      hasSettledOpenRef.current = true
+      return
+    }
+    translateX.setValue(closedTranslateXRef.current)
+    overlayOpacity.setValue(0)
+    const anim = Animated.parallel([
+      Animated.timing(translateX, { toValue: 0, duration: 220, useNativeDriver: true }),
+      Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+    ])
+    currentAnim.current = anim
+    anim.start(({ finished }) => {
+      if (!finished || seq !== animSeq.current) return
+      currentAnim.current = null
+      hasSettledOpenRef.current = true
+    })
+    return () => {
+      if (currentAnim.current === anim) {
+        anim.stop()
+        currentAnim.current = null
+      }
+    }
+  }, [inline, open, immediateMount, translateX, overlayOpacity, cancelReleaseFreeze])
+
+  const prevClosedTranslateXRef = useRef(closedTranslateX)
+  useEffect(() => {
+    if (prevClosedTranslateXRef.current === closedTranslateX) return
+    prevClosedTranslateXRef.current = closedTranslateX
+    if (!inline && !openRef.current && !closingRef.current) {
+      translateX.setValue(closedTranslateX)
+    }
+  }, [inline, closedTranslateX, translateX])
+
+  useEffect(() => {
+    if (closeRef === undefined) return
+    if (inline || !open) {
+      closeRef.current = undefined
+      return
+    }
+    closeRef.current = options => {
+      smoothClose(options?.withHaptic ?? true, options?.force ?? false)
+    }
+    return () => {
+      closeRef.current = undefined
+    }
+  }, [closeRef, inline, open, smoothClose])
+
+  useEffect(() => {
+    if (backRef === undefined) return
+    if (inline || !open) {
+      backRef.current = undefined
+      return
+    }
+    backRef.current = () => {
+      if (bodyBackRef.current?.()) return true
+      if (!dismissibleRef.current) return false
+      smoothClose(true)
+      return true
+    }
+    return () => {
+      backRef.current = undefined
+    }
+  }, [backRef, inline, open, smoothClose])
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponder: (_e, g) => (!inline && openRef.current && dismissibleRef.current && !closingRef.current && !dragActiveRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && openRef.current && dismissibleRef.current && !closingRef.current && !dragActiveRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          if (closingRef.current || !openRef.current) return
+          currentAnim.current?.stop()
+          const seq = ++gestureSeq.current
+          dragReady.current = false
+          translateX.stopAnimation(value => {
+            if (seq !== gestureSeq.current || closingRef.current || !openRef.current) return
+            dragStartX.current = value
+            dragReady.current = true
+          })
+        },
+        onPanResponderMove: (_e, g) => {
+          if (closingRef.current || !openRef.current || !dragReady.current) return
+          const next = clampDrawerTranslate(dragStartX.current + g.dx, drawerWidth)
+          translateX.setValue(next)
+          overlayOpacity.setValue(Math.max(0, 1 + next / drawerWidth))
+        },
+        onPanResponderRelease: (_e, g) => {
+          if (closingRef.current || !openRef.current) return
+          if (shouldConfirmSwipeLeftClose({ dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx })) {
+            smoothClose(true)
+          } else {
+            const seq = ++animSeq.current
+            currentAnim.current?.stop()
+            const anim = Animated.parallel([
+              Animated.spring(translateX, { toValue: 0, bounciness: 0, speed: 18, useNativeDriver: true }),
+              Animated.timing(overlayOpacity, { toValue: 1, duration: 160, useNativeDriver: true }),
+            ])
+            currentAnim.current = anim
+            anim.start(({ finished }) => {
+              if (!finished || seq !== animSeq.current) return
+              currentAnim.current = null
+            })
+          }
+        },
+      }),
+    [inline, drawerWidth, translateX, overlayOpacity, smoothClose],
+  )
+
+  const touchSwipeStartRef = useRef<{ x0: number; y0: number; t0: number } | undefined>(undefined)
+  const drawerTouchProps = useMemo(() => ({
+    ...panResponder.panHandlers,
+    onTouchStart: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+      touchSwipeStartRef.current = { x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, t0: Date.now() }
+    },
+    onTouchEnd: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+      const start = touchSwipeStartRef.current
+      touchSwipeStartRef.current = undefined
+      if (start === undefined || inline || !openRef.current || !dismissibleRef.current || closingRef.current || dragActiveRef.current) return
+      const dx = e.nativeEvent.pageX - start.x0
+      const dy = e.nativeEvent.pageY - start.y0
+      const dt = Math.max(16, Date.now() - start.t0)
+      const vx = dx / dt
+      if (
+        shouldStartSwipeLeftToClose({ dx, dy, x0: start.x0 })
+        && shouldConfirmSwipeLeftClose({ dx, dy, x0: start.x0, vx })
+      ) {
+        smoothClose(true)
+      }
+    },
+  }), [panResponder, inline, smoothClose])
+
+  const body = (
+    <HostSessionsDrawerBody
+      inline={inline}
+      gate={gate}
+      fullWidthCentered={fullWidthCentered}
+      showBackButton={showBackButton}
+      backLabel={backLabel}
+      botMode={botMode}
+      onHeaderBack={handleBack}
+      onClose={stableOnClose}
+      onOpenDeviceInfo={onOpenDeviceInfo}
+      onSelect={onSelect}
+      onOpenAutomationTasks={onOpenAutomationTasks}
+      onOpenPlugins={onOpenPlugins}
+      onOpenHostSwitcher={onOpenHostSwitcher}
+      onOpenSettings={onOpenSettings}
+      onOpenAbout={onOpenAbout}
+      onBotModeChange={onBotModeChange}
+      onSelectBot={onSelectBot}
+      smoothClose={smoothClose}
+      releaseFreeze={releaseFreeze}
+      resetRef={bodyResetRef}
+      backOverlayRef={bodyBackRef}
+      dragActiveRef={dragActiveRef}
+      onBotTabActiveChange={setBotTabActive}
+    />
+  )
+
   if (inline) {
-    return <View style={[styles.drawer, styles.inlineDrawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>{content}</View>
+    return (
+      <View style={[styles.drawer, styles.inlineDrawer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        {body}
+        <BotTeamLoadBridge enabled={visible && botTabActive} />
+        <BotModalsGate visible={visible} gate={gate} />
+      </View>
+    )
   }
 
   return (
     <View
+      collapsable={false}
       style={[StyleSheet.absoluteFill, styles.drawerHost]}
       pointerEvents={open ? 'box-none' : 'none'}
       accessibilityElementsHidden={!open}
@@ -2271,7 +2933,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
             { opacity: overlayOpacity },
           ]}
         >
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" onPress={() => smoothClose(true)} />
+          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" onPress={handleBackdropPress} />
         </Animated.View>
         <Animated.View
           accessibilityViewIsModal={open}
@@ -2290,7 +2952,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
             // drawer edge stays distinct against the dark scrim without a border.
             cappedDrawer && styles.drawerCapped,
             cappedDrawer && scheme === 'dark' && styles.drawerCappedDark,
-            !open && styles.drawerHiddenShadow,
+            cappedDrawer && !open && styles.drawerHiddenShadow,
           ]}
         >
           <View
@@ -2300,10 +2962,12 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
               cappedDrawer && styles.drawerClipCapped,
             ]}
           >
-            {content}
+            {body}
           </View>
         </Animated.View>
       </View>
+      <BotTeamLoadBridge enabled={visible && botTabActive} />
+      <BotModalsGate visible={visible} gate={gate} />
     </View>
   )
 })

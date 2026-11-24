@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, memo, useContext, useEffect, useRef, useState } from 'react'
 import { AccessibilityInfo, Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import * as Clipboard from 'expo-clipboard'
@@ -46,7 +46,7 @@ export function TurnUsageModal({
 }) {
   const { colors } = useTheme()
   const u = item.usage
-  if (!u) return null
+  if (!visible || !u) return null
 
   const totalTokens = u.totalTokens
   const cacheReadTokens = u.cacheReadTokens ?? 0
@@ -147,22 +147,25 @@ export function TurnUsageModal({
 /** Mutating icons only change after the official Host write has been read back. */
 export const BotMessageActionsContext = createContext(false)
 
-export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime?: boolean }) {
+export const MessageActions = memo(function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime?: boolean }) {
   const { colors } = useTheme()
-  const connected = useAppStore(state => state.connection.phase === 'connected')
-  const busy = useAppStore(state => state.busyAction !== undefined)
-  // The row's own session, not whatever happens to be selected afterwards.
-  const session = useAppStore(state => state.sessions.find(row => row.sessionId === item.sessionId)
-    ?? (state.selectedSession?.sessionId === item.sessionId ? state.selectedSession : undefined))
-  const backend = session?.backend
-  const isDeepSeekHarness = backend === undefined || backend === 'harness'
-  const harness = session !== undefined && isDeepSeekHarness
-  // Only delivered Harness messages have an official event prefix to fork.
-  const pending = item.sendState !== undefined
+  const user = item.role === 'user'
   const botConversation = useContext(BotMessageActionsContext)
-  const supportsBranch = !botConversation && harness && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
+  // Only delivered Harness assistant messages need store subscriptions for branch state.
+  const pending = item.sendState !== undefined
+  const mayBranch = !user && !botConversation && !pending && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
+  const isHarnessSession = useAppStore(state => {
+    if (!mayBranch) return false
+    const row = state.selectedSession?.sessionId === item.sessionId
+      ? state.selectedSession
+      : state.sessions.find(candidate => candidate.sessionId === item.sessionId)
+    return row !== undefined && (row.backend === undefined || row.backend === 'harness')
+  })
+  const supportsBranch = mayBranch && isHarnessSession
+  const branchDisabled = useAppStore(state => (
+    !supportsBranch ? false : (state.connection.phase !== 'connected' || state.busyAction !== undefined)
+  ))
   const time = messageTime(item)
-  const fork = useAppStore(state => state.forkChatMessage)
   const [copied, setCopied] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   const copyOpacity = useRef(new Animated.Value(1)).current
@@ -174,7 +177,7 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
     }
   }, [])
 
-  const disabled = !connected || busy || item.streaming === true
+  const disabled = branchDisabled || item.streaming === true
   const report = () => Alert.alert(strings.messageActions.failed, useAppStore.getState().error ?? strings.messageActions.unavailable)
 
   const handleCopy = () => {
@@ -204,11 +207,9 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
     if (!supportsBranch) return
     Alert.alert(strings.messageActions.branch, undefined, [
       { text: strings.common.cancel, style: 'cancel' },
-      { text: strings.messageActions.branch, onPress: () => { void fork(item).then(ok => { if (!ok) report() }) } },
+      { text: strings.messageActions.branch, onPress: () => { void useAppStore.getState().forkChatMessage(item).then(ok => { if (!ok) report() }) } },
     ])
   }
-
-  const user = item.role === 'user'
 
   if (user) {
     return (
@@ -236,6 +237,10 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
 
   const totalTokens = item.usage?.totalTokens
   const usageLabel = totalTokens !== undefined ? `${strings.messageActions.usage} ${formatTokens(totalTokens)} tok` : strings.messageActions.usage
+  const usageSession = usageOpen
+    ? (useAppStore.getState().sessions.find(row => row.sessionId === item.sessionId)
+      ?? (useAppStore.getState().selectedSession?.sessionId === item.sessionId ? useAppStore.getState().selectedSession : undefined))
+    : undefined
 
   return (
     <>
@@ -290,17 +295,17 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
         )}
       </View>
 
-      {item.usage !== undefined && (
+      {usageOpen && item.usage !== undefined && (
         <TurnUsageModal
           visible={usageOpen}
           onClose={() => setUsageOpen(false)}
           item={item}
-          session={session}
+          session={usageSession}
         />
       )}
     </>
   )
-}
+})
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', minHeight: 24 },

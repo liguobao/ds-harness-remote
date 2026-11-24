@@ -1,5 +1,5 @@
 import { ArrowUp, CircleStop, X } from 'lucide-react-native'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings } from '../../locales/i18n'
@@ -53,9 +53,19 @@ export type ExpandedComposerProps = {
   onStop: () => void
 }
 
-export function ExpandedComposer({
+export const ExpandedComposer = memo(function ExpandedComposer(props: ExpandedComposerProps) {
+  const [active, setActive] = useState(props.visible)
+  if (props.visible && !active) {
+    setActive(true)
+  }
+  if (!active) return null
+  return <ExpandedComposerContent {...props} onExitComplete={() => setActive(false)} />
+})
+
+function ExpandedComposerContent({
   visible,
   onClose,
+  onExitComplete,
   backend,
   draft,
   quotes,
@@ -71,7 +81,7 @@ export function ExpandedComposer({
   sendDisabled,
   onSubmit,
   onStop,
-}: ExpandedComposerProps) {
+}: ExpandedComposerProps & { onExitComplete: () => void }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
@@ -109,10 +119,13 @@ export function ExpandedComposer({
       useNativeDriver: true,
     })
     animation.start(({ finished }) => {
-      if (finished) setMounted(false)
+      if (finished) {
+        setMounted(false)
+        onExitComplete()
+      }
     })
     return () => animation.stop()
-  }, [visible, mounted, entrance, reduceMotion])
+  }, [visible, mounted, entrance, reduceMotion, onExitComplete])
 
   if (!mounted) {
     return null

@@ -17,19 +17,54 @@ const harness = vi.hoisted(() => {
   // Minimal stateful hook slots so tests can drive real hooks across re-renders.
   let hookCursor = 0
   let refSlots: Array<{ current: unknown } | undefined> = []
+  let callbackSlots: Array<{ fn: unknown; deps?: readonly unknown[] } | undefined> = []
   let effectSlots: Array<{ deps?: readonly unknown[]; cleanup?: () => void } | undefined> = []
+  let externalStoreSlots: Array<{
+    subscribe: (onStoreChange: () => void) => () => void
+    getSnapshot: () => unknown
+    lastSnapshot: unknown
+    cleanup?: () => void
+    onForceRender?: () => void
+    subscribed: boolean
+  } | undefined> = []
+  let onExternalStoreNotify: (() => void) | undefined
 
   const resetHooks = () => {
     for (const slot of effectSlots) {
       slot?.cleanup?.()
     }
+    for (const slot of externalStoreSlots) {
+      slot?.cleanup?.()
+    }
     hookCursor = 0
     refSlots = []
+    callbackSlots = []
     effectSlots = []
+    externalStoreSlots = []
+    onExternalStoreNotify = undefined
   }
 
   const beginRender = () => {
     hookCursor = 0
+  }
+
+  const flushExternalStoreSubscriptions = () => {
+    for (const slot of externalStoreSlots) {
+      if (slot === undefined || slot.subscribed) continue
+      slot.subscribed = true
+      slot.cleanup = slot.subscribe(() => {
+        const next = slot.getSnapshot()
+        if (!Object.is(slot.lastSnapshot, next)) {
+          slot.lastSnapshot = next
+          slot.onForceRender?.()
+        }
+      })
+      const postSub = slot.getSnapshot()
+      if (!Object.is(slot.lastSnapshot, postSub)) {
+        slot.lastSnapshot = postSub
+        slot.onForceRender?.()
+      }
+    }
   }
 
   return {
@@ -41,12 +76,55 @@ const harness = vi.hoisted(() => {
     keyboardDismissSpy,
     resetHooks,
     beginRender,
+    flushExternalStoreSubscriptions,
+    setExternalStoreNotify(fn: (() => void) | undefined) {
+      onExternalStoreNotify = fn
+    },
     useRef<T>(initial: T): { current: T } {
       const idx = hookCursor++
       if (refSlots[idx] === undefined) {
         refSlots[idx] = { current: initial }
       }
       return refSlots[idx] as { current: T }
+    },
+    useCallback<T extends (...args: never[]) => unknown>(fn: T, deps?: readonly unknown[]): T {
+      const idx = hookCursor++
+      const prev = callbackSlots[idx]
+      const unchanged = prev !== undefined
+        && deps !== undefined
+        && prev.deps !== undefined
+        && deps.length === prev.deps.length
+        && deps.every((dep, i) => Object.is(dep, prev.deps![i]))
+      if (unchanged) return prev.fn as T
+      callbackSlots[idx] = { fn, deps }
+      return fn
+    },
+    useSyncExternalStore<T>(
+      subscribe: (onStoreChange: () => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      const idx = hookCursor++
+      const snapshot = getSnapshot()
+      const existing = externalStoreSlots[idx]
+      if (existing === undefined) {
+        externalStoreSlots[idx] = {
+          subscribe,
+          getSnapshot,
+          lastSnapshot: snapshot,
+          onForceRender: onExternalStoreNotify,
+          subscribed: false,
+        }
+      } else {
+        existing.getSnapshot = getSnapshot
+        existing.lastSnapshot = snapshot
+        existing.onForceRender = onExternalStoreNotify
+        if (existing.subscribe !== subscribe) {
+          existing.cleanup?.()
+          existing.subscribe = subscribe
+          existing.subscribed = false
+        }
+      }
+      return snapshot
     },
     useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void {
       const idx = hookCursor++
@@ -74,6 +152,12 @@ vi.mock('react', async importOriginal => {
   return {
     ...actual,
     useRef: <T,>(initial: T) => harness.useRef(initial),
+    useCallback: <T extends (...args: never[]) => unknown>(fn: T, deps?: readonly unknown[]) =>
+      harness.useCallback(fn, deps),
+    useSyncExternalStore: <T,>(
+      subscribe: (onStoreChange: () => void) => () => void,
+      getSnapshot: () => T,
+    ) => harness.useSyncExternalStore(subscribe, getSnapshot),
     useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) =>
       harness.useEffect(effect, deps),
   }
@@ -89,9 +173,11 @@ vi.mock('react-native', () => ({
 }))
 
 import {
+  createStoreGate,
   selectGatedSnapshot,
   shouldAllowDrawerClose,
   useGatedStore,
+  useStoreGateSelector,
   type GatedSnapshotCache,
   type GatedStoreHook,
 } from '../src/lib/gated-store'
@@ -425,5 +511,102 @@ describe('drawer close contract across cold-start, hidden, and re-entry states',
       dismissible: true,
       force: true,
     })).toBe(false)
+  })
+})
+
+describe('StoreGate zero-notify freeze and synchronized reopen', () => {
+  it('emits zero notifications when freezing or reopening without changes, and notifies once on reopen when dirty', () => {
+    const gate = createStoreGate(true)
+    const listener = vi.fn()
+    const unsubscribe = gate.subscribe(listener)
+
+    try {
+      expect(gate.isActive()).toBe(true)
+
+      // Closing the drawer freezes subscribers with zero notifications.
+      gate.setActive(false)
+      expect(gate.isActive()).toBe(false)
+      expect(listener).not.toHaveBeenCalled()
+
+      // Reopening with no underlying store changes notifies zero times.
+      gate.setActive(true)
+      expect(gate.isActive()).toBe(true)
+      expect(listener).not.toHaveBeenCalled()
+
+      // Closing again, marking dirty while frozen, then reopening flushes once.
+      gate.setActive(false)
+      gate.markDirty()
+      gate.markDirty()
+      expect(listener).not.toHaveBeenCalled()
+
+      gate.setActive(true)
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      // Subsequent redundant setActive(true) does not re-notify.
+      gate.setActive(true)
+      expect(listener).toHaveBeenCalledTimes(1)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('useStoreGateSelector freezes background writes, flushes once on reopen, and catches writes before initial passive subscribe', () => {
+    harness.resetHooks()
+    const store = createStore<DemoStoreState>(() => ({
+      deviceId: 'host-1',
+      selectedSessionId: 's1',
+      streamTick: 0,
+      sessions: [{ id: 's1', title: 'Initial' }],
+    }))
+    const gate = createStoreGate(false)
+    let renderCount = 0
+    let latestSessions: Array<{ id: string; title: string }> = []
+
+    const render = () => {
+      renderCount += 1
+      harness.beginRender()
+      latestSessions = useStoreGateSelector(store, state => state.sessions, gate)
+      return latestSessions
+    }
+
+    harness.setExternalStoreNotify(() => {
+      render()
+    })
+
+    // 1. Mount closed: renders initial snapshot before passive subscription attaches.
+    expect(render()).toEqual([{ id: 's1', title: 'Initial' }])
+    expect(renderCount).toBe(1)
+
+    // 2. Store mutates in the window between initial render and passive-effect subscribe.
+    store.setState({ sessions: [{ id: 's1', title: 'Updated Before Subscribe' }] })
+    harness.flushExternalStoreSubscriptions()
+    expect(renderCount).toBe(1)
+
+    // 3. First open must see the write from step 2 rather than stale initial cache.
+    gate.setActive(true)
+    expect(renderCount).toBe(2)
+    expect(latestSessions).toEqual([{ id: 's1', title: 'Updated Before Subscribe' }])
+
+    // 4. Closing freezes subscriptions with 0 re-renders; background writes trigger 0 renders.
+    gate.setActive(false)
+    expect(renderCount).toBe(2)
+    for (let tick = 1; tick <= 5; tick += 1) {
+      store.setState({
+        streamTick: tick,
+        sessions: [{ id: 's1', title: `Tick ${tick}` }],
+      })
+    }
+    expect(renderCount).toBe(2)
+    expect(latestSessions).toEqual([{ id: 's1', title: 'Updated Before Subscribe' }])
+
+    // 5. Reopening flushes once with the latest snapshot.
+    gate.setActive(true)
+    expect(renderCount).toBe(3)
+    expect(latestSessions).toEqual([{ id: 's1', title: 'Tick 5' }])
+
+    // 6. Close + reopen without store changes triggers 0 extra renders.
+    gate.setActive(false)
+    gate.setActive(true)
+    expect(renderCount).toBe(3)
   })
 })
