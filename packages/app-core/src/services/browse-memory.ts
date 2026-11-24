@@ -2,6 +2,7 @@ import { strings } from '../locales/i18n'
 import { create } from 'zustand'
 const filesystem = () => import('expo-file-system/legacy')
 import { encryptFrame, decryptFrame, fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
+import { parseHandoffMessage, parseHandoffMeta, type PendingHandoffDraft } from '../lib/handoff-context'
 import { acpWorkspaceSuppressionKey, isAcpManagedBackend, isDeletedAcpWorkspace } from '../lib/workspace-key'
 import type { AgentBackend, ChatImage, ChatItem, PromptImage, RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../types'
 
@@ -9,7 +10,8 @@ export { isDeletedAcpWorkspace }
 
 export type ReadingPosition = { key?: string; offset: number; atBottom: boolean }
 export type BrowseEntry = {
-  draft?: string; images?: PromptImage[]; quotes?: string[]; position?: ReadingPosition; starred?: boolean
+  draft?: string; images?: PromptImage[]; quotes?: string[]; handoff?: PendingHandoffDraft
+  position?: ReadingPosition; starred?: boolean
   seenAt?: number; visitedAt?: number; session?: RemoteSession
   groupRounds?: Record<string, Record<string, string | number | boolean | null>[]>
   messages?: ChatItem[]
@@ -234,16 +236,41 @@ function sanitizeDraftQuotes(quotes?: string[]): string[] | undefined {
   return valid.length === 0 ? undefined : valid
 }
 
+function sanitizePendingHandoff(value: unknown): PendingHandoffDraft | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.contextBlock !== 'string'
+    || candidate.contextBlock.length === 0
+    || candidate.contextBlock.length > MAX_TEXT_CHARS
+  ) {
+    return undefined
+  }
+  const meta = parseHandoffMeta(candidate.meta)
+  if (meta === undefined) return undefined
+  if (parseHandoffMessage(candidate.contextBlock) === undefined) return undefined
+  return {
+    meta: {
+      ...meta,
+      ...(meta.sourceTitle !== undefined ? { sourceTitle: capText(meta.sourceTitle) } : {}),
+      ...(meta.cwd !== undefined ? { cwd: capText(meta.cwd) } : {}),
+    },
+    contextBlock: candidate.contextBlock,
+  }
+}
+
 function savedEntry(value: BrowseEntry): BrowseEntry {
   const messages = sanitizeCachedMessages(value.messages)
   const images = sanitizeDraftImages(value.images)
   const quotes = sanitizeDraftQuotes(value.quotes)
+  const handoff = sanitizePendingHandoff(value.handoff)
   return { draft: value.draft, position: value.position, starred: value.starred,
     seenAt: value.seenAt, visitedAt: value.visitedAt,
     session: value.session === undefined ? undefined : safeSession(value.session),
     groupRounds: sanitizeGroupRounds(value.groupRounds),
     ...(images !== undefined ? { images } : {}),
     ...(quotes !== undefined ? { quotes } : {}),
+    ...(handoff !== undefined ? { handoff } : {}),
     ...(messages !== undefined ? { messages } : {}) }
 }
 function snapshot(): Snapshot {

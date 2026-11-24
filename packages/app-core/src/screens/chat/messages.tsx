@@ -1,6 +1,6 @@
 import { heartbeatMessageBody } from '../../ui/heartbeat-message'
 import { ChatImageView } from '../../ui/chat-image'
-import { ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
+import { ArrowRightLeft, ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -19,6 +19,7 @@ import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import { triggerLightHaptic } from '../../ui/haptics'
 import Svg, { Path } from 'react-native-svg'
+import { parseHandoffMessage, type ParsedHandoffMessage } from '../../lib/handoff-context'
 import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
 import { readToolHistoryDetail, useAppStore } from '../../state/store'
@@ -51,6 +52,7 @@ import type { ProcessActivity, ProcessSegment } from '../chat-process'
 import { aggregateTurnUsage, processSummary, processDetail, processSegments, sameUsage, shouldShowTurnResponseActions, toolActivity, toolDisplayName } from '../chat-process'
 import { MessageActions } from '../message-actions'
 import { IntelligentUiCard } from '../intelligent-ui-card'
+import { harnessDisplayName, handoffPresetLabel } from './handoff-modal'
 import { createStyles } from './styles'
 import type { MarkdownChunkSection } from './transcript-chunks'
 
@@ -513,6 +515,108 @@ export function getUserBubblePalettes(colors: ThemeColors): UserBubblePalettes {
   return palettes
 }
 
+function HandoffContextCard({
+  parsed,
+  userBubble,
+  isSolid,
+  solidText,
+  palette,
+  hasTrailingBody,
+}: {
+  parsed: ParsedHandoffMessage
+  userBubble: boolean
+  isSolid: boolean
+  solidText: string
+  palette: ReturnType<typeof useTheme>['colors']
+  hasTrailingBody: boolean
+}) {
+  const { colors, scheme } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const [expanded, setExpanded] = useState(false)
+  const { meta } = parsed
+  const darkSolidText = isSolid && !/^#(?:fff|ffffff)$/iu.test(solidText.trim())
+  const cardBg = userBubble
+    ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.08)' : 'rgba(255, 255, 255, 0.12)')
+    : isSolid
+      ? (darkSolidText ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.14)')
+      : colors.surface
+  const cardBorder = userBubble
+    ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.16)' : 'rgba(255, 255, 255, 0.22)')
+    : isSolid
+      ? (darkSolidText ? 'rgba(0, 0, 0, 0.14)' : 'rgba(255, 255, 255, 0.24)')
+      : palette.surfaceStrong
+  const chipBg = userBubble
+    ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.12)' : 'rgba(255, 255, 255, 0.18)')
+    : isSolid
+      ? (darkSolidText ? 'rgba(0, 0, 0, 0.12)' : palette.surfaceStrong)
+      : colors.primarySoft
+  const chipText = userBubble || isSolid ? palette.ink : colors.primary
+  const bodyBg = userBubble
+    ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.06)' : 'rgba(0, 0, 0, 0.18)')
+    : isSolid
+      ? (darkSolidText ? 'rgba(0, 0, 0, 0.06)' : 'rgba(0, 0, 0, 0.16)')
+      : (colors.codeSurface ?? colors.surfaceStrong)
+  const stats = meta.filesCount > 0
+    ? zhCN.handoff.cardStats(meta.turnsCount, meta.filesCount)
+    : zhCN.handoff.cardStatsNoFiles(meta.turnsCount)
+  const title = zhCN.handoff.cardTitle(
+    harnessDisplayName(meta.sourceBackend),
+    harnessDisplayName(meta.targetBackend),
+  )
+
+  return (
+    <View
+      style={[
+        styles.handoffCard,
+        hasTrailingBody && styles.handoffCardSpacing,
+        { backgroundColor: cardBg, borderColor: cardBorder },
+      ]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={expanded ? zhCN.handoff.collapseContext : zhCN.handoff.expandContext}
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded(value => !value)}
+        style={styles.handoffCardHeader}
+      >
+        <View style={styles.handoffCardTitleRow}>
+          <ArrowRightLeft size={14} color={userBubble || isSolid ? palette.ink : palette.primary} />
+          <Text style={[styles.handoffCardTitle, { color: palette.ink }]} numberOfLines={2}>
+            {title}
+          </Text>
+          {meta.preset !== 'custom' && (
+            <View style={[styles.handoffCardPresetChip, { backgroundColor: chipBg }]}>
+              <Text style={[styles.handoffCardPresetText, { color: chipText }]}>
+                {handoffPresetLabel(meta.preset)}
+              </Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.handoffCardMetaRow}>
+          <Text
+            style={[styles.handoffCardStats, { color: palette.muted }, (userBubble || isSolid) && { opacity: 0.82 }]}
+            numberOfLines={1}
+          >
+            {stats}
+          </Text>
+          {expanded
+            ? <ChevronUp size={15} color={palette.muted} />
+            : <ChevronDown size={15} color={palette.muted} />}
+        </View>
+      </Pressable>
+      {expanded && (
+        <View style={[styles.handoffCardBody, { borderTopColor: cardBorder, backgroundColor: bodyBg }]}>
+          <ScrollView style={styles.handoffCardBodyScroll} nestedScrollEnabled showsVerticalScrollIndicator>
+            <Text selectable style={[styles.handoffCardBodyText, { color: palette.ink }]}>
+              {parsed.contextBody}
+            </Text>
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  )
+}
+
 function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
   item: ChatMessage
   compact: boolean
@@ -537,12 +641,14 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
   const hasArtifacts = artifacts !== undefined && artifacts.length > 0
   const userMessageParts = useMemo(() => {
     if (!user) return undefined
-    const heartbeatBody = heartbeatMessageBody(item.text, 'user')
-    const { quotes, body } = parseMessageQuotes(item.text)
+    const parsedHandoff = parseHandoffMessage(item.text)
+    const heartbeatBody = parsedHandoff === undefined ? heartbeatMessageBody(item.text, 'user') : undefined
+    const effectiveMessageText = parsedHandoff !== undefined ? parsedHandoff.instruction : item.text
+    const { quotes, body } = parseMessageQuotes(effectiveMessageText)
     const extracted = heartbeatBody === undefined
       ? extractUserSubmittedFiles(body, item.files)
       : { files: [], displayText: body }
-    return { heartbeatBody, quotes, extracted }
+    return { parsedHandoff, heartbeatBody, quotes, extracted }
   }, [user, item.text, item.files])
 
   // Harness renders assistant prose directly on the conversation canvas.
@@ -572,14 +678,15 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
   if (user && userMessageParts !== undefined) {
     const undelivered = item.sendState === 'failed' || item.sendState === 'unconfirmed'
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
-    const { heartbeatBody, quotes, extracted } = userMessageParts
+    const { parsedHandoff, heartbeatBody, quotes, extracted } = userMessageParts
     const submittedFiles = extracted.files
     const displayBody = extracted.displayText
-    const hasBubbleText = heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(displayBody)
+    const hasBubbleText = parsedHandoff !== undefined || heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(displayBody)
     const showBubbleContent = hasBubbleText || showImages
     const solidText = colors.onPrimary ?? colors.white
     const isSolid = !userBubble && appearance.bubbleStyle === 'solid'
     const userPalettes = getUserBubblePalettes(colors)
+    const activePalette = userBubble ? userPalettes.bubble : isSolid ? userPalettes.solid : userPalettes.soft
     const userBubbleStyle = userBubble
       ? styles.userBubble
       : !hasBubbleText
@@ -592,6 +699,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
               ? styles.userMinimalBubble
               : styles.userSoftBubble
     const quoteTint = userBubble ? colors.onInverse : isSolid ? solidText : colors.primary
+    const hasTrailingInstruction = quotes.length > 0 || hasVisibleMessageText(displayBody)
     return <View style={styles.userBlock}>
       {submittedFiles.length > 0 && (
         <SubmittedFileStack files={submittedFiles} sessionId={item.sessionId} onFilePress={resolvedFilePress} />
@@ -599,6 +707,16 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
       {showBubbleContent && (
         <View style={[styles.userContent, userBubbleStyle]}>
           {showImages && <ChatImages images={item.images!} alignEnd />}
+          {parsedHandoff !== undefined && (
+            <HandoffContextCard
+              parsed={parsedHandoff}
+              userBubble={Boolean(userBubble)}
+              isSolid={isSolid}
+              solidText={solidText}
+              palette={activePalette}
+              hasTrailingBody={hasTrailingInstruction}
+            />
+          )}
           {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
             <View style={styles.userMessageInlineWrap}>
               {quotes.map((quoteText, index) => (
@@ -616,7 +734,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
           ) : (
             hasVisibleMessageText(displayBody) && (
               <View style={styles.userMarkdownWrap}>
-                <NativeMarkdown text={displayBody} colors={userBubble ? userPalettes.bubble : isSolid ? userPalettes.solid : userPalettes.soft} />
+                <NativeMarkdown text={displayBody} colors={activePalette} />
               </View>
             )
           )}

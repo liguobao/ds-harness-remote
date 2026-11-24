@@ -1686,6 +1686,205 @@ describe('HarnessAlphaClient', () => {
 
     await client.close()
   })
+
+  it('reads another session read-only via session/page without closing an active sessionFollow', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, {}, frame => frames.push(frame))
+    const originalRpc = core.rpc.bind(core)
+    vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+      if (method === 'harness.remote.call' && (params as { endpoint?: string }).endpoint === 'session/page') {
+        await originalRpc(method, params)
+        const req = (params as { payload?: { args?: { request?: Record<string, unknown> } } }).payload?.args?.request
+        if ((req?.address as { sessionId?: string } | undefined)?.sessionId === 'other-session') {
+          return {
+            ok: true,
+            value: {
+              records: [
+                { type: 'event', event: { type: 'user/message', seq: 1, time: 100, data: { content: 'hi' } } },
+                { type: 'chunks', event: { type: 'chunkrow/text-chunks', seq: 2, time: 110, data: { turn: 1, step: 1, index: 0, dt: [4], texts: ['he', 'y'] } } },
+              ],
+              hasMore: true,
+            },
+          }
+        }
+        return { ok: true, value: { records: [], hasMore: false } }
+      }
+      return await originalRpc(method, params)
+    })
+
+    const activeHistory = client.sessionHistory('active-session')
+    await vi.waitFor(() => expect(core.streamIdFor('session/follow')).toBeTruthy())
+    const activeStreamId = core.streamIdFor('session/follow')
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: activeStreamId,
+        hasValue: true,
+        value: { type: 'snapshot', cursor: 4, records: [], hasMore: false, projections: { asOfSeq: 4, values: {} } },
+      },
+    })
+    await expect(activeHistory).resolves.toEqual({ events: [], hasMore: false, throughSeq: 4 })
+
+    const readOnly = await client.sessionReadOnlyHistory('other-session', 60)
+    expect(readOnly).toEqual({
+      events: [
+        { event: { type: 'user/message', seq: 1, time: 100, data: { content: 'hi' } } },
+        { event: { type: 'assistant/chunk', seq: 2, time: 110, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'he' } } } },
+        { event: { type: 'assistant/chunk', seq: 3, time: 114, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'y' } } } },
+      ],
+      hasMore: true,
+      throughSeq: 3,
+    })
+
+    // Active sessionFollow must remain open and still receive live frames.
+    expect(core.rpcCalls.filter(call => call.method === 'harness.remote.stream.close')).toHaveLength(0)
+    expect(core.rpcCalls.filter(call => call.method === 'harness.remote.stream.open')).toHaveLength(1)
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: activeStreamId,
+        hasValue: true,
+        value: { type: 'event', event: { type: 'user/message', seq: 5, time: 200, data: { content: 'still live' } } },
+      },
+    })
+    await vi.waitFor(() => expect(frames).toContainEqual({
+      rpcId: '',
+      payload: {
+        type: 'session/event',
+        sessionId: 'active-session',
+        event: { type: 'user/message', seq: 5, time: 200, data: { content: 'still live' } },
+      },
+    }))
+
+    // Active session pagination still sees its preserved followCursor.
+    await client.sessionHistory('active-session', 2, 20)
+    const activePageCall = core.rpcCalls.findLast(call => call.method === 'harness.remote.call'
+      && (call.params as { endpoint?: string }).endpoint === 'session/page')
+    expect((activePageCall?.params as { payload?: unknown })?.payload).toEqual({
+      args: { request: { address: { kind: 'session', sessionId: 'active-session' }, throughSeq: 4, beforeSeq: 2, maxMessages: 20 } },
+    })
+    await client.close()
+  })
+
+  it('falls back to session/events and slices maxMessages when session/page returns METHOD_NOT_FOUND', async () => {
+    const core = new ScriptedCore()
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+    const originalRpc = core.rpc.bind(core)
+    vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+      if (method === 'harness.remote.call') {
+        const request = params as { endpoint?: string; payload?: unknown }
+        if (request.endpoint === 'session/page') {
+          return { ok: false, error: { code: 'METHOD_NOT_FOUND', message: 'session/page unsupported', details: {} } }
+        }
+        if (request.endpoint === 'session/events') {
+          expect(request.payload).toEqual({
+            args: {
+              request: {
+                address: { kind: 'subagent', parentSessionId: 'parent-1', childSessionId: 'child-1', mode: 'unknown' },
+              },
+            },
+          })
+          return {
+            ok: true,
+            value: {
+              events: [
+                { type: 'user/message', seq: 1, time: 100, data: { content: 'old' } },
+                { type: 'assistant/message', seq: 2, time: 105, data: { content: 'mid' } },
+                { type: 'user/message', seq: 3, time: 110, data: { content: 'new' } },
+              ],
+            },
+          }
+        }
+      }
+      return await originalRpc(method, params)
+    })
+
+    const page = await client.sessionReadOnlyHistory('child-1', 2, 'parent-1')
+    expect(page).toEqual({
+      events: [
+        { event: { type: 'assistant/message', seq: 2, time: 105, data: { content: 'mid' } } },
+        { event: { type: 'user/message', seq: 3, time: 110, data: { content: 'new' } } },
+      ],
+      hasMore: true,
+      throughSeq: 3,
+    })
+    await client.close()
+  })
+
+  it('preserves user prompt and complete chunked assistant stream (>60 chunks) on session/events fallback', async () => {
+    const core = new ScriptedCore()
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+    const originalRpc = core.rpc.bind(core)
+    const texts = Array.from({ length: 75 }, (_, idx) => `tok-${idx} `)
+    vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+      if (method === 'harness.remote.call') {
+        const request = params as { endpoint?: string }
+        if (request.endpoint === 'session/page') {
+          return { ok: false, error: { code: 'gateway/arguments-invalid', message: 'invalid page args', details: {} } }
+        }
+        if (request.endpoint === 'session/events') {
+          return {
+            ok: true,
+            value: {
+              records: [
+                { type: 'event', event: { type: 'user/message', seq: 1, time: 100, data: { content: 'keep this goal' } } },
+                {
+                  type: 'chunks',
+                  event: {
+                    type: 'chunkrow/text-chunks',
+                    seq: 2,
+                    time: 101,
+                    data: { turn: 1, step: 1, index: 0, texts, dt: texts.slice(1).map(() => 1) },
+                  },
+                },
+                { type: 'event', event: { type: 'turn/end', seq: 80, time: 200, data: { turn: 1 } } },
+              ],
+            },
+          }
+        }
+      }
+      return await originalRpc(method, params)
+    })
+
+    const page = await client.sessionReadOnlyHistory('chunked-1', 60)
+    expect(page.hasMore).toBe(false)
+    expect(page.throughSeq).toBe(80)
+    expect(page.events[0]).toEqual({
+      event: { type: 'user/message', seq: 1, time: 100, data: { content: 'keep this goal' } },
+    })
+    const chunkEntries = page.events.filter(entry => entry.event.type === 'assistant/chunk')
+    expect(chunkEntries).toHaveLength(75)
+    expect(page.events.at(-1)).toEqual({
+      event: { type: 'turn/end', seq: 80, time: 200, data: { turn: 1 } },
+    })
+    await client.close()
+  })
+
+  it('returns empty session/page records without calling session/events fallback', async () => {
+    const core = new ScriptedCore()
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+    const originalRpc = core.rpc.bind(core)
+    const eventsCalled = vi.fn()
+    vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+      if (method === 'harness.remote.call') {
+        const request = params as { endpoint?: string }
+        if (request.endpoint === 'session/page') {
+          return { ok: true, value: { records: [], hasMore: false } }
+        }
+        if (request.endpoint === 'session/events') {
+          eventsCalled()
+          return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'should not be called', details: {} } }
+        }
+      }
+      return await originalRpc(method, params)
+    })
+
+    const page = await client.sessionReadOnlyHistory('empty-session', 60)
+    expect(page).toEqual({ events: [], hasMore: false })
+    expect(eventsCalled).not.toHaveBeenCalled()
+    await client.close()
+  })
 })
 
 

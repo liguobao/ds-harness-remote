@@ -1,4 +1,5 @@
 import type { AgentAcpFrameData } from '@dsh-remote/protocol'
+import type { HandoffPacket } from '../lib/handoff-context'
 import type { AppLanguage, LanguagePreference } from '../locales/i18n'
 import type { OAuthProviderInfo, OAuthQrPollResult, OAuthQrSession } from '../services/api'
 import type {
@@ -51,6 +52,24 @@ export interface QrLoginStart {
   baseUrl: string
   provider: OAuthProviderInfo
   session: OAuthQrSession
+}
+
+export interface HandoffSessionParams {
+  targetBackend: AgentBackend
+  targetWorkspaceId?: string
+  registerPath?: string
+  targetSessionId?: string
+  instruction: string
+  packet: HandoffPacket
+  mode: 'send' | 'draft'
+}
+
+export interface HandoffSessionResult {
+  ok: boolean
+  session?: RemoteSession
+  workspace?: WorkspaceView
+  delivered?: 'sent' | 'kept' | 'draft' | 'draft-fallback'
+  error?: string
 }
 
 export interface AppState {
@@ -187,6 +206,8 @@ export interface AppState {
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
   createSession(workspaceId?: string, backend?: AgentBackend): Promise<boolean>
+  loadSessionHandoffItems(session: RemoteSession): Promise<ChatItem[]>
+  handoffSession(params: HandoffSessionParams): Promise<HandoffSessionResult>
   forkSession(sessionId: string, backend?: RemoteSession['backend']): Promise<RemoteSession | undefined>
   archiveSession(sessionId: string): Promise<boolean>
   unarchiveSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>

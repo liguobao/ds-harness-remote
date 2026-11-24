@@ -131,6 +131,63 @@ export function createStyles(
     userMinimalBubble: { backgroundColor: 'transparent', borderRadius: 18, borderTopRightRadius: 6, borderWidth: 1, borderColor: colors.border, maxWidth: '100%' },
     userBubble: { backgroundColor: colors.inverse, borderRadius: 18, borderTopRightRadius: 6, maxWidth: '100%' },
     userMarkdownWrap: { marginBottom: -m.paragraphGap },
+    handoffCard: {
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      overflow: 'hidden',
+    },
+    handoffCardSpacing: {
+      marginBottom: spacing.xs,
+    },
+    handoffCardHeader: {
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 4,
+    },
+    handoffCardTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    handoffCardTitle: {
+      ...t.caption,
+      fontWeight: '600',
+      flex: 1,
+    },
+    handoffCardPresetChip: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: radius.pill,
+    },
+    handoffCardPresetText: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontWeight: '600',
+    },
+    handoffCardMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.xs,
+      paddingLeft: 20,
+    },
+    handoffCardStats: {
+      ...t.caption,
+      flex: 1,
+    },
+    handoffCardBody: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    handoffCardBodyScroll: {
+      maxHeight: 220,
+    },
+    handoffCardBodyText: {
+      fontFamily: monoFontFamily,
+      fontSize: Math.max(11, m.codeFontSize - 0.5),
+      lineHeight: Math.max(15, m.codeLineHeight - 1),
+    },
     userMessageInlineWrap: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -524,6 +581,41 @@ export function createStyles(
       fontWeight: '500',
       color: colors.primary,
       flexShrink: 1,
+    },
+    handoffDraftRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    handoffDraftChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      maxWidth: '100%',
+      paddingLeft: 10,
+      paddingRight: 6,
+      paddingVertical: 5,
+      borderRadius: radius.pill,
+      backgroundColor: colors.primarySoft,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.primary,
+    },
+    handoffDraftChipTrigger: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      flexShrink: 1,
+    },
+    handoffDraftChipText: {
+      ...t.smallStrong,
+      fontSize: 13,
+      lineHeight: 17,
+      color: colors.primary,
+      flexShrink: 1,
+    },
+    handoffDraftChipRemove: {
+      padding: 2,
     },
     composerInputSlotInline: {
       minHeight: 36,

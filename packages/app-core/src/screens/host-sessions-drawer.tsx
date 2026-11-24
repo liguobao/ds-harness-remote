@@ -23,6 +23,7 @@ import * as Clipboard from 'expo-clipboard'
 import Svg, { Path } from 'react-native-svg'
 import {
   ArrowLeft,
+  ArrowRightLeft,
   Bot,
   Check,
   ChevronDown,
@@ -68,7 +69,9 @@ import { useReduceMotion } from '../ui/use-reduce-motion'
 import { resolveSessionDisplayTitle } from './session-title'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { isVisibleSession } from '../lib/session-visibility'
+import { isSubagentSession } from '../lib/session-kind'
 import { isAcpManagedBackend } from '../lib/workspace-key'
+import { harnessDisplayName } from './chat/handoff-modal'
 import { browseStatus } from '../lib/backend-groups'
 import { browseScope, saveHostMode, useBrowseMemory } from '../services/browse-memory'
 import {
@@ -168,26 +171,13 @@ const HARNESS_OPTIONS: HarnessOption[] = [
   { value: 'pi', name: 'Pi' },
 ]
 
-function harnessDisplayName(value: AgentBackend): string {
-  switch (value) {
-    case 'harness': return 'DeepSeek'
-    case 'codex': return 'Codex'
-    case 'claude': return 'Claude'
-    case 'hermes': return 'Hermes'
-    case 'cursor': return 'Cursor'
-    case 'antigravity': return 'Antigravity'
-    case 'opencode': return 'OpenCode'
-    case 'pi': return 'Pi'
-    default: return value
-  }
-}
-
 export interface HostSessionsDrawerProps {
   onBack?: () => void
   onClose: () => void
   onOpenWorkspaces?: () => void
   onOpenDeviceInfo?: () => void
   onSelect: (session: RemoteSession) => Promise<void>
+  onHandoffSession?: (session: RemoteSession, workspace?: WorkspaceView) => void
   onNewSession?: () => Promise<void> | void
   onOpenAutomationTasks?: () => void
   onOpenPlugins?: () => void
@@ -558,6 +548,7 @@ interface HostSessionsDrawerBodyProps {
   onHeaderBack: () => void
   onClose: () => void
   onOpenDeviceInfo?: () => void
+  onHandoffSession?: HostSessionsDrawerProps['onHandoffSession']
   onSelect: (session: RemoteSession) => Promise<void>
   onOpenAutomationTasks?: () => void
   onOpenPlugins?: () => void
@@ -585,6 +576,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   onClose,
   onOpenDeviceInfo,
   onSelect,
+  onHandoffSession,
   onOpenAutomationTasks,
   onOpenPlugins,
   onOpenHostSwitcher,
@@ -702,6 +694,15 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   const [botSearchQuery, setBotSearchQuery] = useState('')
 
   const [menuSession, setMenuSession] = useState<RemoteSession | null>(null)
+  const handoffTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const clearHandoffTimer = useCallback(() => {
+    if (handoffTimerRef.current !== undefined) {
+      clearTimeout(handoffTimerRef.current)
+      handoffTimerRef.current = undefined
+    }
+  }, [])
+  useEffect(() => clearHandoffTimer, [clearHandoffTimer])
+  useEffect(() => { clearHandoffTimer() }, [deviceId, clearHandoffTimer])
   const [renameTarget, setRenameTarget] = useState<{ sessionId: string; currentTitle: string; backend?: RemoteSession['backend'] } | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
@@ -970,13 +971,14 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
 
   useEffect(() => {
     if (!connected) {
+      clearHandoffTimer()
       setMenuSession(null)
       setRenameTarget(null)
       setRenameError(null)
       setRenaming(false)
       setToastMessage(null)
     }
-  }, [connected])
+  }, [connected, clearHandoffTimer])
 
   useEffect(() => {
     if (!toastMessage) return
@@ -1286,6 +1288,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   }
 
   const closeDrawer = useCallback(() => {
+    clearHandoffTimer()
     const state = transientStateRef.current
     if (state.menuSession !== null) setMenuSession(null)
     if (state.renameTarget !== null) setRenameTarget(null)
@@ -1293,9 +1296,10 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
     if (state.renaming) setRenaming(false)
     if (state.toastMessage !== null) setToastMessage(null)
     onClose()
-  }, [onClose])
+  }, [onClose, clearHandoffTimer])
 
   resetRef.current = () => {
+    clearHandoffTimer()
     const state = transientStateRef.current
     if (state.menuSession !== null) setMenuSession(null)
     if (state.renameTarget !== null) setRenameTarget(null)
@@ -2195,6 +2199,31 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                 </Pressable>
               )}
 
+              {connected && onHandoffSession !== undefined && !isSubagentSession(menuSession) && menuSession.blank !== true && (
+                <Pressable
+                  accessibilityRole="menuitem"
+                  accessibilityLabel={strings.handoff.action}
+                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
+                  onPress={() => {
+                    const targetSession = menuSession
+                    const menuWorkspace = workspaces.find(w => w.sessionIds.includes(targetSession.sessionId))
+                    setMenuSession(null)
+                    if (Platform.OS === 'ios') {
+                      if (handoffTimerRef.current !== undefined) clearTimeout(handoffTimerRef.current)
+                      handoffTimerRef.current = setTimeout(() => {
+                        handoffTimerRef.current = undefined
+                        onHandoffSession(targetSession, menuWorkspace)
+                      }, 80)
+                    } else {
+                      onHandoffSession(targetSession, menuWorkspace)
+                    }
+                  }}
+                >
+                  <ArrowRightLeft size={16} color={colors.ink} />
+                  <Text style={styles.menuItemText}>{strings.handoff.action}</Text>
+                </Pressable>
+              )}
+
               {canUseHarnessActions && (
                 <Pressable
                   accessibilityRole="menuitem"
@@ -2556,6 +2585,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
   onOpenWorkspaces: _onOpenWorkspaces,
   onOpenDeviceInfo,
   onSelect,
+  onHandoffSession,
   onNewSession: _onNewSession,
   onOpenAutomationTasks,
   onOpenPlugins,
@@ -2888,6 +2918,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
       onHeaderBack={handleBack}
       onClose={stableOnClose}
       onOpenDeviceInfo={onOpenDeviceInfo}
+      onHandoffSession={onHandoffSession}
       onSelect={onSelect}
       onOpenAutomationTasks={onOpenAutomationTasks}
       onOpenPlugins={onOpenPlugins}
