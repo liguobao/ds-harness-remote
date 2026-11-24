@@ -9,12 +9,14 @@ export function useChatBackHandler(
   onBack: () => boolean | void,
   panels: BackPanel[],
   active = true,
+  beforePanels?: () => boolean,
 ) {
-  const latest = useRef({ onBack, panels, active })
-  latest.current = { onBack, panels, active }
+  const latest = useRef({ onBack, panels, active, beforePanels })
+  latest.current = { onBack, panels, active, beforePanels }
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!latest.current.active) return false
+      if (latest.current.beforePanels?.() === true) return true
       const panel = latest.current.panels.find(panel => panel.open)
       if (panel !== undefined) {
         panel.close()

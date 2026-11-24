@@ -4,9 +4,10 @@ import { SessionTransferHost, type TransferServices } from './session-transfer.j
 import { LanUploadHost } from './lan-upload.js'
 import { HostPairing } from './host-pairing.js'
 import type { HostPairingView } from './pairing-contract.js'
+import { WorkspaceGitHost } from './workspace-git.js'
 import { WorkspaceUploadHost } from './workspace-upload.js'
 import { WorkspaceUploadBudget } from './workspace-upload-budget.js'
-import { workspaceUploadRootResolver } from './workspace-upload-authority.js'
+import { resolveSessionWorkspaceRoot, workspaceUploadRootResolver } from './workspace-upload-authority.js'
 import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
 import { createEvent, REMOTE_SESSION_EVENTS_CAPABILITY, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
@@ -49,7 +50,7 @@ import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
 import { AcpRemoteGateway } from './acp/gateway.js'
 import { AcpWorkspaceStore } from './acp/workspace-store.js'
 import type { AcpPeerBridge, PublishAcpFrame } from './acp/peer-bridge.js'
-import { RpcError } from './safe-error.js'
+import { RpcError, workspaceFileFailure } from './safe-error.js'
 import { CodexWorkspaceBridge, CodexWorkspaceState, type RemoteTerminalSpawner } from './codex-workspace-bridge.js'
 
 export interface HostConnectedClient {
@@ -217,6 +218,13 @@ export class HostPluginRuntime {
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
         ), undefined, context.transportMode, Date.now, this.uploadBudget)
+      const workspaceGit = new WorkspaceGitHost(resolveSessionWorkspaceRoot(
+        peerGateway,
+        () => harnessSessionGeneration(this.harnessVersion) === 'v3',
+        threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+        sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
+        () => workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The session workspace is unavailable.', 'authority-unavailable'),
+      ))
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId, peerIdentityKey: context.peerIdentityKey,
         identity: () => this.currentIdentity(), mode: context.transportMode,
@@ -248,6 +256,7 @@ export class HostPluginRuntime {
         resolveDshWeb && context.transportMode && context.lanWebAddress
           ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : undefined,
         context.sameLinkIpv6Endpoints,
+        workspaceGit,
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {

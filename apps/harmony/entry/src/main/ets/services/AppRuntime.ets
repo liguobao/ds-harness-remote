@@ -8,7 +8,7 @@ import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { notificationManager } from '@kit.NotificationKit';
-import { SecureStore, StoredServerConfig, SavedProfile } from './SecureStore';
+import { SecureStore, StoredServerConfig } from './SecureStore';
 import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
   AccountMembership, OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
 import { CloseVerdict, RelayConnectionInfo, RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
@@ -19,7 +19,7 @@ import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
   DirectoryEntry, HarnessSchedule, HarnessScheduleDelivery, HarnessSessionEvent, HarnessWorkspace,
-  HarnessWorkspaceSnapshot, HistoryPage, PromptImagePart, WorkspaceTextPage } from '../net/HarnessClient';
+  HarnessWorkspaceSnapshot, HistoryPage, PromptImagePart, WorkspaceTextPage, WorkspaceGitStatus, WorkspaceGitDiff } from '../net/HarnessClient';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -45,15 +45,9 @@ export const PHASE_CHAT: string = 'chat';
 
 /** Official public Server, used to prefill the setup screen and as the QR-login fallback
  *  so a fresh install never dials a dead placeholder address. */
-/**
- * 本地专用版的默认服务器：局域网自建 server。
- *
- * 这个 fork 就是给「日常只连自家 LAN」用的，省得每次在登录页切服务器。
- * 官方服务器仍可在登录页手动改地址登录（不会删掉这个默认值）。
- */
-export const DEFAULT_SERVER_URL: string = 'http://192.168.11.128:8080';
-/** 本地专用版预填的账号。 */
-export const DEFAULT_ACCOUNT: string = 'admin@dsh.local';
+/** 默认服务器必须与 Android 客户端一致。自建 Server 仍可在登录页手动填写。 */
+export const DEFAULT_SERVER_URL: string = 'https://dsh.r2049.cn';
+export const DEFAULT_ACCOUNT: string = '';
 
 const MAX_TOOL_DETAIL_CHARS: number = 8000;
 
@@ -283,6 +277,13 @@ export class AppRuntime {
   directoryEntries: DirectoryEntry[] = [];
   /** Host 上的工作区列表。 */
   workspaces: HarnessWorkspace[] = [];
+  workspaceGitStatus: WorkspaceGitStatus = new WorkspaceGitStatus();
+  workspaceGitScope: string = 'all';
+  workspaceGitLoading: boolean = false;
+  workspaceGitError: string = '';
+  workspaceGitDiffPath: string = '';
+  workspaceGitDiff: WorkspaceGitDiff = new WorkspaceGitDiff();
+  workspaceGitDiffLoading: boolean = false;
   /** 新建会话时使用的工作区；空表示沿用当前会话的 cwd。 */
   selectedWorkspaceId: string = '';
   /** 可选模型列表（来自主机模型目录）。 */
@@ -355,6 +356,10 @@ export class AppRuntime {
   splitWidth: number = 0;
   /** 会话列表密度：0 自动 / 1 紧凑 / 2 超紧凑。 */
   layoutDensity: number = 0;
+  /** 会话抽屉视图偏好，与 Android 端保持一致。 */
+  sessionGroupBy: string = 'workspace';
+  sessionOrderBy: string = 'updated';
+  sessionFilterMode: string = 'hideArchived';
   /** 超宽窗口是否显示右侧「会话详情」栏。 */
   showInspector: boolean = true;
   /** 会话收藏与最近访问（sessionId 列表）。 */
@@ -363,9 +368,6 @@ export class AppRuntime {
   /** 完成通知开关（默认开），以及 App 是否在后台——只有后台才值得打扰。 */
   /** busy 的起始时间，用于泄漏自愈。 */
   private busySince: number = 0;
-  /** 切换服务器时用的独立锁：不再共用 busy，避免别处的 busy 把切换挡回去。 */
-  switchingServer: boolean = false;
-  switchingTo: string = '';
   notificationsEnabled: boolean = true;
   appBackground: boolean = false;
   /** 系统网络是否可用（断网时立刻把 UI 变灰，而不是等 socket 自己断）。 */
@@ -382,8 +384,6 @@ export class AppRuntime {
   languageMode: number = 0;
   /** 文字大小档位：0 小 / 1 标准 / 2 大 / 3 特大（对应 0.9 / 1.0 / 1.15 / 1.3 倍）。 */
   textScaleMode: number = 1;
-  /** 已保存的服务器/账号登录态（一键切换，不用重输密码）。 */
-  profiles: SavedProfile[] = [];
   /** 设备身份读不出来（安全存储不可用）时置位，解锁回到前台后自动重试。 */
   identityBlocked: boolean = false;
   /** 服务端下发的 ICE 配置（空串表示没有），将来给 RtcBridge.startOffer 用。 */
@@ -582,10 +582,21 @@ export class AppRuntime {
       this.textScaleMode = this.store.loadTextScale();
       this.splitWidth = this.store.loadSplitWidth();
       this.layoutDensity = this.store.loadLayoutDensity();
+      const sessionView: Record<string, string> = this.store.loadSessionView();
+      if (sessionView['groupBy'] === 'workspace' || sessionView['groupBy'] === 'workspace-tree'
+        || sessionView['groupBy'] === 'list') {
+        this.sessionGroupBy = sessionView['groupBy'];
+      }
+      if (sessionView['orderBy'] === 'manual' || sessionView['orderBy'] === 'updated') {
+        this.sessionOrderBy = sessionView['orderBy'];
+      }
+      if (sessionView['filterMode'] === 'hideArchived' || sessionView['filterMode'] === 'all'
+        || sessionView['filterMode'] === 'archivedOnly') {
+        this.sessionFilterMode = sessionView['filterMode'];
+      }
       this.showInspector = this.store.loadShowInspector();
       this.compactHistory = this.store.loadCompactHistory();
       this.secretMask = this.store.loadSecretMask();
-      this.profiles = this.store.loadProfiles();
       this.drafts = this.store.loadDrafts();
       this.prompts = this.store.loadPrompts();
       const meta: Record<string, string[]> = this.store.loadSessionMeta();
@@ -662,7 +673,6 @@ export class AppRuntime {
       this.email = config.email;
       this.phase = PHASE_DEVICES;
       this.setBusy(false);
-      await this.rememberProfile();
       this.notify();
       await this.refreshDevices();
       return;
@@ -673,6 +683,47 @@ export class AppRuntime {
       if (error instanceof RemoteApiError && error.code === 'TWO_FACTOR_EXPIRED') return '';
     }
     return undefined;
+  }
+
+  /** Android 同步的服务器切换语义：验证新地址后清理旧登录态与主机信任。 */
+  async selectServer(input: string): Promise<string | undefined> {
+    if (this.busy) return undefined;
+    this.setBusy(true);
+    this.errorMsg = '';
+    try {
+      const normalized: string = normalizeServerUrl(input);
+      await new RemoteServerApi(normalized).health();
+      if (normalized === this.serverUrl) {
+        this.setBusy(false);
+        this.notify();
+        return normalized;
+      }
+      this.teardownConnection();
+      this.clearReconnectTimer();
+      await this.store.clearCredentials();
+      await this.store.clearHostPins();
+      this.store.saveLastHost('');
+      this.store.clearHostInfo();
+      const config: StoredServerConfig = new StoredServerConfig();
+      config.baseUrl = normalized;
+      await this.store.saveConfig(config);
+      this.config = config;
+      this.credentials = undefined;
+      this.serverUrl = normalized;
+      this.email = '';
+      this.devices = [];
+      this.providers = [];
+      this.phase = PHASE_SETUP;
+      this.setBusy(false);
+      this.notify();
+      await this.loadProviders(normalized);
+      return normalized;
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.setBusy(false);
+      this.notify();
+      return undefined;
+    }
   }
 
   async readAccountMembership(): Promise<AccountMembership> {
@@ -1274,8 +1325,6 @@ export class AppRuntime {
     NetTrace.reset();
     this.sessionsSnapshot = [];
     this.sessionsSnapshotHost = '';
-    // 退出前先把手上的登录态存成 profile：以后在设置里一键切回来，不用重输密码
-    await this.rememberProfile();
     this.phase = PHASE_SETUP;
     this.setBusy(false);
     this.errorMsg = '';
@@ -1357,6 +1406,62 @@ export class AppRuntime {
     const helper: util.Base64Helper = new util.Base64Helper();
     const bytes: Uint8Array = helper.decodeSync(base64);
     return bytes.buffer as ArrayBuffer;
+  }
+
+  /** Render an Office document on the Host and return the generated PDF bytes. */
+  async readOfficePdfBuffer(path: string): Promise<ArrayBuffer> {
+    const harness = this.harness;
+    const sessionId = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) {
+      throw new Error(t('未连接'));
+    }
+    const generation = await harness.officeGeneration();
+    if (generation.length === 0) {
+      throw new Error('Office preview unavailable');
+    }
+    const base64 = await harness.renderOfficePdf(sessionId, path);
+    if (base64.length === 0) {
+      throw new Error('Office preview returned no PDF');
+    }
+    const helper: util.Base64Helper = new util.Base64Helper();
+    return helper.decodeSync(base64).buffer as ArrayBuffer;
+  }
+
+  async loadWorkspaceGitStatus(scope: string = this.workspaceGitScope): Promise<void> {
+    const harness = this.harness;
+    const sessionId = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0) return;
+    this.workspaceGitLoading = true;
+    this.workspaceGitScope = scope;
+    this.workspaceGitError = '';
+    this.notify();
+    try {
+      this.workspaceGitStatus = await harness.workspaceGitStatus(sessionId, scope);
+    } catch (error) {
+      this.workspaceGitError = errorMessage(error);
+    } finally {
+      this.workspaceGitLoading = false;
+      this.notify();
+    }
+  }
+
+  async loadWorkspaceGitDiff(path: string): Promise<void> {
+    const harness = this.harness;
+    const sessionId = this.currentSessionId;
+    if (harness === undefined || sessionId.length === 0 || path.length === 0) return;
+    this.workspaceGitDiffPath = path;
+    this.workspaceGitDiff = new WorkspaceGitDiff();
+    this.workspaceGitDiffLoading = true;
+    this.notify();
+    try {
+      this.workspaceGitDiff = await harness.workspaceGitDiff(sessionId, path, this.workspaceGitScope);
+    } catch (error) {
+      this.workspaceGitDiff = new WorkspaceGitDiff();
+      this.workspaceGitDiff.diff = errorMessage(error);
+    } finally {
+      this.workspaceGitDiffLoading = false;
+      this.notify();
+    }
   }
 
   async previewFile(path: string, requestPath: string, offset: number): Promise<void> {
@@ -1777,105 +1882,6 @@ export class AppRuntime {
       logInfo('slash command not handled, falling back to prompt: ' + line.split(' ')[0]);
       return false;
     }
-  }
-
-  /** 把当前 config+credentials 记成一份 profile（同一 server+账号则覆盖）。 */
-  private async rememberProfile(): Promise<void> {
-    const config: StoredServerConfig | undefined = this.config;
-    const credentials: TokenPair | undefined = this.credentials;
-    const identity: DeviceIdentity | undefined = this.identity;
-    if (config === undefined || credentials === undefined) {
-      return;
-    }
-    const next: SavedProfile[] = [];
-    for (const existing of this.profiles) {
-      if (existing.baseUrl !== config.baseUrl || existing.email !== config.email) {
-        next.push(existing);
-      }
-    }
-    const profile: SavedProfile = new SavedProfile();
-    profile.baseUrl = config.baseUrl;
-    profile.email = config.email;
-    profile.accessToken = credentials.accessToken;
-    profile.accessTokenExpiresAt = credentials.accessTokenExpiresAt;
-    profile.refreshToken = credentials.refreshToken;
-    profile.refreshTokenExpiresAt = credentials.refreshTokenExpiresAt;
-    profile.deviceId = identity !== undefined ? identity.deviceId : '';
-    next.unshift(profile);
-    this.profiles = next;
-    try {
-      await this.store.saveProfiles(next);
-    } catch (error) {
-      logWarn('save profiles failed');
-    }
-  }
-
-  /** 切换到一个已保存的服务器/账号：不需要重新输密码。 */
-  async switchProfile(profile: SavedProfile): Promise<void> {
-    if (this.switchingServer) {
-      return;
-    }
-    this.switchingServer = true;
-    this.switchingTo = profile.baseUrl;
-    this.errorMsg = '';
-    // 先把内存状态切过去，界面立刻有反应；落盘、旧连接清理都放到后面
-    const config: StoredServerConfig = new StoredServerConfig();
-    config.baseUrl = profile.baseUrl;
-    config.email = profile.email;
-    const tokens: TokenPair = new TokenPair();
-    tokens.accessToken = profile.accessToken;
-    tokens.accessTokenExpiresAt = profile.accessTokenExpiresAt;
-    tokens.refreshToken = profile.refreshToken;
-    tokens.refreshTokenExpiresAt = profile.refreshTokenExpiresAt;
-    this.config = config;
-    this.credentials = tokens;
-    this.serverUrl = config.baseUrl;
-    this.email = config.email;
-    this.phase = PHASE_DEVICES;
-    this.devices = [];
-    // 换到另一套服务器/账号：打点与抖动计数清零，否则数字会串到上一台头上
-    NetTrace.reset();
-    this.sessionsSnapshot = [];
-    this.sessionsSnapshotHost = '';
-    this.setBusy(true);
-    this.notify();
-    // 旧连接是同步拆的（关闭 WS、销毁 core），丢到下一帧别挡点击响应
-    setTimeout(() => {
-      try {
-        this.teardownConnection();
-        this.clearReconnectTimer();
-      } catch (error) {
-        logWarn('teardown on switch failed');
-      }
-    }, 0);
-    try {
-      await this.store.saveConfig(config);
-      await this.store.saveCredentials(tokens);
-      const identity: DeviceIdentity = await this.store.loadOrCreateIdentity();
-      this.identity = identity;
-      this.notify();
-      await this.rememberProfile();
-    } catch (error) {
-      this.errorMsg = errorMessage(error);
-    }
-    this.switchingServer = false;
-    this.switchingTo = '';
-    this.notify();
-    // 设备列表单独刷新：失败只影响列表，不会把整个切换判死
-    this.refreshDevices().catch(() => undefined);
-  }
-
-  /** 删掉一套保存的登录态（不影响服务端注册）。 */
-  async forgetProfile(profile: SavedProfile): Promise<void> {
-    const next: SavedProfile[] = [];
-    for (const existing of this.profiles) {
-      if (existing.baseUrl !== profile.baseUrl || existing.email !== profile.email) {
-        next.push(existing);
-      }
-    }
-    this.profiles = next;
-    await this.store.saveProfiles(next);
-    this.notify();
   }
 
   /** 载入 Host 工作区列表。 */
@@ -2364,6 +2370,23 @@ export class AppRuntime {
     this.store.saveLayoutDensity(value).catch((error: Error) => {
       logWarn('save layout density failed');
     });
+    this.notify();
+  }
+
+  setSessionView(groupBy: string, orderBy: string, filterMode: string): void {
+    if (groupBy !== 'workspace' && groupBy !== 'workspace-tree' && groupBy !== 'list') {
+      return;
+    }
+    if (orderBy !== 'manual' && orderBy !== 'updated') {
+      return;
+    }
+    if (filterMode !== 'hideArchived' && filterMode !== 'all' && filterMode !== 'archivedOnly') {
+      return;
+    }
+    this.sessionGroupBy = groupBy;
+    this.sessionOrderBy = orderBy;
+    this.sessionFilterMode = filterMode;
+    this.store.saveSessionView(groupBy, orderBy, filterMode);
     this.notify();
   }
 

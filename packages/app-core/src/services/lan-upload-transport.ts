@@ -1,7 +1,7 @@
 import { NoiseIkSession } from '@dsh-remote/crypto'
 import { LAN_UPLOAD_CONNECT_MS, SecureMessageCodec, createLanUploadPrologue, type LanUploadOffer, type TransportStats } from '@dsh-remote/protocol'
 import { SerialSend, type RemoteTransport } from '@dsh-remote/webrtc'
-import { nativeChaChaEncryptor } from './native-chacha-poly'
+import { nativeChaChaDecryptor, nativeChaChaEncryptor } from './native-chacha-poly'
 import type { BinarySocketSender } from './native-websocket-binary'
 import type { DeviceIdentity, RemoteDevice } from '../types'
 
@@ -36,7 +36,7 @@ export class LanUploadTransport implements RemoteTransport {
   async connect(): Promise<void> {
     if(this.closed || this.signal.aborted) throw this.signal.reason ?? new Error('LAN upload closed')
     const noise = new NoiseIkSession({role:'initiator',localPrivateKey:this.identity.privateKey,localPublicKey:this.identity.publicKey,
-      remotePublicKey:this.host.identityKey,prologue:createLanUploadPrologue(this.offer),encryptChaChaPoly:nativeChaChaEncryptor()})
+      remotePublicKey:this.host.identityKey,prologue:createLanUploadPrologue(this.offer),encryptChaChaPoly:nativeChaChaEncryptor(),decryptChaChaPoly:nativeChaChaDecryptor()})
     this.noise = noise
     try {
       await new Promise<void>((resolve,reject) => {

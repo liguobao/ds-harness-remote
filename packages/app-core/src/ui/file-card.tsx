@@ -2,6 +2,9 @@ import React, { memo, useState } from 'react'
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
 import { ChevronDown, ChevronRight, Files } from 'lucide-react-native'
 import { strings } from '../locales/i18n'
+import type { ChatFile } from '../types'
+import { formatSubmittedFileMeta } from '../screens/chat/submitted-files'
+import { continuousRadius } from './platform-style'
 import { useTheme } from './theme-context'
 import { DshFileTypeIcon, classifyDshFileType, getDshCategoryTheme } from './dsh-icons'
 
@@ -126,4 +129,90 @@ export const PresentedFileGroup = memo(function PresentedFileGroup({ files, onFi
     </Pressable>
     {expanded && files.map(file => <PresentedFileCard key={file.path} file={file} onFilePress={onFilePress} />)}
   </View>
+})
+
+export const SubmittedFileCard = memo(function SubmittedFileCard({
+  file,
+  resolvedBytes,
+  onPress,
+  style,
+}: {
+  file: ChatFile
+  resolvedBytes?: number
+  onPress?: (path: string) => void
+  style?: StyleProp<ViewStyle>
+}) {
+  const { colors } = useTheme()
+  const filename = file.name || file.path.split(/[/\\]/u).pop() || file.path
+  const meta = formatSubmittedFileMeta(file.path, resolvedBytes ?? file.bytes)
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${filename} · ${meta.fullLabel}`}
+      disabled={onPress === undefined}
+      onPress={() => onPress?.(file.path)}
+      style={({ pressed }) => [
+        submittedStyles.card,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          opacity: pressed ? 0.78 : 1,
+        },
+        style,
+      ]}
+    >
+      <View style={[submittedStyles.iconBox, { backgroundColor: colors.surfaceMuted ?? colors.surfaceStrong }]}>
+        <DshFileTypeIcon path={file.path} size={28} />
+      </View>
+      <View style={submittedStyles.meta}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={[submittedStyles.name, { color: colors.ink }]}>
+          {filename}
+        </Text>
+        <Text numberOfLines={1} style={[submittedStyles.subtitle, { color: colors.muted }]}>
+          {meta.fullLabel}
+        </Text>
+      </View>
+    </Pressable>
+  )
+})
+
+const submittedStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 10,
+    minWidth: 196,
+    maxWidth: '100%',
+    paddingVertical: 10,
+    paddingLeft: 10,
+    paddingRight: 14,
+    borderWidth: 1,
+    ...continuousRadius(16),
+  },
+  iconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meta: {
+    flexShrink: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+    gap: 2,
+  },
+  name: {
+    fontSize: 14.5,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  subtitle: {
+    fontSize: 12,
+    fontWeight: '400',
+    lineHeight: 16,
+    fontVariant: ['tabular-nums'],
+  },
 })

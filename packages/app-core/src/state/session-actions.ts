@@ -39,7 +39,7 @@ import { browseKey, browseScope, getCachedSessionMessages, saveSessionMessagesSn
 import type { RemoteSession } from '../types'
 import { loadSavedCodexPermissions, withBestCodexPermission, withCodexPermissionState } from './codex-session-state'
 import { foldHistory, settleTurnItems } from './event-reducer'
-import { inboxRpcIds, mergeHistoryAndLive, oldestSeq, prependHistory, reconcileDeliveryStates, reconcileUserQuestionsProjection } from './message-helpers'
+import { inboxRpcIds, mergeHistoryAndLive, oldestSeq, prependHistory, reconcileDeliveryStates, reconcileUserQuestionsProjection, reuseUnchangedChatItems } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { applyFeedback, latestHistoryLifecycle, record, withActiveCodexTurn } from './session-state'
 import type { AppState } from './store-state'
@@ -242,7 +242,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           sessions: state.sessions.some(item => item.sessionId === session.sessionId)
             ? state.sessions
             : [session, ...state.sessions],
-          ...(preservedMessages !== undefined ? {
+          ...(preservedMessages !== undefined && state.messages[session.sessionId] !== preservedMessages ? {
             messages: {
               ...state.messages,
               [session.sessionId]: preservedMessages,
@@ -308,7 +308,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         busyAction: `session:${session.sessionId}`,
         codexReadySessionId: undefined,
         selectedSession: session,
-        ...(preservedMessages !== undefined ? {
+        ...(preservedMessages !== undefined && state.messages[session.sessionId] !== preservedMessages ? {
           messages: {
             ...state.messages,
             [session.sessionId]: preservedMessages,
@@ -369,15 +369,19 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 ...read.session,
                 ...(history.activeTurnId !== undefined ? { running: true } : recovering ? { running: false } : {}),
               }
-              const codexMerged = mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? []))
-              if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, codexMerged)
+              const prevList = state.messages[session.sessionId]
+              const codexMerged = mergeHistoryAndLive(items, browseLive(items, prevList ?? []))
+              const nextList = reuseUnchangedChatItems(prevList, codexMerged)
+              if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
               return {
                 selectedSession: state.selectedSession?.sessionId === session.sessionId ? nextSession : state.selectedSession,
                 sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
-                messages: {
-                  ...state.messages,
-                  [session.sessionId]: codexMerged,
-                },
+                messages: nextList === prevList
+                  ? state.messages
+                  : {
+                    ...state.messages,
+                    [session.sessionId]: nextList,
+                  },
                 ...pageState(history.hasMore, oldestSeq(history.events)),
               }
             })
@@ -393,8 +397,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               runtime.activeCodexTimeline = withActiveCodexTurn(runtime.activeCodexTimeline, activeTurnId)
             }
             set(state => {
-              const codexMerged = mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? []))
-              if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, codexMerged)
+              const prevList = state.messages[session.sessionId]
+              const codexMerged = mergeHistoryAndLive(items, browseLive(items, prevList ?? []))
+              const nextList = reuseUnchangedChatItems(prevList, codexMerged)
+              if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
               const activeTurnKnown = activeTurnId !== undefined || runtime.activeCodexTimeline?.activeTurnId !== undefined
               const syncRunning = (item: RemoteSession): RemoteSession => item.sessionId === session.sessionId
                 ? { ...item, running: activeTurnKnown }
@@ -402,10 +408,12 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               return {
                 selectedSession: state.selectedSession === undefined ? undefined : syncRunning(state.selectedSession),
                 sessions: state.sessions.map(syncRunning),
-                messages: {
-                  ...state.messages,
-                  [session.sessionId]: codexMerged,
-                },
+                messages: nextList === prevList
+                  ? state.messages
+                  : {
+                    ...state.messages,
+                    [session.sessionId]: nextList,
+                  },
                 ...pageState(history.hasMore, oldestSeq(history.events)),
               }
             })
@@ -583,13 +591,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             },
           }
           set(state => {
-            const currentMessages = state.messages[session.sessionId] ?? []
+            const prevList = state.messages[session.sessionId]
+            const currentMessages = prevList ?? []
             const liveDeltas = currentMessages.filter(item => !initialAcpIds.has(item.id) || item.id.startsWith('local:') || item.kind === 'approval' || item.kind === 'question')
             const merged = details.events.length > 0 || acpBackend !== 'cursor'
               ? mergeAcpHistoryAndLive(items, liveDeltas)
               : mergeHistoryAndLive(items, liveDeltas)
             const paged = storeAcpPagedMessages(session.sessionId, merged)
-            if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, paged.tail)
+            const nextList = reuseUnchangedChatItems(prevList, paged.tail)
+            if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
             const currentSession = state.selectedSession?.sessionId === session.sessionId
               ? state.selectedSession
               : state.sessions.find(item => item.sessionId === session.sessionId)
@@ -616,10 +626,12 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               sessions: state.sessions.some(item => item.sessionId === session.sessionId)
                 ? state.sessions.map(item => item.sessionId === session.sessionId ? active : item)
                 : [active, ...state.sessions],
-              messages: {
-                ...state.messages,
-                [session.sessionId]: paged.tail,
-              },
+              messages: nextList === prevList
+                ? state.messages
+                : {
+                  ...state.messages,
+                  [session.sessionId]: nextList,
+                },
               sessionModels: undefined,
               historyHasMore: paged.historyHasMore,
               oldestLoadedSeq: paged.oldestLoadedSeq,
@@ -674,7 +686,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           // replaces the row by requestRpcId, so a misjudgment self-heals.
           const inboxSnapshot = latest.projections?.values?.inbox
           const userQuestionsSnapshot = latest.projections?.values?.userQuestions
-          const liveItems = browseLive(items, state.messages[session.sessionId] ?? [])
+          const prevList = state.messages[session.sessionId]
+          const liveItems = browseLive(items, prevList ?? [])
           const historyRpcIds = new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : []))
           const queuedRpcIds = inboxSnapshot === undefined ? undefined : inboxRpcIds(inboxSnapshot)
           const reconciledLive = queuedRpcIds === undefined ? liveItems : reconcileDeliveryStates(
@@ -706,14 +719,17 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             ?? (effectivelyRunning ? [...items].reverse().find(item => item.turn !== undefined && item.turnEnd === undefined)?.turn : undefined)
           const restored = effectivelyRunning === false ? settleTurnItems(withQuestions)
             : activeTurn === undefined ? withQuestions : settleTurnItems(withQuestions, undefined, activeTurn)
-          if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, restored)
+          const nextList = reuseUnchangedChatItems(prevList, restored)
+          if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
           return {
             selectedSession: nextSession,
             sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
             ...(authoritativeLifecycle === undefined ? {} : { sessionLifecycles: { ...state.sessionLifecycles, [session.sessionId]: authoritativeLifecycle } }),
             historyLoadingOlder: false,
             feedbackBySession: ratings === undefined ? state.feedbackBySession : { ...state.feedbackBySession, [session.sessionId]: ratings },
-            messages: { ...state.messages, [session.sessionId]: restored },
+            messages: nextList === prevList
+              ? state.messages
+              : { ...state.messages, [session.sessionId]: nextList },
             ...pageState(history.hasMore, oldestSeq(history.events)),
             busyAction: undefined,
           }

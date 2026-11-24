@@ -25,12 +25,17 @@ interface HostConnectionHandleLike {
   }
 }
 
+export interface HostAdmittedPeerLike {
+  readonly principal?: { readonly kind?: unknown } | string
+  readonly signal?: { readonly aborted?: boolean }
+}
+
 export interface HostWebServerLike {
   register(route: {
     kind: 'prefix'
     path: string
     auth?: 'required'
-    handler(req: IncomingMessage, res: ServerResponse, peer?: unknown): void | Promise<void>
+    handler(req: IncomingMessage, res: ServerResponse, peer?: HostAdmittedPeerLike): void | Promise<void>
   }): () => void | Promise<void>
 }
 
@@ -53,10 +58,9 @@ export function registerControlRoute(
   statusStream?: ControlStatusStreamLike,
 ): () => Promise<void> {
   if (webServer !== undefined) {
-    // Newer DSH builds dropped `connection.requestRejection`, enforce `auth`
-    // in `webServer`, and pass the admitted `peer` as the third handler
-    // argument. Keep `auth: 'required'` and verify either the admitted `peer`
-    // (DSH 0.2.3+) or `requestRejection` / `admit` (older DSH builds).
+    // DSH 0.2.3+ authorizes `auth: 'required'` routes inside `webServer` and
+    // hands the admitted Peer as the third handler argument; older hosts omit
+    // the Peer and authorize through `connection.requestRejection` (or `admit`).
     const dispose = webServer.register({
       kind: 'prefix',
       path: CONTROL_RPC_PREFIX,
@@ -88,11 +92,11 @@ async function handleControlRequest(
   req: IncomingMessage,
   res: ServerResponse,
   statusStream?: ControlStatusStreamLike,
-  peer?: unknown,
+  admittedPeer?: HostAdmittedPeerLike,
 ): Promise<void> {
   if (res.destroyed) return
-  const rejection = peer !== undefined
-    ? admittedPeerRejectionStatus(peer)
+  const rejection = admittedPeer !== undefined
+    ? admittedPeerRejectionStatus(admittedPeer)
     : requestRejectionStatus(connection, req)
   if (rejection !== undefined) {
     writeText(res, rejection, rejectionMessage(rejection))
@@ -230,11 +234,7 @@ function requestRejectionStatus(connection: HostConnectionHandleLike, req: Incom
       const admission = target.admit(req)
       if (typeof admission !== 'object' || admission === null) return 403
       if (typeof admission.rejection === 'number') return normalizeRejectionStatus(admission.rejection)
-      if (typeof admission.peer !== 'object' || admission.peer === null || Array.isArray(admission.peer)) return 403
-      if (isPeerAborted(admission.peer)) return 401
-      const principal = (admission.peer as { principal?: unknown }).principal
-      if (principal !== undefined && !hasOwnerPrincipal(admission.peer)) return 403
-      return undefined
+      return admittedPeerRejectionStatus(admission.peer)
     }
   } catch {
     return 503

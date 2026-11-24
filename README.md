@@ -1,6 +1,5 @@
 <p align="center">
-
-  <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
+  <img src="docs/images/hero-en.png" alt="DeepSeek Harness Remote — Connect once. Ready everywhere." width="100%">
 </p>
 
 <p align="center">
@@ -116,23 +115,20 @@ For self-hosting, use the repository's [minimal Server](apps/server/README.md). 
 
 ### Desktop
 
-On another computer, select an online Host and open its workspace. The workspace opens in the native Harness interface, with the active Host and encrypted connection status in the header.
+On another computer, select an online Host and open its Harness or ACP workspace. Sessions run directly inside the native Harness interface, with live host status and end-to-end encrypted P2P route diagnostics in the header.
 
 <p align="center">
-  <img src="docs/images/host-list.png" alt="Remote workspace picker listing online Hosts" width="40%">
-  <img src="docs/images/remote.png" alt="A Harness conversation running through an encrypted remote connection" width="40%">
+  <img src="docs/images/desktop-showcase-en.png" alt="DSH Desktop remote session with P2P Noise IK route diagnostics and multi-agent Workspace Hub" width="100%">
 </p>
 
 To prevent this computer from controlling other Hosts, open the Host list at [https://dsh.r2049.cn/](https://dsh.r2049.cn/) and enable **Controlled only**. This device will no longer see other devices under your account, while Web and other clients can still connect to it remotely.
 
 ### Android
 
-Use text or image prompts, switch models, and access supported workspace files and terminals.
+Switch across online Hosts, ACP backends, and DS-Bot rooms in one drawer; send text or image prompts, preview delivered files, inspect native Git diffs, and open remote terminals in light or dark mode.
 
 <p align="center">
-  <img src="docs/images/mobile-list.jpg" alt="Android client listing online and offline computers" width="30%">
-  <img src="docs/images/image-msg.jpg" alt="Sending an image prompt from the Android client" width="30%">
-  <img src="docs/images/image-result.jpg" alt="Viewing the image response in the Android client" width="30%">
+  <img src="docs/images/mobile-showcase-en.png" alt="Android client showcasing multi-host ACP drawer, native chat with file delivery, and native Git diff review" width="100%">
 </p>
 
 Mobile Settings includes a global **Compact conversations** switch, off by default and applied when a conversation is next opened.

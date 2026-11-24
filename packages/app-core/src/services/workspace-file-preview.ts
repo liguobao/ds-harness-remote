@@ -402,3 +402,53 @@ export async function loadWorkspaceDownload(
 ): Promise<void> {
   await readBoundedChunks(tools, sessionId, path, MAX_DOWNLOAD_BYTES, write, signal)
 }
+
+const SAFE_OPEN_MIME_TYPES: Readonly<Record<string, string>> = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain',
+  log: 'text/plain',
+  md: 'text/plain',
+  markdown: 'text/plain',
+  csv: 'text/csv',
+  json: 'application/json',
+  xml: 'application/xml',
+}
+
+const MAX_OPEN_FILE_NAME_LENGTH = 120
+const PRESERVED_EXTENSION_RE = /\.[A-Za-z0-9]{1,12}$/u
+
+function openFileBasename(path: string): string {
+  const clean = path.replace(/[\\/]+$/u, '')
+  return clean.split(/[\\/]/u).pop() || clean || 'file'
+}
+
+export function sanitizeOpenFileName(rawName: string): string {
+  const base = openFileBasename(rawName)
+    .replace(/[\x00-\x1f\x7f]/gu, '')
+    .replace(/[<>:"/\\|?*]/gu, '_')
+    .replace(/^\.+|[. ]+$/gu, '')
+    .trim()
+  if (base === '' || base === '.' || base === '..') return 'file'
+  if (base.length <= MAX_OPEN_FILE_NAME_LENGTH) return base
+  const extMatch = PRESERVED_EXTENSION_RE.exec(base)
+  const ext = extMatch && extMatch[0].length < MAX_OPEN_FILE_NAME_LENGTH ? extMatch[0] : ''
+  const rawStem = ext ? base.slice(0, base.length - ext.length) : base
+  const stem = rawStem.slice(0, Math.max(1, MAX_OPEN_FILE_NAME_LENGTH - ext.length)).replace(/[. ]+$/u, '') || 'file'
+  return `${stem}${ext}`
+}
+
+export function safeOpenMimeType(fileName: string): string {
+  const ext = fileName.split('.').at(-1)?.toLowerCase() ?? ''
+  return SAFE_OPEN_MIME_TYPES[ext] ?? 'application/octet-stream'
+}

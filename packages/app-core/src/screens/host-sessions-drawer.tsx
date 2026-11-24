@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -82,6 +82,7 @@ import {
   type SessionOrderBy,
 } from '../services/storage'
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
+import { shouldAllowDrawerClose, useGatedStore } from '../lib/gated-store'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
 import { BotModalsHost, BotSidebarSection, useBotTeamLoad } from './bot-sidebar-section'
 import { HomeActionsMenu } from './setup-screens'
@@ -177,27 +178,7 @@ function harnessDisplayName(value: AgentBackend): string {
   }
 }
 
-export function HostSessionsDrawer({
-  onBack,
-  onClose,
-  onOpenWorkspaces,
-  onOpenDeviceInfo,
-  onSelect,
-  onNewSession: _onNewSession,
-  onOpenAutomationTasks,
-  onOpenPlugins,
-  onOpenHostSwitcher,
-  onOpenSettings,
-  onOpenAbout,
-  botMode,
-  onBotModeChange,
-  onSelectBot,
-  inline = false,
-  backLabel,
-  dismissible = true,
-  entrance = 'immediate',
-  backRef,
-}: {
+export interface HostSessionsDrawerProps {
   onBack?: () => void
   onClose: () => void
   onOpenWorkspaces?: () => void
@@ -213,6 +194,7 @@ export function HostSessionsDrawer({
   onBotModeChange?: (botMode: boolean) => void
   onSelectBot?: (botId: string) => void
   inline?: boolean
+  open?: boolean
   backLabel?: string
   /** 冷启动停留在侧边栏且尚未选择任何页面时，禁止手势/返回键把侧边栏划走。 */
   dismissible?: boolean
@@ -220,56 +202,86 @@ export function HostSessionsDrawer({
   entrance?: 'immediate' | 'slide'
   /** 由 ChatScreen 统一协调硬件返回键顺序。 */
   backRef?: MutableRefObject<(() => boolean) | undefined>
-}) {
-  const language = useAppStore(state => state.language)
-  const deviceId = useAppStore(state => state.selectedDevice?.deviceId)
-  const deviceName = useAppStore(state => state.selectedDevice?.name)
-  const platform = useAppStore(state => state.selectedDevice?.platform)
-  const connectionPhase = useAppStore(state => state.connection.phase)
-  const sessions = useAppStore(state => state.sessions)
-  const recentIds = useAppStore(state => state.currentWorkSessionIds)
-  const codexAvailable = useAppStore(state => state.codexAvailable)
-  const cursorAvailable = useAppStore(state => state.cursorAvailable)
-  const antigravityAvailable = useAppStore(state => state.antigravityAvailable)
-  const piAvailable = useAppStore(state => state.piAvailable)
-  const opencodeAvailable = useAppStore(state => state.opencodeAvailable)
-  const claudeAvailable = useAppStore(state => state.claudeAvailable)
-  const hermesAvailable = useAppStore(state => state.hermesAvailable)
-  const customAcpBackends = useAppStore(selectCustomAcpBackends)
-  const availableBackends = useAppStore(state => [
+  /** 由 ChatScreen 触发常驻 overlay 抽屉的平滑关闭动画。 */
+  closeRef?: MutableRefObject<((options?: { withHaptic?: boolean; force?: boolean }) => void) | undefined>
+  /** 冷启动点选当前会话等显式动作时，同步解锁外层 dismissible 状态。 */
+  onUnlockDismissible?: () => void
+}
+
+export const HostSessionsDrawer = memo(function HostSessionsDrawer({
+  onBack,
+  onClose,
+  onOpenWorkspaces,
+  onOpenDeviceInfo,
+  onSelect,
+  onNewSession: _onNewSession,
+  onOpenAutomationTasks,
+  onOpenPlugins,
+  onOpenHostSwitcher,
+  onOpenSettings,
+  onOpenAbout,
+  botMode,
+  onBotModeChange,
+  onSelectBot,
+  inline = false,
+  open = true,
+  backLabel,
+  dismissible = true,
+  entrance = 'immediate',
+  backRef,
+  closeRef,
+  onUnlockDismissible,
+}: HostSessionsDrawerProps) {
+  const visible = inline || open
+  const language = useGatedStore(useAppStore, state => state.language, visible)
+  const deviceId = useGatedStore(useAppStore, state => state.selectedDevice?.deviceId, visible)
+  const deviceName = useGatedStore(useAppStore, state => state.selectedDevice?.name, visible)
+  const platform = useGatedStore(useAppStore, state => state.selectedDevice?.platform, visible)
+  const connectionPhase = useGatedStore(useAppStore, state => state.connection.phase, visible)
+  const sessions = useGatedStore(useAppStore, state => state.sessions, visible)
+  const recentIds = useGatedStore(useAppStore, state => state.currentWorkSessionIds, visible)
+  const codexAvailable = useGatedStore(useAppStore, state => state.codexAvailable, visible)
+  const cursorAvailable = useGatedStore(useAppStore, state => state.cursorAvailable, visible)
+  const antigravityAvailable = useGatedStore(useAppStore, state => state.antigravityAvailable, visible)
+  const piAvailable = useGatedStore(useAppStore, state => state.piAvailable, visible)
+  const opencodeAvailable = useGatedStore(useAppStore, state => state.opencodeAvailable, visible)
+  const claudeAvailable = useGatedStore(useAppStore, state => state.claudeAvailable, visible)
+  const hermesAvailable = useGatedStore(useAppStore, state => state.hermesAvailable, visible)
+  const customAcpBackends = useGatedStore(useAppStore, selectCustomAcpBackends, visible)
+  const availableBackends = useGatedStore(useAppStore, state => [
     'harness', state.codexAvailable && 'codex', state.cursorAvailable && 'cursor',
     state.antigravityAvailable && 'antigravity', state.piAvailable && 'pi',
     state.opencodeAvailable && 'opencode', state.claudeAvailable && 'claude',
     state.hermesAvailable && 'hermes', ...selectCustomAcpBackends(state),
-  ].filter(Boolean).join(','))
-  const lifecycles = useAppStore(state => state.sessionLifecycles)
-  const selected = useAppStore(state => state.selectedSession)
-  const archivedIds = useAppStore(state => state.archivedSessionIds)
-  const pinnedSessionIds = useAppStore(state => state.pinnedSessionIds)
-  const workspaces = useAppStore(state => state.workspaces)
-  const favoriteWorkspaces = useAppStore(state => state.favoriteWorkspaces)
-  const toggleFavoriteWorkspace = useAppStore(state => state.toggleFavoriteWorkspace)
-  const removeFavoriteWorkspace = useAppStore(state => state.removeFavoriteWorkspace)
-  const createWorkspace = useAppStore(state => state.workspaceCreate)
-  const renameWorkspace = useAppStore(state => state.workspaceRename)
-  const moveWorkspace = useAppStore(state => state.workspaceMove)
-  const deleteWorkspace = useAppStore(state => state.workspaceDelete)
-  const busy = useAppStore(state => state.busyAction)
-  const connected = useAppStore(state => state.connection.phase === 'connected')
-  const error = useAppStore(state => state.error)
-  const clearError = useAppStore(state => state.clearError)
-  const devicesRefreshing = useAppStore(state => state.refreshing)
-  const refreshDevices = useAppStore(state => state.refreshDevices)
-  const createSession = useAppStore(state => state.createSession)
-  const pinSession = useAppStore(state => state.pinSession)
-  const unpinSession = useAppStore(state => state.unpinSession)
-  const renameSession = useAppStore(state => state.renameSession)
-  const forkSession = useAppStore(state => state.forkSession)
-  const archiveSession = useAppStore(state => state.archiveSession)
-  const unarchiveSession = useAppStore(state => state.unarchiveSession)
+  ].filter(Boolean).join(','), visible)
+  const lifecycles = useGatedStore(useAppStore, state => state.sessionLifecycles, visible)
+  const selected = useGatedStore(useAppStore, state => state.selectedSession, visible)
+  const archivedIds = useGatedStore(useAppStore, state => state.archivedSessionIds, visible)
+  const pinnedSessionIds = useGatedStore(useAppStore, state => state.pinnedSessionIds, visible)
+  const workspaces = useGatedStore(useAppStore, state => state.workspaces, visible)
+  const favoriteWorkspaces = useGatedStore(useAppStore, state => state.favoriteWorkspaces, visible)
+  const toggleFavoriteWorkspace = useGatedStore(useAppStore, state => state.toggleFavoriteWorkspace, visible)
+  const removeFavoriteWorkspace = useGatedStore(useAppStore, state => state.removeFavoriteWorkspace, visible)
+  const createWorkspace = useGatedStore(useAppStore, state => state.workspaceCreate, visible)
+  const renameWorkspace = useGatedStore(useAppStore, state => state.workspaceRename, visible)
+  const moveWorkspace = useGatedStore(useAppStore, state => state.workspaceMove, visible)
+  const deleteWorkspace = useGatedStore(useAppStore, state => state.workspaceDelete, visible)
+  const busy = useGatedStore(useAppStore, state => state.busyAction, visible)
+  const connected = useGatedStore(useAppStore, state => state.connection.phase === 'connected', visible)
+  const error = useGatedStore(useAppStore, state => state.error, visible)
+  const clearError = useGatedStore(useAppStore, state => state.clearError, visible)
+  const devicesRefreshing = useGatedStore(useAppStore, state => state.refreshing, visible)
+  const refreshDevices = useGatedStore(useAppStore, state => state.refreshDevices, visible)
+  const createSession = useGatedStore(useAppStore, state => state.createSession, visible)
+  const pinSession = useGatedStore(useAppStore, state => state.pinSession, visible)
+  const unpinSession = useGatedStore(useAppStore, state => state.unpinSession, visible)
+  const renameSession = useGatedStore(useAppStore, state => state.renameSession, visible)
+  const forkSession = useGatedStore(useAppStore, state => state.forkSession, visible)
+  const archiveSession = useGatedStore(useAppStore, state => state.archiveSession, visible)
+  const unarchiveSession = useGatedStore(useAppStore, state => state.unarchiveSession, visible)
 
-  const hostScope = useAppStore(browseScope)
-  const persistedBotMode = useBrowseMemory(state => state.hostModes[hostScope] === 'bot')
+  const hostScope = useGatedStore(useAppStore, browseScope, visible)
+  const persistedBotMode = useGatedStore(useBrowseMemory, state => state.hostModes[hostScope] === 'bot', visible)
   const activeBotMode = botMode ?? persistedBotMode
   const [drawerMode, setDrawerMode] = useState<'agent' | 'bot'>(activeBotMode ? 'bot' : 'agent')
   const reduceMotion = useReduceMotion()
@@ -294,7 +306,7 @@ export function HostSessionsDrawer({
     setDrawerMode(activeBotMode ? 'bot' : 'agent')
   }, [activeBotMode, hostScope])
 
-  useBotTeamLoad(drawerMode === 'bot')
+  useBotTeamLoad(visible && drawerMode === 'bot')
 
   const handleSwitchMode = (nextMode: 'agent' | 'bot') => {
     setDrawerMode(nextMode)
@@ -348,6 +360,11 @@ export function HostSessionsDrawer({
     ...(selected ? [selected.backend ?? 'harness'] : []),
   ])]
   const backendWorkspaces = useMemo(() => workspaces.filter(workspace => (workspace.backend ?? 'harness') === backend), [workspaces, backend])
+  const backendWorkspaceById = useMemo(() => {
+    const map = new Map<string, WorkspaceView>()
+    for (const workspace of backendWorkspaces) map.set(workspace.workspaceId, workspace)
+    return map
+  }, [backendWorkspaces])
   useEffect(() => {
     setBackend(selected?.backend ?? useAppStore.getState().workspaceCatalog?.backend ?? 'harness')
     setVisibleCounts({})
@@ -725,18 +742,19 @@ export function HostSessionsDrawer({
     })
   }
 
-  const botTeamState = useBotTeamStore(state => state.state)
+  const botTeamState = useGatedStore(useBotTeamStore, state => state.state, visible)
 
   const filteredSessions = useMemo(() => {
+    const archivedSet = new Set(archivedIds)
     const known = selected && !sessions.some(session => session.sessionId === selected.sessionId)
       ? [selected, ...sessions] : sessions
     let list = known.filter(session => (session.backend ?? 'harness') === backend
       && !isKnownBotSessionId(session.sessionId, botTeamState, hostScope)
       && isVisibleSession(session, selected?.sessionId, searchQuery))
     if (filterMode === 'hideArchived') {
-      list = list.filter(s => !archivedIds.includes(s.sessionId))
+      list = list.filter(s => !archivedSet.has(s.sessionId))
     } else if (filterMode === 'archivedOnly') {
-      list = list.filter(s => archivedIds.includes(s.sessionId))
+      list = list.filter(s => archivedSet.has(s.sessionId))
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim()
@@ -746,12 +764,14 @@ export function HostSessionsDrawer({
       list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
     }
     return list
-  }, [sessions, selected, backend, archivedIds, filterMode, searchQuery, orderBy, botTeamState])
+  }, [sessions, selected, backend, archivedIds, filterMode, searchQuery, orderBy, botTeamState, hostScope])
 
   const sections = useMemo<DrawerSection[]>(() => {
+    const pinnedSet = new Set(pinnedSessionIds)
+    const archivedSet = new Set(archivedIds)
     const isRowPinned = (s: RemoteSession) => {
       const b = s.backend ?? 'harness'
-      return (b === 'harness' || isAcpManagedBackend(b)) && pinnedSessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId)
+      return (b === 'harness' || isAcpManagedBackend(b)) && pinnedSet.has(s.sessionId) && !archivedSet.has(s.sessionId)
     }
     const partitionPinned = (items: RemoteSession[]) => {
       const pinned: RemoteSession[] = []
@@ -789,11 +809,40 @@ export function HostSessionsDrawer({
       backendWorkspaces.length > 0 ? backendWorkspaces : [{ workspaceId: 'default', title: 'Default', path: '', sessionIds: [] }]
 
     if (groupBy === 'workspace') {
+      const workspaceIdsBySession = new Map<string, string[]>()
+      for (const w of backendWorkspaces) {
+        const seenInWorkspace = new Set<string>()
+        for (const sid of w.sessionIds) {
+          if (seenInWorkspace.has(sid)) continue
+          seenInWorkspace.add(sid)
+          let owners = workspaceIdsBySession.get(sid)
+          if (owners === undefined) {
+            owners = []
+            workspaceIdsBySession.set(sid, owners)
+          }
+          owners.push(w.workspaceId)
+        }
+      }
+      const sessionsByWorkspace = new Map<string, RemoteSession[]>()
+      const unassignedSessions: RemoteSession[] = []
+      for (const s of filteredSessions) {
+        const owners = workspaceIdsBySession.get(s.sessionId)
+        if (owners === undefined || owners.length === 0) {
+          unassignedSessions.push(s)
+        } else {
+          for (const wsId of owners) {
+            let bucket = sessionsByWorkspace.get(wsId)
+            if (bucket === undefined) {
+              bucket = []
+              sessionsByWorkspace.set(wsId, bucket)
+            }
+            bucket.push(s)
+          }
+        }
+      }
       return [...recentSections, ...wsList.map(ws => {
         const isDefault = ws.workspaceId === 'default'
-        let wsSessions = filteredSessions.filter(s =>
-          isDefault ? !backendWorkspaces.some(w => w.sessionIds.includes(s.sessionId)) : ws.sessionIds.includes(s.sessionId)
-        )
+        let wsSessions = isDefault ? unassignedSessions : (sessionsByWorkspace.get(ws.workspaceId) ?? [])
         const groupId = `workspace:${backend}:${ws.workspaceId}`
         if (orderBy === 'manual') {
           wsSessions = applyManualOrder(wsSessions, manualOrders[groupId])
@@ -843,9 +892,10 @@ export function HostSessionsDrawer({
   // Extra travel clears the right-edge elevation shadow off-screen during exit.
   const closedTranslateX = -(drawerWidth + (cappedDrawer ? 24 : 0))
   const immediateMount = entrance === 'immediate'
-  const translateX = useRef(new Animated.Value(immediateMount ? 0 : closedTranslateX)).current
-  const overlayOpacity = useRef(new Animated.Value(immediateMount ? 1 : 0)).current
-  const hasSettledOpenRef = useRef(immediateMount)
+  const initialOpen = !inline && open
+  const translateX = useRef(new Animated.Value(initialOpen && immediateMount ? 0 : closedTranslateX)).current
+  const overlayOpacity = useRef(new Animated.Value(initialOpen && immediateMount ? 1 : 0)).current
+  const hasSettledOpenRef = useRef(initialOpen && immediateMount)
   const dragStartX = useRef(0)
   const closingRef = useRef(false)
   const animSeq = useRef(0)
@@ -856,6 +906,15 @@ export function HostSessionsDrawer({
   onCloseRef.current = onClose
   const dismissibleRef = useRef(dismissible)
   dismissibleRef.current = dismissible
+  const openRef = useRef(open)
+  openRef.current = open
+  const closedTranslateXRef = useRef(closedTranslateX)
+  closedTranslateXRef.current = closedTranslateX
+  const onUnlockDismissibleRef = useRef(onUnlockDismissible)
+  onUnlockDismissibleRef.current = onUnlockDismissible
+  const pendingUnlockRef = useRef(false)
+  const backOverlayStateRef = useRef({ showConfigModal, showSearch, showBotSearch })
+  backOverlayStateRef.current = { showConfigModal, showSearch, showBotSearch }
 
   useEffect(() => {
     if (showSearch) setSearchMounted(true)
@@ -886,12 +945,18 @@ export function HostSessionsDrawer({
     return () => animation.stop()
   }, [showConfigModal, configMotion, reduceMotion])
 
-  const smoothClose = (withHaptic = true) => {
-    if (closingRef.current) return
-    // A cold start parks the user in this drawer without a chosen page; only an
-    // explicit tap (session / Bot) may leave it, never a swipe or the back key.
-    if (!inline && !dismissibleRef.current) return
+  const smoothClose = useCallback((withHaptic = true, force = false, unlockOnComplete = false) => {
+    if (!shouldAllowDrawerClose({
+      inline,
+      open: openRef.current,
+      closing: closingRef.current,
+      dismissible: dismissibleRef.current,
+      force,
+    })) {
+      return
+    }
     closingRef.current = true
+    if (unlockOnComplete) pendingUnlockRef.current = true
     gestureSeq.current++
     dragReady.current = false
     if (withHaptic) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
@@ -899,17 +964,22 @@ export function HostSessionsDrawer({
     currentAnim.current?.stop()
 
     const anim = Animated.parallel([
-      Animated.timing(translateX, { toValue: closedTranslateX, duration: 200, useNativeDriver: true }),
+      Animated.timing(translateX, { toValue: closedTranslateXRef.current, duration: 200, useNativeDriver: true }),
       Animated.timing(overlayOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
     ])
     currentAnim.current = anim
     anim.start(({ finished }) => {
       if (!finished || seq !== animSeq.current) return
       currentAnim.current = null
+      hasSettledOpenRef.current = false
       closingRef.current = false
+      if (pendingUnlockRef.current) {
+        pendingUnlockRef.current = false
+        onUnlockDismissibleRef.current?.()
+      }
       onCloseRef.current()
     })
-  }
+  }, [inline, translateX, overlayOpacity])
 
   const handleBack = () => {
     Keyboard.dismiss()
@@ -923,38 +993,105 @@ export function HostSessionsDrawer({
 
   useEffect(() => {
     if (inline) return
-    if (immediateMount || hasSettledOpenRef.current) {
+    if (!open) {
+      animSeq.current++
       currentAnim.current?.stop()
+      currentAnim.current = null
       closingRef.current = false
+      pendingUnlockRef.current = false
+      hasSettledOpenRef.current = false
+      gestureSeq.current++
+      dragReady.current = false
+      dragActiveRef.current = false
+      translateX.setValue(closedTranslateXRef.current)
+      overlayOpacity.setValue(0)
+      setMenuSession(null)
+      setRenameTarget(null)
+      setRenameError(null)
+      setRenaming(false)
+      setToastMessage(null)
+      setShowConfigModal(false)
+      setHarnessPickerOpen(false)
+      setAppMenuOpen(false)
+      setDragState(null)
+      setShowSearch(false)
+      setSearchQuery('')
+      setSearchMounted(false)
+      searchMotion.setValue(0)
+      setShowBotSearch(false)
+      setBotSearchQuery('')
+      setCreateWorkspaceOpen(false)
+      setWorkspaceActionTarget(undefined)
+      setRenameWorkspaceTarget(undefined)
+      return
+    }
+    const seq = ++animSeq.current
+    currentAnim.current?.stop()
+    currentAnim.current = null
+    closingRef.current = false
+    if (immediateMount || hasSettledOpenRef.current) {
       translateX.setValue(0)
       overlayOpacity.setValue(1)
       hasSettledOpenRef.current = true
       return
     }
+    translateX.setValue(closedTranslateXRef.current)
+    overlayOpacity.setValue(0)
     const anim = Animated.parallel([
       Animated.timing(translateX, { toValue: 0, duration: 220, useNativeDriver: true }),
       Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
     ])
     currentAnim.current = anim
     anim.start(({ finished }) => {
-      if (finished) hasSettledOpenRef.current = true
+      if (!finished || seq !== animSeq.current) return
+      currentAnim.current = null
+      hasSettledOpenRef.current = true
     })
-    return () => currentAnim.current?.stop()
-  }, [inline, immediateMount, translateX, overlayOpacity])
+    return () => {
+      if (currentAnim.current === anim) {
+        anim.stop()
+        currentAnim.current = null
+      }
+    }
+  }, [inline, open, immediateMount, translateX, overlayOpacity, searchMotion])
 
   useEffect(() => {
-    if (backRef === undefined || inline) return
+    if (!inline && !open && !closingRef.current) {
+      translateX.setValue(closedTranslateX)
+    }
+  }, [inline, open, closedTranslateX, translateX])
+
+  useEffect(() => {
+    if (closeRef === undefined) return
+    if (inline || !open) {
+      closeRef.current = undefined
+      return
+    }
+    closeRef.current = options => {
+      smoothClose(options?.withHaptic ?? true, options?.force ?? false)
+    }
+    return () => {
+      closeRef.current = undefined
+    }
+  }, [closeRef, inline, open, smoothClose])
+
+  useEffect(() => {
+    if (backRef === undefined) return
+    if (inline || !open) {
+      backRef.current = undefined
+      return
+    }
     backRef.current = () => {
-      if (showConfigModal) {
+      if (backOverlayStateRef.current.showConfigModal) {
         setShowConfigModal(false)
         return true
       }
-      if (showSearch) {
+      if (backOverlayStateRef.current.showSearch) {
         setShowSearch(false)
         setSearchQuery('')
         return true
       }
-      if (showBotSearch) {
+      if (backOverlayStateRef.current.showBotSearch) {
         setShowBotSearch(false)
         setBotSearchQuery('')
         return true
@@ -966,46 +1103,53 @@ export function HostSessionsDrawer({
     return () => {
       backRef.current = undefined
     }
-  })
+  }, [backRef, inline, open, smoothClose])
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
         onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_e, g) => (!inline && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
-        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponder: (_e, g) => (!inline && openRef.current && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && openRef.current && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
-          if (closingRef.current) return
+          if (closingRef.current || !openRef.current) return
           currentAnim.current?.stop()
           const seq = ++gestureSeq.current
           dragReady.current = false
           translateX.stopAnimation(value => {
-            if (seq !== gestureSeq.current || closingRef.current) return
+            if (seq !== gestureSeq.current || closingRef.current || !openRef.current) return
             dragStartX.current = value
             dragReady.current = true
           })
         },
         onPanResponderMove: (_e, g) => {
-          if (closingRef.current || !dragReady.current) return
+          if (closingRef.current || !openRef.current || !dragReady.current) return
           const next = clampDrawerTranslate(dragStartX.current + g.dx, drawerWidth)
           translateX.setValue(next)
           overlayOpacity.setValue(Math.max(0, 1 + next / drawerWidth))
         },
         onPanResponderRelease: (_e, g) => {
-          if (closingRef.current) return
+          if (closingRef.current || !openRef.current) return
           if (shouldConfirmSwipeLeftClose({ dx: g.dx, dy: g.dy, x0: g.x0, vx: g.vx })) {
             smoothClose(true)
           } else {
-            Animated.parallel([
+            const seq = ++animSeq.current
+            currentAnim.current?.stop()
+            const anim = Animated.parallel([
               Animated.spring(translateX, { toValue: 0, bounciness: 0, speed: 18, useNativeDriver: true }),
               Animated.timing(overlayOpacity, { toValue: 1, duration: 160, useNativeDriver: true }),
-            ]).start()
+            ])
+            currentAnim.current = anim
+            anim.start(({ finished }) => {
+              if (!finished || seq !== animSeq.current) return
+              currentAnim.current = null
+            })
           }
         },
       }),
-    [inline, drawerWidth, translateX, overlayOpacity]
+    [inline, drawerWidth, translateX, overlayOpacity, smoothClose]
   )
 
   const touchSwipeStartRef = useRef<{ x0: number; y0: number; t0: number } | undefined>(undefined)
@@ -1017,7 +1161,7 @@ export function HostSessionsDrawer({
     onTouchEnd: (e: { nativeEvent: { pageX: number; pageY: number } }) => {
       const start = touchSwipeStartRef.current
       touchSwipeStartRef.current = undefined
-      if (start === undefined || inline || !dismissibleRef.current || closingRef.current) return
+      if (start === undefined || inline || !openRef.current || !dismissibleRef.current || closingRef.current) return
       const dx = e.nativeEvent.pageX - start.x0
       const dy = e.nativeEvent.pageY - start.y0
       const dt = Math.max(16, Date.now() - start.t0)
@@ -1391,7 +1535,7 @@ export function HostSessionsDrawer({
               const hasItems = isExp && section.data.length > 0
               const depth = section.depth ?? 0
               const matchedWorkspace = section.workspaceId && section.workspaceId !== 'default'
-                ? backendWorkspaces.find(w => w.workspaceId === section.workspaceId)
+                ? backendWorkspaceById.get(section.workspaceId)
                 : undefined
               return (
                 <Pressable
@@ -1495,8 +1639,15 @@ export function HostSessionsDrawer({
               accessibilityState={{ selected: isSelected }}
               onPress={() => {
                 if (justDraggedRef.current || dragState !== null) return
-                if (isSelected) closeDrawer()
-                else void onSelect(item)
+                if (isSelected && !botMode) {
+                  if (inline) {
+                    closeDrawer()
+                  } else {
+                    smoothClose(true, true, true)
+                  }
+                } else {
+                  void onSelect(item)
+                }
               }}
               onLongPress={() => {
                 if (searchQuery.trim() || section.id.startsWith('recent:')) {
@@ -2095,7 +2246,7 @@ export function HostSessionsDrawer({
       </Modal>
 
       {/* DS-Bot 弹窗宿主 (创建/编辑 Bot & 群聊、上下文菜单、用量/日程报表) */}
-      <BotModalsHost />
+      {visible && <BotModalsHost />}
     </View>
   )
 
@@ -2104,9 +2255,15 @@ export function HostSessionsDrawer({
   }
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.drawerHost]} pointerEvents="box-none">
+    <View
+      style={[StyleSheet.absoluteFill, styles.drawerHost]}
+      pointerEvents={open ? 'box-none' : 'none'}
+      accessibilityElementsHidden={!open}
+      importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
+    >
       <View style={styles.overlayContainer}>
         <Animated.View
+          pointerEvents={open ? 'auto' : 'none'}
           style={[
             StyleSheet.absoluteFill,
             styles.overlay,
@@ -2117,7 +2274,8 @@ export function HostSessionsDrawer({
           <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" onPress={() => smoothClose(true)} />
         </Animated.View>
         <Animated.View
-          accessibilityViewIsModal
+          accessibilityViewIsModal={open}
+          pointerEvents={open ? 'auto' : 'none'}
           {...drawerTouchProps}
           style={[
             styles.overlayDrawerShell,
@@ -2132,6 +2290,7 @@ export function HostSessionsDrawer({
             // drawer edge stays distinct against the dark scrim without a border.
             cappedDrawer && styles.drawerCapped,
             cappedDrawer && scheme === 'dark' && styles.drawerCappedDark,
+            !open && styles.drawerHiddenShadow,
           ]}
         >
           <View
@@ -2147,7 +2306,7 @@ export function HostSessionsDrawer({
       </View>
     </View>
   )
-}
+})
 
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
@@ -2168,6 +2327,7 @@ const createStyles = (colors: ThemeColors) =>
       elevation: 8,
     },
     drawerCappedDark: { backgroundColor: colors.surface },
+    drawerHiddenShadow: { elevation: 0, shadowOpacity: 0 },
     drawerClip: { flex: 1, overflow: 'hidden' },
     drawerClipCapped: { borderTopRightRadius: radius.xl, borderBottomRightRadius: radius.xl },
     inlineDrawer: { width: '100%', maxWidth: '100%', borderRadius: 0, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },

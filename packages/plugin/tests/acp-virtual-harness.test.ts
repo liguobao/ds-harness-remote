@@ -1391,23 +1391,37 @@ describe('AcpVirtualHarness', () => {
         .resolves.toEqual({ ok: true, value: { outcome: 'already-finished' } })
       expect(hostCarrier.dispatch).not.toHaveBeenCalled()
 
-      for (const blocked of ['schedule/list', 'workspaceFiles/readRelated', 'workspace/unarchiveSession']) {
+      for (const blocked of ['schedule/list', 'workspaceFiles/readRelated', 'workspace/unarchiveSession', 'speech/follow', 'speech/arbitrary']) {
         await expect(target.dispatch(blocked, { args: {} }, signal))
           .resolves.toMatchObject({ ok: false, error: { code: 'method-not-found' } })
       }
       expect(hostCarrier.dispatch).not.toHaveBeenCalled()
 
-      for (const allowed of ['pluginInventory/list', 'permissionPresets/catalog', 'credentials/list']) {
+      for (const allowed of [
+        'pluginInventory/list',
+        'permissionPresets/catalog',
+        'credentials/list',
+        'speech/catalog',
+        'speech/transcribe',
+        'speech/prepare',
+        'speech/configure',
+        'speech/cancelPreparation',
+      ]) {
         await expect(target.dispatch(allowed, { args: {} }, signal))
           .resolves.toEqual({ ok: true, value: { endpoint: allowed } })
       }
-      expect(hostCarrier.dispatch).toHaveBeenCalledTimes(3)
+      expect(hostCarrier.dispatch).toHaveBeenCalledTimes(8)
 
-      await expect(target.open('schedule/watch', { args: {} }, signal)).rejects.toMatchObject({ code: 'method-not-found' })
+      for (const blockedOpen of ['schedule/watch', 'speech/transcribe', 'speech/arbitrary']) {
+        await expect(target.open(blockedOpen, { args: {} }, signal)).rejects.toMatchObject({ code: 'method-not-found' })
+      }
       expect(hostCarrier.open).not.toHaveBeenCalled()
-      const allowedOpen = await target.open('remoteAccess/follow', { args: {} }, signal)
-      await expect(allowedOpen[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
-      expect(hostCarrier.open).toHaveBeenCalledTimes(1)
+      for (const allowedOpenEndpoint of ['remoteAccess/follow', 'speech/follow']) {
+        const allowedOpen = await target.open(allowedOpenEndpoint, { args: {} }, signal)
+        await expect(allowedOpen[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
+      }
+      expect(hostCarrier.open).toHaveBeenCalledTimes(2)
+      expect(hostCarrier.open).toHaveBeenLastCalledWith('speech/follow', { args: {} }, signal)
     } finally { await target.close() }
   })
 

@@ -6,6 +6,8 @@ import { TRANSPORT_UPGRADE_CAPABILITY, type TransportUpgradeHost } from './trans
 import {
   BINARY_UPLOAD_CAPABILITY,
   LAN_UPLOAD_CAPABILITY,
+  WORKSPACE_GIT_CAPABILITY,
+  WORKSPACE_GIT_METHODS,
   createRpcError,
   createRpcResponse,
   parseRemoteWorkspaceTypes,
@@ -26,6 +28,7 @@ import type { AuthenticatedPeerChannel } from './types.js'
 import type { CodexPeerBridge } from './codex/peer-bridge.js'
 import type { AcpPeerBridge } from './acp/peer-bridge.js'
 import { RpcError, safeErrorCode, workspaceFileFailureReason } from './safe-error.js'
+import type { WorkspaceGitHost } from './workspace-git.js'
 import type { WorkspaceUploadHost } from './workspace-upload.js'
 import type { PluginRouteBridge } from './plugin-route-bridge.js'
 import type { RemoteCompactionOperations, RemoteCompactionOwner } from './remote-compaction-operations.js'
@@ -49,6 +52,7 @@ const compactionOperationSchema = z.object({
 }).strict()
 const apiMethods = new Set([
   ...sessionTransferMethods,
+  ...WORKSPACE_GIT_METHODS,
   'harness.transport.describe',
   'dsh.web.open',
   'dsh.web.close',
@@ -139,6 +143,7 @@ export class RpcRouter {
     private readonly dshWeb?: DshWebPeer,
     private readonly lanWeb?: DshWebLanPeer,
     private readonly sameLinkIpv6Endpoints?: AuthenticatedPeerChannel['sameLinkIpv6Endpoints'],
+    private readonly workspaceGit?: WorkspaceGitHost,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -153,6 +158,7 @@ export class RpcRouter {
       this.lanUpload?.closeAll(),
       this.transportUpgrade?.closeAll(),
       this.dshWeb?.dispose(),
+      this.workspaceGit?.closeAll(),
     ])
   }
 
@@ -185,6 +191,7 @@ export class RpcRouter {
     } catch (error: unknown) {
       const response = errorResponse(request.id, error)
       const failedEndpoint = !request.payload.method.startsWith('workspace.upload.')
+        && !request.payload.method.startsWith('workspace.git.')
         && !request.payload.method.startsWith('session.transfer.')
         && typeof (request.payload.params as Record<string, unknown> | undefined)?.endpoint === 'string'
         ? String((request.payload.params as Record<string, unknown>).endpoint)
@@ -227,6 +234,7 @@ export class RpcRouter {
           ...(this.harnessRemote === undefined || !remoteAvailable ? [] : ['harness.remote.stream.transfer.v1']),
           ...(this.compaction === undefined ? [] : [REMOTE_COMPACTION_CAPABILITY]),
           ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
+          ...(this.workspaceGit === undefined ? [] : [WORKSPACE_GIT_CAPABILITY]),
           ...(this.sessionTransfer?.capabilities() ?? []),
           ...(this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : []),
           ...(this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === 'linux' ? [DSH_WEB_LAN_IPV6_CAPABILITY] : []),
@@ -317,6 +325,14 @@ export class RpcRouter {
       case 'workspace.upload.abort': {
         if (!this.workspaceUpload) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Workspace upload is unavailable on this Host.')
         return this.workspaceUpload.call(method, params)
+      }
+      case 'workspace.git.status': {
+        if (!this.workspaceGit) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Workspace Git is unavailable on this Host.')
+        return this.workspaceGit.status(params)
+      }
+      case 'workspace.git.diff': {
+        if (!this.workspaceGit) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Workspace Git is unavailable on this Host.')
+        return this.workspaceGit.diff(params)
       }
       case 'plugin.route.call': return this.requirePluginRoute().call(params)
       case 'remote.transport.upgrade.offer': return this.requireTransportUpgrade().offer(params)

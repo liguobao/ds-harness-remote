@@ -6,6 +6,7 @@ import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
+import { sessionFileStatCache } from '../services/file-stat-cache'
 import { saveLastConnectedDeviceId } from '../services/storage'
 import { isTerminalLocalMessage } from './message-helpers'
 import { acpClientForBackend, storeAcpPagedMessages } from './session-actions'
@@ -26,6 +27,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       ++runtime.sessionLoadGeneration
       runtime.sessionReadAbort?.abort()
       runtime.clearHarnessCatalogSync()
+      sessionFileStatCache.clear()
       const memory = useBrowseMemory.getState()
       const scope = browseScope({...get(), selectedDevice: device})
       const cached = device.trusted ? memory.catalogs[scope] : undefined
@@ -53,6 +55,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         connectionNetworkDetails: undefined,
         hostDescriptor: undefined,
         hostSessionEvents: false,
+        hostWorkspaceGit: false,
         codexAvailable: false,
         cursorAvailable: false,
         antigravityAvailable: false,
@@ -149,6 +152,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                     retryable: closeOptions?.retryable !== false },
                   connectionStage: undefined,
                   hostSessionEvents: false,
+                  hostWorkspaceGit: false,
                   codexAvailable: false,
                   cursorAvailable: false,
                   antigravityAvailable: false,
@@ -178,6 +182,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         set({
           hostDescriptor,
           hostSessionEvents: runtime.connection.hasSessionEvents(),
+          hostWorkspaceGit: runtime.connection.hasWorkspaceGit?.() ?? false,
           codexAvailable: runtime.connection.hasCodex(),
           cursorAvailable: runtime.connection.hasCursor(),
           antigravityAvailable: runtime.connection.hasAntigravity(),
@@ -226,6 +231,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           },
           connectionStage: undefined,
           ...(failedStage === 'transport' ? { relayOnlyUntil: Date.now() + RELAY_DOWNGRADE_MS } : {}),
+          hostWorkspaceGit: false,
           codexAvailable: false,
           cursorAvailable: false,
           antigravityAvailable: false,
@@ -391,6 +397,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       runtime.reconnectFlight = undefined
       runtime.clearPendingMuxFrames()
       runtime.clearHarnessCatalogSync()
+      sessionFileStatCache.clear()
       await runtime.closeActiveCodexStream(false)
       await runtime.closeActiveCursorStream(false)
       await runtime.connection.close()
@@ -403,6 +410,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         selectedDevice: undefined,
         hostDescriptor: undefined,
         hostSessionEvents: false,
+        hostWorkspaceGit: false,
         codexAvailable: false,
         cursorAvailable: false,
         antigravityAvailable: false,
@@ -441,12 +449,14 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         ++runtime.sessionLoadGeneration
         runtime.clearPendingMuxFrames()
         runtime.clearHarnessCatalogSync()
+        sessionFileStatCache.clear()
         void runtime.closeActiveCodexStream(false)
         void runtime.closeActiveCursorStream(false)
         set(state => ({
           connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable,
             ...(state.connection.retryable === false ? { retryable: false } : {}) },
           hostSessionEvents: false,
+          hostWorkspaceGit: false,
           codexAvailable: false,
           busyAction: undefined,
           permissionSelecting: false,

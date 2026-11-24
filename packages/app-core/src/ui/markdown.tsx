@@ -11,7 +11,7 @@ import { MathFormula } from './math-formula'
 import { MermaidBlock } from './mermaid/mermaid-block'
 import { useTheme } from './theme-context'
 import type { ThemeColors } from './theme-context'
-import { useThemedStyles } from './use-themed-styles'
+import { getCachedThemedStyles } from './use-themed-styles'
 import { CodeBlockView } from './code-block'
 import { PresentedFileGroup } from './file-card'
 import { QuotePreview } from './quote-preview'
@@ -55,9 +55,21 @@ export const parser = createMarkdownParser()
 
 type MarkdownLinkHandler = (href: string) => void
 const markdownLinkContext = createContext<MarkdownLinkHandler | undefined>(undefined)
+const workspaceFilePressContext = createContext<((path: string) => void) | undefined>(undefined)
+const workspaceStatReadyContext = createContext(true)
 
 export function useMarkdownLink(): MarkdownLinkHandler | undefined {
   return useContext(markdownLinkContext)
+}
+
+export function useWorkspaceFilePress(): ((path: string) => void) | undefined {
+  const filePress = useContext(workspaceFilePressContext)
+  const linkPress = useContext(markdownLinkContext)
+  return filePress ?? linkPress
+}
+
+export function useWorkspaceStatReady(): boolean {
+  return useContext(workspaceStatReadyContext)
 }
 
 const markdownFileContext = createContext<string | undefined>(undefined)
@@ -70,10 +82,18 @@ function MarkdownImage({ src, alt }: { src: string; alt: string }) {
 
 const markdownTextContext = createContext<((text: string) => string) | undefined>(undefined)
 
-export function MarkdownLinkProvider({ onLinkPress, transformText, children }: {
-  onLinkPress?: MarkdownLinkHandler; transformText?: (text: string) => string; children: ReactNode
+export function MarkdownLinkProvider({ onLinkPress, onFilePress, canStatFiles = true, transformText, children }: {
+  onLinkPress?: MarkdownLinkHandler; onFilePress?: (path: string) => void; canStatFiles?: boolean; transformText?: (text: string) => string; children: ReactNode
 }) {
-  return <markdownLinkContext.Provider value={onLinkPress}><markdownTextContext.Provider value={transformText}>{children}</markdownTextContext.Provider></markdownLinkContext.Provider>
+  return (
+    <markdownLinkContext.Provider value={onLinkPress}>
+      <workspaceFilePressContext.Provider value={onFilePress}>
+        <workspaceStatReadyContext.Provider value={canStatFiles}>
+          <markdownTextContext.Provider value={transformText}>{children}</markdownTextContext.Provider>
+        </workspaceStatReadyContext.Provider>
+      </workspaceFilePressContext.Provider>
+    </markdownLinkContext.Provider>
+  )
 }
 
 /**
@@ -83,7 +103,12 @@ export function MarkdownLinkProvider({ onLinkPress, transformText, children }: {
  * result and their rendered element, so per-chunk work is O(tail) instead of
  * O(whole message).
  */
-function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; name?: string }[] {
+const referencedFilesCache = new WeakMap<MarkdownNode[], { path: string; name?: string }[]>()
+
+export function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; name?: string }[] {
+  const cached = referencedFilesCache.get(nodes)
+  if (cached !== undefined) return cached
+
   const files: { path: string; name?: string }[] = []
   const seen = new Set<string>()
 
@@ -112,6 +137,7 @@ function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; name?: s
     }
   }
   walk(nodes)
+  referencedFilesCache.set(nodes, files)
   return files
 }
 
@@ -122,10 +148,10 @@ export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palet
   const onLinkPress = useContext(markdownLinkContext)
   const transformText = useContext(markdownTextContext)
   const source = useMemo(() => transformText?.(text) ?? text, [text, transformText])
-  const styles = useMemo(() => createStyles(colors, theme.appearance), [colors, theme.appearance])
+  const styles = useMemo(() => getCachedThemedStyles(createStyles, colors, theme.appearance), [colors, theme.appearance])
   const cacheRef = useRef<BlockParseCache | undefined>(undefined)
   // Normalize CR / CRLF to LF
-  const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/g, "\n")), [source])
+  const nodes = useMemo(() => parseMarkdownBlocks(source, cacheRef), [source])
   const referencedFiles = useMemo(() => extractReferencedFiles(nodes), [nodes])
 
   return (
@@ -138,13 +164,36 @@ export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palet
   )
 })
 
-interface BlockParseCache {
+export interface BlockParseCache {
   text: string
   nodes: MarkdownNode[]
   /** Char offset of the last top-level block's first line inside `text` (-1 when unknown). */
   tailStart: number
   /** Key of the last top-level block; suffix re-parses continue numbering from it. */
   tailKey: number
+}
+
+export const MAX_MARKDOWN_CACHE_ENTRIES = 192
+export const MAX_MARKDOWN_CACHE_TEXT_LEN = 32_768
+const parsedBlocksCache = new Map<string, MarkdownNode[]>()
+
+function readParsedBlocksCache(text: string): MarkdownNode[] | undefined {
+  const cached = parsedBlocksCache.get(text)
+  if (cached === undefined) return undefined
+  parsedBlocksCache.delete(text)
+  parsedBlocksCache.set(text, cached)
+  return cached
+}
+
+function writeParsedBlocksCache(text: string, nodes: MarkdownNode[]): void {
+  if (text.length > MAX_MARKDOWN_CACHE_TEXT_LEN) return
+  if (parsedBlocksCache.has(text)) {
+    parsedBlocksCache.delete(text)
+  } else if (parsedBlocksCache.size >= MAX_MARKDOWN_CACHE_ENTRIES) {
+    const oldest = parsedBlocksCache.keys().next().value
+    if (oldest !== undefined) parsedBlocksCache.delete(oldest)
+  }
+  parsedBlocksCache.set(text, nodes)
 }
 
 /**
@@ -166,6 +215,7 @@ function tailStartOf(source: string, nodes: MarkdownNode[], base: number): numbe
   const last = nodes.at(-1)
   const line = last?.token.map?.[0]
   if (last === undefined || line === undefined) return -1
+  if (line === 0) return base
   return base + (lineStartsOf(source)[line] ?? -1)
 }
 
@@ -179,6 +229,7 @@ function tailStartOf(source: string, nodes: MarkdownNode[], base: number): numbe
  */
 function parseBlocks(cacheRef: { current: BlockParseCache | undefined }, text: string): MarkdownNode[] {
   const cache = cacheRef.current
+  if (cache !== undefined && cache.text === text) return cache.nodes
   if (cache !== undefined && cache.tailStart >= 0 && cache.tailKey >= 0
     && text.length > cache.text.length && text.startsWith(cache.text)
     && !LINK_REF_DEFINITION.test(text)
@@ -195,9 +246,29 @@ function parseBlocks(cacheRef: { current: BlockParseCache | undefined }, text: s
     }
     return nodes
   }
+  if (text.length <= MAX_MARKDOWN_CACHE_TEXT_LEN) {
+    const cached = readParsedBlocksCache(text)
+    if (cached !== undefined) {
+      cacheRef.current = {
+        text,
+        nodes: cached,
+        tailStart: tailStartOf(text, cached, 0),
+        tailKey: cached.at(-1)?.key ?? -1,
+      }
+      return cached
+    }
+  }
   const nodes = markdownTree(parser.parse(text, {}))
+  writeParsedBlocksCache(text, nodes)
   cacheRef.current = { text, nodes, tailStart: tailStartOf(text, nodes, 0), tailKey: nodes.at(-1)?.key ?? -1 }
   return nodes
+}
+
+export function parseMarkdownBlocks(
+  text: string,
+  cacheRef: { current: BlockParseCache | undefined } = { current: undefined },
+): MarkdownNode[] {
+  return parseBlocks(cacheRef, text.replace(/\r\n?/g, '\n'))
 }
 
 /**

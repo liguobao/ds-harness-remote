@@ -122,7 +122,7 @@ export function createStyles(
     messageRowUser: { flexDirection: 'row-reverse' },
     assistantBlock: { alignSelf: 'stretch', gap: m.assistantGap, marginTop: Math.max(2, m.assistantGap - 2), marginBottom: m.turnBottomGap },
     assistantText: { paddingHorizontal: 0 },
-    userBlock: { alignSelf: 'flex-end', maxWidth: '86%', marginTop: m.turnTopGap, marginBottom: m.turnBottomGap },
+    userBlock: { alignSelf: 'flex-end', alignItems: 'flex-end', gap: 6, maxWidth: '86%', marginTop: m.turnTopGap, marginBottom: m.turnBottomGap },
     userContent: { paddingHorizontal: 14, paddingVertical: 10 },
     userMediaOnly: { paddingHorizontal: 0, paddingVertical: 0 },
     userSoftBubble: { backgroundColor: colors.userBubble ?? colors.surfaceStrong, borderRadius: 18, borderTopRightRadius: 6, maxWidth: '100%' },

@@ -12,7 +12,7 @@ import * as Clipboard from 'expo-clipboard'
 import { useTheme } from './theme-context'
 import { resolveChatMetrics } from './theme'
 import { monoFontFamily } from './platform-style'
-import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from './syntax-highlight'
+import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE, type SyntaxToken } from './syntax-highlight'
 import { IconWrapFill, IconNowrapFill, IconCopyOutline, IconCheckOutline } from './dsh-icons'
 
 export interface CodeBlockProps {
@@ -22,6 +22,30 @@ export interface CodeBlockProps {
 }
 
 const COPY_RESET_MS = 2000
+export const MAX_HIGHLIGHT_CACHE_ENTRIES = 256
+export const MAX_HIGHLIGHT_CACHE_CODE_LEN = 16_384
+
+const highlightCache = new Map<string, SyntaxToken[]>()
+
+export function highlightCodeCached(cleanCode: string, language?: string): SyntaxToken[] {
+  if (cleanCode.length > MAX_HIGHLIGHT_CACHE_CODE_LEN) {
+    return highlightCode(cleanCode, language)
+  }
+  const key = `${language ?? ''}\0${cleanCode}`
+  const cached = highlightCache.get(key)
+  if (cached !== undefined) {
+    highlightCache.delete(key)
+    highlightCache.set(key, cached)
+    return cached
+  }
+  const tokens = highlightCode(cleanCode, language)
+  if (highlightCache.size >= MAX_HIGHLIGHT_CACHE_ENTRIES) {
+    const oldestKey = highlightCache.keys().next().value
+    if (oldestKey !== undefined) highlightCache.delete(oldestKey)
+  }
+  highlightCache.set(key, tokens)
+  return tokens
+}
 
 export const CodeBlockView = memo(function CodeBlockView({ code, language, style }: CodeBlockProps) {
   const { colors, scheme, appearance } = useTheme()
@@ -34,7 +58,7 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
 
   const cleanCode = (code || '').replace(/\n+$/u, '')
   const label = (language || 'code').toLowerCase()
-  const tokens = React.useMemo(() => highlightCode(cleanCode, language), [cleanCode, language])
+  const tokens = React.useMemo(() => highlightCodeCached(cleanCode, language), [cleanCode, language])
 
   useEffect(() => {
     return () => {

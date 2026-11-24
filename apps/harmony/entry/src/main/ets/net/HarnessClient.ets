@@ -23,6 +23,38 @@ export class WorkspaceTextPage {
   eof: boolean = true;
 }
 
+export class WorkspaceGitFile {
+  path: string = '';
+  oldPath: string = '';
+  status: string = '';
+  staged: boolean = false;
+  unstaged: boolean = false;
+  additions: number = -1;
+  deletions: number = -1;
+  isBinary: boolean = false;
+}
+
+export class WorkspaceGitStatus {
+  isGitRepo: boolean = false;
+  branch: string = '';
+  headShortSha: string = '';
+  hasHead: boolean = false;
+  scope: string = 'all';
+  files: WorkspaceGitFile[] = [];
+  totalFiles: number = 0;
+  totalAdditions: number = 0;
+  totalDeletions: number = 0;
+  truncated: boolean = false;
+}
+
+export class WorkspaceGitDiff {
+  diff: string = '';
+  isBinary: boolean = false;
+  additions: number = 0;
+  deletions: number = 0;
+  truncated: boolean = false;
+}
+
 /** 一个 Host 工作区（`workspace/list` item）。 */
 export class HarnessWorkspace {
   workspaceId: string = '';
@@ -470,6 +502,7 @@ export class HarnessAlphaClient {
         workspace.workspaceId = jsonStr(record, 'workspaceId', '');
         workspace.path = jsonStr(record, 'path', '');
         workspace.title = jsonStr(record, 'title', '');
+        workspace.sessionIds = stringListOf(record['sessionIds']);
         const updated: Object | undefined = record['updatedAt'];
         workspace.updatedAt = typeof updated === 'number' ? updated : 0;
         if (workspace.workspaceId.length > 0) {
@@ -483,6 +516,54 @@ export class HarnessAlphaClient {
     snapshot.archivedSessionIds = archivedIds;
     snapshot.pinnedSessionIds = pinnedIds;
     return snapshot;
+  }
+
+  async workspaceGitStatus(sessionId: string, scope: string = 'all'): Promise<WorkspaceGitStatus> {
+    const args: Record<string, Object> = { 'sessionId': sessionId, 'scope': scope };
+    const root: Record<string, Object> | undefined = asRecord(await this.callValue('workspace.git.status', args));
+    const result = new WorkspaceGitStatus();
+    if (root === undefined) return result;
+    result.isGitRepo = root['isGitRepo'] === true;
+    result.branch = jsonStr(root, 'branch', '');
+    result.headShortSha = jsonStr(root, 'headShortSha', '');
+    result.hasHead = root['hasHead'] === true;
+    result.scope = jsonStr(root, 'scope', scope);
+    result.totalFiles = numberValue(root['totalFiles']);
+    result.totalAdditions = numberValue(root['totalAdditions']);
+    result.totalDeletions = numberValue(root['totalDeletions']);
+    result.truncated = root['truncated'] === true;
+    const items = asArray(root['files']);
+    if (items !== undefined) {
+      for (const item of items) {
+        const row = asRecord(item);
+        if (row === undefined) continue;
+        const file = new WorkspaceGitFile();
+        file.path = jsonStr(row, 'path', '');
+        file.oldPath = jsonStr(row, 'oldPath', '');
+        if (file.path.length === 0) continue;
+        file.status = jsonStr(row, 'status', 'modified');
+        file.staged = row['staged'] === true;
+        file.unstaged = row['unstaged'] === true;
+        file.additions = nullableNumberValue(row['additions']);
+        file.deletions = nullableNumberValue(row['deletions']);
+        file.isBinary = row['isBinary'] === true;
+        result.files.push(file);
+      }
+    }
+    return result;
+  }
+
+  async workspaceGitDiff(sessionId: string, path: string, scope: string = 'all'): Promise<WorkspaceGitDiff> {
+    const args: Record<string, Object> = { 'sessionId': sessionId, 'path': path, 'scope': scope, 'contextLines': 3 };
+    const root: Record<string, Object> | undefined = asRecord(await this.callValue('workspace.git.diff', args));
+    const result = new WorkspaceGitDiff();
+    if (root === undefined) return result;
+    result.diff = jsonStr(root, 'diff', '');
+    result.isBinary = root['isBinary'] === true;
+    result.additions = numberValue(root['additions']);
+    result.deletions = numberValue(root['deletions']);
+    result.truncated = root['truncated'] === true;
+    return result;
   }
 
   /** 列出可用斜杠命令；主机返回空时由调用方回退到内置清单。 */
@@ -561,6 +642,33 @@ export class HarnessAlphaClient {
     const data: string = root !== undefined ? jsonStr(root, 'data', '') : '';
     logInfo('workspaceFiles/readBytes ok bytes(base64)=' + data.length);
     return data;
+  }
+
+  /** OfficeKit / legacy officeToPdf conversion used by the native file viewer. */
+  async officeGeneration(): Promise<string> {
+    const timeoutMs = 120000;
+    try {
+      return officeGenerationValue(await this.callValue('officeKit/generation', {}, timeoutMs));
+    } catch (error) {
+      if (!officeFallbackAllowed(error)) throw new Error(String(error));
+      return officeGenerationValue(await this.callValue('officeToPdf/generation', {}, timeoutMs));
+    }
+  }
+
+  async renderOfficePdf(sessionId: string, path: string): Promise<string> {
+    const args: Record<string, Object> = {
+      'workspaceFileScopeId': sessionId,
+      'path': path,
+      'priority': 'foreground'
+    };
+    let value: Record<string, Object> | undefined;
+    try {
+      value = asRecord(await this.callValue('officeKit/render', args, 120000));
+    } catch (error) {
+      if (!officeFallbackAllowed(error)) throw new Error(String(error));
+      value = asRecord(await this.callValue('officeToPdf/render', args, 120000));
+    }
+    return value === undefined ? '' : jsonStr(value, 'data', '');
   }
 
   /** 语音转文字：把手里的 WAV（base64）交给主机上的语音提供商。 */
@@ -1579,4 +1687,25 @@ function assistantStreamAttempt(value: Record<string, Object>, defaultNextIndex:
     return undefined;
   }
   return state;
+}
+
+function numberValue(value: Object | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value as number) : 0;
+}
+
+function nullableNumberValue(value: Object | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value as number) : -1;
+}
+
+function officeGenerationValue(value: Object): string {
+  if (typeof value === 'string') return value;
+  const root = asRecord(value);
+  return root === undefined ? '' : jsonStr(root, 'generation', '');
+}
+
+function officeFallbackAllowed(error: Object): boolean {
+  if (!(error instanceof RemoteGatewayError)) return false;
+  return ['METHOD_NOT_ALLOWED', 'METHOD_NOT_FOUND', 'unknown-endpoint',
+    'gateway/invocation-unavailable', 'gateway/method-unavailable',
+    'gateway/definition-unavailable'].indexOf(error.code) >= 0;
 }

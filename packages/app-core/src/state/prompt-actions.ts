@@ -21,13 +21,13 @@ import type { AppState } from './store-state'
 export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<AppState,
   'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'cancelCompaction' | 'respondApproval' | 'respondQuestion'> {
   return {
-    async sendMessage(input, images = [], reuseRpcId) {
+    async sendMessage(input, images = [], reuseRpcId, files = []) {
       if (get().busyAction?.startsWith('session:')) return 'rejected'
       runtime.flushPendingMuxFrames()
       set({ commandResult: undefined })
       const session = get().selectedSession
       const text = input.trim()
-      if (session === undefined || (text.length === 0 && images.length === 0)) return 'rejected'
+      if (session === undefined || (text.length === 0 && images.length === 0 && files.length === 0)) return 'rejected'
       // Fail closed before the optimistic row is inserted. Without this guard an
       // offline prompt becomes a `local:` row marked failed/unconfirmed and the
       // call returns 'kept', which forbids the caller from restoring the draft.
@@ -103,6 +103,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         role: 'user',
         text,
         ...(images.length === 0 ? {} : { images: images.map(image => ({ uri: image.uri, name: image.name })) }),
+        ...(files.length === 0 ? {} : { files }),
         createdAt: Date.now(),
         requestRpcId,
         // Retry material travels with the row (not a module map) so image rows
@@ -398,7 +399,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       if (row?.kind !== 'message' || (row.sendState !== 'failed' && row.sendState !== 'unconfirmed') || row.requestRpcId === undefined) return false
       // Reuse the original request rpcId: a prompt the Host already accepted
       // (unconfirmed outcome) must not be executed twice where the Host dedupes.
-      return (await get().sendMessage(row.text, row.promptImages ?? [], row.requestRpcId)) === 'sent'
+      return (await get().sendMessage(row.text, row.promptImages ?? [], row.requestRpcId, row.files)) === 'sent'
     },
 
     async cancelCompaction() {

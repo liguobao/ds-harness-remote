@@ -764,6 +764,18 @@ Harness Remote 固定白名单允许官方 CoT 翻译插件的 `cotTranslation/l
 `cotTranslation/translate` unary 调用；不开放该命名空间的其他方法或 stream。
 Host 必须启用对应官方插件，原生 Gateway 的不可用或翻译失败结果原样返回。
 
+Harness Remote 固定白名单允许官方语音输入插件的 `speech/catalog`、`speech/transcribe`、
+`speech/prepare`、`speech/configure`、`speech/cancelPreparation` unary 调用与 `speech/follow`
+stream 订阅；不开放 `speech/*` 命名空间的其他方法，且严格区分 unary 与 stream（通过
+`harness.remote.call` 调用 `speech/follow` 或通过 `harness.remote.stream.open` 打开非
+`speech/follow` 的 `speech/*` 端点均以 `METHOD_NOT_ALLOWED` 拒绝）。Host 必须启用对应官方插件，
+原生 Gateway 的不可用或执行失败结果原样返回。`speech/prepare` 仅触发后台模型准备（进度通过
+`speech/follow` stream 推送）；`speech/transcribe` 因涵盖冷唤醒与本地推理耗时，Host 侧与
+TypeScript 客户端网关默认使用 3 分钟超时预算（Host 侧其余 unary 调用保持默认 60 秒，且在途
+unary 调用随对端连接关闭一并取消）；超过 2 MiB 的请求（如较长 `speech/transcribe` 音频）由
+客户端自动切换至 `harness.remote.transfer.*` 分片传输（受有界传输上限约束，且客户端分片传输
+总预算额外留出分片上传余量）。
+
 ### 16.1 Request
 
 ```json
@@ -2331,3 +2343,11 @@ With `dsh.web.lan.direct.v1`, `harness.transport.describe` also reports the opti
 The browser opens `/__remote/browser` and signals its opener with `dsh.web.ready`. The opener checks the window and exact origin before posting `{type: "dsh.web.grant", browserGrant}`. The landing page submits the grant to same-origin `POST /__remote/session`. WebViews can use the same form or present the grant as `X-DSH-Web-Grant` to `GET /__remote/session-bootstrap`. Redemption sets an HttpOnly session cookie. The Host checks the cookie before forwarding HTTP or upgrading WebSocket. Anonymous requests receive 401, including the two bootstrap HTML pages, which contain no application data. The upstream DSH credential stays on the Host.
 
 Opening another session on this connection replaces the first. `dsh.web.lan.direct.close({sessionId})`, disconnect, expiry, or loss of LAN closes the listener and streams. Session lifetime is capped at 30 minutes after the grant deadline. HTTP and WS on the LAN are plaintext. Non-LAN connections and Hosts lacking the capability use the existing hostc flow.
+
+### Read-only workspace Git review (`workspace.git.read.v1`)
+
+A Host that exposes read-only Git change inspection advertises `workspace.git.read.v1` in `harness.transport.describe`. Both RPCs run only over the authenticated Noise channel, resolve the session workspace root strictly from Host-side session authority (Harness, CodeX, or ACP; never a Client-supplied path), verify bidirectional gitdir ownership for linked worktrees/submodules (rejecting forged `.git` gitfiles, `--separate-git-dir` layouts without a host backlink, and external `.git` symlinks as `WORKSPACE_GIT_UNSAFE_REPO`), neutralize repository `filter.<name>.*`, disable partial-clone lazy fetch / network protocols (`GIT_NO_LAZY_FETCH=1`, `protocol.allow=never`, rejecting promisor/partial-clone configs), and never invoke write Git subcommands, external diff/textconv hooks, `core.fsmonitor`, or optional index locks (`--no-optional-locks`).
+
+- **`workspace.git.status`**: `{ sessionId, scope?: 'all' | 'staged' | 'unstaged' }` (default `'all'`). Returns `{ isGitRepo, branch?, headShortSha?, hasHead, scope, files, totalFiles, truncated, totalAdditions, totalDeletions }`. Non-Git workspaces and bare repositories return `isGitRepo: false` with an empty list. Returned paths are POSIX workspace-relative paths strictly inside the canonical workspace root (parent-repo prefixes are stripped, out-of-workspace rename origins are omitted, `.gitignore` rules are respected, and untracked symlinks are skipped). Responses are capped at 200 files (`WORKSPACE_GIT_MAX_FILES`) and 512 KiB of raw status output (`WORKSPACE_GIT_MAX_STATUS_STDOUT_BYTES`), setting `truncated: true` when bounded.
+- **`workspace.git.diff`**: `{ sessionId, path?, scope?: 'all' | 'staged' | 'unstaged', contextLines?: 0..20 }` (default `scope: 'all'`, `contextLines: 3`). Validates `path` lexically (POSIX relative path without `..`, drive/ADS colons, backslashes, control chars, or leading `-`) and physically (non-symlink ancestor chain and non-symlink target inside the canonical root). Untracked non-ignored regular files are bounded-read directly without following symlinks and returned as standard Unified Diff text (or `isBinary: true`); ignored files return an empty diff. Responses are capped at 256 KiB (`WORKSPACE_GIT_MAX_DIFF_BYTES`) and 2,500 lines (`WORKSPACE_GIT_MAX_DIFF_LINES`) with `truncated: true` and `truncatedReason: 'max-bytes' | 'max-lines'`.
+- **Execution & error boundaries**: Per-connection concurrency is bounded to 4 (`RATE_LIMITED`, `retryable: true`). Each RPC invocation shares a single 10 s call-level deadline (`RPC_TIMEOUT`, `retryable: true`) and active child processes are killed on peer disconnect (`WORKSPACE_GIT_CLOSED`). Errors use stable sanitized codes (`WORKSPACE_UNAVAILABLE`, `WORKSPACE_PATH_DENIED`, `WORKSPACE_GIT_UNAVAILABLE`, `WORKSPACE_GIT_UNSAFE_REPO`, `WORKSPACE_GIT_FAILED`, `WORKSPACE_GIT_CLOSED`, `RPC_TIMEOUT`, `RATE_LIMITED`) and never echo host paths or raw Git stderr.
