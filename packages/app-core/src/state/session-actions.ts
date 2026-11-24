@@ -782,7 +782,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             (async () => {
               if (typeof acpClient.loadSessionDetails === 'function') {
                 try {
-                  return await readAcpHistory(acpClient, cursorNativeId(session), acpBackend)
+                  return await readAcpHistory(acpClient, cursorNativeId(session), acpBackend, readAbort.signal)
                 } catch (err) {
                   if (acpBackend !== 'cursor') throw err
                   return { events: [] as unknown[] }
@@ -792,7 +792,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 : acpBackend === 'hermes' ? await readHermesHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'opencode' ? await readOpencodeHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'pi' ? await readPiHistory(acpClient, cursorNativeId(session))
-                : acpBackend === 'antigravity' ? await readAntigravityHistory(acpClient, cursorNativeId(session))
+                : acpBackend === 'antigravity' ? await readAntigravityHistory(acpClient, cursorNativeId(session), readAbort.signal)
                 : [] as unknown[]
               return { events }
             })(),

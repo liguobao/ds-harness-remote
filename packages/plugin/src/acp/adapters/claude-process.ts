@@ -191,13 +191,15 @@ export class ClaudeAcpClient extends CursorAcpClient {
   }
 
   /** One temporary process, separate from all live sessions (including active prompts). */
-  async history(sessionId: string, cwd: string): Promise<unknown[]> {
+  async history(sessionId: string, cwd: string, signal?: AbortSignal): Promise<unknown[]> {
+    signal?.throwIfAborted()
     if (this.shuttingDown) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
     if (this.historyReading) throw new CursorAcpError('ACP_PROCESS_LIMIT', `A ${this.label} history read is already in progress.`)
     this.historyReading = true
     const client = this.makeClient()
     let stopping: Promise<void> | undefined
     const stop = () => stopping ??= client.close()
+    const onAbort = () => { void stop().catch(() => undefined) }
     this.historyStop = stop
     const updates: Parameters<typeof acpHistoryEvents>[0] = []
     let bytes = 0
@@ -219,10 +221,13 @@ export class ClaudeAcpClient extends CursorAcpClient {
         void stop().catch(() => undefined)
       } else updates.push(message)
     })
+    signal?.addEventListener('abort', onAbort, { once: true })
     try {
       await client.start()
+      signal?.throwIfAborted()
       if (this.shuttingDown) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
       const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
+      signal?.throwIfAborted()
       this.assertLoaded(result, sessionId)
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
       const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
@@ -230,6 +235,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
         client.call('dsh/sessionModes', { sessionId }).catch(() => undefined),
         client.call('dsh/sessionCommands', { sessionId }).catch(() => undefined),
       ])
+      signal?.throwIfAborted()
       const models = isRecord(modelsRaw) ? modelsRaw : undefined
       const modes = isRecord(modesRaw) && Array.isArray(modesRaw.availableModes)
         ? modesRaw as unknown as AcpSessionModes
@@ -252,9 +258,11 @@ export class ClaudeAcpClient extends CursorAcpClient {
       }
       return acpHistoryEvents(updates, sessionId, this.modelLabel)
     } catch (error) {
+      signal?.throwIfAborted()
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
       throw error
     } finally {
+      signal?.removeEventListener('abort', onAbort)
       try { await stop() } finally { this.historyStop = undefined; this.historyReading = false }
     }
   }

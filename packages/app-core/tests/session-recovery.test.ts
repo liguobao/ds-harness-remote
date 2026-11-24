@@ -1135,7 +1135,10 @@ describe('session restore state machine', () => {
             expect(acp.transferCall).toHaveBeenCalledTimes(backend !== 'cursor' ? 1 : 0)
             if (backend !== 'cursor') {
               // Restoring a session must read its history from its own backend.
-              expect(acp.transferCall).toHaveBeenCalledWith('dsh/sessionHistory', { sessionId: 'native-session', backend })
+              expect(acp.transferCall).toHaveBeenCalledWith(
+                'dsh/sessionHistory', { sessionId: 'native-session', backend },
+                ...(backend === 'antigravity' ? [expect.any(AbortSignal)] : []),
+              )
             }
             expect(await useAppStore.getState().reconnect({ restoreSession: false })).toBe(true)
             expect(acp.openStream).toHaveBeenCalledTimes(1)
@@ -1257,16 +1260,22 @@ describe('session restore state machine', () => {
     expect(useAppStore.getState().acpReadOnlySessionId).toBeUndefined()
   })
 
-  it('ignores AGY history completing after navigation to another conversation', async () => {
-    let finish!: (result: { events: unknown[] }) => void
-    acp.transferCall.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  it('aborts AGY history on navigation without changing the next conversation', async () => {
+    let signal: AbortSignal | undefined
+    acp.transferCall.mockImplementationOnce((_method, _params, readSignal: AbortSignal) => {
+      signal = readSignal
+      return new Promise((_resolve, reject) => {
+        readSignal.addEventListener('abort', () => reject(readSignal.reason), { once: true })
+      })
+    })
     const old = useAppStore.getState().openSession({ ...session, sessionId: 'antigravity:old', nativeId: 'old', backend: 'antigravity' })
-    await vi.waitFor(() => expect(acp.transferCall).toHaveBeenCalled())
+    await vi.waitFor(() => expect(signal?.aborted).toBe(false))
     expect(await useAppStore.getState().openSession({ ...session, sessionId: 'new' })).toBe(true)
-    finish({ events: [] })
+    expect(signal?.aborted).toBe(true)
     expect(await old).toBe(false)
     expect(useAppStore.getState().selectedSession?.sessionId).toBe('new')
     expect(useAppStore.getState().messages['antigravity:old']).toBeUndefined()
+    expect(useAppStore.getState().error).toBeUndefined()
   })
 
   it('closes late ACP subscriptions after navigation', async () => {
@@ -2798,7 +2807,7 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
         acp.openStream.mockResolvedValueOnce({ streamId: 's-resume', close: async () => undefined })
         try {
           await useAppStore.getState().resumeConnection()
-          await vi.waitFor(() => expect(loadSessionDetails).toHaveBeenCalledWith('resume-1', 'antigravity', undefined))
+          await vi.waitFor(() => expect(loadSessionDetails).toHaveBeenCalledWith('resume-1', 'antigravity', expect.any(AbortSignal)))
           await vi.waitFor(() => expect(useAppStore.getState().busyAction).toBeUndefined())
           expect(acp.openStream).toHaveBeenCalledTimes(1)
           expect(useAppStore.getState().selectedSession?.running).toBe(scenario.expectedRunning)

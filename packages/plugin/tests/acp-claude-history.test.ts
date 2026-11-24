@@ -161,6 +161,23 @@ describe('Claude isolated history and live session recovery', () => {
     }
   })
 
+  it('cancels only the isolated history reader and allows a fresh history read', async () => {
+    const { client, children } = setup((message, _child, index) => index === 1 && message.method === 'session/load')
+    const controller = new AbortController()
+    const cancellation = new Error('History cancelled')
+    try {
+      await client.start()
+      const history = client.history('saved', '/tmp', controller.signal)
+      const cancelled = expect(history).rejects.toBe(cancellation)
+      await vi.waitFor(() => expect(children[1]?.sent.some(message => message.method === 'session/load')).toBe(true))
+      controller.abort(cancellation)
+      await cancelled
+      expect(children[1]?.child.killed).toBe(true)
+      expect(children[0]?.child.killed).toBe(false)
+      await expect(client.history('saved', '/tmp')).resolves.toEqual([])
+    } finally { await client.close() }
+  })
+
   it('intercepts requests during session/load replay and holds a bounded tombstone after timeout (#466)', async () => {
     let pendingLoad: Wire | undefined
     const { client, children } = setup((message) => {

@@ -841,6 +841,121 @@ describe('AcpRemoteGateway', () => {
     }
   })
 
+  it('cancels abandoned history transfers while preserving other waiters and the reader slot', async () => {
+    const cwd = await realpath(process.cwd())
+    const backend = 'antigravity'
+    const ids = ['shared', 'skipped', 'reopened']
+    const activeReads: Array<{ sessionId: string; signal?: AbortSignal; finish: (events: unknown[]) => void }> = []
+    const history = vi.fn((sessionId: string, _cwd: string, signal?: AbortSignal) => new Promise<unknown[]>(resolve => {
+      activeReads.push({ sessionId, signal, finish: resolve })
+    }))
+    const adapter = Object.assign(readyAcp(), { history })
+    adapter.call = vi.fn(async method => method === 'session/list'
+      ? { sessions: ids.map(sessionId => ({ sessionId, cwd })) }
+      : {})
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, backends: [{ id: backend, enabled: true, command: 'fixture', args: [] }] },
+      silentLogger(),
+      () => adapter,
+    )
+    await gateway.start()
+    const first = gateway.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+    const second = gateway.createPeer({ connectionId: 'second', peerDeviceId: 'two' }, async () => undefined)!
+    const startRead = (peer: typeof first, sessionId: string) => {
+      const transferId = randomUUID()
+      const request = Buffer.from(JSON.stringify({ method: 'dsh/sessionHistory', params: { backend, sessionId } }))
+      const open = { transferId, totalBytes: request.byteLength, totalChunks: 1 }
+      peer.openTransfer(open)
+      peer.appendTransfer({ transferId, index: 0, data: request.toString('base64') })
+      const result = peer.commitTransfer({ transferId }).catch((error: unknown) => error)
+      return { open, result, close: () => peer.closeTransfer({ transferId }) }
+    }
+    // Synchronize at reader admission, after async catalog authority validation.
+    const waitersFor = (sessionId: string) => (gateway as unknown as {
+      pendingHistoryReads: Map<string, { waiters: Set<unknown> }>
+    }).pendingHistoryReads.get(`${backend}:${sessionId}`)?.waiters.size
+    try {
+      const initiating = startRead(first, 'shared')
+      await vi.waitFor(() => expect(activeReads.map(read => read.sessionId)).toEqual(['shared']))
+      const other = startRead(second, 'shared')
+      await vi.waitFor(() => expect(waitersFor('shared')).toBe(2))
+      expect(() => first.openTransfer(initiating.open)).toThrow(expect.objectContaining({ code: 'REQUEST_CONFLICT' }))
+      expect(second.closeTransfer({ transferId: initiating.open.transferId }).closed).toBe(false)
+      expect(initiating.close().closed).toBe(true)
+      expect(await initiating.result).toMatchObject({ code: 'ACP_HISTORY_CANCELLED' })
+      expect(activeReads[0]?.signal?.aborted).toBe(false)
+
+      const skipped = startRead(first, 'skipped')
+      await vi.waitFor(() => expect(waitersFor('skipped')).toBe(1))
+      expect(skipped.close().closed).toBe(true)
+      expect(await skipped.result).toMatchObject({ code: 'ACP_HISTORY_CANCELLED' })
+      activeReads[0]!.finish([])
+      expect(await other.result).toMatchObject({ kind: 'inline', response: { events: [] } })
+
+      const abandoned = startRead(first, 'reopened')
+      await vi.waitFor(() => expect(activeReads.map(read => read.sessionId)).toEqual(['shared', 'reopened']))
+      expect(abandoned.close().closed).toBe(true)
+      expect(await abandoned.result).toMatchObject({ code: 'ACP_HISTORY_CANCELLED' })
+      expect(activeReads[1]?.signal?.aborted).toBe(true)
+      const next = startRead(second, 'reopened')
+      await vi.waitFor(() => expect(waitersFor('reopened')).toBe(1))
+      expect(history).toHaveBeenCalledTimes(2)
+      activeReads[1]!.finish([{ old: true }])
+      await vi.waitFor(() => expect(activeReads).toHaveLength(3))
+      expect(activeReads[2]?.signal?.aborted).toBe(false)
+      activeReads[2]!.finish([{ fresh: true }])
+      expect(await next.result).toMatchObject({ kind: 'inline', response: { events: [{ fresh: true }] } })
+      expect(() => first.readTransfer({ transferId: abandoned.open.transferId, index: 0 })).toThrow()
+    } finally {
+      await first.closeAll()
+      await second.closeAll()
+      for (const read of activeReads) read.finish([])
+      await gateway.close()
+    }
+  })
+
+  it('releases cancelled transfer slots even while catalog lookup is blocked', async () => {
+    const cwd = await realpath(process.cwd())
+    type Catalog = { sessions: Array<{ sessionId: string; cwd: string }> }
+    let finishCatalog!: (catalog: Catalog) => void
+    const catalog = new Promise<Catalog>(resolve => { finishCatalog = resolve })
+    const history = vi.fn(async () => [])
+    const adapter = Object.assign(readyAcp(), { history })
+    adapter.call = vi.fn(async method => method === 'session/list' ? catalog : {})
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'fixture', args: [] }] },
+      silentLogger(),
+      () => adapter,
+    )
+    await gateway.start()
+    const peer = gateway.createPeer({ connectionId: 'reader', peerDeviceId: 'device' }, async () => undefined)!
+    const startRead = (sessionId: string) => {
+      const transferId = randomUUID()
+      const request = Buffer.from(JSON.stringify({ method: 'dsh/sessionHistory', params: { backend: 'antigravity', sessionId } }))
+      peer.openTransfer({ transferId, totalBytes: request.byteLength, totalChunks: 1 })
+      peer.appendTransfer({ transferId, index: 0, data: request.toString('base64') })
+      const result = peer.commitTransfer({ transferId }).catch((error: unknown) => error)
+      return { result, close: () => peer.closeTransfer({ transferId }) }
+    }
+    try {
+      const first = startRead('first')
+      const second = startRead('second')
+      await vi.waitFor(() => expect(adapter.call).toHaveBeenCalledWith('session/list', expect.anything()))
+      expect(first.close().closed).toBe(true)
+      expect(second.close().closed).toBe(true)
+      expect(await first.result).toMatchObject({ code: 'ACP_HISTORY_CANCELLED' })
+      expect(await second.result).toMatchObject({ code: 'ACP_HISTORY_CANCELLED' })
+      const latest = startRead('latest')
+      finishCatalog({ sessions: ['first', 'second', 'latest'].map(sessionId => ({ sessionId, cwd })) })
+      expect(await latest.result).toMatchObject({ kind: 'inline', response: { events: [] } })
+      expect(history.mock.calls).toEqual([['latest', cwd, expect.any(AbortSignal)]])
+    } finally {
+      finishCatalog({ sessions: [] })
+      await peer.closeAll()
+      await gateway.close()
+    }
+  })
+
   it('allows image prompts on a Hermes-owned session and reports image prompt capabilities', async () => {
     const acp = readyAcp()
     acp.call = vi.fn(async (method) => {

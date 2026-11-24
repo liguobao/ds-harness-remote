@@ -82,6 +82,28 @@ describe('ACP image transfer', () => {
     expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
   })
 
+  it('closes an aborted history transfer without reusing the aborted signal', async () => {
+    const controller = new AbortController()
+    let enterCommit!: () => void
+    const enteredCommit = new Promise<void>(resolve => { enterCommit = resolve })
+    const rpc = vi.fn(async (method: string, _params: unknown, signal?: AbortSignal) => {
+      if (method !== 'agent.acp.transfer.commit') return {}
+      enterCommit()
+      return new Promise((_resolve, reject) => {
+        signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+      })
+    })
+    const client = new AgentAcpClient({ rpc } as never)
+    const history = client.loadSessionHistory('saved', 'antigravity', controller.signal)
+    const cancelled = expect(history).rejects.toMatchObject({ name: 'AbortError' })
+    await enteredCommit
+    controller.abort()
+    await cancelled
+    const transfer = rpc.mock.calls.find(([method]) => method === 'agent.acp.transfer.commit')?.[1]
+    expect(rpc.mock.calls.at(-1)).toEqual(['agent.acp.transfer.close', transfer])
+    expect(rpc.mock.calls.some(([method]) => method === 'agent.acp.transfer.read')).toBe(false)
+  })
+
   it('releases failed or mismatched ACP response transfers', async () => {
     await runScenarios([
       {

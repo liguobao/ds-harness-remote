@@ -161,7 +161,13 @@ export class AcpRemoteGateway {
   private historyEpoch = 0
   private minValidHistoryEpoch = 0
   private readonly historyInvalidatedAt = new Map<string, number>()
-  private readonly pendingHistoryReads = new Map<string, { client: CursorAcpLike; readEpoch: number; promise: Promise<unknown[]> }>()
+  private readonly pendingHistoryReads = new Map<string, {
+    client: CursorAcpLike
+    readEpoch: number
+    controller: AbortController
+    waiters: Set<() => void>
+    promise: Promise<unknown[]>
+  }>()
   private readonly backendHistoryChains = new Map<string, Promise<void>>()
   private readonly backendDiagnostics = new Map<string, AcpAuthDiagnostic>()
   private readonly backendErrors = new Map<string, string>()
@@ -327,7 +333,7 @@ export class AcpRemoteGateway {
     return bridge
   }
 
-  async call(connectionId: string, input: unknown): Promise<unknown> {
+  async call(connectionId: string, input: unknown, historySignal?: AbortSignal): Promise<unknown> {
     const envelope = parseCallEnvelope(input)
     const call = parseAcpCall(envelope.method, envelope.params)
     const sessionId = sessionIdFromParams(call.method, call.params)
@@ -336,14 +342,18 @@ export class AcpRemoteGateway {
       : call.method === 'dsh/sessionHistory'
         ? this.resolveHistoryTarget(call.params).backend
         : (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : undefined)
-    const assertCurrent = this.captureCallScope(connectionId, typeof backend === 'string' ? backend : this.defaultBackend())
+    const assertScope = this.captureCallScope(connectionId, typeof backend === 'string' ? backend : this.defaultBackend())
+    const assertCurrent = () => {
+      historySignal?.throwIfAborted()
+      assertScope()
+    }
     const reserve = backend === 'opencode' && sessionId !== undefined && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(call.method)
     if (reserve) {
       if (this.archivingSessions.has(sessionId!)) throw new RpcError('ACP_SESSION_BUSY', 'The OpenCode session is being archived.')
       this.opencodeOperations.set(sessionId!, (this.opencodeOperations.get(sessionId!) ?? 0) + 1)
     }
     try {
-      const result = await this.callInternal(connectionId, call, assertCurrent)
+      const result = await this.callInternal(connectionId, call, assertCurrent, historySignal)
       assertCurrent()
       return result
     } catch (error) {
@@ -389,7 +399,7 @@ export class AcpRemoteGateway {
     }
   }
 
-  private async callInternal(connectionId: string, call: ReturnType<typeof parseAcpCall>, assertCurrent: () => void): Promise<unknown> {
+  private async callInternal(connectionId: string, call: ReturnType<typeof parseAcpCall>, assertCurrent: () => void, historySignal?: AbortSignal): Promise<unknown> {
     assertCurrent()
     this.logger.info('ACP call received', {
       method: call.method,
@@ -658,7 +668,7 @@ export class AcpRemoteGateway {
         // History uses an isolated reader and must neither require nor claim
         // the live session's control ownership.
         const client = this.requireAcp(backend) as CursorAcpLike & {
-          history?: (sessionId: string, cwd: string) => Promise<unknown[]>
+          history?: (sessionId: string, cwd: string, signal?: AbortSignal) => Promise<unknown[]>
           lastHistoryMetadata?: (sessionId: string) => { models?: unknown; modes?: { availableModes?: unknown[] }; commands?: unknown[] } | undefined
         }
         if (!client.history) {
@@ -668,7 +678,9 @@ export class AcpRemoteGateway {
             ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
           }
         }
-        const events = await this.readCatalogHistory(backend, client as CursorAcpLike & { history: (sessionId: string, cwd: string) => Promise<unknown[]> }, conversationId, cwd, assertCurrent)
+        const events = await this.readCatalogHistory(
+          backend, client, client.history.bind(client), conversationId, cwd, assertCurrent, historySignal,
+        )
         const cachedMeta = client.lastHistoryMetadata?.(conversationId)
         const nonEmptyModes = cachedMeta?.modes && Array.isArray(cachedMeta.modes.availableModes) && cachedMeta.modes.availableModes.length > 0
           ? cachedMeta.modes
@@ -1078,52 +1090,63 @@ export class AcpRemoteGateway {
 
   private async readCatalogHistory(
     backend: string,
-    client: CursorAcpLike & { history: (sessionId: string, cwd: string) => Promise<unknown[]> },
+    client: CursorAcpLike,
+    history: (sessionId: string, cwd: string, signal?: AbortSignal) => Promise<unknown[]>,
     conversationId: string,
     cwd: string,
     assertCurrent: () => void,
+    signal?: AbortSignal,
   ): Promise<unknown[]> {
+    assertCurrent()
     const key = `${backend}:${conversationId}`
-    const existing = this.pendingHistoryReads.get(key)
-    if (
-      existing !== undefined
-      && existing.client === client
-      && this.isHistoryEpochValid(conversationId, existing.readEpoch)
-    ) {
-      const events = await existing.promise
-      assertCurrent()
-      return events
-    }
-    const readEpoch = ++this.historyEpoch
-    const previous = this.backendHistoryChains.get(backend) ?? Promise.resolve()
-    let releaseQueue!: () => void
-    const currentTurn = new Promise<void>(resolve => { releaseQueue = resolve })
-    const nextChain = previous.then(() => currentTurn, () => currentTurn)
-    this.backendHistoryChains.set(backend, nextChain)
-    const readPromise = (async (): Promise<unknown[]> => {
-      await previous.catch(() => undefined)
-      try {
-        assertCurrent()
+    let read = this.pendingHistoryReads.get(key)
+    if (read === undefined || read.client !== client || read.controller.signal.aborted
+      || !this.isHistoryEpochValid(conversationId, read.readEpoch)) {
+      const readEpoch = ++this.historyEpoch
+      const controller = new AbortController()
+      const waiters = new Set<() => void>()
+      const previous = this.backendHistoryChains.get(backend) ?? Promise.resolve()
+      const promise = previous.then(async () => {
+        controller.signal.throwIfAborted()
+        let scopeError: unknown
+        const hasCurrentWaiter = [...waiters].some(checkScope => {
+          try {
+            checkScope()
+            return true
+          } catch (error) {
+            scopeError = error
+            return false
+          }
+        })
+        if (!hasCurrentWaiter) throw scopeError ?? new RpcError('ACP_HISTORY_CANCELLED', 'The ACP history read was cancelled.')
         if (this.requireAcp(backend) !== client) {
-          throw new RpcError('CURSOR_UNAVAILABLE', `The ${backend} ACP backend is not ready.`)
+          throw new RpcError('CURSOR_UNAVAILABLE', 'The ACP backend is not ready.')
         }
-        return await client.history(conversationId, cwd)
-      } finally {
-        releaseQueue()
-        if (this.backendHistoryChains.get(backend) === nextChain) {
-          this.backendHistoryChains.delete(backend)
-        }
-      }
-    })()
-    this.pendingHistoryReads.set(key, { client, readEpoch, promise: readPromise })
+        // Native AGY can stop the isolated reader without touching a live prompt.
+        return backend === 'antigravity' ? history(conversationId, cwd, controller.signal) : history(conversationId, cwd)
+      }).finally(() => {
+        if (this.backendHistoryChains.get(backend) === nextChain) this.backendHistoryChains.delete(backend)
+        if (this.pendingHistoryReads.get(key)?.promise === promise) this.pendingHistoryReads.delete(key)
+      })
+      const nextChain = promise.then(() => undefined, () => undefined)
+      this.backendHistoryChains.set(backend, nextChain)
+      read = { client, readEpoch, controller, waiters, promise }
+      this.pendingHistoryReads.set(key, read)
+    }
+    const { controller, waiters, promise } = read
+    waiters.add(assertCurrent)
+    const onAbort = () => {
+      waiters.delete(assertCurrent)
+      if (waiters.size === 0) controller.abort(signal?.reason)
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
     try {
-      const events = await readPromise
+      const events = await promise
       assertCurrent()
       return events
     } finally {
-      if (this.pendingHistoryReads.get(key)?.promise === readPromise) {
-        this.pendingHistoryReads.delete(key)
-      }
+      signal?.removeEventListener('abort', onAbort)
+      waiters.delete(assertCurrent)
     }
   }
 

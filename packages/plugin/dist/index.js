@@ -100127,13 +100127,17 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     return this.historyMetadata.get(sessionId);
   }
   /** One temporary process, separate from all live sessions (including active prompts). */
-  async history(sessionId, cwd2) {
+  async history(sessionId, cwd2, signal) {
+    signal?.throwIfAborted();
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
     if (this.historyReading) throw new CursorAcpError("ACP_PROCESS_LIMIT", `A ${this.label} history read is already in progress.`);
     this.historyReading = true;
     const client = this.makeClient();
     let stopping;
     const stop = () => stopping ??= client.close();
+    const onAbort = () => {
+      void stop().catch(() => void 0);
+    };
     this.historyStop = stop;
     const updates = [];
     let bytes = 0;
@@ -100152,10 +100156,13 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         void stop().catch(() => void 0);
       } else updates.push(message);
     });
+    signal?.addEventListener("abort", onAbort, { once: true });
     try {
       await client.start();
+      signal?.throwIfAborted();
       if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
       const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      signal?.throwIfAborted();
       this.assertLoaded(result, sessionId);
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
       const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
@@ -100163,6 +100170,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         client.call("dsh/sessionModes", { sessionId }).catch(() => void 0),
         client.call("dsh/sessionCommands", { sessionId }).catch(() => void 0)
       ]);
+      signal?.throwIfAborted();
       const models = isRecord19(modelsRaw) ? modelsRaw : void 0;
       const modes = isRecord19(modesRaw) && Array.isArray(modesRaw.availableModes) ? modesRaw : void 0;
       const commands = isRecord19(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0 ? commandsRaw.commands : void 0;
@@ -100181,9 +100189,11 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       }
       return acpHistoryEvents(updates, sessionId, this.modelLabel);
     } catch (error62) {
+      signal?.throwIfAborted();
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
       throw error62;
     } finally {
+      signal?.removeEventListener("abort", onAbort);
       try {
         await stop();
       } finally {
@@ -102500,6 +102510,7 @@ var AcpPeerBridge = class {
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
+  historyCommits = /* @__PURE__ */ new Map();
   closed = false;
   async call(input4) {
     return this.callDomain(input4, true);
@@ -102507,10 +102518,11 @@ var AcpPeerBridge = class {
   async publishArchived(data2) {
     if (!this.closed) await this.publish("agent.acp.catalog.changed", data2);
   }
-  async callDomain(input4, logFailure) {
+  async callDomain(input4, logFailure, signal) {
     this.requireOpen();
     try {
-      const result = await this.domain.call(this.context.connectionId, input4);
+      const result = await this.domain.call(this.context.connectionId, input4, signal);
+      signal?.throwIfAborted();
       return this.compactHistoryEnabled && safeMethod2(input4) === "dsh/sessionHistory" ? compactHistory(result) : result;
     } catch (error62) {
       if (logFailure) {
@@ -102609,7 +102621,7 @@ var AcpPeerBridge = class {
     if (params.totalChunks !== Math.ceil(params.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk count is invalid.");
     }
-    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
+    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId) || this.historyCommits.has(params.transferId)) {
       throw new RpcError("REQUEST_CONFLICT", "The ACP transfer id is already active.");
     }
     if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS2) {
@@ -102664,15 +102676,32 @@ var AcpPeerBridge = class {
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The ACP transfer does not contain a valid request.");
     }
+    const method = safeMethod2(request2);
+    let controller;
+    if (method === "dsh/sessionHistory") {
+      if (this.historyCommits.size >= MAX_ACTIVE_TRANSFERS2) {
+        throw new RpcError("RATE_LIMITED", "Too many ACP history transfers are active.", void 0, true);
+      }
+      controller = new AbortController();
+      this.historyCommits.set(params.transferId, controller);
+    }
     let response;
+    let cancelCommit;
     try {
-      response = await this.callDomain(request2, false);
-    } catch (error62) {
-      this.logger?.warn("ACP transfer call failed", {
-        method: safeMethod2(request2),
-        code: safeErrorCode3(error62)
+      const signal = controller?.signal;
+      const cancelled = signal && new Promise((_resolve, reject) => {
+        cancelCommit = () => reject(signal.reason);
+        signal.addEventListener("abort", cancelCommit, { once: true });
       });
+      const result = this.callDomain(request2, false, signal);
+      response = await (cancelled ? Promise.race([result, cancelled]) : result);
+      controller?.signal.throwIfAborted();
+    } catch (error62) {
+      if (!controller?.signal.aborted) this.logger?.warn("ACP transfer call failed", { method, code: safeErrorCode3(error62) });
       throw error62;
+    } finally {
+      if (cancelCommit !== void 0) controller?.signal.removeEventListener("abort", cancelCommit);
+      if (controller !== void 0) this.historyCommits.delete(params.transferId);
     }
     this.requireOpen();
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
@@ -102717,7 +102746,9 @@ var AcpPeerBridge = class {
   }
   closeTransfer(input4) {
     const params = transferIdSchema2.parse(input4);
-    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
+    const controller = this.historyCommits.get(params.transferId);
+    controller?.abort(new RpcError("ACP_HISTORY_CANCELLED", "The ACP history read was cancelled."));
+    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId) || controller !== void 0;
     return { closed, transferId: params.transferId };
   }
   async publishInbound(sessionId, frame) {
@@ -102771,6 +102802,9 @@ var AcpPeerBridge = class {
     this.streams.clear();
     for (const controller of this.toolControllers.values()) controller.abort();
     this.toolControllers.clear();
+    for (const controller of this.historyCommits.values()) {
+      controller.abort(new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed."));
+    }
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
     this.domain.dropPeer(this.context.connectionId);
@@ -103233,19 +103267,23 @@ var AcpRemoteGateway = class {
     ));
     return bridge;
   }
-  async call(connectionId, input4) {
+  async call(connectionId, input4, historySignal) {
     const envelope = parseCallEnvelope2(input4);
     const call = parseAcpCall(envelope.method, envelope.params);
     const sessionId = sessionIdFromParams(call.method, call.params);
     const backend = typeof call.params.backend === "string" ? call.params.backend : call.method === "dsh/sessionHistory" ? this.resolveHistoryTarget(call.params).backend : sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : void 0;
-    const assertCurrent = this.captureCallScope(connectionId, typeof backend === "string" ? backend : this.defaultBackend());
+    const assertScope = this.captureCallScope(connectionId, typeof backend === "string" ? backend : this.defaultBackend());
+    const assertCurrent = () => {
+      historySignal?.throwIfAborted();
+      assertScope();
+    };
     const reserve = backend === "opencode" && sessionId !== void 0 && ["session/load", "session/prompt", "dsh/selectModel"].includes(call.method);
     if (reserve) {
       if (this.archivingSessions.has(sessionId)) throw new RpcError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
       this.opencodeOperations.set(sessionId, (this.opencodeOperations.get(sessionId) ?? 0) + 1);
     }
     try {
-      const result = await this.callInternal(connectionId, call, assertCurrent);
+      const result = await this.callInternal(connectionId, call, assertCurrent, historySignal);
       assertCurrent();
       return result;
     } catch (error62) {
@@ -103278,7 +103316,7 @@ var AcpRemoteGateway = class {
       }
     };
   }
-  async callInternal(connectionId, call, assertCurrent) {
+  async callInternal(connectionId, call, assertCurrent, historySignal) {
     assertCurrent();
     this.logger.info("ACP call received", {
       method: call.method,
@@ -103526,7 +103564,15 @@ var AcpRemoteGateway = class {
             ...persistedPreset ? { permissionPreset: persistedPreset } : {}
           };
         }
-        const events2 = await this.readCatalogHistory(backend, client, conversationId, cwd2, assertCurrent);
+        const events2 = await this.readCatalogHistory(
+          backend,
+          client,
+          client.history.bind(client),
+          conversationId,
+          cwd2,
+          assertCurrent,
+          historySignal
+        );
         const cachedMeta = client.lastHistoryMetadata?.(conversationId);
         const nonEmptyModes = cachedMeta?.modes && Array.isArray(cachedMeta.modes.availableModes) && cachedMeta.modes.availableModes.length > 0 ? cachedMeta.modes : void 0;
         return {
@@ -103883,46 +103929,55 @@ var AcpRemoteGateway = class {
   isHistoryEpochValid(sessionId, readEpoch) {
     return readEpoch > this.minValidHistoryEpoch && readEpoch > (this.historyInvalidatedAt.get(sessionId) ?? 0);
   }
-  async readCatalogHistory(backend, client, conversationId, cwd2, assertCurrent) {
+  async readCatalogHistory(backend, client, history2, conversationId, cwd2, assertCurrent, signal) {
+    assertCurrent();
     const key = `${backend}:${conversationId}`;
-    const existing = this.pendingHistoryReads.get(key);
-    if (existing !== void 0 && existing.client === client && this.isHistoryEpochValid(conversationId, existing.readEpoch)) {
-      const events = await existing.promise;
-      assertCurrent();
-      return events;
-    }
-    const readEpoch = ++this.historyEpoch;
-    const previous = this.backendHistoryChains.get(backend) ?? Promise.resolve();
-    let releaseQueue;
-    const currentTurn = new Promise((resolve11) => {
-      releaseQueue = resolve11;
-    });
-    const nextChain = previous.then(() => currentTurn, () => currentTurn);
-    this.backendHistoryChains.set(backend, nextChain);
-    const readPromise = (async () => {
-      await previous.catch(() => void 0);
-      try {
-        assertCurrent();
+    let read = this.pendingHistoryReads.get(key);
+    if (read === void 0 || read.client !== client || read.controller.signal.aborted || !this.isHistoryEpochValid(conversationId, read.readEpoch)) {
+      const readEpoch = ++this.historyEpoch;
+      const controller2 = new AbortController();
+      const waiters2 = /* @__PURE__ */ new Set();
+      const previous = this.backendHistoryChains.get(backend) ?? Promise.resolve();
+      const promise3 = previous.then(async () => {
+        controller2.signal.throwIfAborted();
+        let scopeError;
+        const hasCurrentWaiter = [...waiters2].some((checkScope) => {
+          try {
+            checkScope();
+            return true;
+          } catch (error62) {
+            scopeError = error62;
+            return false;
+          }
+        });
+        if (!hasCurrentWaiter) throw scopeError ?? new RpcError("ACP_HISTORY_CANCELLED", "The ACP history read was cancelled.");
         if (this.requireAcp(backend) !== client) {
-          throw new RpcError("CURSOR_UNAVAILABLE", `The ${backend} ACP backend is not ready.`);
+          throw new RpcError("CURSOR_UNAVAILABLE", "The ACP backend is not ready.");
         }
-        return await client.history(conversationId, cwd2);
-      } finally {
-        releaseQueue();
-        if (this.backendHistoryChains.get(backend) === nextChain) {
-          this.backendHistoryChains.delete(backend);
-        }
-      }
-    })();
-    this.pendingHistoryReads.set(key, { client, readEpoch, promise: readPromise });
+        return backend === "antigravity" ? history2(conversationId, cwd2, controller2.signal) : history2(conversationId, cwd2);
+      }).finally(() => {
+        if (this.backendHistoryChains.get(backend) === nextChain) this.backendHistoryChains.delete(backend);
+        if (this.pendingHistoryReads.get(key)?.promise === promise3) this.pendingHistoryReads.delete(key);
+      });
+      const nextChain = promise3.then(() => void 0, () => void 0);
+      this.backendHistoryChains.set(backend, nextChain);
+      read = { client, readEpoch, controller: controller2, waiters: waiters2, promise: promise3 };
+      this.pendingHistoryReads.set(key, read);
+    }
+    const { controller, waiters, promise: promise2 } = read;
+    waiters.add(assertCurrent);
+    const onAbort = () => {
+      waiters.delete(assertCurrent);
+      if (waiters.size === 0) controller.abort(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     try {
-      const events = await readPromise;
+      const events = await promise2;
       assertCurrent();
       return events;
     } finally {
-      if (this.pendingHistoryReads.get(key)?.promise === readPromise) {
-        this.pendingHistoryReads.delete(key);
-      }
+      signal?.removeEventListener("abort", onAbort);
+      waiters.delete(assertCurrent);
     }
   }
   async failSessionStreams(sessionId) {
