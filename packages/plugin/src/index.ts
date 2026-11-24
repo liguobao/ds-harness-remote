@@ -1,7 +1,6 @@
 import type { MessageFileAttachment } from './message-file-attachment.js'
 import type { DshWebBrowserAuth } from './dsh-web-host.js'
 import type { TransferServices } from './session-transfer.js'
-import * as DshConnection from '@deepseek-ai/dsh-client-connection'
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the `ctx.settings` Context merge and the rc.1 forms type.
 import type { SettingsForms } from '@deepseek-ai/dsh-settings'
@@ -329,7 +328,12 @@ async function activate(
     const nativeTypertGateway = ctx.get('typertGateway') as TypertGatewayLike
     // Only the authenticated ConnectionController callback creates per-connection
     // owner peers. Never share a browser Peer or accept a principal from the tunnel.
-    const connectionExports = DshConnection as Record<string, unknown>
+    let connectionExports: Record<string, unknown> = {}
+    try {
+      connectionExports = await import('@deepseek-ai/dsh-client-connection') as Record<string, unknown>
+    } catch {
+      // The peer is optional; the Connection Host service below provides Peer.
+    }
     // Harness 0.2.2 dereferences `peer.signal` for forwarded Remote events. Prefer
     // the official Peer export, but fall back to the Connection Host service when a
     // build's module shape no longer exposes it, so a local carrier never opens
