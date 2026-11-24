@@ -86,6 +86,7 @@ export interface AppState {
   selectedSession?: RemoteSession
   /** History and the current connection's Codex event subscription are ready. */
   codexReadySessionId?: string
+  acpReadOnlySessionId?: string
   /** Successfully opened in this remote-use lifecycle; retained across transport recovery. */
   currentWorkSessionIds: string[]
   messages: Record<string, ChatItem[]>
@@ -242,7 +243,7 @@ export function selectCustomAcpBackends(state: Pick<AppState, 'customAcpBackends
 export function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'hostWorkspaceGit' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'customAcpBackends' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' | 'agentPresetOptions' | 'agentPresetLoading' | 'agentPresetSelecting' |
-  'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
+  'acpReadOnlySessionId' | 'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
     config: undefined,
@@ -272,6 +273,7 @@ export function initialData(): Pick<AppState,
     sessions: [],
     selectedSession: undefined,
     codexReadySessionId: undefined,
+    acpReadOnlySessionId: undefined,
     currentWorkSessionIds: [],
     messages: {},
     sessionLifecycles: {},

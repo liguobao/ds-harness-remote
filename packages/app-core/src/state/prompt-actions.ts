@@ -31,7 +31,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       // Fail closed before the optimistic row is inserted. Without this guard an
       // offline prompt becomes a `local:` row marked failed/unconfirmed and the
       // call returns 'kept', which forbids the caller from restoring the draft.
-      if (get().connection.phase !== 'connected') return 'rejected'
+      if (get().connection.phase !== 'connected' || get().acpReadOnlySessionId === session.sessionId) return 'rejected'
       if (session.backend === 'codex' && (get().codexReadySessionId !== session.sessionId
         || runtime.activeCodexStream === undefined
         || runtime.activeCodexTimeline?.session.nativeId !== codexThreadId(session))) return 'rejected'
@@ -426,7 +426,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
 
     async stopSession() {
       const session = get().selectedSession
-      if (session === undefined) return
+      if (session === undefined || get().acpReadOnlySessionId === session.sessionId) return
       set({ busyAction: 'stop-session' })
       try {
         if (session.backend === 'codex') {

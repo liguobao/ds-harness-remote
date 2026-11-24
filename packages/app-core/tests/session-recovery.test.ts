@@ -1239,6 +1239,24 @@ describe('session restore state machine', () => {
       } }))), prepareScenario1)
   })
 
+  it('shows AGY history when another peer owns the live stream', async () => {
+    const selected = { ...session, sessionId: 'antigravity:owned', nativeId: 'owned', backend: 'antigravity' } as const
+    acp.openStream.mockRejectedValueOnce(Object.assign(new Error('owned'), { code: 'CURSOR_SESSION_OWNED' }))
+    acp.transferCall.mockResolvedValueOnce({ events: [entry('assistant/message', 1, {
+      turn: 1, message: { id: 'history', content: [{ type: 'text', text: 'read-only history' }] },
+    })] })
+    expect(await useAppStore.getState().openSession(selected)).toBe(true)
+    expect(useAppStore.getState().messages[selected.sessionId]).toEqual([
+      expect.objectContaining({ kind: 'message', text: 'read-only history' }),
+    ])
+    expect(useAppStore.getState().acpReadOnlySessionId).toBe(selected.sessionId)
+    expect(useAppStore.getState().busyAction).toBeUndefined()
+    expect(await useAppStore.getState().sendMessage('new message')).toBe('rejected')
+    expect(acp.prompt).not.toHaveBeenCalled()
+    expect(await useAppStore.getState().openSession(selected)).toBe(true)
+    expect(useAppStore.getState().acpReadOnlySessionId).toBeUndefined()
+  })
+
   it('ignores AGY history completing after navigation to another conversation', async () => {
     let finish!: (result: { events: unknown[] }) => void
     acp.transferCall.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))

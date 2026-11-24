@@ -695,6 +695,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const clearError = useAppStore(state => state.clearError)
   const busy = useAppStore(state => state.busyAction)
   const codexReadySessionId = useAppStore(state => state.codexReadySessionId)
+  const acpReadOnly = useAppStore(state => state.acpReadOnlySessionId !== undefined
+    && state.acpReadOnlySessionId === state.selectedSession?.sessionId)
   const connection = useAppStore(state => state.connection)
   const hostWorkspaceGit = useAppStore(state => state.hostWorkspaceGit)
   const imageGeneration = chatImageConnectionGeneration()
@@ -1412,7 +1414,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
       : agentPresetName(currentPresetRow)
 
   const connectionRetrying = reconnectingSession || connection.phase === 'connecting' || connection.phase === 'reconnecting'
-  const sendReady = connected && !busy?.startsWith('session:')
+  const sendReady = connected && !acpReadOnly && !busy?.startsWith('session:')
     && (session.backend !== 'codex' || codexReadySessionId === session.sessionId)
   const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0
   const commandRunning = busy === 'command'
@@ -1426,7 +1428,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   // text field itself only blocks on composer-local states so an offline draft
   // can be typed, edited and kept for the manual send after reconnection.
   const inputEditable = composerEditable({ permissionSelecting, uploading: uploadingFiles })
-  const composerDisabled = !connected || permissionSelecting || uploadingFiles
+  const composerDisabled = !connected || acpReadOnly || permissionSelecting || uploadingFiles
   const sendDisabled = !sendReady || permissionSelecting || !hasComposerContent || uploadingFiles
   const projectedPermissions = sessionPermissions(session)
   const permissions = projectedPermissions === undefined ? undefined : { ...projectedPermissions, options: permissionOptions ?? projectedPermissions.options }
@@ -1778,6 +1780,12 @@ const ChatConversationPane = memo(function ChatConversationPane({
           </Text>
         </Pressable>
       )}
+      {acpReadOnly && (
+        <View style={styles.errorBanner} accessibilityRole="alert">
+          <View style={styles.errorDot} />
+          <Text style={styles.errorBannerText}>{strings.errors.CURSOR_SESSION_OWNED}</Text>
+        </View>
+      )}
       {storeError !== undefined && (
         <Pressable
           style={styles.errorBanner}
@@ -1913,7 +1921,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
             backend={session.backend} draft={draft} input={mentionInput}
             quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
             headerSlot={composerHeaderSlot}
-            replyActive={replyActive} stopping={stopping} commandRunning={commandRunning}
+            replyActive={replyActive && !acpReadOnly} stopping={stopping} commandRunning={commandRunning}
             hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
             composerDisabled={composerDisabled} sendDisabled={sendDisabled}
             compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
@@ -1934,7 +1942,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
         onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
         hasAttachments={images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0}
         input={mentionInput}
-        replyActive={replyActive}
+        replyActive={replyActive && !acpReadOnly}
         stopping={stopping}
         sendDisabled={sendDisabled}
         onSubmit={() => void submit()}
