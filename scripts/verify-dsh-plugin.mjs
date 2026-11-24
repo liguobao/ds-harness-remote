@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createRequire, isBuiltin } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -86,6 +86,25 @@ assert.equal(
 assert.equal(pluginManifest.bin?.remote, undefined, 'npm package must not install a standalone remote executable')
 assert.equal(manifest.exports?.['./client'], './packages/plugin/dist/client.github.js', 'root package must export the GitHub-root browser client entry')
 
+assert.ok(Array.isArray(pluginManifest.files), 'npm plugin package must declare an explicit files allowlist')
+const normalizedPluginFiles = pluginManifest.files.map(entry => entry.replace(/^\.\//, ''))
+assert.ok(normalizedPluginFiles.includes('dist/index.js'), 'npm plugin files allowlist must include dist/index.js')
+assert.ok(normalizedPluginFiles.includes('dist/client.js'), 'npm plugin files allowlist must include dist/client.js')
+for (const forbiddenEntry of ['dist', 'dist/', 'dist/*', 'dist/**', 'dist/client.github.js']) {
+  assert.ok(
+    !normalizedPluginFiles.includes(forbiddenEntry),
+    `npm plugin files allowlist must not include ${forbiddenEntry}`,
+  )
+}
+for (const entry of normalizedPluginFiles) {
+  if (!entry.startsWith('!') && entry.startsWith('dist/')) {
+    assert.ok(
+      entry === 'dist/index.js' || entry === 'dist/client.js',
+      `npm plugin files allowlist must not include unexpected dist entry: ${entry}`,
+    )
+  }
+}
+
 for (const [packageRoot, packageManifest] of [[root, manifest], [join(root, 'packages/plugin'), pluginManifest]]) {
   const require = createRequire(join(packageRoot, 'package.json'))
   assert.equal(
@@ -101,12 +120,21 @@ for (const file of [
   'cordis.patch.yml',
   'packages/plugin/dsh-plugin.json',
   'packages/plugin/dist/index.js',
+  'packages/plugin/dist/client.js',
   'packages/plugin/dist/client.github.js',
   'packages/plugin/public.d.ts',
   'packages/plugin/bin/ds-harness-remote.js',
 ]) {
   assert.ok(existsSync(join(root, file)), `DSH plugin artifact is missing: ${file}`)
 }
+
+const allowedDistEntries = new Set(['index.js', 'index.js.map', 'client.js', 'client.github.js'])
+const distEntries = readdirSync(join(root, 'packages/plugin/dist')).sort()
+assert.deepEqual(
+  distEntries.filter(entry => !allowedDistEntries.has(entry)),
+  [],
+  'packages/plugin/dist must not contain stale or unbundled compiler outputs',
+)
 
 const patch = readFileSync(join(root, 'cordis.patch.yml'), 'utf8')
 assert.match(patch, /^\s*- id:\s*ds-harness-remote\s*$/m, 'root patch must use the canonical Cordis instance id')
@@ -134,8 +162,11 @@ assert.match(rootHostEntry, /packages\/plugin\/dist\/index\.js/, 'root Host entr
 const publicTypes = readFileSync(join(root, 'packages/plugin/public.d.ts'), 'utf8')
 assert.match(publicTypes, /name:\s*'ds-harness-remote'/, 'public types must expose the canonical plugin id')
 
+const unpublishedWorkspaceImportPattern =
+  /(?:\bfrom\s+|\b(?:import|require)\s*\(\s*)['"]@dsh-remote\/|^\s*(?:import|export)\s+['"]@dsh-remote\//m
+
 const hostBundle = readFileSync(join(root, 'packages/plugin/dist/index.js'), 'utf8')
-assert.doesNotMatch(hostBundle, /(?:from\s+|require\()['\"]@dsh-remote\//, 'Host bundle must not import unpublished workspace packages')
+assert.doesNotMatch(hostBundle, unpublishedWorkspaceImportPattern, 'Host bundle must not import unpublished workspace packages')
 assert.doesNotMatch(
   hostBundle,
   /tuiScenes|tuiCommandTrees|ds-harness-remote-tui/,
@@ -171,6 +202,11 @@ assert.doesNotMatch(
 )
 
 const clientBundle = readFileSync(join(root, 'packages/plugin/dist/client.github.js'), 'utf8')
+assert.doesNotMatch(
+  clientBundle,
+  unpublishedWorkspaceImportPattern,
+  'GitHub browser client bundle must not import unpublished workspace packages',
+)
 assert.match(clientBundle, /window\.__ModuleLoader__\.load/, 'browser client entry must register with the DSH module loader')
 assert.match(clientBundle, /status\.events/, 'browser client must open the Host status event stream')
 assert.match(clientBundle, /new EventSource/, 'browser client must push-render Host status through EventSource')
@@ -203,6 +239,11 @@ assert.equal(githubClient?.id, manifest.name, 'browser client module id must mat
 assert.equal(typeof githubClient?.factory, 'function', 'browser client entry must register a factory')
 
 const npmClientBundle = readFileSync(join(root, 'packages/plugin/dist/client.js'), 'utf8')
+assert.doesNotMatch(
+  npmClientBundle,
+  unpublishedWorkspaceImportPattern,
+  'npm browser client bundle must not import unpublished workspace packages',
+)
 let npmClient
 runInNewContext(npmClientBundle, {
   window: { __ModuleLoader__: { load: handoff => { npmClient = handoff } } },

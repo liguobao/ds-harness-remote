@@ -1,19 +1,11 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { build } from 'esbuild'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-
-// tsc does not remove outputs for deleted sources. Keep retired rc.2 and
-// retired dsh-TUI modules out of npm's dist directory when rebuilding an
-// existing checkout.
-await Promise.all(
-  ['api-proxy-switch', 'harness-api-bridge', 'harness-api-history', 'remote-api-proxy', 'tui-command']
-    .flatMap(name => ['.js', '.js.map', '.d.ts', '.d.ts.map'].map(extension =>
-      rm(join(root, 'dist', `${name}${extension}`), { force: true }),
-    )),
-)
+const distDir = join(root, 'dist')
+const expectedDistEntries = new Set(['index.js', 'index.js.map', 'client.js', 'client.github.js'])
 
 async function buildBundle(options) {
   const result = await build({ ...options, write: false })
@@ -78,3 +70,11 @@ for (const [moduleId, outfile] of [
     outfile: join(root, 'dist', outfile),
   })
 }
+
+// Clean up any stale tsc outputs or retired modules left in dist/ from prior builds.
+const distEntries = await readdir(distDir)
+await Promise.all(
+  distEntries
+    .filter(entry => !expectedDistEntries.has(entry))
+    .map(entry => rm(join(distDir, entry), { recursive: true, force: true })),
+)
