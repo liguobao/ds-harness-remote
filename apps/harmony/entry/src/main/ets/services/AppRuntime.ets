@@ -1044,7 +1044,7 @@ export class AppRuntime {
       const harness: HarnessAlphaClient =
         new HarnessAlphaClient(core, features.sessionFormat, (frame: HarnessClientFrame) => {
           this.handleFrame(frame);
-        });
+        }, features.capabilities.includes('harness.remote.stream.transfer.v1'));
       this.harness = harness;
       this.setConnectStage(3, '订阅会话事件…');
       await harness.start();
@@ -1923,7 +1923,8 @@ export class AppRuntime {
       || sessionId.length === 0 || sessionId !== this.currentSessionId) {
       return undefined;
     }
-    return new TerminalSession(new RemoteGateway(this.core), sessionId);
+    const transferFrames = this.featuresCacheValue?.capabilities.includes('harness.remote.stream.transfer.v1') === true;
+    return new TerminalSession(new RemoteGateway(this.core, transferFrames), sessionId);
   }
 
   supportsDshWeb(): boolean {
