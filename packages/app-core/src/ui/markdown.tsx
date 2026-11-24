@@ -40,6 +40,7 @@ import {
 } from './markdown-helpers'
 
 export {
+  type MarkdownNode,
   type TaskItemInfo,
   type CalloutInfo,
   getTaskInfo,
@@ -141,24 +142,51 @@ export function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; n
   return files
 }
 
-export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palette, sourceFile }: { text: string; colors?: ThemeColors; sourceFile?: string }) {
+const EMPTY_REFERENCED_FILES: { path: string; name?: string }[] = []
+
+export const NativeMarkdown = memo(function NativeMarkdown({
+  text,
+  colors: palette,
+  sourceFile,
+  preparsedNodes,
+  suppressReferencedFiles = false,
+  referencedFilesOverride,
+}: {
+  text: string
+  colors?: ThemeColors
+  sourceFile?: string
+  preparsedNodes?: readonly MarkdownNode[]
+  suppressReferencedFiles?: boolean
+  referencedFilesOverride?: readonly { path: string; name?: string }[]
+}) {
   const theme = useTheme()
   // A caller can paint one block on a dark surface (a user bubble) without touching the theme.
   const colors = palette ?? theme.colors
   const onLinkPress = useContext(markdownLinkContext)
   const transformText = useContext(markdownTextContext)
-  const source = useMemo(() => transformText?.(text) ?? text, [text, transformText])
+  // `preparsedNodes` represents a caller-sliced block AST (e.g. a virtualized
+  // chunk); never fall back to re-parsing `text` when it is supplied, or every
+  // chunk would duplicate the entire message under a `transformText` provider.
+  const usePreparsed = preparsedNodes !== undefined
+  const source = useMemo(() => (usePreparsed ? '' : (transformText?.(text) ?? text)), [usePreparsed, text, transformText])
   const styles = useMemo(() => getCachedThemedStyles(createStyles, colors, theme.appearance), [colors, theme.appearance])
   const cacheRef = useRef<BlockParseCache | undefined>(undefined)
   // Normalize CR / CRLF to LF
-  const nodes = useMemo(() => parseMarkdownBlocks(source, cacheRef), [source])
-  const referencedFiles = useMemo(() => extractReferencedFiles(nodes), [nodes])
+  const nodes = useMemo(
+    () => (usePreparsed ? preparsedNodes! : parseMarkdownBlocks(source, cacheRef)),
+    [usePreparsed, preparsedNodes, source],
+  )
+  const referencedFiles = useMemo(() => {
+    if (suppressReferencedFiles) return EMPTY_REFERENCED_FILES
+    if (referencedFilesOverride !== undefined) return referencedFilesOverride as { path: string; name?: string }[]
+    return extractReferencedFiles(nodes as MarkdownNode[])
+  }, [suppressReferencedFiles, referencedFilesOverride, nodes])
 
   return (
     <markdownFileContext.Provider value={sourceFile}>
       <View style={styles.container}>
         {nodes.map(node => renderBlockCached(node, styles, colors, onLinkPress))}
-        <PresentedFileGroup files={referencedFiles} onFilePress={onLinkPress} />
+        {!suppressReferencedFiles && <PresentedFileGroup files={referencedFiles} onFilePress={onLinkPress} />}
       </View>
     </markdownFileContext.Provider>
   )
@@ -441,7 +469,14 @@ const MarkdownTable = memo(function MarkdownTable({ plan, minCellWidth, rows, st
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.tableScrollContent}
       style={styles.tableContainer}
-      onLayout={event => setViewportWidth(event.nativeEvent.layout.width)}
+      onLayout={event => {
+        const nextWidth = event.nativeEvent.layout.width
+        setViewportWidth(prev => (
+          (nextWidth > planTotal || prev > planTotal) && Math.abs(nextWidth - prev) > 1
+            ? nextWidth
+            : prev
+        ))
+      }}
     >
       <View style={styles.table}>
         {rows.map((row, rowIndex) => (
@@ -453,7 +488,7 @@ const MarkdownTable = memo(function MarkdownTable({ plan, minCellWidth, rows, st
                   key={cell.key}
                   style={[styles.tableCell, { width: (plan[column] ?? minCellWidth) * fillScale }, isHeader && styles.tableHeader]}
                 >
-                  <Text selectable style={isHeader ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(cell.children, styles, colors, onLinkPress)}</Text>
+                  <Text style={isHeader ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(cell.children, styles, colors, onLinkPress)}</Text>
                 </View>
               )
             })}

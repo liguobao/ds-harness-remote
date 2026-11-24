@@ -137,6 +137,7 @@ vi.mock('../src/services/browse-memory', () => {
 })
 
 import { chatSections } from '../src/state/message-helpers'
+import { updateBrowseEntry } from '../src/services/browse-memory'
 import { TAIL_EXPAND_STEP, TAIL_WINDOW_SIZE, useChatScroll } from '../src/screens/chat/use-chat-scroll'
 
 function makeSession(sessionId: string): RemoteSession {
@@ -196,7 +197,7 @@ describe('useChatScroll progressive tail expansion state machine', () => {
     return result
   }
 
-  it('keeps the queued immediate expansion rAF intact when anchorEnabled commits from false to true on drag', () => {
+  it('expands incrementally by TAIL_EXPAND_STEP on top-edge drag with 1-frame anchor handshake instead of dumping all history', () => {
     const session = makeSession('sess-long-1')
     const messages = makeMessages(session.sessionId, 12)
     const visibleSections = chatSections(messages)
@@ -218,8 +219,13 @@ describe('useChatScroll progressive tail expansion state machine', () => {
     expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE)
     expect(state.maintainVisibleContentPosition).toBeUndefined()
 
-    // User drags within the initial 280ms delay: must arm anchoring on this commit
-    // without cancelling the queued rAF that expands to all 12 sections on the next frame.
+    // No blind post-switch timer should silently dump earlier history while idle.
+    vi.advanceTimersByTime(1_000)
+    state = settle(render)
+    expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE)
+
+    // Dragging near the top edge (offset 0) arms anchoring first and prepends
+    // one bounded chunk on the next rAF rather than dumping all 12 sections.
     state.onScrollBeginDrag()
     state = settle(render)
     expect(state.maintainVisibleContentPosition).toEqual({ minIndexForVisible: 0 })
@@ -227,13 +233,68 @@ describe('useChatScroll progressive tail expansion state machine', () => {
 
     flushRafs()
     state = settle(render)
-    expect(state.displaySections).toHaveLength(12)
-    expect(state.displaySections).toBe(visibleSections)
+    expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE + TAIL_EXPAND_STEP)
   })
 
-  it('advances the first background chunk right after 280ms + 1 rAF rather than losing the frame to cleanup', () => {
-    const session = makeSession('sess-long-2')
-    const messages = makeMessages(session.sessionId, 12)
+  it('fills a short tail slice one row at a time after drawer closes even when flexGrow keeps contentHeight equal to viewportHeight', () => {
+    const session = makeSession('sess-short-tail')
+    const messages = makeMessages(session.sessionId, 10)
+    const visibleSections = chatSections(messages)
+    const setTrajectory = vi.fn()
+    const drawerOpenRef = { current: true }
+    const onDrawerClosedRef: { current: (() => void) | undefined } = { current: undefined }
+    const render = () => useChatScroll({
+      session,
+      messages,
+      visibleMessages: messages,
+      visibleSections,
+      memoryScope: 'scope',
+      memoryKey: `scope:${session.sessionId}`,
+      panelOpen: false,
+      historyLoadingOlder: false,
+      busy: undefined,
+      setTrajectory,
+      drawerOpenRef,
+      onDrawerClosedRef,
+    })
+
+    let state = settle(render)
+    state.onListLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 411, height: 800 } } } as never)
+    state.onListContentSizeChange(411, 800)
+    // While drawer covers the list, short-tail fill must stay dormant.
+    vi.advanceTimersByTime(500)
+    state = settle(render)
+    expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE)
+
+    // Once drawer closes, short-tail fill pulls 1 row after settle delay.
+    drawerOpenRef.current = false
+    onDrawerClosedRef.current?.()
+    vi.advanceTimersByTime(200)
+    state = settle(render)
+    flushRafs()
+    state = settle(render)
+    expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE + 1)
+
+    // Even without a second onContentSizeChange (flexGrow keeps height === 800),
+    // the next step still runs until content exceeds viewport + buffer.
+    vi.advanceTimersByTime(200)
+    state = settle(render)
+    flushRafs()
+    state = settle(render)
+    expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE + 2)
+
+    // Once content grows past viewport + margin, auto-fill stops cleanly.
+    state.onListContentSizeChange(411, 1100)
+    vi.advanceTimersByTime(500)
+    flushRafs()
+    state = settle(render)
+    expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE + 2)
+  })
+
+  it('does not poison browseMemory with atBottom:false on programmatic content-growth scroll while bottom-pinned', () => {
+    vi.mocked(updateBrowseEntry).mockClear()
+    const session = makeSession('sess-pin-guard')
+    const messages = makeMessages(session.sessionId, 8)
     const visibleSections = chatSections(messages)
     const setTrajectory = vi.fn()
     const render = () => useChatScroll({
@@ -249,17 +310,92 @@ describe('useChatScroll progressive tail expansion state machine', () => {
       setTrajectory,
     })
 
+    const state = settle(render)
+    // First land at the bottom so `initialPinRef` clears while `pinToBottomRef` stays true.
+    state.onListScroll({
+      nativeEvent: {
+        contentOffset: { x: 0, y: 400 },
+        contentSize: { width: 411, height: 1200 },
+        layoutMeasurement: { width: 411, height: 800 },
+      },
+    } as never)
+    vi.mocked(updateBrowseEntry).mockClear()
+    vi.advanceTimersByTime(300)
+
+    // Now content grows from 1200 -> 2400 while offset stays at 400 before scrollToEnd lands.
+    state.onListScroll({
+      nativeEvent: {
+        contentOffset: { x: 0, y: 400 },
+        contentSize: { width: 411, height: 2400 },
+        layoutMeasurement: { width: 411, height: 800 },
+      },
+    } as never)
+    expect(updateBrowseEntry).not.toHaveBeenCalled()
+  })
+
+  it('expands the tail window on non-drag upward scroll (mouse wheel/keyboard/TalkBack) and preserves top row when new turns append', () => {
+    const session = makeSession('sess-wheel-and-append')
+    let messages = makeMessages(session.sessionId, 12)
+    let visibleSections = chatSections(messages)
+    const setTrajectory = vi.fn()
+    const render = () => useChatScroll({
+      session,
+      messages,
+      visibleMessages: messages,
+      visibleSections,
+      memoryScope: 'scope',
+      memoryKey: `scope:${session.sessionId}`,
+      panelOpen: false,
+      historyLoadingOlder: false,
+      busy: undefined,
+      setTrajectory,
+    })
+
     let state = settle(render)
+    flushRafs()
+    state = settle(render)
     expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE)
 
-    vi.advanceTimersByTime(280)
-    state = settle(render)
-    expect(state.maintainVisibleContentPosition).toEqual({ minIndexForVisible: 0 })
-    expect(rafQueue.size).toBeGreaterThanOrEqual(1)
+    // Settle at bottom first (`y = 600, contentSize = 1400, viewport = 800`).
+    state.onListScroll({
+      nativeEvent: {
+        contentOffset: { x: 0, y: 600 },
+        contentSize: { width: 411, height: 1400 },
+        layoutMeasurement: { width: 411, height: 800 },
+      },
+    } as never)
 
+    // Mouse wheel / TalkBack scrolls upward without emitting onScrollBeginDrag.
+    state.onListScroll({
+      nativeEvent: {
+        contentOffset: { x: 0, y: 480 },
+        contentSize: { width: 411, height: 1400 },
+        layoutMeasurement: { width: 411, height: 800 },
+      },
+    } as never)
+    state = settle(render)
     flushRafs()
     state = settle(render)
     expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE + TAIL_EXPAND_STEP)
+    const firstMountedKeyBeforeAppend = state.displaySections[0]!.key
+
+    // While user is reading inside the sliced window, a new turn appends at the bottom.
+    // The first mounted row must remain mounted rather than being evicted by `slice(-N)`.
+    messages = [
+      ...messages,
+      {
+        kind: 'message',
+        id: 'msg-appended',
+        sessionId: session.sessionId,
+        createdAt: 99_999,
+        role: 'assistant',
+        text: 'Appended live turn',
+      },
+    ]
+    visibleSections = chatSections(messages)
+    state = settle(render)
+    expect(state.displaySections[0]!.key).toBe(firstMountedKeyBeforeAppend)
+    expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE + TAIL_EXPAND_STEP + 1)
   })
 
   it('cancels an in-flight tail expansion rAF when switching to another session', () => {

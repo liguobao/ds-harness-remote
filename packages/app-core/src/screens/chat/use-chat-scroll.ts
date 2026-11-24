@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import { FlatList, Keyboard, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 import { updateBrowseEntry, useBrowseMemory } from '../../services/browse-memory'
-import { computeStreamingSignature, LATEST_EDGE_PX, type ChatSection } from '../../state/message-helpers'
+import { computeStreamingSignature, LATEST_EDGE_PX } from '../../state/message-helpers'
 import type { ChatItem, RemoteSession } from '../../types'
+import { resolveInitialTailLimit, resolveReadingAnchorIndex, type DisplayChatSection } from './transcript-chunks'
 
 type Options = {
   session: RemoteSession | undefined
   messages: ChatItem[]
   visibleMessages: ChatItem[]
-  visibleSections: readonly ChatSection[]
+  visibleSections: readonly DisplayChatSection[]
   memoryScope: string
   memoryKey: string
   panelOpen: boolean
@@ -21,20 +22,21 @@ type Options = {
 }
 
 const MAINTAIN_VISIBLE_POSITION = { minIndexForVisible: 0 } as const
-export const TAIL_WINDOW_SIZE = 3
-export const TAIL_EXPAND_STEP = 3
-const TAIL_EXPAND_DELAY_MS = 280
-const TAIL_EXPAND_STEP_MS = 120
+export const TAIL_WINDOW_SIZE = 2
+export const TAIL_EXPAND_STEP = 4
+const TOP_EDGE_EXPAND_PX = 480
+const SHORT_TAIL_FILL_MARGIN_PX = 160
+const SHORT_TAIL_FILL_DELAY_MS = 180
 
 /**
  * Slice a bottom-aligned transcript to its latest turns on the initial frame of
- * a session switch; short transcripts (`<= tailLimit + 1`) stay intact.
+ * a session switch; transcripts that already fit within `tailLimit` stay intact.
  */
-export function resolveDisplaySections(
-  sections: readonly ChatSection[],
+export function resolveDisplaySections<T>(
+  sections: readonly T[],
   tailLimit: number | undefined,
-): readonly ChatSection[] {
-  if (tailLimit === undefined || tailLimit <= 0 || sections.length <= tailLimit + 1) {
+): readonly T[] {
+  if (tailLimit === undefined || tailLimit <= 0 || sections.length <= tailLimit) {
     return sections
   }
   return sections.slice(-tailLimit)
@@ -48,7 +50,7 @@ export function nextTailWindowLimit(
 ): number | undefined {
   if (currentLimit === undefined || currentLimit <= 0) return undefined
   const next = currentLimit + Math.max(1, step)
-  return totalSections <= next + 1 ? undefined : next
+  return totalSections <= next ? undefined : next
 }
 
 function savedAtBottomFor(memoryKey: string): boolean {
@@ -75,7 +77,7 @@ export function useChatScroll({
   sessionIdRef.current = sessionId
   const memoryKeyRef = useRef(memoryKey)
   memoryKeyRef.current = memoryKey
-  const listRef = useRef<FlatList<ChatSection>>(null)
+  const listRef = useRef<FlatList<DisplayChatSection>>(null)
   const lastAutoScrollAt = useRef(0)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
@@ -92,19 +94,38 @@ export function useChatScroll({
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
   const [newContent, setNewContent] = useState(false)
+  const initialLimitForCurrent = resolveInitialTailLimit(visibleSections, TAIL_WINDOW_SIZE)
   const [windowState, setWindowState] = useState<{
     key: string
     tailLimit: number | undefined
+    /** First mounted section key while sliced so appending new turns never evicts read rows. */
+    firstKey: string | undefined
     anchorEnabled: boolean
-  }>(() => ({
-    key: memoryKey,
-    tailLimit: savedAtBottomFor(memoryKey) ? TAIL_WINDOW_SIZE : undefined,
-    anchorEnabled: false,
-  }))
+  }>(() => {
+    const tailLimit = savedAtBottomFor(memoryKey) ? initialLimitForCurrent : undefined
+    const firstKey = tailLimit !== undefined && visibleSections.length > tailLimit
+      ? visibleSections[visibleSections.length - tailLimit]?.key
+      : undefined
+    return { key: memoryKey, tailLimit, firstKey, anchorEnabled: false }
+  })
   const isFreshSessionRender = windowState.key !== memoryKey
-  const effectiveTailLimit = isFreshSessionRender
-    ? (savedAtBottomFor(memoryKey) ? TAIL_WINDOW_SIZE : undefined)
+  const rawTailLimit = isFreshSessionRender
+    ? (savedAtBottomFor(memoryKey) ? initialLimitForCurrent : undefined)
     : windowState.tailLimit
+  const effectiveFirstKey = isFreshSessionRender
+    ? (rawTailLimit !== undefined && visibleSections.length > rawTailLimit
+        ? visibleSections[visibleSections.length - rawTailLimit]?.key
+        : undefined)
+    : windowState.firstKey
+  let effectiveTailLimit = rawTailLimit
+  if (effectiveTailLimit !== undefined && effectiveFirstKey !== undefined && visibleSections.length > effectiveTailLimit) {
+    const anchoredIndex = visibleSections.findIndex(section => section.key === effectiveFirstKey)
+    if (anchoredIndex > 0) {
+      effectiveTailLimit = Math.max(effectiveTailLimit, visibleSections.length - anchoredIndex)
+    } else if (anchoredIndex === 0) {
+      effectiveTailLimit = undefined
+    }
+  }
   const effectiveAnchorEnabled = isFreshSessionRender
     ? false
     : (windowState.anchorEnabled || historyLoadingOlder)
@@ -115,8 +136,10 @@ export function useChatScroll({
   const maintainVisibleContentPosition = effectiveAnchorEnabled ? MAINTAIN_VISIBLE_POSITION : undefined
   const tailLimitRef = useRef(effectiveTailLimit)
   tailLimitRef.current = effectiveTailLimit
-  const totalSectionsRef = useRef(visibleSections.length)
-  totalSectionsRef.current = visibleSections.length
+  const visibleSectionsRef = useRef(visibleSections)
+  visibleSectionsRef.current = visibleSections
+  const displaySectionsLengthRef = useRef(displaySections.length)
+  displaySectionsLengthRef.current = displaySections.length
   const isTailSlicedRef = useRef(displaySections.length < visibleSections.length)
   isTailSlicedRef.current = displaySections.length < visibleSections.length
   const visibleAnchor = useRef<string | undefined>(undefined)
@@ -134,6 +157,8 @@ export function useChatScroll({
   /** Mirrors the floating jump button so scroll events only re-render on a crossing. */
   const awayFromLatestRef = useRef(false)
   const [awayFromLatest, setAwayFromLatest] = useState(false)
+  /** Only re-pin on drawer close if content or session actually changed while the drawer covered the list. */
+  const dirtyWhileDrawerOpenRef = useRef(false)
   const baseAutoScrollAllowedRef = useRef(false)
   baseAutoScrollAllowedRef.current = !panelOpen && !historyLoadingOlder && sessionId !== undefined && visibleMessages.length > 0
   const autoScrollAllowedRef = useRef(false)
@@ -167,7 +192,7 @@ export function useChatScroll({
     }
   }, [clearTailTimer])
 
-  const expandTailWindow = useCallback((immediate = false) => {
+  const expandTailWindow = useCallback((immediate = false, step = TAIL_EXPAND_STEP) => {
     if (tailLimitRef.current === undefined) return
     if (tailTimerRef.current !== null) {
       clearTimeout(tailTimerRef.current)
@@ -180,13 +205,25 @@ export function useChatScroll({
     }
     const activeKey = memoryKeyRef.current
     if (!isTailSlicedRef.current) {
-      setWindowState(prev => (prev.key !== activeKey || prev.tailLimit === undefined ? prev : { ...prev, tailLimit: undefined }))
+      setWindowState(prev => (
+        prev.key !== activeKey || (prev.tailLimit === undefined && prev.firstKey === undefined)
+          ? prev
+          : { ...prev, tailLimit: undefined, firstKey: undefined }
+      ))
       return
     }
-    const advanceLimit = (prev: { key: string; tailLimit: number | undefined; anchorEnabled: boolean }) => {
+    const advanceLimit = (prev: { key: string; tailLimit: number | undefined; firstKey: string | undefined; anchorEnabled: boolean }) => {
       if (prev.key !== activeKey || prev.tailLimit === undefined) return prev
-      const nextLimit = immediate ? undefined : nextTailWindowLimit(prev.tailLimit, totalSectionsRef.current)
-      return prev.tailLimit === nextLimit ? prev : { ...prev, tailLimit: nextLimit }
+      const sections = visibleSectionsRef.current
+      const total = sections.length
+      const currentCount = Math.max(prev.tailLimit, displaySectionsLengthRef.current)
+      const nextLimit = immediate ? undefined : nextTailWindowLimit(currentCount, total, step)
+      const nextFirstKey = nextLimit !== undefined && total > nextLimit
+        ? sections[total - nextLimit]?.key
+        : undefined
+      return prev.tailLimit === nextLimit && prev.firstKey === nextFirstKey
+        ? prev
+        : { ...prev, tailLimit: nextLimit, firstKey: nextFirstKey }
     }
     // Arm `maintainVisibleContentPosition` one frame before prepending earlier
     // turns so Android's MaintainVisibleScrollPositionHelper is mounted first.
@@ -287,6 +324,9 @@ export function useChatScroll({
   // Restore reading position before the reused list can emit scroll events.
   // Keep `listViewportRef` intact because the FlatList no longer remounts on
   // session switch, so `onLayout` will not re-fire for the same viewport size.
+  // `effectiveTailLimit` and `effectiveAnchorEnabled` already derive the fresh
+  // session window synchronously during render, so defer committing `windowState`
+  // to `useEffect` to avoid a redundant synchronous pre-paint double-commit.
   useLayoutEffect(() => {
     scrollIntentGenerationRef.current++
     cancelPendingScroll()
@@ -298,33 +338,50 @@ export function useChatScroll({
     initialPinRef.current = bottom
     restoringPosition.current = !bottom
     visibleAnchor.current = undefined
-    setNewContent(false)
+    setNewContent(prev => (prev ? false : prev))
     laidOutSessionRef.current = undefined
     userScrollingRef.current = false
-    listContentRef.current = { width: 0, height: 0 }
+    // Keep `listContentRef` intact across session switches for the same reason
+    // as `listViewportRef`: `shortConversation` sets `flexGrow: 1`, so switching
+    // between two <=1-screen slices keeps `contentSize.height === viewportHeight`
+    // and RN's ScrollView will not re-emit `onContentSizeChange`.
     listOffsetRef.current = 0
     listRef.current?.scrollToOffset({ offset: 0, animated: false })
-    awayFromLatestRef.current = !bottom
-    setAwayFromLatest(!bottom)
-    const initialTailLimit = bottom ? TAIL_WINDOW_SIZE : undefined
-    setWindowState(prev =>
-      prev.key === memoryKey && prev.tailLimit === initialTailLimit && !prev.anchorEnabled
-        ? prev
-        : { key: memoryKey, tailLimit: initialTailLimit, anchorEnabled: false },
-    )
-  }, [memoryKey, cancelPendingScroll, cancelTailExpansion, setTrajectory])
+    if (drawerOpenRef?.current) dirtyWhileDrawerOpenRef.current = true
+    const nextAway = !bottom
+    if (awayFromLatestRef.current !== nextAway) {
+      awayFromLatestRef.current = nextAway
+      setAwayFromLatest(nextAway)
+    }
+  }, [memoryKey, cancelPendingScroll, cancelTailExpansion, setTrajectory, drawerOpenRef])
 
+  const initialLimitRef = useRef(initialLimitForCurrent)
+  initialLimitRef.current = initialLimitForCurrent
   useEffect(() => {
-    if (windowState.key !== memoryKey || windowState.tailLimit === undefined) return
-    const delayMs = windowState.tailLimit === TAIL_WINDOW_SIZE
-      ? TAIL_EXPAND_DELAY_MS
-      : TAIL_EXPAND_STEP_MS
-    tailTimerRef.current = setTimeout(() => {
-      tailTimerRef.current = null
-      expandTailWindow(false)
-    }, delayMs)
-    return clearTailTimer
-  }, [memoryKey, windowState.key, windowState.tailLimit, expandTailWindow, clearTailTimer])
+    const bottom = savedPosition.current?.atBottom !== false
+    const initialTailLimit = bottom ? initialLimitRef.current : undefined
+    const sections = visibleSectionsRef.current
+    const initialFirstKey = initialTailLimit !== undefined && sections.length > initialTailLimit
+      ? sections[sections.length - initialTailLimit]?.key
+      : undefined
+    setWindowState(prev =>
+      prev.key === memoryKey && prev.tailLimit === initialTailLimit && prev.firstKey === initialFirstKey && !prev.anchorEnabled
+        ? prev
+        : { key: memoryKey, tailLimit: initialTailLimit, firstKey: initialFirstKey, anchorEnabled: false },
+    )
+  }, [memoryKey])
+
+  // Latch the first mounted section key once cold-loaded sections arrive so
+  // subsequent appends at the bottom never shift existing rows out of the slice.
+  const firstMountedKey = displaySections.length < visibleSections.length ? displaySections[0]?.key : undefined
+  useEffect(() => {
+    if (firstMountedKey === undefined) return
+    setWindowState(prev =>
+      prev.key !== memoryKey || prev.tailLimit === undefined || prev.firstKey !== undefined
+        ? prev
+        : { ...prev, firstKey: firstMountedKey },
+    )
+  }, [memoryKey, firstMountedKey])
 
   useEffect(() => () => {
     cancelPendingScroll()
@@ -360,7 +417,12 @@ export function useChatScroll({
     setWindowState(prev =>
       prev.key === activeKey && prev.anchorEnabled
         ? prev
-        : { key: activeKey, tailLimit: prev.key === activeKey ? prev.tailLimit : undefined, anchorEnabled: true },
+        : {
+            key: activeKey,
+            tailLimit: prev.key === activeKey ? prev.tailLimit : undefined,
+            firstKey: prev.key === activeKey ? prev.firstKey : undefined,
+            anchorEnabled: true,
+          },
     )
     if (tailLimitRef.current !== undefined) expandTailWindow(true)
   }, [historyLoadingOlder, expandTailWindow])
@@ -371,31 +433,79 @@ export function useChatScroll({
 
   // Scroll when a brand-new item is appended or the last message receives streaming tokens.
   useEffect(() => {
-    if (panelOpen || drawerOpenRef?.current || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (drawerOpenRef?.current) {
+      dirtyWhileDrawerOpenRef.current = true
+      return
+    }
+    if (panelOpen) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
     scheduleScrollToBottom()
   }, [drawerOpenRef, streamingSignature, visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId])
+
+  const scheduleShortTailFill = useCallback(() => {
+    // If the initial tail slice settles shorter than one screen plus scroll
+    // buffer, pull one more chunk after a brief settle delay so the user can
+    // always drag upward seamlessly — without triggering premature Frame-0
+    // expansion before the initial rows finish measuring.
+    const height = listContentRef.current.height
+    const viewportHeight = listViewportRef.current.height
+    const needsShortTailFill = isTailSlicedRef.current
+      && viewportHeight > 0
+      && height > 0
+      && height < viewportHeight + SHORT_TAIL_FILL_MARGIN_PX
+      && !drawerOpenRef?.current
+    if (!needsShortTailFill) {
+      clearTailTimer()
+      return
+    }
+    if (tailTimerRef.current !== null || tailFrameRef.current !== null) return
+    const expectedKey = memoryKeyRef.current
+    tailTimerRef.current = setTimeout(() => {
+      tailTimerRef.current = null
+      if (
+        memoryKeyRef.current !== expectedKey
+        || drawerOpenRef?.current
+        || !isTailSlicedRef.current
+        || listViewportRef.current.height <= 0
+        || listContentRef.current.height >= listViewportRef.current.height + SHORT_TAIL_FILL_MARGIN_PX
+      ) return
+      expandTailWindow(false, 1)
+    }, SHORT_TAIL_FILL_DELAY_MS)
+  }, [clearTailTimer, drawerOpenRef, expandTailWindow])
 
   const onListLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout
     const previous = listViewportRef.current
     if (previous.width === width && previous.height === height) return
     listViewportRef.current = { width, height }
+    if (drawerOpenRef?.current) dirtyWhileDrawerOpenRef.current = true
     // The viewport can change while the content stays put (keyboard, rotation,
     // tablet split), which is exactly when the newest turn may leave the screen.
     syncLatestTurnIndicator(listContentRef.current.height - height - listOffsetRef.current)
+    scheduleShortTailFill()
     if (!isAutoScrollAllowed() || (!pinToBottomRef.current && !initialPinRef.current)) return
     scheduleScrollToBottom()
-  }, [isAutoScrollAllowed, scheduleScrollToBottom, syncLatestTurnIndicator])
+  }, [drawerOpenRef, isAutoScrollAllowed, scheduleScrollToBottom, scheduleShortTailFill, syncLatestTurnIndicator])
 
   const onListContentSizeChange = useCallback((width: number, height: number) => {
     const previous = listContentRef.current
     if (previous.width === width && previous.height === height) return
     listContentRef.current = { width, height }
+    if (drawerOpenRef?.current) dirtyWhileDrawerOpenRef.current = true
     syncLatestTurnIndicator(height - listViewportRef.current.height - listOffsetRef.current)
+    scheduleShortTailFill()
     if (!isAutoScrollAllowed() || (!pinToBottomRef.current && !initialPinRef.current)) return
     scheduleScrollToBottom()
-  }, [isAutoScrollAllowed, scheduleScrollToBottom, syncLatestTurnIndicator])
+  }, [drawerOpenRef, isAutoScrollAllowed, scheduleScrollToBottom, scheduleShortTailFill, syncLatestTurnIndicator])
+
+  // Re-check short-tail fill after each progressive tail step: because
+  // `shortConversation` uses `flexGrow: 1`, prepending a small chunk while
+  // total content is still <= viewport height keeps `contentSize.height` equal
+  // to `viewportHeight` so `onContentSizeChange` does not re-fire between steps.
+  useEffect(() => {
+    scheduleShortTailFill()
+  }, [displaySections.length, memoryKey, scheduleShortTailFill])
 
   const restoreReadingPosition = useCallback(() => {
     // A session switch can render the list before its viewport and markdown
@@ -404,7 +514,7 @@ export function useChatScroll({
     if (panelOpen || drawerOpenRef?.current || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (laidOutSessionRef.current === sessionId) return
     const position = savedPosition.current
-    const anchorIndex = displaySections.findIndex(item => item.key === position?.key)
+    const anchorIndex = resolveReadingAnchorIndex(displaySections, position?.key)
     if (position?.atBottom === false && anchorIndex < 0 && busy?.startsWith('session:')) return
     laidOutSessionRef.current = sessionId
     if (position?.atBottom === false) {
@@ -415,7 +525,9 @@ export function useChatScroll({
         }
         if (anchorIndex >= 0) listRef.current?.scrollToIndex({ index: anchorIndex, animated: false, viewPosition: 0 })
         else listRef.current?.scrollToOffset({ offset: position.key === undefined ? position.offset : 0, animated: false })
-        restoringPosition.current = false
+        requestAnimationFrame(() => {
+          if (sessionIdRef.current === sessionId) restoringPosition.current = false
+        })
       })
     } else scheduleScrollToBottom()
   }, [drawerOpenRef, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length, displaySections, busy])
@@ -431,9 +543,12 @@ export function useChatScroll({
     if (onDrawerClosedRef !== undefined) {
       onDrawerClosedRef.current = () => {
         if (drawerOpenRef?.current) return
+        const dirty = dirtyWhileDrawerOpenRef.current
+        dirtyWhileDrawerOpenRef.current = false
         const wasLaidOut = laidOutSessionRef.current === sessionIdRef.current
         restoreReadingPositionRef.current()
-        if (wasLaidOut && (pinToBottomRef.current || initialPinRef.current)) {
+        scheduleShortTailFill()
+        if (wasLaidOut && dirty && (pinToBottomRef.current || initialPinRef.current)) {
           scheduleScrollToBottom()
         }
       }
@@ -442,21 +557,28 @@ export function useChatScroll({
       if (cancelScrollRef !== undefined) cancelScrollRef.current = undefined
       if (onDrawerClosedRef !== undefined) onDrawerClosedRef.current = undefined
     }
-  }, [cancelScrollRef, onDrawerClosedRef, cancelPendingScroll, drawerOpenRef, scheduleScrollToBottom])
+  }, [cancelScrollRef, onDrawerClosedRef, cancelPendingScroll, drawerOpenRef, scheduleScrollToBottom, scheduleShortTailFill])
 
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+    const prevOffset = listOffsetRef.current
     listOffsetRef.current = contentOffset.y
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
     // Content growth and IME resizing can also emit scroll events. Only a
-    // user's drag/fling changes the intent to follow the latest response.
+    // user's drag/fling or an explicit upward offset decrease away from the
+    // bottom (mouse wheel, trackpad, keyboard, TalkBack/VoiceOver) changes the
+    // intent to follow the latest response.
     if (restoringPosition.current) {
       syncLatestTurnIndicator(distanceFromEnd)
       return
     }
     const atBottom = distanceFromEnd <= LATEST_EDGE_PX
-    if (userScrollingRef.current) {
-      if (distanceFromEnd > LATEST_EDGE_PX) {
+    const isNonDragUpwardScroll = !userScrollingRef.current
+      && !drawerOpenRef?.current
+      && contentOffset.y < prevOffset - 1
+      && !atBottom
+    if (userScrollingRef.current || isNonDragUpwardScroll) {
+      if (!atBottom) {
         pinToBottomRef.current = false
         initialPinRef.current = false
       } else {
@@ -466,19 +588,33 @@ export function useChatScroll({
       pinToBottomRef.current = true
       initialPinRef.current = false
     }
+    // Demand-driven top-edge expansion: prepend `TAIL_EXPAND_STEP` sections when
+    // the user scrolls near the top of the mounted tail window via touch drag or
+    // non-drag input (wheel/trackpad/keyboard/accessibility), never dumping all
+    // hidden history on touch start or on blind post-switch timers.
+    const topExpandThreshold = Math.max(TOP_EDGE_EXPAND_PX, layoutMeasurement.height * 0.9)
+    const allowTopEdgeExpand = userScrollingRef.current
+      || isNonDragUpwardScroll
+      || (!pinToBottomRef.current && !initialPinRef.current && !drawerOpenRef?.current)
+    if (isTailSlicedRef.current && allowTopEdgeExpand && contentOffset.y <= topExpandThreshold) {
+      expandTailWindow(false)
+    }
     syncLatestTurnIndicator(distanceFromEnd)
     if (atBottom) setNewContent(false)
-    // Ignore the synthetic offset-0 event emitted while resetting the reused
-    // list before the initial bottom pin lands.
-    const shouldSavePosition = atBottom || !initialPinRef.current || userScrollingRef.current
+    // Ignore programmatic content-growth scroll events while still bottom-pinned:
+    // persisting `atBottom: false` before `scrollToEnd` lands would poison
+    // `browseMemory`, jump the user to the top on next visit, and disable the
+    // initial tail window.
+    const effectiveAtBottom = atBottom || pinToBottomRef.current
+    const shouldSavePosition = atBottom || (!pinToBottomRef.current && !initialPinRef.current) || userScrollingRef.current
     if (session !== undefined && shouldSavePosition && (Date.now() - lastPositionSave.current > 200 || atBottom)) {
       lastPositionSave.current = Date.now()
-      updateBrowseEntry(memoryScope, session.sessionId, {        
-position: { key: visibleAnchor.current, offset: contentOffset.y, atBottom },
-        ...(atBottom ? { seenAt: session.updatedAt } : {})      
-})
+      updateBrowseEntry(memoryScope, session.sessionId, {
+        position: { key: visibleAnchor.current, offset: contentOffset.y, atBottom: effectiveAtBottom },
+        ...(effectiveAtBottom ? { seenAt: session.updatedAt } : {}),
+      })
     }
-  }, [memoryScope, session?.sessionId, session?.updatedAt, syncLatestTurnIndicator])
+  }, [drawerOpenRef, expandTailWindow, memoryScope, session?.sessionId, session?.updatedAt, syncLatestTurnIndicator])
   useEffect(() => {
     if (contentBefore.current.key === memoryKey && contentBefore.current.version !== undefined
       && contentBefore.current.version !== lastContentVersion && !pinToBottomRef.current) setNewContent(true)
@@ -535,9 +671,15 @@ position: { key: visibleAnchor.current, offset: contentOffset.y, atBottom },
   const onScrollBeginDrag = useCallback(() => {
     scrollIntentGenerationRef.current++
     cancelPendingScroll()
+    restoringPosition.current = false
     userScrollingRef.current = true
-    expandTailWindow(true)
-    Keyboard.dismiss()
+    if (
+      isTailSlicedRef.current
+      && listOffsetRef.current <= Math.max(TOP_EDGE_EXPAND_PX, listViewportRef.current.height * 0.9)
+    ) {
+      expandTailWindow(false)
+    }
+    if (typeof Keyboard.isVisible !== 'function' || Keyboard.isVisible()) Keyboard.dismiss()
   }, [cancelPendingScroll, expandTailWindow])
   const onMomentumScrollBegin = useCallback(() => {
     cancelPendingScroll()

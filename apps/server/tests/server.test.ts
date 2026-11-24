@@ -222,6 +222,69 @@ describe('account and device authorization', () => {
     expect(result.status).toBe(400)
     expect(result.data.error.code).toBe('INVALID_MESSAGE')
   })
+  it('revokes a device through the account session and blocks re-registration', async () => {
+    const keys = generateKeyPair()
+    const descriptor = { deviceId: randomUUID(), identityKey: keys.publicKey, name: 'revocable-device', role: 'client' as const, platform: 'linux', clientVersion: '0.6.4' }
+    const first = await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)
+    expect(first.status).toBe(200)
+
+    // 设备自身的 bearer token 不能调用账号级删除
+    const byDevice = await request(`/account/devices/${descriptor.deviceId}`, 'DELETE', undefined, first.data.accessToken)
+    expect(byDevice.status).toBe(401)
+    expect(byDevice.data.error.code).toBe('ACCOUNT_AUTH_REQUIRED')
+
+    const revoked = await request(`/account/devices/${descriptor.deviceId}`, 'DELETE', undefined, accountToken)
+    expect(revoked.status).toBe(200)
+    expect(revoked.data.status).toBe('revoked')
+
+    const devices = await request('/account/devices', 'GET', undefined, accountToken)
+    expect(devices.data.items.map((item: { deviceId: string }) => item.deviceId)).not.toContain(descriptor.deviceId)
+
+    const stale = await request('/me', 'GET', undefined, first.data.accessToken)
+    expect(stale.status).toBe(401)
+    expect(stale.data.error.code).toBe('AUTH_INVALID')
+    const refreshed = await request('/auth/refresh', 'POST', { deviceId: descriptor.deviceId, refreshToken: first.data.refreshToken })
+    expect(refreshed.status).toBe(403)
+    expect(refreshed.data.error.code).toBe('DEVICE_REVOKED')
+
+    // 吊销墓碑保留：原身份、换新密钥或换角色都不能重新登记（protocol §7 的 deviceId -> identityKey 固定约束）
+    const same = await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)
+    expect(same.status).toBe(403)
+    expect(same.data.error.code).toBe('DEVICE_REVOKED')
+    const replacedKeys = generateKeyPair()
+    const replaced = await request('/devices/register', 'POST', {
+      v: 1,
+      device: { ...descriptor, identityKey: replacedKeys.publicKey, role: 'host' },
+    }, accountToken)
+    expect(replaced.status).toBe(403)
+    expect(replaced.data.error.code).toBe('DEVICE_REVOKED')
+
+    // 重复撤销被墓碑拦截，不会被清除
+    const twice = await request(`/account/devices/${descriptor.deviceId}`, 'DELETE', undefined, accountToken)
+    expect(twice.status).toBe(403)
+    expect(twice.data.error.code).toBe('DEVICE_REVOKED')
+  })
+  it('closes an online device socket and rejects its refresh token after revocation', async () => {
+    const target = await device('host')
+    const wire = await socket(target)
+    const closed = once(wire.ws, 'close')
+    const revoked = await request(`/account/devices/${target.deviceId}`, 'DELETE', undefined, accountToken)
+    expect(revoked.status).toBe(200)
+    const [closeCode, closeReason] = await closed
+    expect(closeCode).toBe(4001)
+    expect(closeReason.toString()).toBe('AUTH_INVALID')
+    const refreshed = await request('/auth/refresh', 'POST', { deviceId: target.deviceId, refreshToken: target.refreshToken })
+    expect(refreshed.status).toBe(403)
+    expect(refreshed.data.error.code).toBe('DEVICE_REVOKED')
+  })
+  it('rejects revoking without an account session or for an unknown device', async () => {
+    const anonymous = await request('/account/devices/does-not-exist', 'DELETE')
+    expect(anonymous.status).toBe(401)
+    expect(anonymous.data.error.code).toBe('ACCOUNT_AUTH_REQUIRED')
+    const missing = await request('/account/devices/does-not-exist', 'DELETE', undefined, accountToken)
+    expect(missing.status).toBe(404)
+    expect(missing.data.error.code).toBe('DEVICE_NOT_FOUND')
+  })
   it('separates account, cookie and device credentials; rejects cross-origin requests', async () => {
     expect((await request('/auth/login', 'POST', { email: account, password: 'wrong' })).status).toBe(401)
     expect((await request('/auth/login', 'POST', { email: account, password }, undefined, { Origin: 'https://attacker.example' })).status).toBe(403)

@@ -681,6 +681,9 @@ export function FileViewerModal({
   }, [visible, file])
 
   const showing = visible && Boolean(file)
+  const hadShownRef = useRef(false)
+  if (showing) hadShownRef.current = true
+  if (!showing && !hadShownRef.current) return null
 
   const handleRequestClose = () => {
     if (menuOpen) {
