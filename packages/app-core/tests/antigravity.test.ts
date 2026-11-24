@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentAcpClient } from '@dsh-remote/client-core'
 import { loadAntigravityCatalog, mergeAntigravityCatalog, readAntigravityHistory } from '../src/services/antigravity'
-import { applyCursorFrame, createAntigravitySession, createAntigravityWorkspace, foldAcpHistory } from '../src/services/cursor'
+import { acpPermissionsValue, applyCursorFrame, createAntigravitySession, createAntigravityWorkspace, foldAcpHistory } from '../src/services/cursor'
+import { snapshotAcpPermissions } from '../src/lib/workspace-key'
 
 describe('AGY catalog and recovery', () => {
   it('rediscovers Host sessions and preserves an empty local session and running state during reconnect', async () => {
@@ -12,11 +13,17 @@ describe('AGY catalog and recovery', () => {
     const catalog = await loadAntigravityCatalog(client)
     expect(call).toHaveBeenCalledWith('dsh/sessionList', { backend: 'antigravity', path: '/host/project', limit: 100, prewarm: false })
     const blank = createAntigravitySession({ acpSessionId: 'new', cwd: '/host/project' })
-    const running = { ...catalog.sessions[0]!, title: 'Old title', running: true }
+    const running = {
+      ...catalog.sessions[0]!, title: 'Old title', running: true,
+      projections: { values: { permissions: acpPermissionsValue('danger-full-access') } },
+    }
     const workspace = { ...createAntigravityWorkspace('/host/project'), sessionIds: [blank.sessionId, running.sessionId] }
     const merged = mergeAntigravityCatalog(catalog, [workspace], [blank, running])
     expect(merged.workspaces[0]?.sessionIds).toEqual(['antigravity:durable', 'antigravity:new'])
-    expect(merged.sessions.find(item => item.nativeId === 'durable')).toMatchObject({ title: 'Saved title', running: true, updatedAt: 123 })
+    expect(merged.sessions.find(item => item.nativeId === 'durable')).toMatchObject({
+      title: 'Saved title', running: true, updatedAt: 123,
+      projections: { values: { permissions: { currentValue: 'danger-full-access' }, imageLimits: expect.any(Object) } },
+    })
     expect(merged.sessions.find(item => item.nativeId === 'new')).toMatchObject({ blank: true })
   })
 
@@ -29,6 +36,20 @@ describe('AGY catalog and recovery', () => {
     expect(transferCall).toHaveBeenCalledWith('dsh/sessionHistory', { backend: 'antigravity', sessionId: 'durable' })
     const user = foldAcpHistory(events, 'antigravity:durable')[0]
     expect(user).toMatchObject({ role: 'user', images: [{ uri: 'data:image/png;base64,aGVsbG8=' }] })
+  })
+
+  it('uses the Host catalog permission when another client changed it', async () => {
+    const client = { call: vi.fn(async (method: string) => method === 'dsh/workspaceList'
+      ? [{ path: '/host/project' }]
+      : { items: [{ conversationId: 'durable', permissionPreset: 'workspace-write' }] }) } as unknown as AgentAcpClient
+    const catalog = await loadAntigravityCatalog(client)
+    const local = createAntigravitySession({ acpSessionId: 'durable', cwd: '/host/project' })
+    local.projections = { values: { permissions: acpPermissionsValue('danger-full-access') } }
+    const merged = mergeAntigravityCatalog(catalog, [], [local])
+    expect(merged.sessions[0]?.projections?.values?.permissions).toMatchObject({ currentValue: 'workspace-write' })
+    const permissionsAtStart = snapshotAcpPermissions(merged.sessions, 'antigravity')
+    const afterLocalWrite = mergeAntigravityCatalog(catalog, [], [local], { permissionsAtStart })
+    expect(afterLocalWrite.sessions[0]?.projections?.values?.permissions).toMatchObject({ currentValue: 'danger-full-access' })
   })
 
   it('provides default permission projection on newly created AGY sessions', () => {

@@ -459,9 +459,12 @@ describe('Issue #469 ACP parity (plugin)', () => {
       const store = new AcpWorkspaceStore(storeFile)
       await expect(store.pinSession('constructor', 's1')).rejects.toThrow(/Reserved ACP backend/)
       await expect(store.upsertWorkspace('antigravity', '/repo/a', 'Repo A')).rejects.toThrow()
+      await expect(store.setSessionPermission('s1', 'danger-full-access')).rejects.toThrow()
+      await expect(store.getSessionPermission('s1')).resolves.toBeUndefined()
       await rm(storeFile, { recursive: true, force: true })
       await expect(store.upsertWorkspace('antigravity', '/repo/b', 'Repo B')).resolves.toMatchObject({ path: '/repo/b' })
       const reloaded = new AcpWorkspaceStore(storeFile)
+      await expect(reloaded.getSessionPermission('s1')).resolves.toBeUndefined()
       const list = await reloaded.listWorkspaces('antigravity')
       expect(list.workspaces.map(w => w.path)).toEqual(['/repo/a', '/repo/b'])
     } finally {

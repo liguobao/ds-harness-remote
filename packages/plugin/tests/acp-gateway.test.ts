@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
+import { AcpWorkspaceStore } from '../src/acp/workspace-store.js'
 import { AntigravityAcpError } from '../src/acp/adapters/antigravity-process.js'
 import { CursorAcpError, type CursorAcpInbound, type CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
 import { OpencodeAcpError } from '../src/acp/adapters/opencode-process.js'
@@ -35,6 +36,137 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
+  it('blocks permission selection until the same session finishes a direct mode write', async () => {
+    const cwd = await realpath(process.cwd())
+    const store = new AcpWorkspaceStore()
+    const adapter = readyAcp()
+    let waitForMode!: () => void
+    const pendingMode = new Promise<void>(resolve => { waitForMode = resolve })
+    let modeEntered!: () => void
+    const entered = new Promise<void>(resolve => { modeEntered = resolve })
+    const modeWrites: string[] = []
+    let currentModeId = 'dontAsk'
+    let availableModes = [{ id: 'default' }, { id: 'dontAsk' }, { id: 'auto' }]
+    adapter.call = vi.fn(async (method, rawParams) => {
+      const params = rawParams as { modeId: string; sessionId: string }
+      if (method === 'session/new') return { sessionId: 'mode-lock' }
+      if (method === 'dsh/sessionModes') return { currentModeId, availableModes }
+      if (method !== 'session/set_mode') return {}
+      modeWrites.push(params.modeId)
+      modeEntered()
+      await pendingMode
+      currentModeId = params.modeId
+      return { currentModeId }
+    })
+    const config = { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'fixture', args: [] }] }
+    const gateway = new AcpRemoteGateway(config, silentLogger(), () => adapter, [], () => false, undefined, store)
+    const params = { backend: 'antigravity', sessionId: 'mode-lock' }
+    const select = () => gateway.call('owner', { method: 'dsh/selectPermission', params: { ...params, preset: 'danger-full-access' } })
+    try {
+      await gateway.start()
+      await gateway.call('owner', { method: 'session/new', params: { backend: 'antigravity', cwd } })
+      await expect(select()).resolves.toEqual({ preset: 'danger-full-access' })
+      expect(modeWrites).toEqual([])
+      const switching = gateway.call('owner', { method: 'session/set_mode', params: { ...params, modeId: 'default' } })
+      try {
+        await entered
+        await expect(select()).rejects.toMatchObject({ code: 'ACP_SESSION_BUSY' })
+        expect(modeWrites).toEqual(['default'])
+        await expect(store.getSessionPermission(params.sessionId)).resolves.toBe('danger-full-access')
+      } finally { waitForMode() }
+      await expect(switching).resolves.toEqual({ currentModeId: 'default', permissionPreset: 'workspace-write' })
+      await expect(store.getSessionPermission(params.sessionId)).resolves.toBe('workspace-write')
+      availableModes = [{ id: 'default' }, { id: 'dontAsk' }]
+      await expect(select()).resolves.toEqual({ preset: 'danger-full-access' })
+      expect(modeWrites).toEqual(['default', 'dontAsk'])
+    } finally { waitForMode(); await gateway.close() }
+  })
+
+  it('does not republish the in-memory permission after shutdown during a durable write', async () => {
+    const cwd = await realpath(process.cwd())
+    const store = new AcpWorkspaceStore()
+    const writePermission = store.setSessionPermission.bind(store)
+    let finishWrite!: () => void
+    const pendingWrite = new Promise<void>(resolve => { finishWrite = resolve })
+    let writeEntered!: () => void
+    const entered = new Promise<void>(resolve => { writeEntered = resolve })
+    vi.spyOn(store, 'setSessionPermission').mockImplementation(async (id, preset) => {
+      writeEntered()
+      await pendingWrite
+      await writePermission(id, preset)
+    })
+    const adapter = readyAcp()
+    adapter.call = vi.fn(async method => method === 'session/new' ? { sessionId: 'shutdown-permission' } : {})
+    const config = { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'fixture', args: [] }] }
+    const gateway = new AcpRemoteGateway(config, silentLogger(), () => adapter, [], () => false, undefined, store)
+    const sessionId = 'shutdown-permission'
+    try {
+      await gateway.start()
+      await gateway.call('owner', { method: 'session/new', params: { backend: 'antigravity', cwd } })
+      const selection = gateway.call('owner', {
+        method: 'dsh/selectPermission', params: { backend: 'antigravity', sessionId, preset: 'danger-full-access' },
+      }).catch(error => error)
+      await entered
+      await gateway.close()
+      finishWrite()
+      expect(await selection).toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+      await expect(store.getSessionPermission(sessionId)).resolves.toBe('danger-full-access')
+      const state = gateway as unknown as { sessionPermissions: Map<string, string> }
+      expect(state.sessionPermissions.has(sessionId)).toBe(false)
+    } finally { finishWrite(); await gateway.close() }
+  })
+
+  it('keeps the previous AGY permission until the upstream mode and the store confirm the change', async () => {
+    const cwd = await realpath(process.cwd())
+    const store = new AcpWorkspaceStore()
+    const persist = vi.spyOn(store, 'setSessionPermission')
+    const adapter = readyAcp()
+    let currentModeId = 'default'
+    let rejectMode = false
+    let supportsDefault = true
+    adapter.call = vi.fn(async (method, params) => {
+      if (method === 'session/new') return { sessionId: 'permission-test' }
+      if (method === 'dsh/sessionModes') {
+        return { currentModeId, availableModes: [...(supportsDefault ? [{ id: 'default' }] : []), { id: 'auto' }] }
+      }
+      if (method === 'session/set_mode') {
+        if (rejectMode) throw new CursorAcpError('ANTIGRAVITY_UPSTREAM_ERROR', 'Rejected')
+        currentModeId = (params as { modeId: string }).modeId
+        return { currentModeId }
+      }
+      return {}
+    })
+    const config = { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'fixture', args: [] }] }
+    const gateway = new AcpRemoteGateway(config, silentLogger(), () => adapter, [], () => false, undefined, store)
+    const params = { backend: 'antigravity', sessionId: 'permission-test' }
+    const select = (preset: string) => gateway.call('owner', { method: 'dsh/selectPermission', params: { ...params, preset } })
+    const history = () => gateway.call('owner', { method: 'dsh/sessionHistory', params })
+    try {
+      await gateway.start()
+      await gateway.call('owner', { method: 'session/new', params: { backend: 'antigravity', cwd } })
+      await expect(select('danger-full-access')).resolves.toEqual({ preset: 'danger-full-access' })
+      expect(currentModeId).toBe('auto')
+      rejectMode = true
+      await expect(select('workspace-write')).rejects.toMatchObject({ code: 'ANTIGRAVITY_UPSTREAM_ERROR' })
+      expect(currentModeId).toBe('auto')
+      expect(persist).toHaveBeenCalledTimes(1)
+      await expect(history()).resolves.toMatchObject({ permissionPreset: 'danger-full-access' })
+      rejectMode = false
+      supportsDefault = false
+      await expect(select('workspace-write')).rejects.toMatchObject({ code: 'ACP_MODE_UNAVAILABLE' })
+      expect(currentModeId).toBe('auto')
+      expect(persist).toHaveBeenCalledTimes(1)
+      supportsDefault = true
+      persist.mockRejectedValueOnce(new Error('write failed'))
+      await expect(select('workspace-write')).rejects.toThrow()
+      expect(currentModeId).toBe('auto')
+      await expect(store.getSessionPermission('permission-test')).resolves.toBe('danger-full-access')
+      await expect(select('workspace-write')).resolves.toEqual({ preset: 'workspace-write' })
+      expect(currentModeId).toBe('default')
+      await expect(history()).resolves.toMatchObject({ permissionPreset: 'workspace-write' })
+    } finally { await gateway.close() }
+  })
+
   it.each(['cursor', 'antigravity'] as const)('resolves %s upload roots only for a live peer, matching backend and session owner', async backend => {
     const cwd = await realpath(process.cwd())
     const adapter = readyAcp()

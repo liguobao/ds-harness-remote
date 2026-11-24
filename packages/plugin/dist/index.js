@@ -66750,7 +66750,12 @@ var AgentAcpClient = class {
   }
   async setMode(sessionId, backend, modeId, signal) {
     const result = await this.call("session/set_mode", { sessionId, backend, modeId }, signal);
-    return isRecord2(result) && typeof result.currentModeId === "string" ? { currentModeId: result.currentModeId } : { currentModeId: modeId };
+    if (!isRecord2(result))
+      return { currentModeId: modeId };
+    return {
+      currentModeId: typeof result.currentModeId === "string" ? result.currentModeId : modeId,
+      ...result.permissionPreset === "workspace-write" ? { permissionPreset: result.permissionPreset } : {}
+    };
   }
   async sessionCommands(sessionId, backend, signal) {
     const result = await this.call("dsh/sessionCommands", { sessionId, backend }, signal);
@@ -72405,6 +72410,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     const seq = this.nextProjectionSeq(sessionId);
     this.events.publishProjection(sessionId, "agentPreset", committed, seq);
+    if (result.permissionPreset !== void 0) this.applyPermissionSelection(sessionId, result.permissionPreset);
     return success2(committed);
   }
   async workspaceForSession(request2) {
@@ -73006,7 +73012,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   permissionsProjection(sessionId) {
     return acpPermissionsProjection(this.permissionSelection(sessionId));
   }
-  setPermissionSelection(sessionId, preset) {
+  applyPermissionSelection(sessionId, preset) {
     const resolved = this.resolveSessionId(sessionId);
     if (preset === void 0) {
       this.selectedPermissions.delete(resolved);
@@ -73022,7 +73028,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     const session2 = this.sessions.get(resolved);
     if (session2 !== void 0) this.syncSessionCache(session2);
+  }
+  setPermissionSelection(sessionId, preset) {
+    this.applyPermissionSelection(sessionId, preset);
     if (this.client.selectPermission) {
+      const resolved = this.resolveSessionId(sessionId);
       void this.client.selectPermission(nativeAcpId(resolved, this.backend), this.backend, preset ?? "workspace-write").catch(() => void 0);
     }
   }
@@ -102881,15 +102891,24 @@ var AcpWorkspaceStore = class _AcpWorkspaceStore {
     }
     return entry;
   }
-  async persist() {
-    if (this.filePath === void 0) return;
+  async persist(permission) {
+    if (this.filePath === void 0) {
+      if (permission) this.data.sessionPermissions[permission.sessionId] = permission.preset;
+      return;
+    }
     const filePath = this.filePath;
-    const snapshot2 = JSON.stringify(this.data, null, 2);
     const next = this.writeChain.catch(() => void 0).then(async () => {
+      const snapshot2 = permission ? {
+        ...this.data,
+        sessionPermissions: Object.assign(emptyPermissions(), this.data.sessionPermissions, {
+          [permission.sessionId]: permission.preset
+        })
+      } : this.data;
       await mkdir4(dirname5(filePath), { recursive: true });
       const temp = `${filePath}.${process.pid}.tmp`;
-      await writeFile3(temp, snapshot2, "utf8");
+      await writeFile3(temp, JSON.stringify(snapshot2, null, 2), "utf8");
       await rename3(temp, filePath);
+      if (permission) this.data.sessionPermissions[permission.sessionId] = permission.preset;
     });
     this.writeChain = next;
     return next;
@@ -102998,8 +103017,7 @@ var AcpWorkspaceStore = class _AcpWorkspaceStore {
     if (PROTOTYPE_KEYS.has(sessionId)) {
       throw new Error(`Reserved ACP session key: ${sessionId}`);
     }
-    this.data.sessionPermissions[sessionId] = preset;
-    await this.persist();
+    await this.persist({ sessionId, preset });
   }
   async getAllSessionPermissions() {
     await this.load();
@@ -103037,6 +103055,7 @@ function isRecord22(value) {
 }
 
 // packages/plugin/src/acp/gateway.ts
+var ELEVATED_ACP_MODES = ["auto", "bypassPermissions", "yolo", "full-auto", "dontAsk", "accept-edits", "acceptEdits"];
 var APPROVAL_TTL_MS2 = 5 * 6e4;
 var MAX_SESSION_TITLE_ENTRIES = 256;
 var DETACHED_ACP_APPROVAL_METHODS = /* @__PURE__ */ new Set([
@@ -103099,6 +103118,7 @@ var AcpRemoteGateway = class {
   sessionOwners = /* @__PURE__ */ new Map();
   sessionBackends = /* @__PURE__ */ new Map();
   sessionPermissions = /* @__PURE__ */ new Map();
+  changingPermissions = /* @__PURE__ */ new Set();
   approvals = /* @__PURE__ */ new Map();
   approvalExpiryTimer;
   restartAttempts = /* @__PURE__ */ new Map();
@@ -103234,6 +103254,28 @@ var AcpRemoteGateway = class {
     const sessionId = sessionIdFromParams(call.method, call.params);
     const backend = typeof call.params.backend === "string" ? call.params.backend : call.method === "dsh/sessionHistory" ? this.resolveHistoryTarget(call.params).backend : sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : void 0;
     const assertCurrent = this.captureCallScope(connectionId, typeof backend === "string" ? backend : this.defaultBackend());
+    assertCurrent();
+    if (typeof call.params.backend === "string") {
+      const parsedPrefix = typeof call.params.sessionId === "string" ? parsePublicSessionId(call.params.sessionId) : void 0;
+      if (parsedPrefix && parsedPrefix.backend !== call.params.backend) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
+      const sessionId2 = call.method === "dsh/sessionHistory" && parsedPrefix ? parsedPrefix.nativeId : sessionIdFromParams(call.method, call.params);
+      const boundBackend = sessionId2 === void 0 ? void 0 : this.sessionBackends.get(sessionId2);
+      if (boundBackend !== void 0 && boundBackend !== call.params.backend) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
+      this.requireAcp(call.params.backend);
+    }
+    const modeWrite = call.method === "session/set_mode" || call.method === "dsh/selectPermission" ? sessionId : void 0;
+    if (modeWrite !== void 0) {
+      this.requireSessionOwner(connectionId, modeWrite);
+      if (this.changingPermissions.has(modeWrite)) throw new RpcError("ACP_SESSION_BUSY", "An ACP permission or mode change is in progress.");
+      if (this.promptsInProgress.has(modeWrite)) {
+        throw call.method === "session/set_mode" ? new RpcError("PROMPT_IN_PROGRESS", "Stop the ACP reply before changing its mode.") : new RpcError("ACP_SESSION_BUSY", "The ACP session is busy.");
+      }
+      this.changingPermissions.add(modeWrite);
+    }
     const reserve = backend === "opencode" && sessionId !== void 0 && ["session/load", "session/prompt", "dsh/selectModel"].includes(call.method);
     if (reserve) {
       if (this.archivingSessions.has(sessionId)) throw new RpcError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
@@ -103246,6 +103288,7 @@ var AcpRemoteGateway = class {
     } catch (error62) {
       throw mapAcpError(error62);
     } finally {
+      if (modeWrite !== void 0) this.changingPermissions.delete(modeWrite);
       if (reserve) {
         const remaining = (this.opencodeOperations.get(sessionId) ?? 1) - 1;
         if (remaining) this.opencodeOperations.set(sessionId, remaining);
@@ -103279,18 +103322,6 @@ var AcpRemoteGateway = class {
       method: call.method,
       sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
     });
-    if (typeof call.params.backend === "string") {
-      const parsedPrefix = typeof call.params.sessionId === "string" ? parsePublicSessionId(call.params.sessionId) : void 0;
-      if (parsedPrefix && parsedPrefix.backend !== call.params.backend) {
-        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
-      }
-      const sessionId2 = call.method === "dsh/sessionHistory" && parsedPrefix ? parsedPrefix.nativeId : sessionIdFromParams(call.method, call.params);
-      const boundBackend = sessionId2 === void 0 ? void 0 : this.sessionBackends.get(sessionId2);
-      if (boundBackend !== void 0 && boundBackend !== call.params.backend) {
-        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
-      }
-      this.requireAcp(call.params.backend);
-    }
     if (call.method === "initialize") {
       const requestedBackend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
       this.requireAcp(requestedBackend);
@@ -103482,7 +103513,7 @@ var AcpRemoteGateway = class {
           for (const item of items) this.sessionCwds.set(item.conversationId, { backend, cwd: cwd2 });
         }
         this.logger.info("ACP session list fetched", { count: items.length });
-        return { items };
+        return { items: await this.withCatalogPermissions(items) };
       }
       if (this.isNativeCatalogBackend(backend)) {
         const cwd2 = path ? await this.requireExistingDirectory(path) : void 0;
@@ -103490,13 +103521,13 @@ var AcpRemoteGateway = class {
         sessions.sort((a, b) => (Date.parse(b.updatedAt ?? "") || 0) - (Date.parse(a.updatedAt ?? "") || 0) || a.sessionId.localeCompare(b.sessionId));
         const pinnedSessionIds = await this.workspaceStore.getPinnedSessions(backend);
         return {
-          items: sessions.slice(0, limit).map((item) => ({
+          items: await this.withCatalogPermissions(sessions.slice(0, limit).map((item) => ({
             conversationId: item.sessionId,
             title: item.title ?? "Untitled Session",
             createdAt: Date.parse(item.updatedAt ?? "") || 0,
             updatedAt: Date.parse(item.updatedAt ?? "") || 0,
             cwd: item.cwd
-          })),
+          }))),
           ...pinnedSessionIds.length > 0 ? { pinnedSessionIds } : {}
         };
       }
@@ -103508,7 +103539,9 @@ var AcpRemoteGateway = class {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
       this.requireAcp(backend);
-      const persistedPreset = this.sessionPermissions.get(conversationId) ?? await this.workspaceStore.getSessionPermission(conversationId);
+      const storedPreset = this.sessionPermissions.get(conversationId) ?? await this.workspaceStore.getSessionPermission(conversationId);
+      assertCurrent();
+      const persistedPreset = this.sessionPermissions.get(conversationId) ?? storedPreset;
       if (persistedPreset) this.sessionPermissions.set(conversationId, persistedPreset);
       if (this.isNativeCatalogBackend(backend)) {
         const cwd2 = await this.catalogSessionCwd(backend, conversationId);
@@ -103585,7 +103618,7 @@ var AcpRemoteGateway = class {
       if (sessionId !== void 0 && !this.sessionPermissions.has(sessionId)) {
         const persistedPreset = await this.workspaceStore.getSessionPermission(sessionId);
         assertCurrent();
-        if (persistedPreset) this.sessionPermissions.set(sessionId, persistedPreset);
+        if (persistedPreset && !this.sessionPermissions.has(sessionId)) this.sessionPermissions.set(sessionId, persistedPreset);
       }
       this.sessionBackends.set(sessionId, requested);
     }
@@ -103636,7 +103669,7 @@ var AcpRemoteGateway = class {
         }
         this.sessionOwners.set(loadedId, connectionId);
         this.sessionBackends.set(loadedId, targetBackend);
-        if (persistedPreset) this.sessionPermissions.set(loadedId, persistedPreset);
+        if (persistedPreset && !this.sessionPermissions.has(loadedId)) this.sessionPermissions.set(loadedId, persistedPreset);
       }
       return sanitizeSessionResult(result);
     }
@@ -103682,12 +103715,27 @@ var AcpRemoteGateway = class {
       return sanitizeSessionResult(result);
     }
     if (call.method === "session/set_mode") {
-      if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "Stop the ACP reply before changing its mode.");
-      const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(sessionId) ?? this.defaultBackend();
-      const acp = this.requireAcp(backend);
-      const result = await acp.call("session/set_mode", { sessionId, modeId: call.params.modeId });
+      const id7 = sessionId;
+      const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(id7) ?? this.defaultBackend();
+      const client = this.requireAcp(backend);
+      const modeId = String(call.params.modeId);
+      const permissionMode = modeId === "default" || ELEVATED_ACP_MODES.includes(modeId);
+      const resetGrant = permissionMode && await this.workspaceStore.getSessionPermission(id7) === "danger-full-access";
       assertCurrent();
-      return sanitizeSessionResult(result);
+      if (!resetGrant) return sanitizeSessionResult(await client.call("session/set_mode", { sessionId: id7, modeId }));
+      const modes = await client.call("dsh/sessionModes", { sessionId: id7 });
+      assertCurrent();
+      const previousMode = isRecord23(modes) && typeof modes.currentModeId === "string" ? modes.currentModeId : void 0;
+      if (previousMode === void 0) throw new RpcError("ACP_MODE_UNCONFIRMED", "The ACP backend did not report its current permission mode.");
+      await this.writePermission(
+        id7,
+        backend,
+        client,
+        "workspace-write",
+        { current: previousMode, target: modeId },
+        assertCurrent
+      );
+      return { currentModeId: modeId, permissionPreset: "workspace-write" };
     }
     if (call.method === "dsh/sessionModes" || call.method === "dsh/sessionCommands") {
       const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(sessionId) ?? this.defaultBackend();
@@ -103726,16 +103774,15 @@ var AcpRemoteGateway = class {
       if (preset !== "workspace-write" && preset !== "danger-full-access") {
         throw new RpcError("INVALID_MESSAGE", "Unknown permission preset.");
       }
-      this.sessionPermissions.set(sessionId, preset);
-      await this.workspaceStore.setSessionPermission(sessionId, preset);
-      assertCurrent();
-      const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(sessionId);
-      if (backend) {
-        await this.syncPermissionModeIfCompatible(backend, sessionId, preset).catch(() => void 0);
-      }
+      const id7 = sessionId;
+      const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(id7) ?? this.defaultBackend();
+      const client = this.requireAcp(backend);
+      const mode2 = await this.permissionModeChange(backend, client, id7, preset, assertCurrent);
+      await this.writePermission(id7, backend, client, preset, mode2, assertCurrent);
       return { preset };
     }
     if (call.method === "session/prompt" && sessionId !== void 0) {
+      if (this.changingPermissions.has(sessionId)) throw new RpcError("ACP_SESSION_BUSY", "An ACP permission change is in progress.");
       if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "An ACP reply is already in progress.");
       this.invalidateSessionHistory(sessionId);
       const backend = this.sessionBackends.get(sessionId) ?? this.defaultBackend();
@@ -104729,19 +104776,62 @@ var AcpRemoteGateway = class {
     if (backend === "antigravity") return this.isNativeCatalogBackend("antigravity");
     return backend !== "cursor" && backend !== "opencode" && isValidAcpBackendId(backend);
   }
-  async syncPermissionModeIfCompatible(backend, sessionId, preset) {
-    const client = this.backendInstances.get(backend)?.client;
-    if (!client) return;
-    const modes = await client.call("dsh/sessionModes", { sessionId }).catch(() => void 0);
+  async withCatalogPermissions(items) {
+    return Promise.all(items.map(async (item) => ({
+      ...item,
+      permissionPreset: await this.workspaceStore.getSessionPermission(item.conversationId) ?? "workspace-write"
+    })));
+  }
+  async writePermission(sessionId, backend, client, preset, mode2, assertCurrent) {
+    assertCurrent();
+    const changingMode = mode2 !== void 0 && mode2.current !== mode2.target;
+    try {
+      if (changingMode) {
+        const result = await client.call("session/set_mode", { sessionId, modeId: mode2.target });
+        if (!isRecord23(result) || result.currentModeId !== mode2.target) {
+          throw new RpcError("ACP_MODE_UNCONFIRMED", "The ACP backend did not confirm the permission mode.");
+        }
+      }
+      assertCurrent();
+      await this.workspaceStore.setSessionPermission(sessionId, preset);
+    } catch (error62) {
+      if (changingMode && this.backendInstances.get(backend)?.client === client && client.isReady()) {
+        try {
+          const result = await client.call("session/set_mode", { sessionId, modeId: mode2.current });
+          if (!isRecord23(result) || result.currentModeId !== mode2.current) {
+            this.logger.warn("ACP permission mode rollback was not confirmed");
+          }
+        } catch (rollbackError) {
+          this.logger.warn("ACP permission mode rollback failed", { code: errorCode3(rollbackError) });
+        }
+      }
+      throw error62;
+    }
+    this.sessionPermissions.delete(sessionId);
+    assertCurrent();
+    this.sessionPermissions.set(sessionId, preset);
+  }
+  async permissionModeChange(backend, client, sessionId, preset, assertCurrent) {
+    if (client instanceof AntigravityAcpClient) return;
+    if (client instanceof AntigravityNativeAcpClient && !client.isSessionLoaded(sessionId)) {
+      const cwd2 = await this.catalogSessionCwd(backend, sessionId);
+      assertCurrent();
+      await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      assertCurrent();
+    }
+    const modes = await client.call("dsh/sessionModes", { sessionId }).catch((error62) => {
+      if (backend !== "antigravity" && errorCode3(error62) === "ACP_SESSION_NOT_LOADED") return void 0;
+      throw error62;
+    });
     if (!isRecord23(modes) || !Array.isArray(modes.availableModes)) return;
     const current = typeof modes.currentModeId === "string" ? modes.currentModeId : void 0;
-    const permissionModes = /* @__PURE__ */ new Set(["default", "accept-edits", "auto", "acceptEdits", "bypassPermissions", "dontAsk", "yolo", "full-auto"]);
-    if (current && !permissionModes.has(current)) return;
+    if (!current || current !== "default" && !ELEVATED_ACP_MODES.includes(current)) return;
     const ids = modes.availableModes.filter((item) => isRecord23(item) && typeof item.id === "string").map((item) => item.id);
-    const target3 = preset === "danger-full-access" ? ["auto", "bypassPermissions", "yolo", "full-auto", "accept-edits", "acceptEdits"].find((id7) => ids.includes(id7)) : ids.find((id7) => id7 === "default");
-    if (target3 && target3 !== current) {
-      await client.call("session/set_mode", { sessionId, modeId: target3 });
+    const target3 = preset === "danger-full-access" ? ELEVATED_ACP_MODES.includes(current) ? current : ELEVATED_ACP_MODES.find((id7) => ids.includes(id7)) : ids.find((id7) => id7 === "default");
+    if (target3 === void 0 && preset === "workspace-write" && current !== "default") {
+      throw new RpcError("ACP_MODE_UNAVAILABLE", "The ACP backend has no compatible mode for this permission.");
     }
+    return target3 !== void 0 && target3 !== current ? { current, target: target3 } : void 0;
   }
   initializeResult(params, backend) {
     const requested = typeof params.protocolVersion === "number" ? params.protocolVersion : 1;

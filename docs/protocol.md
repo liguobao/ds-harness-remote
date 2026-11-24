@@ -1453,6 +1453,12 @@ Host 以可信 catalog / realpath 和原生返回的 ID/目录确认会话归属
 其他 ACP 后端无此能力，禁止仅移除本地投影并返回归档成功。具体进程隔离与验证边界见
 [OpenCode 原生归档设计](acp-remote.md#opencode-与原生归档)。
 
+`dsh/sessionList` 的会话条目可携带 Host 当前确认的 Remote `permissionPreset`，值为
+`workspace-write` 或 `danger-full-access`。旧 Host 可以省略该字段。对同一会话，
+`session/set_mode` 与 `dsh/selectPermission` 的写入互斥。直接选原生模式不会授予
+Remote 自动审批；若选权限相关模式时撤销了已有 Remote 自动审批，响应包含
+`permissionPreset: "workspace-write"`，供 Client 同步权限显示。
+
 Client 侧 `initialize` 由 Gateway 返回 backend-neutral 能力描述，不把 Cursor 私有 method 名暴露为公共面。AGY 的
 `dsh/sessionList` 在指定有效工作目录时可异步预热该目录的一个空闲进程，不等待初始化、
 不发送 prompt，也不注册客户端 Session；`session/new` 才领取预热进程。AGY 摘要数据库

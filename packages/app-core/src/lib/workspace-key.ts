@@ -5,6 +5,12 @@ export type AcpManagedBackend = Exclude<AgentBackend, 'harness' | 'codex'>
 export interface AcpCatalogFilterOptions {
   deletedKeys?: ReadonlySet<string>
   platform?: string
+  permissionsAtStart?: ReadonlyMap<string, unknown>
+}
+
+export function snapshotAcpPermissions(sessions: RemoteSession[], backend: AcpManagedBackend): ReadonlyMap<string, unknown> {
+  return new Map(sessions.filter(session => session.backend === backend)
+    .map(session => [session.sessionId, session.projections?.values?.permissions]))
 }
 
 export function isAcpManagedBackend(backend?: AgentBackend): backend is AcpManagedBackend {
@@ -194,6 +200,14 @@ export async function loadAcpDirectoryCatalog(spec: {
         ...(typeof row.title === 'string' && row.title.trim() ? { title: row.title } : {}),
       })
       if (typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt)) session.updatedAt = row.updatedAt
+      const permissions = session.projections?.values?.permissions
+      if (isObjectRecord(permissions) && (row.permissionPreset === 'workspace-write' || row.permissionPreset === 'danger-full-access')) {
+        session.projections = { values: {
+          ...session.projections?.values,
+          permissions: { ...permissions, currentValue: row.permissionPreset },
+          acpPermissionFromCatalog: true,
+        } }
+      }
       sessions.set(session.sessionId, session)
       ids.push(session.sessionId)
     }
@@ -223,7 +237,18 @@ export function mergeAcpDirectoryCatalog(spec: {
   )
   for (const session of spec.catalog.sessions) {
     const previous = byId.get(session.sessionId)
-    byId.set(session.sessionId, { ...previous, ...session, running: previous?.running ?? false })
+    const permissions = previous?.projections?.values?.permissions
+    const atStart = spec.options?.permissionsAtStart
+    const changedDuringRefresh = atStart !== undefined && atStart.get(session.sessionId) !== permissions
+    const hasHostPermission = session.projections?.values?.acpPermissionFromCatalog === true
+    byId.set(session.sessionId, {
+      ...previous,
+      ...session,
+      running: previous?.running ?? false,
+      ...(permissions === undefined || (hasHostPermission && !changedDuringRefresh) ? {} : {
+        projections: { ...session.projections, values: { ...session.projections?.values, permissions } },
+      }),
+    })
   }
   const roots = new Map(spec.workspaces.filter(item => item.backend === spec.backend).map(item => [item.workspaceId, item]))
   for (const workspace of spec.catalog.workspaces) {

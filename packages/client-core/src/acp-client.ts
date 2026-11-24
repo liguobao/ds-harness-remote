@@ -122,9 +122,13 @@ export class AgentAcpClient {
     }
   }
 
-  async setMode(sessionId: string, backend: AcpAgentBackend, modeId: string, signal?: AbortSignal): Promise<{ currentModeId?: string }> {
+  async setMode(sessionId: string, backend: AcpAgentBackend, modeId: string, signal?: AbortSignal): Promise<{ currentModeId?: string; permissionPreset?: 'workspace-write' }> {
     const result = await this.call('session/set_mode', { sessionId, backend, modeId }, signal)
-    return isRecord(result) && typeof result.currentModeId === 'string' ? { currentModeId: result.currentModeId } : { currentModeId: modeId }
+    if (!isRecord(result)) return { currentModeId: modeId }
+    return {
+      currentModeId: typeof result.currentModeId === 'string' ? result.currentModeId : modeId,
+      ...(result.permissionPreset === 'workspace-write' ? { permissionPreset: result.permissionPreset } : {}),
+    }
   }
 
   async sessionCommands(sessionId: string, backend: AcpAgentBackend, signal?: AbortSignal): Promise<AcpAvailableCommand[]> {

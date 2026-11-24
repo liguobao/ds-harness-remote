@@ -1,6 +1,6 @@
 import { loadAcpModels } from '../services/acp-models'
 import type { AcpStream, CodexStream, CodexTimelineState } from '@dsh-remote/client-core'
-import { isAcpManagedBackend, workspaceStableKey, type AcpCatalogFilterOptions, type AcpManagedBackend } from '../lib/workspace-key'
+import { isAcpManagedBackend, snapshotAcpPermissions, workspaceStableKey, type AcpCatalogFilterOptions, type AcpManagedBackend } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
 import * as browseMemory from '../services/browse-memory'
@@ -194,10 +194,11 @@ export class SessionRuntime {
     const deviceId = this.store.get().selectedDevice?.deviceId
     try {
       const options = this.acpCatalogOptions()
+      const permissionsAtStart = snapshotAcpPermissions(this.store.get().sessions, spec.backend)
       const catalog = await spec.load(client, this.store.get().workspaces, undefined, options)
       if (!spec.has() || spec.require() !== client || this.store.get().selectedDevice?.deviceId !== deviceId) return
       this.store.set(state => {
-        const merged = spec.merge(catalog, state.workspaces, state.sessions, this.acpCatalogOptions())
+        const merged = spec.merge(catalog, state.workspaces, state.sessions, { ...this.acpCatalogOptions(), permissionsAtStart })
         return {
           workspaces: [...state.workspaces.filter(item => item.backend !== spec.backend), ...merged.workspaces],
           sessions: [...state.sessions.filter(item => item.backend !== spec.backend), ...merged.sessions],

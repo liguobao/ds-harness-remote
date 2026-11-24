@@ -128,7 +128,7 @@ export interface AcpClientLike {
   sessionModels?(sessionId: string, backend: AcpCatalogBackend, signal?: AbortSignal): Promise<AcpSessionModels>
   selectModel?(sessionId: string, backend: AcpCatalogBackend, selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
   sessionModes?(sessionId: string, backend: AcpCatalogBackend, signal?: AbortSignal): Promise<AcpSessionModes>
-  setMode?(sessionId: string, backend: AcpCatalogBackend, modeId: string, signal?: AbortSignal): Promise<{ currentModeId?: string }>
+  setMode?(sessionId: string, backend: AcpCatalogBackend, modeId: string, signal?: AbortSignal): Promise<{ currentModeId?: string; permissionPreset?: 'workspace-write' }>
   sessionCommands?(sessionId: string, backend: AcpCatalogBackend, signal?: AbortSignal): Promise<AcpAvailableCommand[]>
   forkSession?(sessionId: string, backend: AcpCatalogBackend, signal?: AbortSignal): Promise<{ sessionId: string }>
   createWorkspace?(path: string, backend: AcpCatalogBackend, title?: string, signal?: AbortSignal): Promise<{ path: string; title?: string }>

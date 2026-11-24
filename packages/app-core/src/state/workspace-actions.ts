@@ -3,6 +3,7 @@ import { friendlyError } from '../lib/errors'
 import {
   filterVisibleAcpCatalog,
   isAcpManagedBackend,
+  snapshotAcpPermissions,
   workspaceStableKey,
   type AcpCatalogFilterOptions,
 } from '../lib/workspace-key'
@@ -129,7 +130,10 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         let catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] }
         let archivedSessionIds: string[] | undefined
         let pinnedSessionIds: string[] | undefined
-        const filterOpts = catalogOptions()
+        const filterOpts = {
+          ...catalogOptions(),
+          permissionsAtStart: isAcpManagedBackend(backend) ? snapshotAcpPermissions(get().sessions, backend) : undefined,
+        }
         switch (backend) {
           case 'harness': {
             const proxy = scope.bind(() => connection.requireProxy())

@@ -609,6 +609,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
     const seq = this.nextProjectionSeq(sessionId)
     this.events.publishProjection(sessionId, 'agentPreset', committed, seq)
+    if (result.permissionPreset !== undefined) this.applyPermissionSelection(sessionId, result.permissionPreset)
     return success(committed)
   }
 
@@ -1284,7 +1285,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return acpPermissionsProjection(this.permissionSelection(sessionId))
   }
 
-  private setPermissionSelection(sessionId: string, preset: AcpPermissionPreset | undefined): void {
+  private applyPermissionSelection(sessionId: string, preset: AcpPermissionPreset | undefined): void {
     const resolved = this.resolveSessionId(sessionId)
     if (preset === undefined) {
       this.selectedPermissions.delete(resolved)
@@ -1300,7 +1301,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
     const session = this.sessions.get(resolved)
     if (session !== undefined) this.syncSessionCache(session)
+  }
+
+  private setPermissionSelection(sessionId: string, preset: AcpPermissionPreset | undefined): void {
+    this.applyPermissionSelection(sessionId, preset)
     if (this.client.selectPermission) {
+      const resolved = this.resolveSessionId(sessionId)
       void this.client.selectPermission(nativeAcpId(resolved, this.backend), this.backend, preset ?? 'workspace-write').catch(() => undefined)
     }
   }

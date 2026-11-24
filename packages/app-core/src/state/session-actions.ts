@@ -1835,13 +1835,21 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       }
       set({ agentPresetSelecting: true, error: undefined })
       try {
-        const committed = isAcpManagedBackend(session.backend)
-          ? await acpClientForBackend(runtime.connection, session.backend).setMode(cursorNativeId(session), session.backend, preset).then(res => res.currentModeId ?? preset)
-          : await runtime.connection.requireProxy().agentPresetSelect(session.sessionId, preset)
+        const result = isAcpManagedBackend(session.backend)
+          ? await acpClientForBackend(runtime.connection, session.backend).setMode(cursorNativeId(session), session.backend, preset)
+          : { currentModeId: await runtime.connection.requireProxy().agentPresetSelect(session.sessionId, preset) }
+        const committed = result.currentModeId ?? preset
+        const permissions = 'permissionPreset' in result && result.permissionPreset ? acpPermissionsValue(result.permissionPreset) : undefined
         if (!isCurrent()) { releaseIfLatest(); return false }
         set(state => {
           const update = (item: RemoteSession): RemoteSession =>
-            item.sessionId === session.sessionId ? { ...item, agentPreset: committed } : item
+            item.sessionId === session.sessionId ? {
+              ...item,
+              agentPreset: committed,
+              ...(permissions === undefined ? {} : {
+                projections: { ...item.projections, values: { ...item.projections?.values, permissions } },
+              }),
+            } : item
           return {
             sessions: state.sessions.map(update),
             selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),

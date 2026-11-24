@@ -96,17 +96,26 @@ export class AcpWorkspaceStore {
     return entry
   }
 
-  private async persist(): Promise<void> {
-    if (this.filePath === undefined) return
+  private async persist(permission?: { sessionId: string; preset: AcpPermissionPreset }): Promise<void> {
+    if (this.filePath === undefined) {
+      if (permission) this.data.sessionPermissions[permission.sessionId] = permission.preset
+      return
+    }
     const filePath = this.filePath
-    const snapshot = JSON.stringify(this.data, null, 2)
     const next = this.writeChain
       .catch(() => undefined)
       .then(async () => {
+        const snapshot = permission ? {
+          ...this.data,
+          sessionPermissions: Object.assign(emptyPermissions(), this.data.sessionPermissions, {
+            [permission.sessionId]: permission.preset,
+          }),
+        } : this.data
         await mkdir(dirname(filePath), { recursive: true })
         const temp = `${filePath}.${process.pid}.tmp`
-        await writeFile(temp, snapshot, 'utf8')
+        await writeFile(temp, JSON.stringify(snapshot, null, 2), 'utf8')
         await rename(temp, filePath)
+        if (permission) this.data.sessionPermissions[permission.sessionId] = permission.preset
       })
     this.writeChain = next
     return next
@@ -225,8 +234,7 @@ export class AcpWorkspaceStore {
     if (PROTOTYPE_KEYS.has(sessionId)) {
       throw new Error(`Reserved ACP session key: ${sessionId}`)
     }
-    this.data.sessionPermissions[sessionId] = preset
-    await this.persist()
+    await this.persist({ sessionId, preset })
   }
 
   async getAllSessionPermissions(): Promise<Record<string, AcpPermissionPreset>> {

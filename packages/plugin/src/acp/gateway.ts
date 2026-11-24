@@ -44,7 +44,9 @@ import {
 } from './method-policy.js'
 import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
-import { AcpWorkspaceStore } from './workspace-store.js'
+import { AcpWorkspaceStore, type AcpPermissionPreset } from './workspace-store.js'
+
+const ELEVATED_ACP_MODES = ['auto', 'bypassPermissions', 'yolo', 'full-auto', 'dontAsk', 'accept-edits', 'acceptEdits']
 
 const APPROVAL_TTL_MS = 5 * 60_000
 const MAX_SESSION_TITLE_ENTRIES = 256
@@ -132,6 +134,7 @@ export class AcpRemoteGateway {
   private readonly sessionOwners = new Map<string, string>()
   private readonly sessionBackends = new Map<string, string>()
   private readonly sessionPermissions = new Map<string, string>()
+  private readonly changingPermissions = new Set<string>()
   private readonly approvals = new Map<string, PendingApproval>()
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
   private readonly restartAttempts = new Map<string, number>()
@@ -337,6 +340,33 @@ export class AcpRemoteGateway {
         ? this.resolveHistoryTarget(call.params).backend
         : (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : undefined)
     const assertCurrent = this.captureCallScope(connectionId, typeof backend === 'string' ? backend : this.defaultBackend())
+    assertCurrent()
+    if (typeof call.params.backend === 'string') {
+      const parsedPrefix = typeof call.params.sessionId === 'string' ? parsePublicSessionId(call.params.sessionId) : undefined
+      if (parsedPrefix && parsedPrefix.backend !== call.params.backend) {
+        throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
+      }
+      const sessionId = call.method === 'dsh/sessionHistory' && parsedPrefix
+        ? parsedPrefix.nativeId
+        : sessionIdFromParams(call.method, call.params)
+      const boundBackend = sessionId === undefined ? undefined : this.sessionBackends.get(sessionId)
+      if (boundBackend !== undefined && boundBackend !== call.params.backend) {
+        throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
+      }
+      this.requireAcp(call.params.backend)
+    }
+
+    const modeWrite = call.method === 'session/set_mode' || call.method === 'dsh/selectPermission' ? sessionId : undefined
+    if (modeWrite !== undefined) {
+      this.requireSessionOwner(connectionId, modeWrite)
+      if (this.changingPermissions.has(modeWrite)) throw new RpcError('ACP_SESSION_BUSY', 'An ACP permission or mode change is in progress.')
+      if (this.promptsInProgress.has(modeWrite)) {
+        throw call.method === 'session/set_mode'
+          ? new RpcError('PROMPT_IN_PROGRESS', 'Stop the ACP reply before changing its mode.')
+          : new RpcError('ACP_SESSION_BUSY', 'The ACP session is busy.')
+      }
+      this.changingPermissions.add(modeWrite)
+    }
     const reserve = backend === 'opencode' && sessionId !== undefined && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(call.method)
     if (reserve) {
       if (this.archivingSessions.has(sessionId!)) throw new RpcError('ACP_SESSION_BUSY', 'The OpenCode session is being archived.')
@@ -350,6 +380,7 @@ export class AcpRemoteGateway {
       throw mapAcpError(error)
     }
     finally {
+      if (modeWrite !== undefined) this.changingPermissions.delete(modeWrite)
       if (reserve) {
         const remaining = (this.opencodeOperations.get(sessionId!) ?? 1) - 1
         if (remaining) this.opencodeOperations.set(sessionId!, remaining)
@@ -395,21 +426,6 @@ export class AcpRemoteGateway {
       method: call.method,
       sessionId: typeof call.params?.sessionId === 'string' ? shortSessionId(call.params.sessionId) : undefined,
     })
-
-    if (typeof call.params.backend === 'string') {
-      const parsedPrefix = typeof call.params.sessionId === 'string' ? parsePublicSessionId(call.params.sessionId) : undefined
-      if (parsedPrefix && parsedPrefix.backend !== call.params.backend) {
-        throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
-      }
-      const sessionId = call.method === 'dsh/sessionHistory' && parsedPrefix
-        ? parsedPrefix.nativeId
-        : sessionIdFromParams(call.method, call.params)
-      const boundBackend = sessionId === undefined ? undefined : this.sessionBackends.get(sessionId)
-      if (boundBackend !== undefined && boundBackend !== call.params.backend) {
-        throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
-      }
-      this.requireAcp(call.params.backend)
-    }
 
     if (call.method === 'initialize') {
       const requestedBackend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
@@ -620,7 +636,7 @@ export class AcpRemoteGateway {
           for (const item of items) this.sessionCwds.set(item.conversationId, { backend, cwd })
         }
         this.logger.info('ACP session list fetched', { count: items.length })
-        return { items }
+        return { items: await this.withCatalogPermissions(items) }
       }
       if (this.isNativeCatalogBackend(backend)) {
         const cwd = path ? await this.requireExistingDirectory(path) : undefined
@@ -629,13 +645,13 @@ export class AcpRemoteGateway {
           || a.sessionId.localeCompare(b.sessionId))
         const pinnedSessionIds = await this.workspaceStore.getPinnedSessions(backend)
         return {
-          items: sessions.slice(0, limit).map(item => ({
+          items: await this.withCatalogPermissions(sessions.slice(0, limit).map(item => ({
             conversationId: item.sessionId,
             title: item.title ?? 'Untitled Session',
             createdAt: Date.parse(item.updatedAt ?? '') || 0,
             updatedAt: Date.parse(item.updatedAt ?? '') || 0,
             cwd: item.cwd,
-          })),
+          }))),
           ...(pinnedSessionIds.length > 0 ? { pinnedSessionIds } : {}),
         }
       }
@@ -649,8 +665,10 @@ export class AcpRemoteGateway {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
       this.requireAcp(backend)
-      const persistedPreset = this.sessionPermissions.get(conversationId)
+      const storedPreset = this.sessionPermissions.get(conversationId)
         ?? await this.workspaceStore.getSessionPermission(conversationId)
+      assertCurrent()
+      const persistedPreset = this.sessionPermissions.get(conversationId) ?? storedPreset
       if (persistedPreset) this.sessionPermissions.set(conversationId, persistedPreset)
       if (this.isNativeCatalogBackend(backend)) {
         const cwd = await this.catalogSessionCwd(backend, conversationId)
@@ -742,7 +760,7 @@ export class AcpRemoteGateway {
       if (sessionId !== undefined && !this.sessionPermissions.has(sessionId)) {
         const persistedPreset = await this.workspaceStore.getSessionPermission(sessionId)
         assertCurrent()
-        if (persistedPreset) this.sessionPermissions.set(sessionId, persistedPreset)
+        if (persistedPreset && !this.sessionPermissions.has(sessionId)) this.sessionPermissions.set(sessionId, persistedPreset)
       }
       this.sessionBackends.set(sessionId!, requested)
     }
@@ -794,7 +812,7 @@ export class AcpRemoteGateway {
         }
         this.sessionOwners.set(loadedId, connectionId)
         this.sessionBackends.set(loadedId, targetBackend)
-        if (persistedPreset) this.sessionPermissions.set(loadedId, persistedPreset)
+        if (persistedPreset && !this.sessionPermissions.has(loadedId)) this.sessionPermissions.set(loadedId, persistedPreset)
       }
       return sanitizeSessionResult(result)
     }
@@ -854,12 +872,22 @@ export class AcpRemoteGateway {
     }
 
     if (call.method === 'session/set_mode') {
-      if (this.promptsInProgress.has(sessionId!)) throw new RpcError('PROMPT_IN_PROGRESS', 'Stop the ACP reply before changing its mode.')
-      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.sessionBackends.get(sessionId!) ?? this.defaultBackend()
-      const acp = this.requireAcp(backend)
-      const result = await acp.call('session/set_mode', { sessionId, modeId: call.params.modeId })
+      const id = sessionId!
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.sessionBackends.get(id) ?? this.defaultBackend()
+      const client = this.requireAcp(backend)
+      const modeId = String(call.params.modeId)
+      // Selecting a native mode does not grant Remote automatic approvals.
+      const permissionMode = modeId === 'default' || ELEVATED_ACP_MODES.includes(modeId)
+      const resetGrant = permissionMode && await this.workspaceStore.getSessionPermission(id) === 'danger-full-access'
       assertCurrent()
-      return sanitizeSessionResult(result)
+      if (!resetGrant) return sanitizeSessionResult(await client.call('session/set_mode', { sessionId: id, modeId }))
+      const modes = await client.call('dsh/sessionModes', { sessionId: id })
+      assertCurrent()
+      const previousMode = isRecord(modes) && typeof modes.currentModeId === 'string' ? modes.currentModeId : undefined
+      if (previousMode === undefined) throw new RpcError('ACP_MODE_UNCONFIRMED', 'The ACP backend did not report its current permission mode.')
+      await this.writePermission(id, backend, client, 'workspace-write',
+        { current: previousMode, target: modeId }, assertCurrent)
+      return { currentModeId: modeId, permissionPreset: 'workspace-write' }
     }
 
     if (call.method === 'dsh/sessionModes' || call.method === 'dsh/sessionCommands') {
@@ -901,13 +929,11 @@ export class AcpRemoteGateway {
       if (preset !== 'workspace-write' && preset !== 'danger-full-access') {
         throw new RpcError('INVALID_MESSAGE', 'Unknown permission preset.')
       }
-      this.sessionPermissions.set(sessionId!, preset)
-      await this.workspaceStore.setSessionPermission(sessionId!, preset)
-      assertCurrent()
-      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.sessionBackends.get(sessionId!)
-      if (backend) {
-        await this.syncPermissionModeIfCompatible(backend, sessionId!, preset).catch(() => undefined)
-      }
+      const id = sessionId!
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.sessionBackends.get(id) ?? this.defaultBackend()
+      const client = this.requireAcp(backend)
+      const mode = await this.permissionModeChange(backend, client, id, preset, assertCurrent)
+      await this.writePermission(id, backend, client, preset, mode, assertCurrent)
       return { preset }
     }
 
@@ -916,6 +942,7 @@ export class AcpRemoteGateway {
     // interleaved agent.acp.frame events (Android stays on "正在回复" with no
     // thought/text). Accept immediately and finish via stream updates.
     if (call.method === 'session/prompt' && sessionId !== undefined) {
+      if (this.changingPermissions.has(sessionId)) throw new RpcError('ACP_SESSION_BUSY', 'An ACP permission change is in progress.')
       if (this.promptsInProgress.has(sessionId)) throw new RpcError('PROMPT_IN_PROGRESS', 'An ACP reply is already in progress.')
       this.invalidateSessionHistory(sessionId)
       const backend = this.sessionBackends.get(sessionId) ?? this.defaultBackend()
@@ -2028,23 +2055,78 @@ export class AcpRemoteGateway {
     return backend !== 'cursor' && backend !== 'opencode' && isValidAcpBackendId(backend)
   }
 
-  private async syncPermissionModeIfCompatible(backend: string, sessionId: string, preset: 'workspace-write' | 'danger-full-access'): Promise<void> {
-    const client = this.backendInstances.get(backend)?.client
-    if (!client) return
-    const modes = await client.call('dsh/sessionModes', { sessionId }).catch(() => undefined)
+  private async withCatalogPermissions<T extends { conversationId: string }>(items: T[]) {
+    return Promise.all(items.map(async item => ({
+      ...item,
+      permissionPreset: await this.workspaceStore.getSessionPermission(item.conversationId) ?? 'workspace-write',
+    })))
+  }
+
+  private async writePermission(
+    sessionId: string, backend: string, client: CursorAcpLike, preset: AcpPermissionPreset,
+    mode: { current: string; target: string } | undefined, assertCurrent: () => void,
+  ): Promise<void> {
+    assertCurrent()
+    const changingMode = mode !== undefined && mode.current !== mode.target
+    try {
+      if (changingMode) {
+        const result = await client.call('session/set_mode', { sessionId, modeId: mode.target })
+        if (!isRecord(result) || result.currentModeId !== mode.target) {
+          throw new RpcError('ACP_MODE_UNCONFIRMED', 'The ACP backend did not confirm the permission mode.')
+        }
+      }
+      assertCurrent()
+      await this.workspaceStore.setSessionPermission(sessionId, preset)
+    } catch (error) {
+      if (changingMode && this.backendInstances.get(backend)?.client === client && client.isReady()) {
+        try {
+          const result = await client.call('session/set_mode', { sessionId, modeId: mode.current })
+          if (!isRecord(result) || result.currentModeId !== mode.current) {
+            this.logger.warn('ACP permission mode rollback was not confirmed')
+          }
+        } catch (rollbackError) {
+          this.logger.warn('ACP permission mode rollback failed', { code: errorCode(rollbackError) })
+        }
+      }
+      throw error
+    }
+    // A completed durable write still applies after the peer leaves. Invalidate
+    // the old cache, but only publish into memory for the current call scope.
+    this.sessionPermissions.delete(sessionId)
+    assertCurrent()
+    this.sessionPermissions.set(sessionId, preset)
+  }
+
+  private async permissionModeChange(
+    backend: string, client: CursorAcpLike, sessionId: string, preset: AcpPermissionPreset, assertCurrent: () => void,
+  ): Promise<{ current: string; target: string } | undefined> {
+    // Legacy stream-json uses Remote's approval handling and has no ACP modes.
+    if (client instanceof AntigravityAcpClient) return
+    if (client instanceof AntigravityNativeAcpClient && !client.isSessionLoaded(sessionId)) {
+      const cwd = await this.catalogSessionCwd(backend, sessionId)
+      assertCurrent()
+      await client.call('session/load', { sessionId, cwd, mcpServers: [] })
+      assertCurrent()
+    }
+    const modes = await client.call('dsh/sessionModes', { sessionId }).catch(error => {
+      // Some other adapters expose Remote approval settings before loading a native session.
+      if (backend !== 'antigravity' && errorCode(error) === 'ACP_SESSION_NOT_LOADED') return undefined
+      throw error
+    })
     if (!isRecord(modes) || !Array.isArray(modes.availableModes)) return
     const current = typeof modes.currentModeId === 'string' ? modes.currentModeId : undefined
-    const permissionModes = new Set(['default', 'accept-edits', 'auto', 'acceptEdits', 'bypassPermissions', 'dontAsk', 'yolo', 'full-auto'])
-    if (current && !permissionModes.has(current)) return
+    // Preserve orthogonal modes such as plan while applying the Remote preset.
+    if (!current || (current !== 'default' && !ELEVATED_ACP_MODES.includes(current))) return
     const ids = modes.availableModes
       .filter((item): item is { id: string } => isRecord(item) && typeof item.id === 'string')
       .map(item => item.id)
     const target = preset === 'danger-full-access'
-      ? ['auto', 'bypassPermissions', 'yolo', 'full-auto', 'accept-edits', 'acceptEdits'].find(id => ids.includes(id))
+      ? (ELEVATED_ACP_MODES.includes(current) ? current : ELEVATED_ACP_MODES.find(id => ids.includes(id)))
       : ids.find(id => id === 'default')
-    if (target && target !== current) {
-      await client.call('session/set_mode', { sessionId, modeId: target })
+    if (target === undefined && preset === 'workspace-write' && current !== 'default') {
+      throw new RpcError('ACP_MODE_UNAVAILABLE', 'The ACP backend has no compatible mode for this permission.')
     }
+    return target !== undefined && target !== current ? { current, target } : undefined
   }
 
   private initializeResult(params: Record<string, unknown>, backend?: string): Record<string, unknown> {
