@@ -1,6 +1,5 @@
 <p align="center">
-
-  <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
+  <img src="docs/images/hero-ja.png" alt="DeepSeek Harness Remote — 一度つなげば、どこからでも使える。" width="100%">
 </p>
 
 <p align="center">
@@ -114,23 +113,20 @@ DSH 0.2.2 以降では、npm からインストールしたプラグインのバ
 
 ### Desktop
 
-別のパソコンでオンラインの Host を選び、そのワークスペースを開きます。ネイティブの Harness UI で開かれ、ヘッダーに接続先の Host と暗号化接続の状態が表示されます。
+別のパソコンでオンラインの Host を選び、リモートワークスペースハブから DSH や各種 ACP ワークスペースを開きます。ネイティブの Harness UI でそのまま動作し、ヘッダーに接続先の Host や P2P エンドツーエンド暗号化ルート診断が表示されます。
 
 <p align="center">
-  <img src="docs/images/host-list.png" alt="オンラインの Host を表示する Remote ワークスペース選択画面" width="40%">
-  <img src="docs/images/remote.png" alt="暗号化されたリモート接続で利用する Harness の会話画面" width="40%">
+  <img src="docs/images/desktop-showcase-en.png" alt="P2P 暗号化ルート診断とマルチ Agent ワークスペース選択を備えたデスクトップ版リモート画面" width="100%">
 </p>
 
 このパソコンから他の Host を操作できないようにするには、[https://dsh.r2049.cn/](https://dsh.r2049.cn/) のホスト一覧で「被操作専用（仅被控）」を有効にしてください。このデバイスからは同じアカウントの他のデバイスが見えなくなりますが、Web や他のクライアントからこのデバイスへのリモート接続は引き続き利用できます。
 
 ### Android
 
-テキストや画像のプロンプト送信、モデルの切り替え、対応するワークスペースのファイルやターミナルへのアクセスが可能です。
+ライト／ダークの両テーマに対応し、ドロワーからオンライン Host・ACP バックエンド・DS-Bot を切り替えられます。テキスト／画像プロンプト、モデル切替、ファイルカード表示、ネイティブ Git Diff レビュー、リモートターミナルに対応しています。
 
 <p align="center">
-  <img src="docs/images/mobile-list.jpg" alt="オンラインとオフラインのパソコンを表示する Android クライアント" width="30%">
-  <img src="docs/images/image-msg.jpg" alt="Android クライアントから画像プロンプトを送信" width="30%">
-  <img src="docs/images/image-result.jpg" alt="Android クライアントで画像への応答を表示" width="30%">
+  <img src="docs/images/mobile-showcase-en.png" alt="マルチ Host・ACP ドロワー、ファイル配信対応チャット、ネイティブ Git Diff レビューを備えた Android クライアント" width="100%">
 </p>
 
 モバイルの設定には、全体に適用される **Compact conversations**（会話のコンパクト表示）スイッチがあります。デフォルトは無効で、次に会話を開くときに反映されます。

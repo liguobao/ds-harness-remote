@@ -69,9 +69,21 @@ apps/harmony/scripts/smoke.sh <hdc-device-id>
 
 签名材料不得提交。复制 `build-profile.json5` 为被忽略的 `build-profile.local.json5`，通过 DevEco Studio 配置本机签名。`scripts/build-local.sh` 会临时使用该文件，结束时还原原配置；设置 `HVIGORW` 可指定构建命令路径。
 
+`release` Profile 用于应用市场分发，不能仅因为加入设备 UDID 就变成可用 `hdc` 侧载的包。需要侧载验收时，在 DevEco Studio 创建 Debug certificate 和 Debug `.p7b`，把目标设备 UDID 加入该 profile，并确认 `build-profile.local.json5` 的 product 使用 Debug signing config，然后执行：
+
+```sh
+cd apps/harmony
+scripts/build-sideload.sh
+hdc -t <hdc-device-id> install -r entry/build/default/outputs/default/*.hap
+```
+
+`build-sideload.sh` 固定使用 `buildMode=debug`，构建结束后恢复仓库中的 `build-profile.json5`。应用市场包继续使用 release Profile 和现有 release 工作流，两套签名材料不能混用。
+
 普通 `v*` 标签触发 Release 工作流，创建 GitHub Release 后调用 `.github/workflows/harmony-hap.yml`，生成未签名 HAP 并附加到同一 Release，文件名为 `dsh-remote-harmony-<tag>-unsigned.hap`。未签名包不能直接安装到真机；自动发布暂不依赖签名 Secrets。
 
 鸿蒙工作流也支持手动构建（默认未签名，可显式选择签名），需要安装 SDK、带 `self-hosted` / `harmonyos` 标签的 runner。它仅允许上游仓库运行，不自动执行 fork PR 的代码。手动构建目标分支前须审查代码；签名构建只针对可信代码。
+
+`HarmonyOS HAP` workflow 每次都会同时构建 release 包和 `hdc` 可侧载的 debug 包，两个文件一起上传到 `harmony-hap` artifact。需要侧载的包位于 `sideload/` 目录。签名构建时，签名 Profile 必须已经包含目标设备 UDID。
 
 runner 可通过 `~/.config/harmony-env.sh` 导出 `HARMONY_CLT`、`DEVECO_SDK_HOME`、`JAVA_HOME` 与工具 PATH；workflow 会加载该文件并为后续步骤保留 SDK、JDK 环境。该文件由构建机维护，不包含签名口令。
 

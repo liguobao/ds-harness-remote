@@ -17,8 +17,14 @@ export struct ConnectionScreen {
     Row({ space: 12 }) {
       if (this.phase === index) {
         LoadingProgress().width(24).height(24).color(this.palette.primary)
+      } else if (this.phase > index) {
+        Image($r('app.media.ic_check'))
+          .width(18)
+          .height(18)
+          .fillColor(this.palette.success)
+          .margin({ left: 3, right: 3 })
       } else {
-        Text(this.phase > index ? '✓' : '·')
+        Text('·')
           .fontSize(17)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.phase > index ? this.palette.success : this.palette.text2)

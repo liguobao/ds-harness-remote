@@ -49,11 +49,13 @@ class SessionFolder {
   key: string;
   title: string;
   sessions: HarnessRemoteSession[];
+  depth: number;
 
-  constructor(key: string, title: string, sessions: HarnessRemoteSession[]) {
+  constructor(key: string, title: string, sessions: HarnessRemoteSession[], depth: number = 0) {
     this.key = key;
     this.title = title;
     this.sessions = sessions;
+    this.depth = depth;
   }
 }
 
@@ -220,8 +222,10 @@ struct Index {
   @State messageActionCode: string = '';
   /** 设备详情面板（点 ⋯ 菜单里的「查看详情」打开）。 */
   @State deviceDetailId: string = '';
-  /** 会话列表只看收藏。 */
-  @State favoriteOnly: boolean = false;
+  /** 会话抽屉视图选项，与 Android 端的分组/排序/归档筛选一致。 */
+  @State sessionGroupBy: string = 'workspace';
+  @State sessionOrderBy: string = 'updated';
+  @State sessionFilterMode: string = 'hideArchived';
   /** 展开看原文的心跳消息 id（默认折叠成可读正文）。 */
   @State heartbeatExpanded: string[] = [];
   /** 全屏编辑面板（长文写作时用，对齐 Android 的 composer expand）。 */
@@ -238,8 +242,6 @@ struct Index {
   /** 当前会话还有更早历史可翻（同上，运行时字段要镜像）。 */
   @State historyHasMore: boolean = false;
   @State loadingOlderHistory: boolean = false;
-  /** 会话抽屉里是否把已归档的会话也列出来。 */
-  @State showArchived: boolean = false;
   /** 按工作区过滤会话（存完整 cwd；空 = 全部）。 */
   @State workspaceFilter: string = '';
   /** 会话内搜索（只在当前会话里找）。 */
@@ -746,6 +748,9 @@ struct Index {
     this.permissionOptionsList = this.runtime.permissionOptions.slice();
     this.workspaces = this.runtime.workspaces;
     this.selectedWorkspaceId = this.runtime.selectedWorkspaceId;
+    this.sessionGroupBy = this.runtime.sessionGroupBy;
+    this.sessionOrderBy = this.runtime.sessionOrderBy;
+    this.sessionFilterMode = this.runtime.sessionFilterMode;
     this.filePreviewPath = this.runtime.filePreviewPath;
     this.filePreviewLoading = this.runtime.filePreviewLoading;
     this.filePreviewError = this.runtime.filePreviewError;
@@ -1200,28 +1205,6 @@ struct Index {
   }
 
   /** 会话列表实际展示的条目：搜索优先，其次「只看收藏」。 */
-  /** 会话列表里出现过的不同工作区（按会话数降序，最多 6 个）。 */
-  private sessionWorkspaces(): string[] {
-    const counts: Map<string, number> = new Map<string, number>();
-    for (const session of this.sessions) {
-      if (session.cwd.length === 0) {
-        continue;
-      }
-      // 被隐藏的空白/subagent 会话也不该贡献工作区筛选 chip。
-      if (!isVisibleSession(session.sessionId, session.blank, session.origin, this.currentSessionId,
-        this.sessionSearchActive ? this.sessionSearchInput.trim() : '')) {
-        continue;
-      }
-      counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1);
-    }
-    const keys: string[] = [];
-    counts.forEach((count: number, cwd: string) => {
-      keys.push(cwd);
-    });
-    keys.sort((a: string, b: string) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0));
-    return keys.slice(0, 6);
-  }
-
   private isArchivedSession(sessionId: string): boolean {
     return this.archivedIds.includes(sessionId);
   }
@@ -1240,29 +1223,29 @@ struct Index {
       if (!isVisibleSession(session.sessionId, session.blank, session.origin, this.currentSessionId, query)) {
         continue;
       }
-      // 归档的会话默认不进列表；搜索时照常给结果，别让搜到的会话凭空消失
       if (this.workspaceFilter.length > 0 && session.cwd !== this.workspaceFilter) {
         continue;
       }
       const archived: boolean = this.isArchivedSession(session.sessionId);
-      if (archived && !this.showArchived && !this.sessionSearchActive) {
+      if (this.sessionFilterMode === 'hideArchived' && archived) {
         continue;
       }
-      if (this.favoriteOnly && !this.runtime.isFavoriteSession(session.sessionId)) {
+      if (this.sessionFilterMode === 'archivedOnly' && !archived) {
         continue;
       }
       list.push(session);
     }
-    // 置顶最先，其次运行中，其余保持服务端给的时间顺序
+    // Android 端先按置顶分区，再按最近更新时间排序；手动排序保留 Host 返回顺序。
     return list.sort((a: HarnessRemoteSession, b: HarnessRemoteSession) => {
       const aPin: number = this.runtime.isPinnedSession(a.sessionId) ? 1 : 0;
       const bPin: number = this.runtime.isPinnedSession(b.sessionId) ? 1 : 0;
       if (aPin !== bPin) {
         return bPin - aPin;
       }
-      const aRunning: number = a.running ? 1 : 0;
-      const bRunning: number = b.running ? 1 : 0;
-      return bRunning - aRunning;
+      if (this.sessionOrderBy === 'updated') {
+        return b.updatedAt - a.updatedAt;
+      }
+      return 0;
     });
   }
 
@@ -1287,14 +1270,90 @@ struct Index {
     return this.tr('默认');
   }
 
+  private workspaceParentIds(): Map<string, string | undefined> {
+    const byPath: Map<string, string> = new Map<string, string>();
+    for (const workspace of this.workspaces) {
+      if (workspace.path.length > 0) {
+        byPath.set(workspace.path.replace(/\\/g, '/').replace(/\/+$/, ''), workspace.workspaceId);
+      }
+    }
+    const parents: Map<string, string | undefined> = new Map<string, string | undefined>();
+    for (const workspace of this.workspaces) {
+      const childPath: string = workspace.path.replace(/\\/g, '/').replace(/\/+$/, '');
+      let parentId: string | undefined = undefined;
+      let parentLength: number = -1;
+      if (childPath.length > 0) {
+        byPath.forEach((candidateId: string, candidatePath: string) => {
+          if (candidatePath.length > parentLength && candidatePath !== childPath
+            && childPath.startsWith(candidatePath + '/')) {
+            parentId = candidateId;
+            parentLength = candidatePath.length;
+          }
+        });
+      }
+      parents.set(workspace.workspaceId, parentId);
+    }
+    return parents;
+  }
+
+  private workspaceTreeSessions(sessions: HarnessRemoteSession[]): SessionFolder[] {
+    const parents: Map<string, string | undefined> = this.workspaceParentIds();
+    const children: Map<string, HarnessWorkspace[]> = new Map<string, HarnessWorkspace[]>();
+    const assigned: Set<string> = new Set<string>();
+    for (const workspace of this.workspaces) {
+      for (const sessionId of workspace.sessionIds) {
+        assigned.add(sessionId);
+      }
+      const parentId: string | undefined = parents.get(workspace.workspaceId);
+      const list: HarnessWorkspace[] = children.get(parentId ?? '') ?? [];
+      list.push(workspace);
+      children.set(parentId ?? '', list);
+    }
+    const groups: SessionFolder[] = [];
+    const append = (workspace: HarnessWorkspace, depth: number): void => {
+      const entries: HarnessRemoteSession[] = sessions.filter((session: HarnessRemoteSession) =>
+        workspace.sessionIds.includes(session.sessionId));
+      groups.push(new SessionFolder('workspace:' + workspace.workspaceId,
+        workspace.title || cwdTail(workspace.path) || this.tr('默认'), entries, depth));
+      const nested: HarnessWorkspace[] = children.get(workspace.workspaceId) ?? [];
+      for (const child of nested) {
+        append(child, depth + 1);
+      }
+    };
+    const roots: HarnessWorkspace[] = children.get('') ?? [];
+    for (const root of roots) {
+      append(root, 0);
+    }
+    const unassigned: HarnessRemoteSession[] = sessions.filter((session: HarnessRemoteSession) =>
+      !assigned.has(session.sessionId));
+    if (unassigned.length > 0) {
+      groups.push(new SessionFolder('default', this.tr('默认'), unassigned));
+    }
+    return groups;
+  }
+
   private groupedSessions(): SessionFolder[] {
     const sessions: HarnessRemoteSession[] = this.visibleSessions();
-    const byWorkspace: Map<string, HarnessRemoteSession[]> = new Map<string, HarnessRemoteSession[]>();
+    if (this.sessionGroupBy === 'list') {
+      return sessions.length > 0
+        ? [new SessionFolder('all', this.tr('全部会话'), sessions)]
+        : [];
+    }
     const recent: HarnessRemoteSession[] = [];
     for (const session of sessions) {
       if (session.sessionId === this.currentSessionId || this.runtime.recentSessions.includes(session.sessionId)) {
         recent.push(session);
       }
+    }
+    if (this.sessionGroupBy === 'workspace-tree') {
+      const groups: SessionFolder[] = this.workspaceTreeSessions(sessions);
+      if (recent.length > 0) {
+        groups.unshift(new SessionFolder('recent', this.workspaceGroupTitle('recent'), recent));
+      }
+      return groups;
+    }
+    const byWorkspace: Map<string, HarnessRemoteSession[]> = new Map<string, HarnessRemoteSession[]>();
+    for (const session of sessions) {
       const key: string = this.workspaceGroupKey(session);
       const entries: HarnessRemoteSession[] = byWorkspace.get(key) ?? [];
       entries.push(session);
@@ -1323,16 +1382,6 @@ struct Index {
       this.collapsedSessionGroups = this.collapsedSessionGroups.filter((value: string) => value !== folder.key);
       this.expandedSessionGroups = this.expandedSessionGroups.concat([folder.key]);
     }
-  }
-
-  /** 最近访问的会话标题；列表里没有（已归档/换主机）时给个短 id。 */
-  private recentSessionTitle(sessionId: string): string {
-    for (const session of this.sessions) {
-      if (session.sessionId === sessionId) {
-        return formatSessionTitle(session);
-      }
-    }
-    return '#' + sessionId.substring(sessionId.length - 6);
   }
 
   /** 文字大小：所有关键字号都过这个函数，改档位就是整体缩放。 */
@@ -2864,7 +2913,11 @@ struct Index {
           Row({ space: 4 }) {
             ForEach([0, 1, 2, 3, 4], (tint: number) => {
               Column({ space: 6 }) {
-                Button(this.runtime.themeTint === tint ? '✓' : '', { type: ButtonType.Circle })
+                Button({ type: ButtonType.Circle }) {
+                  if (this.runtime.themeTint === tint) {
+                    Image($r('app.media.ic_check')).width(18).height(18).fillColor(this.pal().primary)
+                  }
+                }
                   .width(36)
                   .height(36)
                   .padding(0)
@@ -2872,7 +2925,6 @@ struct Index {
                     this.isDarkUi).bg)
                   .border({ width: 2, color: this.runtime.themeTint === tint
                     ? this.pal().primary : this.pal().borderStrong })
-                  .fontColor(this.pal().primary)
                   .accessibilityText(this.tintName(tint))
                   .onClick(() => { this.runtime.setThemeTint(tint); })
                 Text(this.tintName(tint))
@@ -2956,7 +3008,7 @@ struct Index {
         .fontSize(12)
         .fontColor(this.pal().text3)
       if (this.membershipStatus === 'none') {
-        Text('›').fontSize(15).fontColor(this.pal().text3)
+        Image($r('app.media.ic_chevron_right')).width(16).height(16).fillColor(this.pal().text3)
       }
     }
     .width('100%')
@@ -2985,7 +3037,7 @@ struct Index {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       if (action !== undefined) {
-        Text('›').fontSize(15).fontColor(this.pal().text3)
+        Image($r('app.media.ic_chevron_right')).width(16).height(16).fillColor(this.pal().text3)
       }
     }
     .width('100%')
@@ -3116,12 +3168,11 @@ struct Index {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.pal().text)
           Blank()
-          Text('✕')
-            .fontSize(15)
-            .fontColor(this.pal().text3)
-            .width(30)
-            .height(30)
-            .textAlign(TextAlign.Center)
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text3)
+            .padding(2)
             .onClick(() => {
               this.choiceOpen = false;
             })
@@ -3141,9 +3192,10 @@ struct Index {
             .alignItems(HorizontalAlign.Start)
             .layoutWeight(1)
             if (this.choiceCurrentValue() === choice.value) {
-              Text('✓')
-                .fontSize(16)
-                .fontColor(this.pal().primary)
+              Image($r('app.media.ic_check'))
+                .width(18)
+                .height(18)
+                .fillColor(this.pal().primary)
             }
           }
           .width('100%')
@@ -3367,12 +3419,15 @@ struct Index {
   DevicesScreen() {
     Column() {
       Row({ space: 8 }) {
-        Button('‹', { type: ButtonType.Normal })
+        Button({ type: ButtonType.Normal }) {
+          Image($r('app.media.ic_arrow_left'))
+            .width(20)
+            .height(20)
+            .fillColor(this.pal().text)
+        }
           .width(36)
           .height(44)
           .padding(0)
-          .fontSize(28)
-          .fontColor(this.pal().text)
           .backgroundColor(Color.Transparent)
           .accessibilityText(this.tr('返回'))
           .onClick(() => {
@@ -3448,10 +3503,11 @@ struct Index {
                 this.runtime.retryLastError();
               })
           }
-          Text('✕')
-            .fontSize(this.fs(12))
-            .fontColor(this.pal().danger)
-            .padding({ left: 6, right: 2, top: 2, bottom: 2 })
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().danger)
+            .padding(2)
             .onClick(() => {
               this.runtime.clearError();
             })
@@ -3511,8 +3567,10 @@ struct Index {
       if (this.devices.length === 0 && !this.busy) {
         // 空态别只留一行灰字：给一张卡片说清楚下一步该做什么
         Column({ space: 10 }) {
-          Text('🖥')
-            .fontSize(26)
+          Image($r('app.media.ic_host'))
+            .width(28)
+            .height(28)
+            .fillColor(this.pal().text2)
           Text(this.tr('还没有可用的主机'))
             .fontSize(this.fs(14))
             .fontWeight(FontWeight.Medium)
@@ -3594,9 +3652,14 @@ struct Index {
             Text(this.tr('切换主机'))
               .fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.pal().text).layoutWeight(1)
             this.TopIcon($r('app.media.ic_refresh'), () => { this.runtime.refreshDevices(); })
-            Button('×', { type: ButtonType.Normal })
+            Button({ type: ButtonType.Normal }) {
+              Image($r('app.media.ic_close'))
+                .width(20)
+                .height(20)
+                .fillColor(this.pal().text)
+            }
               .width(40).height(40).padding(0).fontSize(22)
-              .fontColor(this.pal().text).backgroundColor(Color.Transparent)
+              .backgroundColor(Color.Transparent)
               .accessibilityText(this.tr('关闭'))
               .onClick(() => { this.dismissHostSwitcher(); })
           }
@@ -3629,7 +3692,7 @@ struct Index {
           Row({ space: 12 }) {
             Image($r('app.media.ic_settings')).width(20).height(20).fillColor(this.pal().text)
             Text(this.tr('管理远程主机')).fontSize(16).fontColor(this.pal().text).layoutWeight(1)
-            Text('›').fontSize(18).fontColor(this.pal().text2)
+            Image($r('app.media.ic_chevron_right')).width(18).height(18).fillColor(this.pal().text2)
           }
           .width('100%')
           .height(58)
@@ -3830,10 +3893,11 @@ struct Index {
                 this.runtime.retryLastError();
               })
           }
-          Text('✕')
-            .fontSize(this.fs(12))
-            .fontColor(this.pal().danger)
-            .padding({ left: 6, right: 2, top: 2, bottom: 2 })
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().danger)
+            .padding(2)
             .onClick(() => {
               this.runtime.clearError();
             })
@@ -4041,9 +4105,12 @@ struct Index {
 
       if (!this.stickToBottom) {
         Row() {
-          Text('↓ ' + this.tr('回到最新'))
-            .fontSize(12)
-            .fontColor(this.pal().text2)
+          Row({ space: 4 }) {
+            Image($r('app.media.ic_arrow_down')).width(14).height(14).fillColor(this.pal().text2)
+            Text(this.tr('回到最新'))
+              .fontSize(12)
+              .fontColor(this.pal().text2)
+          }
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
             .backgroundColor(this.pal().card)
             .borderRadius(14)
@@ -4090,7 +4157,10 @@ struct Index {
         Row({ space: 12 }) {
           Image($r('app.media.ic_image')).width(22).height(22).fillColor(this.pal().text)
           Text(this.tr('相册')).fontSize(16).fontColor(this.pal().text).layoutWeight(1)
-          Text('›').fontSize(18).fontColor(this.pal().text2)
+          Image($r('app.media.ic_arrow_right'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text2)
         }
         .width('100%').height(58)
         .padding({ left: 16, right: 16 })
@@ -4134,9 +4204,10 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text('›')
-            .fontSize(this.fs(15))
-            .fontColor(this.pal().text3)
+          Image($r('app.media.ic_chevron_right'))
+            .width(16)
+            .height(16)
+            .fillColor(this.pal().text3)
         }
         .width('100%')
         .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -4160,9 +4231,10 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text('›')
-            .fontSize(this.fs(15))
-            .fontColor(this.pal().text3)
+          Image($r('app.media.ic_chevron_right'))
+            .width(16)
+            .height(16)
+            .fillColor(this.pal().text3)
         }
         .width('100%')
         .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -4215,12 +4287,11 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text('✕')
-            .fontSize(this.fs(14))
-            .fontColor(this.pal().text3)
-            .width(30)
-            .height(30)
-            .textAlign(TextAlign.Center)
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text3)
+            .padding(2)
             .onClick(() => {
               this.sendModeOpen = false;
             })
@@ -4261,9 +4332,12 @@ struct Index {
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
-      Text(selected ? '✓' : '')
-        .fontSize(this.fs(14))
-        .fontColor(steer ? '#F5A623' : this.pal().primary)
+      if (selected) {
+        Image($r('app.media.ic_check'))
+          .width(18)
+          .height(18)
+          .fillColor(steer ? '#F5A623' : this.pal().primary)
+      }
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -4364,12 +4438,11 @@ struct Index {
                     .backgroundColor('rgba(0,0,0,0.45)')
                     .borderRadius(6)
                     .margin({ top: 58, right: 2 })
-                  Text('✕')
-                    .fontSize(this.fs(11))
-                    .fontColor('#FFFFFF')
+                  Image($r('app.media.ic_close'))
                     .width(18)
                     .height(18)
-                    .textAlign(TextAlign.Center)
+                    .fillColor('#FFFFFF')
+                    .padding(4)
                     .backgroundColor('rgba(0,0,0,0.55)')
                     .borderRadius(9)
                     .onClick(() => {
@@ -4412,9 +4485,10 @@ struct Index {
           // 展开：只在有空间时给（手机上会挤占输入框宽度，长文交给全屏编辑入口）
           if (!this.compactDock()) {
           Row() {
-            Text('⤢')
-              .fontSize(this.fs(15))
-              .fontColor(this.pal().text2)
+            Image($r('app.media.ic_expand'))
+              .width(18)
+              .height(18)
+              .fillColor(this.pal().text2)
           }
           .width(this.compactDock() ? 30 : 34)
           .height(this.compactDock() ? 40 : 46)
@@ -4496,12 +4570,11 @@ struct Index {
             this.writingMenuOpen = true;
           })
           if (this.generating && !this.compactDock()) {
-            Text('■')
-              .fontSize(this.fs(16))
-              .fontColor(this.pal().danger)
+            Image($r('app.media.ic_stop'))
               .width(46)
               .height(46)
-              .textAlign(TextAlign.Center)
+              .padding(14)
+              .fillColor(this.pal().danger)
               .backgroundColor('rgba(248,87,73,0.12)')
               .borderRadius(23)
               .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
@@ -4530,14 +4603,12 @@ struct Index {
               this.runtime.stopGeneration();
             })
           } else {
-          Text('↑')
-            .fontSize(this.fs(20))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.promptInput.trim().length > 0 || this.pendingImages.length > 0
-              ? this.pal().onInverse : this.pal().text2)
+          Image($r('app.media.ic_arrow_up'))
             .width(this.compactDock() ? 36 : 42)
             .height(this.compactDock() ? 36 : 42)
-            .textAlign(TextAlign.Center)
+            .padding(this.compactDock() ? 9 : 11)
+            .fillColor(this.promptInput.trim().length > 0 || this.pendingImages.length > 0
+              ? this.pal().onInverse : this.pal().text2)
             .backgroundColor(this.promptInput.trim().length > 0 || this.pendingImages.length > 0
               ? this.pal().inverse : this.pal().chip)
             .borderRadius(23)
@@ -4590,34 +4661,88 @@ struct Index {
     this.runtime.searchSessions('');
   }
 
+  private applySessionView(groupBy: string, orderBy: string, filterMode: string): void {
+    this.sessionGroupBy = groupBy;
+    this.sessionOrderBy = orderBy;
+    this.sessionFilterMode = filterMode;
+    this.runtime.setSessionView(groupBy, orderBy, filterMode);
+    this.workspaceOptionsOpen = false;
+  }
+
+  @Builder
+  WorkspaceOptionItem(label: string, selected: boolean, action: () => void) {
+    Row() {
+      Text(label)
+        .fontSize(this.fs(12.5))
+        .fontColor(this.pal().text)
+        .layoutWeight(1)
+      if (selected) {
+        Image($r('app.media.ic_check'))
+          .width(16)
+          .height(16)
+          .fillColor(this.pal().text)
+      }
+    }
+    .width('100%')
+    .padding({ left: 4, right: 4, top: 7, bottom: 7 })
+    .onClick(action)
+  }
+
+  @Builder
+  WorkspaceOptionSectionTitle(title: string) {
+    Text(title)
+      .fontSize(this.fs(11))
+      .fontWeight(FontWeight.Medium)
+      .fontColor(this.pal().text2)
+      .width('100%')
+      .margin({ bottom: 2 })
+  }
+
   @Builder
   WorkspaceOptions() {
-    Stack({ alignContent: Alignment.Bottom }) {
+    Stack({ alignContent: Alignment.TopEnd }) {
       Column()
         .width('100%').height('100%')
-        .backgroundColor(this.pal().backdrop)
+        .backgroundColor(Color.Transparent)
         .onClick(() => { this.workspaceOptionsOpen = false; })
-      Column({ space: 12 }) {
-        this.SheetTitle(this.tr('视图选项'), () => { this.workspaceOptionsOpen = false; })
-        Column() {
-          this.SettingsRow(this.tr('只看收藏'), this.favoriteOnly ? this.tr('开') : this.tr('关'), false, () => {
-            this.favoriteOnly = !this.favoriteOnly;
-          })
-          this.SettingsRow(this.tr('显示归档'), this.showArchived ? this.tr('开') : this.tr('关'), false, () => {
-            this.showArchived = !this.showArchived;
-          })
-          this.SettingsRow(this.tr('列表密度'), this.layoutDensityLabel(), false, () => {
-            this.workspaceOptionsOpen = false;
-            this.openChoice('density');
-          })
-        }
-        .width('100%').backgroundColor(this.pal().card).borderRadius(22).clip(true)
+      Column({ space: 4 }) {
+        this.WorkspaceOptionSectionTitle(this.tr('分组方式'))
+        this.WorkspaceOptionItem(this.tr('按工作区'), this.sessionGroupBy === 'workspace', () => {
+          this.applySessionView('workspace', this.sessionOrderBy, this.sessionFilterMode);
+        })
+        this.WorkspaceOptionItem(this.tr('按工作区树'), this.sessionGroupBy === 'workspace-tree', () => {
+          this.applySessionView('workspace-tree', this.sessionOrderBy, this.sessionFilterMode);
+        })
+        this.WorkspaceOptionItem(this.tr('单列表'), this.sessionGroupBy === 'list', () => {
+          this.applySessionView('list', this.sessionOrderBy, this.sessionFilterMode);
+        })
+        Divider().strokeWidth(0.5).color(this.pal().border).margin({ top: 3, bottom: 3 })
+        this.WorkspaceOptionSectionTitle(this.tr('排序方式'))
+        this.WorkspaceOptionItem(this.tr('手动排序'), this.sessionOrderBy === 'manual', () => {
+          this.applySessionView(this.sessionGroupBy, 'manual', this.sessionFilterMode);
+        })
+        this.WorkspaceOptionItem(this.tr('最近更新'), this.sessionOrderBy === 'updated', () => {
+          this.applySessionView(this.sessionGroupBy, 'updated', this.sessionFilterMode);
+        })
+        Divider().strokeWidth(0.5).color(this.pal().border).margin({ top: 3, bottom: 3 })
+        this.WorkspaceOptionSectionTitle(this.tr('筛选会话'))
+        this.WorkspaceOptionItem(this.tr('隐藏归档'), this.sessionFilterMode === 'hideArchived', () => {
+          this.applySessionView(this.sessionGroupBy, this.sessionOrderBy, 'hideArchived');
+        })
+        this.WorkspaceOptionItem(this.tr('全部'), this.sessionFilterMode === 'all', () => {
+          this.applySessionView(this.sessionGroupBy, this.sessionOrderBy, 'all');
+        })
+        this.WorkspaceOptionItem(this.tr('仅归档'), this.sessionFilterMode === 'archivedOnly', () => {
+          this.applySessionView(this.sessionGroupBy, this.sessionOrderBy, 'archivedOnly');
+        })
       }
-      .width('100%')
-      .constraintSize({ maxWidth: 540 })
-      .padding({ left: 20, right: 20, top: 18, bottom: 24 })
-      .backgroundColor(this.pal().bg)
-      .borderRadius({ topLeft: 28, topRight: 28 })
+      .width(236)
+      .padding(14)
+      .margin({ top: this.topSafePadding() + 168, right: 10 })
+      .backgroundColor(this.pal().card)
+      .borderRadius(18)
+      .border({ width: 0.5, color: this.pal().border })
+      .shadow({ radius: 18, color: 'rgba(0,0,0,0.18)', offsetX: 0, offsetY: 6 })
     }
     .width('100%').height('100%')
   }
@@ -4666,7 +4791,7 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text('›').fontSize(17).fontColor(this.pal().text3)
+          Image($r('app.media.ic_chevron_right')).width(17).height(17).fillColor(this.pal().text3)
         }
         .width('100%').height(60).padding({ left: 14, right: 14 })
         .border({ width: { bottom: 0.5 }, color: this.pal().border })
@@ -4848,10 +4973,11 @@ struct Index {
             .onChange((value: string) => {
               this.workspaceTitleInput = value;
             })
-          Text('✓')
-            .fontSize(this.fs(14))
-            .fontColor(this.pal().success)
-            .padding({ left: 8, right: 8 })
+          Image($r('app.media.ic_check'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().success)
+            .padding(2)
             .onClick(() => {
               this.runtime.renameWorkspace(this.editingWorkspaceId, this.workspaceTitleInput);
               this.editingWorkspaceId = '';
@@ -4859,155 +4985,6 @@ struct Index {
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 2, bottom: 6 })
-      }
-      if (this.workspaces.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text('跟随当前会话')
-              .fontSize(this.fs(11))
-              .fontColor(this.selectedWorkspaceId.length === 0 ? this.pal().primary : this.pal().text3)
-              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-              .backgroundColor(this.selectedWorkspaceId.length === 0
-                ? this.pal().primarySoft : this.pal().inputBg)
-              .borderRadius(9)
-              .border({ width: 1, color: this.selectedWorkspaceId.length === 0
-                ? this.pal().primary : this.pal().border })
-              .onClick(() => {
-                this.runtime.setSelectedWorkspace('');
-              })
-            Text('＋ ' + this.tr('新建'))
-              .fontSize(this.fs(11))
-              .fontColor(this.pal().primary)
-              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-              .backgroundColor(this.pal().primarySoft)
-              .borderRadius(9)
-              .border({ width: 1, color: this.pal().primary })
-              .onClick(() => {
-                this.workspacePathInput = this.runtime.browsePath.length > 0
-                  ? this.runtime.browsePath : '';
-                this.workspaceNameDraft = '';
-                this.workspaceCreateOpen = true;
-              })
-            ForEach(this.workspaces, (workspace: HarnessWorkspace) => {
-              Text(workspace.title.length > 0 ? workspace.title : workspace.path)
-                .fontSize(this.fs(11))
-                .maxLines(1)
-                .constraintSize({ maxWidth: 140 })
-                .fontColor(this.selectedWorkspaceId === workspace.workspaceId
-                  ? this.pal().primary : this.pal().text3)
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.selectedWorkspaceId === workspace.workspaceId
-                  ? this.pal().primarySoft : this.pal().inputBg)
-                .borderRadius(9)
-                .border({ width: 1, color: this.selectedWorkspaceId === workspace.workspaceId
-                  ? this.pal().primary : this.pal().border })
-                .onClick(() => {
-                  this.runtime.setSelectedWorkspace(workspace.workspaceId);
-                })
-                .gesture(LongPressGesture().onAction(() => {
-                  ActionSheet.show({
-                    title: workspace.title.length > 0 ? workspace.title : workspace.path,
-                    message: workspace.path,
-                    sheets: [
-                      {
-                        title: this.tr('浏览文件'),
-                        action: () => {
-                          this.openWorkspaceFiles(workspace.path);
-                        }
-                      },
-                      {
-                        title: this.tr('重命名'),
-                        action: () => {
-                          this.editingWorkspaceId = workspace.workspaceId;
-                          this.workspaceTitleInput = workspace.title;
-                        }
-                      },
-                      {
-                        title: this.tr('删除工作区'),
-                        action: () => {
-                          this.runtime.deleteWorkspace(workspace.workspaceId);
-                        }
-                      }
-                    ]
-                  });
-                }))
-            }, (workspace: HarnessWorkspace) => `${workspace.workspaceId}#${this.languageMode}`)
-          }
-          .padding({ left: 16, right: 16 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .padding({ top: 2, bottom: 6 })
-      }
-      Column()
-        .width('100%')
-        .height(0.5)
-        .backgroundColor(this.pal().border)
-      if (!this.sessionSearchActive && this.runtime.recentSessions.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text(this.tr('最近'))
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
-            ForEach(this.runtime.recentSessions, (id: string) => {
-              Text(this.recentSessionTitle(id))
-                .fontSize(this.fs(11))
-                .fontColor(this.pal().text2)
-                .maxLines(1)
-                .constraintSize({ maxWidth: 120 })
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.pal().inputBg)
-                .borderRadius(9)
-                .border({ width: 1, color: this.pal().border })
-                .onClick(() => {
-                  this.closeDrawer();
-                  this.runtime.openSession(id);
-                })
-            }, (id: string) => 'recent-' + id)
-          }
-          .padding({ left: 16, right: 16, bottom: 6 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-      }
-      if (!this.sessionSearchActive && this.sessionWorkspaces().length > 1) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text(this.tr('工作区'))
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
-            Text(this.tr('全部'))
-              .fontSize(this.fs(11))
-              .fontColor(this.workspaceFilter.length === 0 ? this.pal().primary : this.pal().text3)
-              .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-              .backgroundColor(this.workspaceFilter.length === 0
-                ? this.pal().primarySoft : this.pal().inputBg)
-              .borderRadius(8)
-              .onClick(() => {
-                this.workspaceFilter = '';
-              })
-            ForEach(this.sessionWorkspaces(), (cwd: string) => {
-              Text(cwdTail(cwd))
-                .fontSize(this.fs(11))
-                .fontColor(this.workspaceFilter === cwd ? this.pal().primary : this.pal().text3)
-                .maxLines(1)
-                .constraintSize({ maxWidth: 110 })
-                .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-                .backgroundColor(this.workspaceFilter === cwd
-                  ? this.pal().primarySoft : this.pal().inputBg)
-                .borderRadius(8)
-                .onClick(() => {
-                  this.workspaceFilter = this.workspaceFilter === cwd ? '' : cwd;
-                })
-            }, (cwd: string) => 'ws-' + cwd)
-          }
-          .padding({ left: 16, right: 16, bottom: 6 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
       }
       if (this.visibleSessions().length === 0) {
         Column({ space: 6 }) {
@@ -5033,18 +5010,26 @@ struct Index {
           }, (session: HarnessRemoteSession) => session.sessionId)
         } else {
           ForEach(this.groupedSessions(), (folder: SessionFolder) => {
-            ListItemGroup({ header: this.SessionFolderHeader(folder) }) {
-              if (this.sessionFolderExpanded(folder)) {
-                ForEach(folder.sessions, (session: HarnessRemoteSession) => {
-                  ListItem() {
-                    this.SessionCatalogRow(session)
-                  }
-                }, (session: HarnessRemoteSession) => session.sessionId)
+            if (this.sessionGroupBy === 'list') {
+              ForEach(folder.sessions, (session: HarnessRemoteSession) => {
+                ListItem() {
+                  this.SessionCatalogRow(session)
+                }
+              }, (session: HarnessRemoteSession) => session.sessionId)
+            } else {
+              ListItemGroup({ header: this.SessionFolderHeader(folder) }) {
+                if (this.sessionFolderExpanded(folder)) {
+                  ForEach(folder.sessions, (session: HarnessRemoteSession) => {
+                    ListItem() {
+                      this.SessionCatalogRow(session)
+                    }
+                  }, (session: HarnessRemoteSession) => session.sessionId)
+                }
               }
+              .backgroundColor(this.pal().card)
+              .borderRadius(22)
+              .clip(true)
             }
-            .backgroundColor(this.pal().card)
-            .borderRadius(22)
-            .clip(true)
           }, (folder: SessionFolder) => folder.key)
         }
       }
@@ -5082,7 +5067,7 @@ struct Index {
             .backgroundColor(connected ? this.connectionDotColor() : this.pal().text3)
           Text(connected && !this.reconnecting ? this.tr('在线') : this.tr('未连接'))
             .fontSize(12).fontColor(this.pal().text2)
-          Text('⌃').fontSize(12).fontColor(this.pal().text2)
+          Image($r('app.media.ic_chevron_up')).width(14).height(14).fillColor(this.pal().text2)
           Blank()
         }
         .layoutWeight(1)
@@ -5220,13 +5205,15 @@ struct Index {
         .borderRadius(12)
         .backgroundColor(this.pal().chip)
       Blank()
-      Text(this.sessionFolderExpanded(folder) ? '⌄' : '›')
-        .fontSize(17)
-        .fontColor(this.pal().text2)
+      Image(this.sessionFolderExpanded(folder)
+        ? $r('app.media.ic_chevron_down') : $r('app.media.ic_chevron_right'))
+        .width(17)
+        .height(17)
+        .fillColor(this.pal().text2)
     }
     .width('100%')
     .height(48)
-    .padding({ left: 16, right: 16 })
+    .padding({ left: 16 + folder.depth * 14, right: 16 })
     .onClick(() => { this.toggleSessionFolder(folder); })
   }
 
@@ -5944,7 +5931,10 @@ struct Index {
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
                 if (preset === this.permissionPreset) {
-                  Text('✓').fontSize(16).fontColor(this.pal().primary)
+                  Image($r('app.media.ic_check'))
+                    .width(18)
+                    .height(18)
+                    .fillColor(this.pal().primary)
                 }
               }
               .width('100%')
@@ -5992,7 +5982,7 @@ struct Index {
   }
 
   @Builder
-  ModelOptionRow(label: string, selected: boolean, onSelect: () => void) {
+  ModelOptionRow(label: string, selected: boolean, onSelect: () => void, trailingChevron: boolean = false) {
     Row() {
       Text(label)
         .fontSize(this.fs(15))
@@ -6001,7 +5991,15 @@ struct Index {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
       if (selected) {
-        Text('✓').fontSize(16).fontColor(this.pal().primary)
+        Image($r('app.media.ic_check'))
+          .width(18)
+          .height(18)
+          .fillColor(this.pal().primary)
+      } else if (trailingChevron) {
+        Image($r('app.media.ic_chevron_right'))
+          .width(17)
+          .height(17)
+          .fillColor(this.pal().text2)
       }
     }
     .width('100%')
@@ -6016,11 +6014,16 @@ struct Index {
   SheetTitle(title: string, onClose: () => void, back: boolean = false) {
     Row({ space: 8 }) {
       if (back) {
-        Button('‹', { type: ButtonType.Circle })
+        Button({ type: ButtonType.Circle }) {
+          Image($r('app.media.ic_arrow_left'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text)
+        }
           .width(36)
           .height(36)
           .fontSize(24)
-          .fontColor(this.pal().text)
+          .padding(0)
           .backgroundColor(Color.Transparent)
           .accessibilityText(this.tr('返回'))
           .onClick(() => { this.pendingModel = undefined; })
@@ -6032,11 +6035,15 @@ struct Index {
         .layoutWeight(1)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-      Button('×', { type: ButtonType.Circle })
+      Button({ type: ButtonType.Circle }) {
+        Image($r('app.media.ic_close'))
+          .width(20)
+          .height(20)
+          .fillColor(this.pal().text)
+      }
         .width(40)
         .height(40)
-        .fontSize(22)
-        .fontColor(this.pal().text)
+        .padding(0)
         .backgroundColor(Color.Transparent)
         .accessibilityText(this.tr('关闭'))
         .onClick(onClose)
@@ -6103,11 +6110,11 @@ struct Index {
         .constraintSize({ maxHeight: '78%' })
         .scrollBar(BarState.Auto)
         if (this.pendingModel === undefined && this.currentModelEfforts().length > 0) {
-          this.ModelOptionRow(this.tr('推理等级') + ' · ' + (this.currentModelEffort || this.tr('默认')) + '  ›',
+          this.ModelOptionRow(this.tr('推理等级') + ' · ' + (this.currentModelEffort || this.tr('默认')),
             false, () => {
               this.pendingModel = this.modelOptions.find((option: ModelOption) =>
                 option.model === this.currentModelLabel && option.provider === this.currentModelProvider);
-            })
+            }, true)
         }
       }
       .width('100%')
@@ -6222,8 +6229,9 @@ struct Index {
               Column({ space: 4 }) {
                 ForEach(item.files, (label: string, index: number) => {
                   Row({ space: 6 }) {
-                    Text('📎')
-                      .fontSize(12)
+                    Image($r('app.media.ic_file'))
+                      .width(14)
+                      .height(14)
                     Text(label)
                       .fontSize(12)
                       .fontColor(this.pal().text)
@@ -6616,8 +6624,9 @@ struct Index {
           })
       } else if (this.images.errorOf(line.imageSrc).length > 0) {
         Row({ space: 8 }) {
-          Text('🖼')
-            .fontSize(13)
+          Image($r('app.media.ic_image'))
+            .width(18)
+            .height(18)
           Column({ space: 2 }) {
             Text(t('图片加载失败'))
               .fontSize(12)
@@ -6928,11 +6937,18 @@ struct Index {
 
   @Builder
   PdfTool(symbol: string, label: string, enabled: boolean, action: () => void) {
-    Button(symbol, { type: ButtonType.Normal })
+    Button({ type: ButtonType.Normal }) {
+      if (symbol === '‹') {
+        Image($r('app.media.ic_arrow_left')).width(20).height(20).fillColor(this.pal().text)
+      } else if (symbol === '›') {
+        Image($r('app.media.ic_arrow_right')).width(20).height(20).fillColor(this.pal().text)
+      } else {
+        Text(symbol).fontSize(22).fontColor(this.pal().text)
+      }
+    }
       .width(56)
       .height(48)
-      .fontSize(24)
-      .fontColor(this.pal().text)
+      .padding(0)
       .backgroundColor(Color.Transparent)
       .opacity(enabled ? 1 : 0.36)
       .accessibilityText(this.tr(label))
@@ -7995,12 +8011,15 @@ struct Index {
       Column({ space: 10 }) {
         Row() {
           Blank()
-          Button('↘', { type: ButtonType.Circle })
+          Button({ type: ButtonType.Circle }) {
+            Image($r('app.media.ic_collapse'))
+              .width(19)
+              .height(19)
+              .fillColor(this.pal().text)
+          }
             .width(36)
             .height(36)
             .padding(0)
-            .fontSize(20)
-            .fontColor(this.pal().text)
             .backgroundColor(Color.Transparent)
             .accessibilityText(this.tr('收起'))
             .onClick(() => { this.composerExpanded = false; })
@@ -8038,21 +8057,28 @@ struct Index {
           }
           Blank()
           if (this.generating && this.promptInput.trim().length === 0 && this.pendingImages.length === 0) {
-            Button('■', { type: ButtonType.Circle })
+            Button({ type: ButtonType.Circle }) {
+              Image($r('app.media.ic_stop'))
+                .width(18)
+                .height(18)
+                .fillColor(Color.White)
+            }
               .width(44)
               .height(44)
               .padding(0)
-              .fontColor(Color.White)
               .backgroundColor(this.pal().text)
               .accessibilityText(this.tr('停止'))
               .onClick(() => { this.runtime.stopGeneration(); })
           } else {
-            Button('↑', { type: ButtonType.Circle })
+            Button({ type: ButtonType.Circle }) {
+              Image($r('app.media.ic_arrow_up'))
+                .width(20)
+                .height(20)
+                .fillColor(Color.White)
+            }
               .width(44)
               .height(44)
               .padding(0)
-              .fontSize(21)
-              .fontColor(Color.White)
               .backgroundColor(this.pal().primary)
               .accessibilityText(this.tr('发送'))
               .enabled(this.promptInput.trim().length > 0 || this.pendingImages.length > 0)
@@ -8414,12 +8440,11 @@ struct Index {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.pal().text)
           Blank()
-          Text('✕')
-            .fontSize(15)
-            .fontColor(this.pal().text3)
-            .width(30)
-            .height(30)
-            .textAlign(TextAlign.Center)
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text3)
+            .padding(2)
             .onClick(() => {
               this.promptPanelOpen = false;
             })
@@ -8436,10 +8461,11 @@ struct Index {
                   .maxLines(3)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                   .layoutWeight(1)
-                Text('✕')
-                  .fontSize(this.fs(12))
-                  .fontColor(this.pal().text3)
-                  .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+                Image($r('app.media.ic_close'))
+                  .width(18)
+                  .height(18)
+                  .fillColor(this.pal().text3)
+                  .padding(3)
                   .onClick(() => {
                     this.runtime.removePrompt(item);
                   })
@@ -8573,9 +8599,10 @@ struct Index {
       } else {
         Blank()
       }
-      Text(item.rev === 1 ? '⌃' : '⌄')
-        .fontSize(this.fs(12))
-        .fontColor(this.pal().text3)
+      Image(item.rev === 1 ? $r('app.media.ic_chevron_up') : $r('app.media.ic_chevron_down'))
+        .width(14)
+        .height(14)
+        .fillColor(this.pal().text3)
     }
     .width('100%')
     .padding({ top: 4, bottom: 4 })

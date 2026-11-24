@@ -113,14 +113,20 @@ export struct RemoteHostRow {
             .fontColor(this.palette.text2)
         }
         if (this.switching && this.selected) {
-          Text('✓').fontSize(17).fontColor(this.palette.primary)
+          Image($r('app.media.ic_check'))
+            .width(18)
+            .height(18)
+            .fillColor(this.palette.primary)
         } else if (!this.switching) {
-        Button('›', { type: ButtonType.Normal })
+        Button({ type: ButtonType.Normal }) {
+          Image($r('app.media.ic_arrow_right'))
+            .width(20)
+            .height(20)
+            .fillColor(this.palette.text2)
+        }
           .width(20)
           .height(44)
           .padding(0)
-          .fontSize(18)
-          .fontColor(this.palette.text2)
           .backgroundColor(Color.Transparent)
           .accessibilityText(t('主机详情'))
           .onClick(this.onDetails)

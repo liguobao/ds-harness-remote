@@ -5,11 +5,6 @@ name: HarmonyOS HAP
 on:
   workflow_dispatch:
     inputs:
-      build_mode:
-        description: Build mode
-        type: choice
-        options: [release, debug]
-        default: release
       signed:
         description: Sign with repository secrets (trusted code only)
         type: boolean
@@ -74,16 +69,25 @@ jobs:
           export HARMONY_SIGNING_SOURCE_DIR="$HOME/.config/dsh-remote/harmony-signing"
           node scripts/inject-signing.mjs
 
-      - name: Build HAP
-        env:
-          BUILD_MODE: ${{ inputs.build_mode || 'release' }}
-        run: hvigorw --no-daemon assembleHap -p product=default -p buildMode="$BUILD_MODE"
+      - name: Build release HAP
+        run: |
+          hvigorw --no-daemon assembleHap -p product=default -p buildMode=release
+          mkdir -p build/ci/release
+          cp entry/build/default/outputs/default/*.hap build/ci/release/
+
+      - name: Build hdc sideload HAP
+        run: |
+          hvigorw --no-daemon assembleHap -p product=default -p buildMode=debug
+          mkdir -p build/ci/sideload
+          cp entry/build/default/outputs/default/*.hap build/ci/sideload/
 
       - name: Upload HAP artifact
         uses: actions/upload-artifact@v4
         with:
           name: harmony-hap
-          path: apps/harmony/entry/build/default/outputs/default/*.hap
+          path: |
+            apps/harmony/build/ci/release/*.hap
+            apps/harmony/build/ci/sideload/*.hap
           if-no-files-found: error
 
       - name: Stage unsigned release HAP
@@ -92,7 +96,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           mkdir -p build/release-assets
-          haps=(entry/build/default/outputs/default/*-unsigned.hap)
+          haps=(build/ci/release/*-unsigned.hap)
           test "${#haps[@]}" -eq 1 && test -f "${haps[0]}"
           cp "${haps[0]}" "build/release-assets/dsh-remote-harmony-${RELEASE_TAG}-unsigned.hap"
 
