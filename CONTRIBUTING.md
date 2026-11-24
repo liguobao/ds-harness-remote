@@ -34,7 +34,7 @@ For deep architectural invariants and coding-agent rules, see [`AGENTS.md`](AGEN
 
 ### Base toolchain
 
-- **Node.js `>=24.9`** (CI runs on `24.9.0`)
+- **Node.js `^24.22.3 || >=26.13.1`** (CI runs on `24.22.3`)
 - **`pnpm@9.15.4`** (declared in `packageManager` in root `package.json`; run `corepack enable` to match it automatically)
 - `.npmrc` sets `node-linker=hoisted` to stay compatible with Windows path length limits.
 

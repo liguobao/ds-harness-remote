@@ -1,6 +1,6 @@
 // Simplified upstream HostsPage + product AppHeader. No remote/open/admin actions.
-import { Alert, Button, Card, Empty, Input, Layout, Space, Table, Tag, Typography } from 'antd'
-import { EditOutlined, GithubOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Empty, Input, Layout, Popconfirm, Space, Table, Tag, Typography } from 'antd'
+import { DeleteOutlined, EditOutlined, GithubOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { api, RequestError, type Device, type DeviceList } from './api'
@@ -16,6 +16,7 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
   const [renaming, setRenaming] = useState<Device>()
   const [newName, setNewName] = useState('')
   const [savingName, setSavingName] = useState(false)
+  const [removing, setRemoving] = useState('')
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try { const data = await api<DeviceList>('/account/devices'); setResult(data); setUpdated(new Date().toLocaleTimeString('zh-CN')) }
@@ -30,6 +31,17 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
     try { await api(`/devices/${encodeURIComponent(renaming.deviceId)}/name`, { name }); setRenaming(undefined); await load() }
     catch (err) { setError(err instanceof Error ? err.message : '改名失败，请重试。') }
     finally { setSavingName(false) }
+  }
+  async function removeDevice(d: Device) {
+    setRemoving(d.deviceId); setError('')
+    try {
+      await api(`/account/devices/${encodeURIComponent(d.deviceId)}`, undefined, 'DELETE')
+      if (renaming?.deviceId === d.deviceId) setRenaming(undefined)
+      await load()
+    } catch (err) {
+      if (err instanceof RequestError && err.status === 401) onSignedOut()
+      else setError(err instanceof Error ? err.message : '删除失败，请重试。')
+    } finally { setRemoving('') }
   }
   useEffect(() => { void load() }, [load])
   async function logout() {
@@ -54,6 +66,11 @@ export function DevicesPage({ account, onSignedOut }: { account: string; onSigne
     { title: '系统', dataIndex: 'platform', key: 'platform', render: (platform: string) => ({ darwin: 'macOS', win32: 'Windows', linux: 'Linux', android: 'Android' })[platform] ?? platform },
     { title: '插件版本', dataIndex: 'clientVersion', key: 'clientVersion' },
     { title: 'Harness 版本', dataIndex: 'harnessVersion', key: 'harnessVersion', render: (value?: string) => value || '—' },
+    {
+      title: '操作', key: 'actions', render: (_: unknown, d) => <Popconfirm title="删除设备" description={`删除后“${d.name}”需要重新登录才能再次连接，确定删除？`} okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => removeDevice(d)}>
+        <Button type="text" size="small" danger icon={<DeleteOutlined />} loading={removing === d.deviceId} disabled={Boolean(removing) && removing !== d.deviceId} aria-label={`删除设备 ${d.name}`}>删除</Button>
+      </Popconfirm>,
+    },
   ]
   return <>
     <Layout.Header className="topbar product-topbar"><div className="topbar-inner"><div className="topbar-brand-group is-product"><a className="topbar-brand" href="/" aria-label="返回首页"><img className="topbar-brand-mark" src="/brand-whale.webp" alt="" width="40" height="40" /><span className="topbar-brand-copy"><Title level={3}>DeepSeek Harness Remote</Title><small>安全远程访问</small></span></a></div><div className="topbar-actions"><a className="topbar-github-link product-github-link" href="https://github.com/liguobao/dsh-harness-remote" target="_blank" rel="noreferrer" aria-label="GitHub"><GithubOutlined /> GitHub</a><ThemeToggle /><Button type="text" loading={loggingOut} onClick={() => void logout()}>退出登录</Button></div></div></Layout.Header>

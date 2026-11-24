@@ -27,7 +27,7 @@
     "directory": "packages/tui"
   },
   "engines": {
-    "node": ">=24.9.0"
+    "node": "^24.22.3 || >=26.13.1"
   },
   "publishConfig": {
     "access": "public",
@@ -40,21 +40,20 @@
   },
   "dependencies": {
     "ds-harness-remote": "workspace:0.6.7",
-    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-client-file-upload": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-session-reference": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-session-stats": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-session-turn-outline": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-session-log-export": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-host-plugin-inventory": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-api-session-controller": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-api-job-controller": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-api-terminal-controller": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-api-workspace-files": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-api-account-controller": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-api-settings-controller": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-api-workspace-controller": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-workspace-changes": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-api-remotes": "0.2.2-rc.1"
+    "@deepseek-ai/dsh-client-connection": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-client-file-upload": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-session-reference": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-session-stats": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-session-turn-outline": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-session-log-export": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-host-plugin-inventory": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-job-controller": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-terminal-controller": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-workspace-files": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-settings-controller": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-workspace-controller": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-workspace-changes": "0.2.3-alpha.2",
+    "@deepseek-ai/dsh-api-remotes": "0.2.3-alpha.2"
   }
 }

@@ -34,7 +34,7 @@
 
 ### 基础工具链
 
-- **Node.js `>=24.9`**（CI 使用 `24.9.0`）
+- **Node.js `^24.22.3 || >=26.13.1`**（CI 使用 `24.22.3`）
 - **`pnpm@9.15.4`**（已在根 `package.json` 的 `packageManager` 字段声明，可运行 `corepack enable` 自动匹配）
 - `.npmrc` 配置了 `node-linker=hoisted`，以兼容 Windows 路径长度限制。
 

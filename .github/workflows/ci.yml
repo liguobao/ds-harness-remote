@@ -120,7 +120,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24.9.0
+          node-version: 24.22.3
           cache: pnpm
 
       - name: Install dependencies
@@ -192,7 +192,7 @@ jobs:
           version: 9.15.4
       - uses: actions/setup-node@v7
         with:
-          node-version: 24.9.0
+          node-version: 24.22.3
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter './packages/**' -r build
@@ -230,7 +230,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24.9.0
+          node-version: 24.22.3
           cache: pnpm
 
       - name: Install dependencies
@@ -295,7 +295,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24.9.0
+          node-version: 24.22.3
           cache: pnpm
 
       - name: Set up Java
@@ -394,7 +394,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24.9.0
+          node-version: 24.22.3
           cache: pnpm
 
       - name: Install dependencies

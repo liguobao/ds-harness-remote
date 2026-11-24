@@ -85,10 +85,12 @@ import {
   ChatItemView,
   ChatProcessGroup,
   isActiveChatItem,
+  MarkdownChunkRow,
   QueueDock,
   ReplyStatusBanner,
   WelcomeMessage
 } from './chat/messages'
+import type { DisplayChatSection } from './chat/transcript-chunks'
 import {
   agentPresetName,
   builtinPresetName,
@@ -194,6 +196,14 @@ function useEdgeSwipeOpen(
 function ComposerFocusGate({ disabled, children }: { disabled: boolean; children: ReactNode }) {
   const parentFocused = useNavigationFocused()
   return <NavigationFocusProvider value={parentFocused && !disabled}>{children}</NavigationFocusProvider>
+}
+
+/** Keeps an unopened SheetModal picker completely unmounted until first requested. */
+function LazySheetHost({ visible, render }: { visible: boolean; render: () => ReactNode }) {
+  const openedRef = useRef(visible)
+  if (visible) openedRef.current = true
+  if (!openedRef.current) return null
+  return <>{render()}</>
 }
 
 function BotChatImageProvider({ hostId, connected, children }: {
@@ -369,7 +379,7 @@ export function ChatScreen({
   }, [sessionsOpen, splitNav])
 
   const openSessionsDrawer = useCallback(() => {
-    Keyboard.dismiss()
+    if (typeof Keyboard.isVisible !== 'function' || Keyboard.isVisible()) Keyboard.dismiss()
     closeMentionRef.current?.()
     cancelScrollRef.current?.()
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
@@ -581,6 +591,7 @@ export function ChatScreen({
           <KeyboardInset>
             <View
               key="chat-layout"
+              collapsable={false}
               style={[styles.splitRoot, splitNav && styles.splitRootWide]}
               pointerEvents={sessionsOpen && !splitNav ? 'none' : 'auto'}
               accessibilityElementsHidden={sessionsOpen && !splitNav}
@@ -636,20 +647,24 @@ export function ChatScreen({
           </KeyboardInset>
         </NavigationFocusProvider>
         {!splitNav && renderDrawer(false)}
-        <PluginsModal visible={pluginsOpen} onClose={closePluginsModal} />
-        <AutomationTasksModal
-          visible={automationTasksOpen}
-          onClose={closeAutomationTasksModal}
-          onOpenSession={handleAutomationOpenSession}
-          onNewTask={handleAutomationNewTask}
-        />
-        <HandoffModal
-          visible={handoffTarget !== undefined}
-          sourceSession={handoffTarget?.session}
-          sourceWorkspace={handoffTarget?.workspace}
-          onClose={closeHandoffModal}
-          onCompleted={handleHandoffCompleted}
-        />
+        {pluginsOpen && <PluginsModal visible={pluginsOpen} onClose={closePluginsModal} />}
+        {automationTasksOpen && (
+          <AutomationTasksModal
+            visible={automationTasksOpen}
+            onClose={closeAutomationTasksModal}
+            onOpenSession={handleAutomationOpenSession}
+            onNewTask={handleAutomationNewTask}
+          />
+        )}
+        {handoffTarget !== undefined && (
+          <HandoffModal
+            visible={handoffTarget !== undefined}
+            sourceSession={handoffTarget?.session}
+            sourceWorkspace={handoffTarget?.workspace}
+            onClose={closeHandoffModal}
+            onCompleted={handleHandoffCompleted}
+          />
+        )}
       </View>
     </MarkdownLinkProvider>
   )
@@ -707,6 +722,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const clearError = useAppStore(state => state.clearError)
   const busy = useAppStore(state => state.busyAction)
   const codexReadySessionId = useAppStore(state => state.codexReadySessionId)
+  const acpReadOnly = useAppStore(state => state.acpReadOnlySessionId !== undefined
+    && state.acpReadOnlySessionId === state.selectedSession?.sessionId)
   const connection = useAppStore(state => state.connection)
   const hostWorkspaceGit = useAppStore(state => state.hostWorkspaceGit)
   const imageGeneration = chatImageConnectionGeneration()
@@ -860,8 +877,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
         lastSessionId = currentId
         sessionGenerationRef.current += 1
         uploadControllerRef.current?.abort()
-        setUploadProgress(undefined)
-        setStagedFiles([])
+        setUploadProgress(prev => (prev === undefined ? prev : undefined))
+        setStagedFiles(prev => (prev.length === 0 ? prev : []))
       }
     })
   }, [])
@@ -947,7 +964,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const [newSessionPending, setNewSessionPending] = useState(false)
   const creatingSessionRef = useRef(false)
   const lastNewSessionTimeRef = useRef(0)
-  const { visibleMessages, visibleSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState } = useChatTranscript({ session, sessions, messages, hostId })
+  const { visibleMessages, chunkedSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState } = useChatTranscript({ session, sessions, messages, hostId })
   const panelOpen = composerExpanded || plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || previewFilePath !== undefined || trajectory || mentionType !== null
     || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || sessionInfoOpen
@@ -955,7 +972,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const { listRef, displaySections, maintainVisibleContentPosition, viewability, awayFromLatest, newContent, jumpToLatest, beginSendScroll,
     onListLayout, onListContentSizeChange, onListScroll, onListDragEnd, onListMomentumEnd,
     onScrollBeginDrag, onMomentumScrollBegin } = useChatScroll({
-    session, messages, visibleMessages, visibleSections, memoryScope, memoryKey,
+    session, messages, visibleMessages, visibleSections: chunkedSections, memoryScope, memoryKey,
     panelOpen, historyLoadingOlder, busy, setTrajectory,
     drawerOpenRef, cancelScrollRef, onDrawerClosedRef,
   })
@@ -976,19 +993,49 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const lastDisplaySectionKey = displaySections[displaySections.length - 1]?.key
   // Artifact changes must invalidate FlatList cells even when their section is
   // reused (a later turn can patch a card owned by an earlier turn).
-  const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup
-        items={item.items}
-        artifacts={uiBySection.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS}
-        updatedArtifacts={uiBySection.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS}
-        availableUiIds={visibleUiIds}
-        isTurnRunning={item.key === lastDisplaySectionKey && (session?.running === true || stopping)}
-        turnUsage={turnUsageByTurn.get(item.turn)}
-        onApproval={respondApproval}
-        onQuestion={respondQuestion}
-      />
-    : <ChatItemView item={item.item} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [lastDisplaySectionKey, respondApproval, respondQuestion, session?.running, stopping, turnUsageByTurn, uiBySection, visibleUiIds])
+  const renderChatItem = useCallback(({ item }: { item: DisplayChatSection }) => {
+    if (item.kind === 'markdown-chunk') {
+      const uiEntry = uiBySection.get(item.sourceKey)
+      return (
+        <MarkdownChunkRow
+          section={item}
+          artifacts={uiEntry?.cards ?? EMPTY_UI_ARTIFACTS}
+          updatedArtifacts={uiEntry?.pointers ?? EMPTY_UI_ARTIFACTS}
+          availableUiIds={visibleUiIds}
+          turnUsage={item.turn !== undefined ? turnUsageByTurn.get(item.turn) : undefined}
+        />
+      )
+    }
+    if (item.kind === 'process-prefix') {
+      return (
+        <ChatProcessGroup
+          items={item.items}
+          artifacts={EMPTY_UI_ARTIFACTS}
+          updatedArtifacts={EMPTY_UI_ARTIFACTS}
+          availableUiIds={visibleUiIds}
+          isTurnRunning={false}
+          hiddenResponseItemId={item.hiddenResponseItemId}
+          onApproval={respondApproval}
+          onQuestion={respondQuestion}
+        />
+      )
+    }
+    if (item.kind === 'process') {
+      return (
+        <ChatProcessGroup
+          items={item.items}
+          artifacts={uiBySection.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS}
+          updatedArtifacts={uiBySection.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS}
+          availableUiIds={visibleUiIds}
+          isTurnRunning={item.key === lastDisplaySectionKey && (session?.running === true || stopping)}
+          turnUsage={turnUsageByTurn.get(item.turn)}
+          onApproval={respondApproval}
+          onQuestion={respondQuestion}
+        />
+      )
+    }
+    return <ChatItemView item={item.item} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />
+  }, [lastDisplaySectionKey, respondApproval, respondQuestion, session?.running, stopping, turnUsageByTurn, uiBySection, visibleUiIds])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can
@@ -1413,7 +1460,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
       : agentPresetName(currentPresetRow)
 
   const connectionRetrying = reconnectingSession || connection.phase === 'connecting' || connection.phase === 'reconnecting'
-  const sendReady = connected && !busy?.startsWith('session:')
+  const sendReady = connected && !acpReadOnly && !busy?.startsWith('session:')
     && (session.backend !== 'codex' || codexReadySessionId === session.sessionId)
   const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0 || pendingHandoff !== undefined
   const commandRunning = busy === 'command'
@@ -1427,7 +1474,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   // text field itself only blocks on composer-local states so an offline draft
   // can be typed, edited and kept for the manual send after reconnection.
   const inputEditable = composerEditable({ permissionSelecting, uploading: uploadingFiles })
-  const composerDisabled = !connected || permissionSelecting || uploadingFiles
+  const composerDisabled = !connected || acpReadOnly || permissionSelecting || uploadingFiles
   const sendDisabled = !sendReady || permissionSelecting || !hasComposerContent || uploadingFiles
   const projectedPermissions = sessionPermissions(session)
   const permissions = projectedPermissions === undefined ? undefined : { ...projectedPermissions, options: permissionOptions ?? projectedPermissions.options }
@@ -1812,12 +1859,10 @@ const ChatConversationPane = memo(function ChatConversationPane({
           </Text>
         </Pressable>
       )}
-      {connected && busy === `session:${session.sessionId}` && (
-        <View style={styles.syncBanner} accessibilityRole="summary">
-          <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
-          <Text style={styles.connectionBannerText} numberOfLines={1}>
-            {strings.chat.syncingHistory}
-          </Text>
+      {acpReadOnly && (
+        <View style={styles.errorBanner} accessibilityRole="alert">
+          <View style={styles.errorDot} />
+          <Text style={styles.errorBannerText}>{strings.errors.CURSOR_SESSION_OWNED}</Text>
         </View>
       )}
       {storeError !== undefined && (
@@ -1843,12 +1888,21 @@ const ChatConversationPane = memo(function ChatConversationPane({
         </View>
       )}
     </>
+  const showSyncBanner = connected && busy === `session:${session.sessionId}`
   return (
     <ChatImageProvider value={imageLoader}>
       <MarkdownLinkProvider onLinkPress={onOpenLink} onFilePress={openWorkspaceFile} canStatFiles={connected}>
       <View style={styles.splitMain} {...swipeRightTouchProps}>
         {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
         <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary resetKey={session.sessionId}><Animated.View style={[{ flex: 1 }, { opacity: trajectoryMotion, transform: [{ translateY: trajectoryMotion.interpolate({ inputRange: [0, 1], outputRange: [resolveMotion('fullscreen', reduceMotion).translate, 0] }) }] }]}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
+        {showSyncBanner && (
+          <View pointerEvents="none" style={[styles.syncBanner, { position: 'absolute', top: headerHeight, left: 0, right: 0, zIndex: 5 }]} accessibilityRole="summary">
+            <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
+            <Text style={styles.connectionBannerText} numberOfLines={1}>
+              {strings.chat.syncingHistory}
+            </Text>
+          </View>
+        )}
         <FlatList
           ref={listRef}
           style={[styles.list, readableColumn]}
@@ -1856,11 +1910,11 @@ const ChatConversationPane = memo(function ChatConversationPane({
           data={displaySections}
           keyExtractor={item => item.key}
           renderItem={renderChatItem}
-          initialNumToRender={4}
-          maxToRenderPerBatch={3}
+          initialNumToRender={2}
+          maxToRenderPerBatch={1}
           updateCellsBatchingPeriod={32}
-          windowSize={7}
-          removeClippedSubviews
+          windowSize={3}
+          removeClippedSubviews={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           onLayout={onListLayout}
@@ -1932,8 +1986,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
         <View style={[styles.composerInner, readableColumn]}>
         {connected && (session.backend === undefined || session.backend === 'harness' || Boolean(session.projections?.values?.todos) || Boolean(session.projections?.values?.goal) || childSessions.length > 0 || (teamState !== undefined && teamState.members.length > 0)) && (
           <SessionActivityDock
-            key={`${memoryKey}:${chatImageConnectionGeneration()}`}
             session={session}
+            connectionGeneration={chatImageConnectionGeneration()}
             childSessions={childSessions}
             teamState={teamState}
             sessions={sessions}
@@ -1946,7 +2000,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
             backend={session.backend} draft={draft} input={mentionInput}
             quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
             headerSlot={composerHeaderSlot}
-            replyActive={replyActive} stopping={stopping} commandRunning={commandRunning}
+            replyActive={replyActive && !acpReadOnly} stopping={stopping} commandRunning={commandRunning}
             hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
             composerDisabled={composerDisabled} sendDisabled={sendDisabled}
             compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
@@ -1967,7 +2021,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
         onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
         hasAttachments={images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0 || pendingHandoff !== undefined}
         input={mentionInput}
-        replyActive={replyActive}
+        replyActive={replyActive && !acpReadOnly}
         stopping={stopping}
         sendDisabled={sendDisabled}
         onSubmit={() => void submit()}
@@ -1975,41 +2029,53 @@ const ChatConversationPane = memo(function ChatConversationPane({
       />
       </View>
 
-      <ChatActionMenu
-        visible={plusMenuOpen} onClose={closePlusMenu} anchor={sheetAnchor}
-        onDismiss={plusMenuActions.onDismiss} runAfterClose={runAfterPlusMenu}
-        attachmentPicking={attachmentPicking}
-        takePhoto={takePhoto} pickImages={pickImages} pickFiles={pickFiles}
-        workspaceLabel={workspaceLabel} modeLabel={modeLabel}
-        supportsModeSelection={supportsModeSelection} agentPresetSelecting={agentPresetSelecting}
-        toolsAvailable={connected}
-        permissionsAvailable={permissions !== undefined} permissionSelecting={permissionSelecting}
-        permissionDisabled={permissionSelecting || (replyActive && !hasComposerContent)}
-        permissionLabel={permissions === undefined ? undefined : permissionDisplayName(permissions.currentValue, currentPermission?.name)}
-        onReferenceChat={(session.backend ?? 'harness') === 'harness' ? () => setReferenceChatOpen(true) : undefined}
-        onOpenWorkspace={() => setWorkspacePickerOpen(true)} onOpenMode={() => setModePickerOpen(true)}
-        onOpenTools={() => setToolPickerOpen(true)} onOpenPermissions={() => setPermissionPickerOpen(true)}
+      <LazySheetHost
+        visible={plusMenuOpen}
+        render={() => (
+          <ChatActionMenu
+            visible={plusMenuOpen} onClose={closePlusMenu} anchor={sheetAnchor}
+            onDismiss={plusMenuActions.onDismiss} runAfterClose={runAfterPlusMenu}
+            attachmentPicking={attachmentPicking}
+            takePhoto={takePhoto} pickImages={pickImages} pickFiles={pickFiles}
+            workspaceLabel={workspaceLabel} modeLabel={modeLabel}
+            supportsModeSelection={supportsModeSelection} agentPresetSelecting={agentPresetSelecting}
+            toolsAvailable={connected}
+            permissionsAvailable={permissions !== undefined} permissionSelecting={permissionSelecting}
+            permissionDisabled={permissionSelecting || (replyActive && !hasComposerContent)}
+            permissionLabel={permissions === undefined ? undefined : permissionDisplayName(permissions.currentValue, currentPermission?.name)}
+            onReferenceChat={(session.backend ?? 'harness') === 'harness' ? () => setReferenceChatOpen(true) : undefined}
+            onOpenWorkspace={() => setWorkspacePickerOpen(true)} onOpenMode={() => setModePickerOpen(true)}
+            onOpenTools={() => setToolPickerOpen(true)} onOpenPermissions={() => setPermissionPickerOpen(true)}
+          />
+        )}
       />
 
-      <ReferenceChatModal
-        visible={referenceChatOpen}
-        currentSessionId={session.sessionId}
-        botState={botTeamState}
-        onClose={() => setReferenceChatOpen(false)}
-        onPick={(_mentionText, candidate) => {
-          setStagedReferences(current =>
-            current.some(item => item.sessionId === candidate.sessionId)
-              ? current
-              : [...current, candidate],
-          )
-        }}
-      />
+      {referenceChatOpen && (
+        <ReferenceChatModal
+          visible={referenceChatOpen}
+          currentSessionId={session.sessionId}
+          botState={botTeamState}
+          onClose={() => setReferenceChatOpen(false)}
+          onPick={(_mentionText, candidate) => {
+            setStagedReferences(current =>
+              current.some(item => item.sessionId === candidate.sessionId)
+                ? current
+                : [...current, candidate],
+            )
+          }}
+        />
+      )}
 
-      <ModelPicker
+      <LazySheetHost
         visible={modelPickerOpen}
-        models={sessionModels}
-        onClose={() => setModelPickerOpen(false)}
-        onPick={pickModel}
+        render={() => (
+          <ModelPicker
+            visible={modelPickerOpen}
+            models={sessionModels}
+            onClose={() => setModelPickerOpen(false)}
+            onPick={pickModel}
+          />
+        )}
       />
       {toolsMode !== undefined && connected && (
         <SessionToolsPanel
@@ -2040,79 +2106,118 @@ const ChatConversationPane = memo(function ChatConversationPane({
           )
         }}
       />
-      <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
-      <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
-      <SessionInfo
-        key={`${hostId}:${session.sessionId}`}
+      <LazySheetHost
+        visible={permissionPickerOpen}
+        render={() => (
+          <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
+        )}
+      />
+      <LazySheetHost
+        visible={modePickerOpen}
+        render={() => (
+          <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
+        )}
+      />
+      <LazySheetHost
         visible={sessionInfoOpen}
-        session={session}
-        workspace={currentWorkspace}
-        trajectory={trajectory}
-        archived={sessionArchived}
-        archiveDisabled={!connected || busy !== undefined}
-        onClose={closeSessionInfo}
-        onDismiss={sessionInfoActions.onDismiss}
-        runAfterClose={runAfterSessionInfo}
-        onOpenWorkspace={() => {
-          if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
-          else onOpenSessionsDrawer()
-        }}
-        onToggleTrajectory={() => {
-          Keyboard.dismiss()
-          setMentionType(null)
-          setTrajectory(value => !value)
-        }}
-        onHandoff={canHandoffCurrentSession ? () => onOpenHandoff(session, currentWorkspace) : undefined}
-        onToggleArchive={canArchiveSession ? toggleArchiveCurrentSession : undefined}
+        render={() => (
+          <SessionInfo
+            visible={sessionInfoOpen}
+            session={session}
+            workspace={currentWorkspace}
+            trajectory={trajectory}
+            archived={sessionArchived}
+            archiveDisabled={!connected || busy !== undefined}
+            onClose={closeSessionInfo}
+            onDismiss={sessionInfoActions.onDismiss}
+            runAfterClose={runAfterSessionInfo}
+            onOpenWorkspace={() => {
+              if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
+              else onOpenSessionsDrawer()
+            }}
+            onToggleTrajectory={() => {
+              Keyboard.dismiss()
+              setMentionType(null)
+              setTrajectory(value => !value)
+            }}
+            onHandoff={canHandoffCurrentSession ? () => onOpenHandoff(session, currentWorkspace) : undefined}
+            onToggleArchive={canArchiveSession ? toggleArchiveCurrentSession : undefined}
+          />
+        )}
       />
-      <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); onOpenSessionsDrawer() }} />
-      <ToolAccessPicker visible={toolPickerOpen} supportsChanges={hostWorkspaceGit} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
-      <PromptsPicker
+      <LazySheetHost
+        visible={workspacePickerOpen}
+        render={() => (
+          <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); onOpenSessionsDrawer() }} />
+        )}
+      />
+      <LazySheetHost
+        visible={toolPickerOpen}
+        render={() => (
+          <ToolAccessPicker visible={toolPickerOpen} supportsChanges={hostWorkspaceGit} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
+        )}
+      />
+      <LazySheetHost
         visible={promptsPickerOpen}
-        prompts={customPrompts ?? BUILT_IN_PROMPTS}
-        actionMode={quickPromptActionMode}
-        onToggleActionMode={mode => {
-          void setQuickPromptActionMode(mode).catch(() => {
-            Alert.alert(strings.settings.quickPromptActionMode, strings.settings.quickPromptActionSaveFailed)
-          })
-        }}
-        onClose={() => setPromptsPickerOpen(false)}
-        onPick={prompt => void pickQuickPrompt(prompt)}
-        onManage={() => { setPromptsPickerOpen(false); setPromptsManagerOpen(true) }}
+        render={() => (
+          <PromptsPicker
+            visible={promptsPickerOpen}
+            prompts={customPrompts ?? BUILT_IN_PROMPTS}
+            actionMode={quickPromptActionMode}
+            onToggleActionMode={mode => {
+              void setQuickPromptActionMode(mode).catch(() => {
+                Alert.alert(strings.settings.quickPromptActionMode, strings.settings.quickPromptActionSaveFailed)
+              })
+            }}
+            onClose={() => setPromptsPickerOpen(false)}
+            onPick={prompt => void pickQuickPrompt(prompt)}
+            onManage={() => { setPromptsPickerOpen(false); setPromptsManagerOpen(true) }}
+          />
+        )}
       />
-      <PromptsManager
+      <LazySheetHost
         visible={promptsManagerOpen}
-        prompts={customPrompts ?? BUILT_IN_PROMPTS}
-        promptsLoading={promptsLoading}
-        onBack={() => { setPromptsManagerOpen(false); setPromptsPickerOpen(true) }}
-        onClose={() => setPromptsManagerOpen(false)}
-        onAdd={() => { setPromptsManagerOpen(false); setPromptEditing('new') }}
-        onEdit={prompt => { setPromptsManagerOpen(false); setPromptEditing(prompt) }}
-        onDelete={prompt => {
-          Alert.alert(strings.chat.toolPromptDeleteTitle(prompt.title), strings.chat.toolPromptDeleteBody, [
-            { text: strings.common.cancel, style: 'cancel' },
-            { text: strings.common.delete, style: 'destructive', onPress: () => void deletePrompt(prompt) },
-          ])
-        }}
+        render={() => (
+          <PromptsManager
+            visible={promptsManagerOpen}
+            prompts={customPrompts ?? BUILT_IN_PROMPTS}
+            promptsLoading={promptsLoading}
+            onBack={() => { setPromptsManagerOpen(false); setPromptsPickerOpen(true) }}
+            onClose={() => setPromptsManagerOpen(false)}
+            onAdd={() => { setPromptsManagerOpen(false); setPromptEditing('new') }}
+            onEdit={prompt => { setPromptsManagerOpen(false); setPromptEditing(prompt) }}
+            onDelete={prompt => {
+              Alert.alert(strings.chat.toolPromptDeleteTitle(prompt.title), strings.chat.toolPromptDeleteBody, [
+                { text: strings.common.cancel, style: 'cancel' },
+                { text: strings.common.delete, style: 'destructive', onPress: () => void deletePrompt(prompt) },
+              ])
+            }}
+          />
+        )}
       />
-      <PromptEditor
+      <LazySheetHost
         visible={promptEditing !== null}
-        prompt={promptEditing === 'new' || promptEditing === null ? undefined : promptEditing}
-        promptsLoading={promptsLoading}
-        onBack={() => { setPromptEditing(null); setPromptsManagerOpen(true) }}
-        onClose={() => setPromptEditing(null)}
-        onSave={(title, text) => void savePromptEdit(title, text)}
+        render={() => (
+          <PromptEditor
+            visible={promptEditing !== null}
+            prompt={promptEditing === 'new' || promptEditing === null ? undefined : promptEditing}
+            promptsLoading={promptsLoading}
+            onBack={() => { setPromptEditing(null); setPromptsManagerOpen(true) }}
+            onClose={() => setPromptEditing(null)}
+            onSave={(title, text) => void savePromptEdit(title, text)}
+          />
+        )}
       />
-      <Modal
-        visible={previewImageUri !== undefined}
-        transparent
-        animationType="none"
-        onRequestClose={() => setPreviewImageUri(undefined)}
-        statusBarTranslucent
-      >
-        <View style={styles.lightboxBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPreviewImageUri(undefined)} />
-          {previewImageUri !== undefined && (
+      {previewImageUri !== undefined && (
+        <Modal
+          visible
+          transparent
+          animationType="none"
+          onRequestClose={() => setPreviewImageUri(undefined)}
+          statusBarTranslucent
+        >
+          <View style={styles.lightboxBackdrop}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setPreviewImageUri(undefined)} />
             <Animated.Image
               source={{ uri: previewImageUri }}
               style={[styles.lightboxImage, {
@@ -2121,18 +2226,18 @@ const ChatConversationPane = memo(function ChatConversationPane({
               }]}
               resizeMode="contain"
             />
-          )}
-          <Pressable
-            style={styles.lightboxClose}
-            onPress={() => setPreviewImageUri(undefined)}
-            accessibilityRole="button"
-            accessibilityLabel={strings.common.close}
-            hitSlop={12}
-          >
-            <X size={24} color="#ffffff" />
-          </Pressable>
-        </View>
-      </Modal>
+            <Pressable
+              style={styles.lightboxClose}
+              onPress={() => setPreviewImageUri(undefined)}
+              accessibilityRole="button"
+              accessibilityLabel={strings.common.close}
+              hitSlop={12}
+            >
+              <X size={24} color="#ffffff" />
+            </Pressable>
+          </View>
+        </Modal>
+      )}
       <HandoffDraftPreviewModal
         visible={pendingHandoffPreviewOpen && pendingHandoff !== undefined}
         draft={pendingHandoff}

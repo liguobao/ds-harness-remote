@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { isSubagentSession } from '../../lib/session-kind'
 import { hasVisibleMessageText } from '../../state/event-reducer'
 import type { ChatSection } from '../../state/message-helpers'
 import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning } from '../../state/message-helpers'
+import { extractReferencedFiles, parseMarkdownBlocks } from '../../ui/markdown'
 import { aggregateTurnUsageByTurn } from '../chat-process'
 import type { ChatItem, RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
+import { chunkTranscriptSections, isSectionLive, type DisplayChatSection } from './transcript-chunks'
 import { useSessionUiArtifacts } from './use-session-ui-artifacts'
+
+const parseBlocksForChunk = (text: string) => parseMarkdownBlocks(text)
 
 export function useChatTranscript({ session, sessions, messages, hostId }: { session: RemoteSession | undefined; sessions: RemoteSession[]; messages: ChatItem[]; hostId: string | undefined }) {
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
@@ -21,12 +25,48 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
   const turnUsageByTurn = useMemo(() => aggregateTurnUsageByTurn(messages), [messages])
   // Feed the previous list back so untouched groups keep their identity; the
   // streaming delta then only rebuilds the group that actually changed.
-  const previousSectionsRef = useRef<readonly ChatSection[]>([])
+  // Track sessionId inline so switching sessions never scans the prior session's
+  // sections on the first frame.
+  const previousSectionsRef = useRef<{ sessionId: string | undefined; sections: readonly ChatSection[] }>({
+    sessionId: undefined,
+    sections: [],
+  })
   const visibleSections = useMemo(() => {
-    const next = chatSections(visibleMessages, previousSectionsRef.current)
-    previousSectionsRef.current = next
+    const prev = previousSectionsRef.current.sessionId === session?.sessionId
+      ? previousSectionsRef.current.sections
+      : []
+    const next = chatSections(visibleMessages, prev)
+    previousSectionsRef.current = { sessionId: session?.sessionId, sections: next }
     return next
-  }, [visibleMessages])
+  }, [visibleMessages, session?.sessionId])
+  // Keep any turn that was ever observed live/streaming unchunked for the rest
+  // of this session visit so turn completion never swaps FlatList row keys.
+  const liveTurnKeysRef = useRef<{ sessionId: string | undefined; keys: Set<string> }>({
+    sessionId: undefined,
+    keys: new Set(),
+  })
+  const chunkCacheRef = useRef(new WeakMap<ChatSection, readonly DisplayChatSection[]>())
+  const isSessionRunning = session?.running === true
+  const chunkedSections = useMemo(() => {
+    if (liveTurnKeysRef.current.sessionId !== session?.sessionId) {
+      liveTurnKeysRef.current = { sessionId: session?.sessionId, keys: new Set() }
+    }
+    const liveKeys = liveTurnKeysRef.current.keys
+    for (let i = 0; i < visibleSections.length; i += 1) {
+      const sec = visibleSections[i]!
+      if (isSectionLive(sec, i === visibleSections.length - 1, isSessionRunning)) {
+        liveKeys.add(sec.key)
+      }
+    }
+    return chunkTranscriptSections(visibleSections, {
+      liveTurnKeys: liveKeys,
+      isSessionRunning,
+      backend: session?.backend,
+      parseBlocks: parseBlocksForChunk,
+      extractFiles: extractReferencedFiles,
+      cache: chunkCacheRef.current,
+    })
+  }, [visibleSections, isSessionRunning, session?.sessionId, session?.backend])
   const { uiBySection, visibleUiIds } = useSessionUiArtifacts({
     messages,
     visibleSections,
@@ -34,13 +74,6 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
     sessionId: session?.sessionId,
     backend: session?.backend,
   })
-
-  // The previousSectionsRef describes one transcript. Switching sessions must drop it,
-  // otherwise the first render of the next session would compare against a
-  // foreign list (harmless for correctness, wasteful for memory).
-  useEffect(() => {
-    previousSectionsRef.current = []
-  }, [session?.sessionId])
   // Queued prompts: the Host `inbox` projection is authoritative (includes
   // items queued from other devices); local `queued` rows are the fallback for
   // Hosts without projections. Rows in this state are hidden from the timeline.
@@ -75,5 +108,5 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
       typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).id === 'string') : []
     return { members, tasks } satisfies { members: TeamMemberSnapshot[]; tasks: TeamTaskSnapshot[] }
   }, [session?.projections?.values])
-  return { visibleMessages, visibleSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState }
+  return { visibleMessages, visibleSections, chunkedSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState }
 }

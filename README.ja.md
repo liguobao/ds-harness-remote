@@ -36,7 +36,7 @@ Harness は作業用パソコン上で動作し続け、ワークスペース、
 
 DeepSeek Harness デスクトップ版に対応しています。最新リリースをインストールしてください。
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
 ## 主な機能
 
@@ -72,9 +72,9 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 
 DeepSeek Harness Desktop の **Extensions / Plugin management** を開き、npm からのインストールを選択して、次のパッケージを入力します。
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
-インストール後に Desktop を再起動してください。公式の `dsh` ランチャーでも、`dsh plugin --profile desktop add -w ds-harness-remote@0.6.5` を実行して指定バージョンをインストールできます。
+インストール後に Desktop を再起動してください。公式の `dsh` ランチャーでも、`dsh plugin --profile desktop add -w ds-harness-remote@0.6.7` を実行して指定バージョンをインストールできます。
 
 DSH 0.2.2 以降では、npm からインストールしたプラグインのバージョン確認とワンクリック更新をプラグイン管理画面から行えます。ホットアップデートに失敗した場合、DSH は旧バージョンへの復元を試みます。GitHub／ローカル link からのインストールは、先に npm に切り替える必要があります。[オンライン更新の説明](docs/installation.md#online-updates-in-dsh-plugin-management)を参照してください。
 
@@ -101,7 +101,7 @@ DSH 0.2.2 以降では、npm からインストールしたプラグインのバ
 ## クイックスタート
 
 1. DeepSeek Harness のサイドバーから **Remote** を開きます。
-2. 知乎、GitHub、Google の認可ログイン、またはアカウントとパスワードでログインします。アカウント登録には招待コードが必要です。リポジトリの作者にメールで申請できます。
+2. 知乎、GitHub、Google のいずれかでログインします。
 3. 別のデバイスの DeepSeek Harness に同じプラグインをインストールし、手順 1〜2 と同じ方法でログインします。Remote Web、iOS、Android、DSH Go のクライアントなら、プラグインのインストールなしですぐに利用できます。
 4. オンラインの Host を選び、既存のワークスペースを選択するか、リモートのディレクトリを参照して開きます。
 
@@ -226,7 +226,7 @@ Remote プラグインをインストールしてログインした Harness イ�
 
 **対応する Harness のバージョンは？**
 
-現在の基準バージョンは `dsh-v0.2.2-rc.1` です。`dsh-v0.2.1-rc.5` と `0.2.0` rc.2 / rc.1 は同じ公式 carrier 上で引き続き互換です。[互換性ガイド](docs/compatibility.md)を参照してください。
+現在の基準バージョンは `dsh-v0.2.3-alpha.2` です。`dsh-v0.2.1-rc.5` と `0.2.0` rc.2 / rc.1 は同じ公式 carrier 上で引き続き互換です。[互換性ガイド](docs/compatibility.md)を参照してください。
 
 Host プラグイン、同梱の Remote クライアント、Android では、Harness `0.1.1-rc.2` の ApiProxy 対応を削除しました。公式の Typert Remote carrier を提供する Host を使用してください。ApiProxy のみを提供する Host や機能検出に対応しない旧 Host への接続は拒否され、フォールバックは行いません。
 
@@ -277,7 +277,7 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
 - [変更履歴](docs/CHANGELOG.md)
 - [プライバシーポリシー](docs/PRIVACY.md)
 - [Android ガイド](apps/android/README.md)
-- 現在の開発基準は `dsh-v0.2.2-rc.1` です。検証範囲は[互換性ガイド](docs/compatibility.md)に記載しています。
+- 現在の開発基準は `dsh-v0.2.3-alpha.2` です。検証範囲は[互換性ガイド](docs/compatibility.md)に記載しています。
 
 ## 関連リンク
 

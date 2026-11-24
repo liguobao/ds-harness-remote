@@ -36,7 +36,7 @@ scripts/     install.sh、bundle/WebRTC/场景/基准校验
 docs/        README.md、protocol.md、compatibility*.md、TODO.md、CHANGELOG.md、design/
 ```
 
-- **同名包过滤**：`packages/tui`（无 `scripts`）与 `packages/tui-plugin`（`test` 跑 `packages/tui-plugin/scripts/verify-bundle.mjs` 校验 16 个 `@deepseek-ai/*` 固定版本与 `inject` 契约）同名 `ds-harness-remote-tui`，`pnpm --filter` 须用 `./packages/tui` 或 `./packages/tui-plugin`。
+- **同名包过滤**：`packages/tui`（无 `scripts`）与 `packages/tui-plugin`（`test` 跑 `packages/tui-plugin/scripts/verify-bundle.mjs` 校验 组合包所需 `@deepseek-ai/*` 固定版本与 `inject` 契约）同名 `ds-harness-remote-tui`，`pnpm --filter` 须用 `./packages/tui` 或 `./packages/tui-plugin`。
 - **根包边界**：
   - 根 `package.json` 与 `dsh-plugin.json` 为 DSH Desktop GitHub 安装边界，须留 `dsh.bundle.patch`、Host/Client `exports`、CLI `bin` 与根 `cordis.patch.yml`。
   - **根 `package.json` 严禁设 `scripts`、`private: true` 或 `repository.directory`**。
@@ -51,7 +51,7 @@ docs/        README.md、protocol.md、compatibility*.md、TODO.md、CHANGELOG.m
 
 ## Development & Verification
 
-环境：Node.js `>=24.9`、`pnpm@9.15.4`（Android 原生另需 JDK 17 与 Android SDK）。
+环境：Node.js `^24.22.3 || >=26.13.1`、`pnpm@9.15.4`（Android 原生另需 JDK 17 与 Android SDK）。
 
 ```bash
 pnpm install --frozen-lockfile
