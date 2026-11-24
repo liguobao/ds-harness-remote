@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Archive, ArchiveRestore, ArrowRightLeft, ChevronDown, ChevronUp, Folder, ListTree, MessageSquare, Wifi, X } from 'lucide-react-native'
+import { ChevronDown, ChevronUp, Folder, Wifi, X } from 'lucide-react-native'
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings } from '../../locales/i18n'
@@ -19,30 +19,18 @@ export function SessionInfo({
   visible,
   session,
   workspace,
-  trajectory = false,
-  archived = false,
-  archiveDisabled = false,
   onClose,
   onDismiss,
   runAfterClose,
   onOpenWorkspace,
-  onToggleTrajectory,
-  onHandoff,
-  onToggleArchive,
 }: {
   visible: boolean
   session: RemoteSession
   workspace?: WorkspaceView
-  trajectory?: boolean
-  archived?: boolean
-  archiveDisabled?: boolean
   onClose: () => void
   onDismiss?: () => void
   runAfterClose?: (action: () => void) => void
   onOpenWorkspace: () => void
-  onToggleTrajectory?: () => void
-  onHandoff?: () => void
-  onToggleArchive?: () => void
 }) {
   const { colors } = useTheme()
   const device = useAppStore(state => state.selectedDevice)
@@ -101,20 +89,6 @@ export function SessionInfo({
             value={workspace?.title ?? strings.chat.workspaceNone}
             onPress={() => runAction(onOpenWorkspace)}
           />
-          {onToggleTrajectory !== undefined && (
-            <GroupRow
-              icon={trajectory ? MessageSquare : ListTree}
-              label={trajectory ? strings.trajectory.close : strings.trajectory.open}
-              onPress={() => runAction(onToggleTrajectory)}
-            />
-          )}
-          {onHandoff !== undefined && (
-            <GroupRow
-              icon={ArrowRightLeft}
-              label={strings.handoff.action}
-              onPress={() => runAction(onHandoff)}
-            />
-          )}
         </GroupCard>
 
         <GroupCard>
@@ -135,19 +109,6 @@ export function SessionInfo({
             </View>
           )}
         </GroupCard>
-
-        {onToggleArchive !== undefined && (
-          <GroupCard>
-            <GroupRow
-              first
-              icon={archived ? ArchiveRestore : Archive}
-              label={archived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession}
-              chevron={false}
-              disabled={archiveDisabled}
-              onPress={() => runAction(onToggleArchive)}
-            />
-          </GroupCard>
-        )}
       </ScrollView>
   </SheetModal>
 }

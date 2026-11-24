@@ -435,4 +435,155 @@ describe('useChatScroll progressive tail expansion state machine', () => {
     expect(state.displaySections).toHaveLength(TAIL_WINDOW_SIZE)
     expect(state.maintainVisibleContentPosition).toBeUndefined()
   })
+
+  it('suppresses auto-scroll while searching and expands tail window without anchoring on scrollToSectionKey', () => {
+    const session = makeSession('sess-search-1')
+    let messages = makeMessages(session.sessionId, 12)
+    let visibleSections = chatSections(messages)
+    let searchActive = true
+    const setTrajectory = vi.fn()
+    const scrollToIndex = vi.fn()
+    const scrollToOffset = vi.fn()
+    const scrollToEnd = vi.fn()
+
+    const render = () => {
+      const hook = useChatScroll({
+        session,
+        messages,
+        visibleMessages: messages,
+        visibleSections,
+        memoryScope: 'scope',
+        memoryKey: `scope:${session.sessionId}`,
+        panelOpen: false,
+        searchActive,
+        historyLoadingOlder: false,
+        busy: undefined,
+        setTrajectory,
+      })
+      ;(hook.listRef as { current: unknown }).current = {
+        scrollToIndex,
+        scrollToOffset,
+        scrollToEnd,
+      }
+      return hook
+    }
+
+    let state = settle(render)
+    flushRafs()
+    vi.advanceTimersByTime(50)
+    expect(scrollToEnd).not.toHaveBeenCalled()
+
+    // Streaming delta while searchActive=true must not yank user back to bottom.
+    messages = [
+      ...messages,
+      {
+        kind: 'message',
+        id: 'sess-search-1-stream',
+        sessionId: session.sessionId,
+        createdAt: 20_000,
+        role: 'assistant',
+        text: 'Streaming chunk while searching',
+        streaming: true,
+      },
+    ]
+    visibleSections = chatSections(messages)
+    state = settle(render)
+    flushRafs()
+    expect(scrollToEnd).not.toHaveBeenCalled()
+
+    // Jump to an early section outside the initial tail window (index 1 of 13).
+    const targetKey = visibleSections[1]!.key
+    state.scrollToSectionKey(targetKey)
+    state = settle(render)
+    expect(state.maintainVisibleContentPosition).toBeUndefined()
+    expect(state.displaySections.some(sec => sec.key === targetKey)).toBe(true)
+
+    flushRafs()
+    expect(scrollToIndex).toHaveBeenCalledWith({
+      index: state.displaySections.findIndex(sec => sec.key === targetKey),
+      animated: true,
+      viewPosition: 0.35,
+    })
+
+    // Bounded retries on onScrollToIndexFailed, cancelled cleanly by user drag.
+    scrollToIndex.mockClear()
+    state.onScrollToIndexFailed({ index: 2, averageItemLength: 120 })
+    expect(scrollToOffset).toHaveBeenCalledWith({ offset: 240, animated: false })
+    vi.advanceTimersByTime(60)
+    expect(scrollToIndex).toHaveBeenCalledTimes(1)
+
+    state.onScrollToIndexFailed({ index: 2, averageItemLength: 120 })
+    state.onScrollBeginDrag()
+    vi.advanceTimersByTime(60)
+    expect(scrollToIndex).toHaveBeenCalledTimes(1)
+
+    // Exiting search keeps the expanded window intact without shrinking jump.
+    const countBeforeExit = state.displaySections.length
+    searchActive = false
+    state = settle(render)
+    expect(state.displaySections).toHaveLength(countBeforeExit)
+  })
+
+  it('re-schedules search scrollToIndex when streaming updates cancel the pending rAF before it fires', () => {
+    const session = makeSession('sess-search-raf-cancel')
+    let messages = makeMessages(session.sessionId, 13)
+    let visibleSections = chatSections(messages)
+    const scrollToIndex = vi.fn()
+    const scrollToOffset = vi.fn()
+    const scrollToEnd = vi.fn()
+    const setTrajectory = vi.fn()
+
+    const render = () => {
+      const hook = useChatScroll({
+        session,
+        messages,
+        visibleMessages: messages,
+        visibleSections,
+        memoryScope: 'scope',
+        memoryKey: `scope:${session.sessionId}`,
+        panelOpen: false,
+        searchActive: true,
+        historyLoadingOlder: false,
+        busy: undefined,
+        setTrajectory,
+      })
+      hook.listRef.current = { scrollToIndex, scrollToOffset, scrollToEnd } as never
+      return hook
+    }
+
+    let state = settle(render)
+    flushRafs()
+    scrollToIndex.mockClear()
+
+    const targetKey = visibleSections[1]!.key
+    state.scrollToSectionKey(targetKey)
+    state = settle(render)
+    expect(state.displaySections.some(sec => sec.key === targetKey)).toBe(true)
+    expect(scrollToIndex).not.toHaveBeenCalled()
+
+    // Streaming delta arrives before the first rAF fires, cancelling the effect rAF.
+    messages = [
+      ...messages,
+      {
+        kind: 'message',
+        id: 'sess-search-raf-cancel-delta',
+        sessionId: session.sessionId,
+        createdAt: 30_000,
+        role: 'assistant',
+        text: 'Streaming update mid-jump',
+        streaming: true,
+      },
+    ]
+    visibleSections = chatSections(messages)
+    state = settle(render)
+    flushRafs()
+
+    const expectedIndex = state.displaySections.findIndex(sec => sec.key === targetKey)
+    expect(scrollToIndex).toHaveBeenCalledTimes(1)
+    expect(scrollToIndex).toHaveBeenCalledWith({
+      index: expectedIndex,
+      animated: true,
+      viewPosition: 0.35,
+    })
+  })
 })

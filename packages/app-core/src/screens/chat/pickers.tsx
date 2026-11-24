@@ -8,7 +8,6 @@ import type {
   ModelCatalogModel,
   ModelProviderGroup,
   PermissionSelect,
-  WorkspaceView,
 } from '../../types'
 import { Button, IconButton } from '../../ui/components'
 import { useTheme } from '../../ui/theme-context'
@@ -99,60 +98,6 @@ export function PermissionPicker({ visible, permissions, onClose, onPick, loadin
               <Pressable key={option.value} accessibilityRole="button" accessibilityState={{ selected: current }} onPress={() => onPick(option.value)} style={[styles.permissionOption, current && styles.modelOptionCurrent]}>
                 <View style={styles.permissionOptionCopy}><Text style={styles.permissionOptionName}>{permissionDisplayName(option.value, option.name)}</Text>{permissionDisplayDescription(option.value, option.description) !== undefined && <Text style={styles.permissionOptionDescription}>{permissionDisplayDescription(option.value, option.description)}</Text>}</View>
                 {current && <Check size={16} color={colors.primary} />}
-              </Pressable>
-            )
-          })}
-        </ScrollView>
-    </SheetModal>
-  )
-}
-
-export function WorkspacePicker({ visible, workspaces, currentSessionId, sessionBackend, busy, onClose, onPick, onManage }: {
-  visible: boolean
-  workspaces: WorkspaceView[]
-  currentSessionId: string
-  sessionBackend?: WorkspaceView['backend']
-  busy?: string
-  onClose: () => void
-  onPick: (workspace: WorkspaceView) => void
-  onManage?: () => void
-}) {
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  const listMaxHeight = usePickerListMaxHeight()
-  const options = workspaces.filter(workspace => (workspace.backend ?? 'harness') === (sessionBackend ?? 'harness'))
-  return (
-    <SheetModal visible={visible} onClose={onClose}>
-        <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectWorkspace}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
-        <Text style={styles.pickerHint}>{zhCN.chat.moveSessionHint}</Text>
-        <ScrollView
-          style={{ flexShrink: 1, maxHeight: listMaxHeight }}
-          contentContainerStyle={styles.modalListContent}
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-        >
-          {options.length === 0 ? (
-            <View style={styles.pickerEmpty}>
-              <Text style={styles.permissionOptionName}>{zhCN.chat.workspacePickerEmptyTitle}</Text>
-              <Text style={styles.permissionOptionDescription}>{zhCN.chat.workspacePickerEmptyBody}</Text>
-              {onManage !== undefined && <Button label={zhCN.chat.manageWorkspaces} onPress={() => { onClose(); onManage() }} />}
-            </View>
-          ) : options.map(workspace => {
-            const isCurrent = workspace.sessionIds.includes(currentSessionId)
-            return (
-              <Pressable
-                key={workspace.workspaceId}
-                accessibilityRole="button"
-                accessibilityState={{ selected: isCurrent, disabled: busy !== undefined }}
-                disabled={busy !== undefined}
-                onPress={() => onPick(workspace)}
-                style={[styles.permissionOption, isCurrent && styles.modelOptionCurrent, busy !== undefined && styles.plusMenuOptionDisabled]}
-              >
-                <View style={styles.permissionOptionCopy}>
-                  <Text style={styles.permissionOptionName}>{workspace.title}</Text>
-                  <Text style={styles.permissionOptionDescription} numberOfLines={1}>{workspace.path}</Text>
-                </View>
-                {isCurrent && <Check size={16} color={colors.primary} />}
               </Pressable>
             )
           })}

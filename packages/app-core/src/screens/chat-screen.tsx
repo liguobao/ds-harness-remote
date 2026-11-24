@@ -20,6 +20,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View
 } from 'react-native'
 import { Alert } from '../ui/alert'
@@ -50,7 +51,7 @@ import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { ChatImageProvider } from '../ui/chat-image'
 import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
 import { KeyboardInset } from '../ui/keyboard-inset'
-import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, openSafeExternalUrl } from '../ui/markdown'
+import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, openSafeExternalUrl, parseMarkdownBlocks } from '../ui/markdown'
 import { NavigationFocusProvider, useNavigationFocused } from '../ui/mention-popover'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -77,10 +78,19 @@ import {
 import { ChatTrajectory } from './chat-trajectory'
 import { ChatActionMenu } from './chat/action-menu'
 import { shouldLoadAgentPresets } from './chat/agent-presets-gate'
+import {
+  buildChatSearchIndex,
+  clampSearchIndex,
+  normalizeSearchQuery,
+  resolveInitialSearchIndex,
+  resolveNextSearchIndex,
+  type SearchHighlightState,
+} from './chat/chat-search'
 import { createModalActionQueue } from './chat/modal-action-queue'
 import { BACKEND_CHAT_TEXT_KEYS, ChatComposer } from './chat/composer'
 import { applyQuickPromptDraft, composerEditable, submitIntent } from './chat/composer-gate'
 import { ExpandedComposer } from './chat/expanded-composer'
+import { ChatHeaderMenuPopover, type HeaderPopoverView } from './chat/header-menu-popover'
 import {
   ChatImages,
   ChatItemView,
@@ -103,9 +113,9 @@ import {
   PromptsManager,
   PromptsPicker,
   ToolAccessPicker,
-  WorkspacePicker,
 } from './chat/pickers'
 import { sessionTitle } from './chat/presentation'
+import { ChatSearchBar } from './chat/search-bar'
 import { SessionActivityDock } from './chat/session-activity'
 import { HandoffDraftPreviewModal, HandoffModal, harnessDisplayName } from './chat/handoff-modal'
 import { SessionInfo } from './chat/session-info'
@@ -722,6 +732,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const reduceMotion = useReduceMotion()
   const session = useAppStore(state => state.selectedSession)
   const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
+  const pinnedSessionIds = useAppStore(state => state.pinnedSessionIds)
   // Legacy Hosts keep the 8s poll; event-capable Hosts use `$events` + `session/control`.
   // Keep this mounted in chat so subagent/running updates still arrive when list screens unmount.
   useLiveSessionStatus(session !== undefined && (session.backend ?? 'harness') === 'harness')
@@ -759,6 +770,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const createSession = useAppStore(state => state.createSession)
   const archiveSession = useAppStore(state => state.archiveSession)
   const unarchiveSession = useAppStore(state => state.unarchiveSession)
+  const pinSession = useAppStore(state => state.pinSession)
+  const unpinSession = useAppStore(state => state.unpinSession)
   const workspaces = useAppStore(state => state.workspaces)
   const sessions = useAppStore(state => state.sessions)
   const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
@@ -904,13 +917,20 @@ const ChatConversationPane = memo(function ChatConversationPane({
   useEffect(() => () => plusMenuActions.cancel(), [plusMenuActions])
   const sessionInfoActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
   useEffect(() => () => sessionInfoActions.cancel(), [sessionInfoActions])
+  const headerPopoverActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
+  useEffect(() => () => headerPopoverActions.cancel(), [headerPopoverActions])
   const fileViewerActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
   useEffect(() => () => fileViewerActions.cancel(), [fileViewerActions])
   const quoteFocusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const searchFocusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => {
     if (quoteFocusTimerRef.current !== undefined) {
       clearTimeout(quoteFocusTimerRef.current)
       quoteFocusTimerRef.current = undefined
+    }
+    if (searchFocusTimerRef.current !== undefined) {
+      clearTimeout(searchFocusTimerRef.current)
+      searchFocusTimerRef.current = undefined
     }
   }, [])
   const [sheetAnchor, setSheetAnchor] = useState<Rect>()
@@ -918,7 +938,13 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const [referenceChatOpen, setReferenceChatOpen] = useState(false)
   const [stagedReferences, setStagedReferences] = useState<ReferenceChatCandidate[]>([])
   const [modePickerOpen, setModePickerOpen] = useState(false)
-  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
+  const [headerPopoverView, setHeaderPopoverView] = useState<HeaderPopoverView | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const [activeMatchIndex, setActiveMatchIndex] = useState(-1)
+  const searchInputRef = useRef<TextInput>(null)
+  const prevSearchQueryRef = useRef('')
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
   const [toolsMode, setToolsMode] = useState<SessionToolsMode>()
   const [filesInitialPath, setFilesInitialPath] = useState<string>()
@@ -975,17 +1001,111 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const creatingSessionRef = useRef(false)
   const lastNewSessionTimeRef = useRef(0)
   const { visibleMessages, chunkedSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState } = useChatTranscript({ session, sessions, messages, hostId })
+  const searchActive = searchOpen && !trajectory
   const panelOpen = composerExpanded || plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
-    || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || previewFilePath !== undefined || trajectory || mentionType !== null
+    || headerPopoverView !== null || toolPickerOpen || toolsMode !== undefined || previewFilePath !== undefined || trajectory || mentionType !== null
     || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || sessionInfoOpen
     || pendingHandoffPreviewOpen
-  const { listRef, displaySections, maintainVisibleContentPosition, viewability, awayFromLatest, newContent, jumpToLatest, beginSendScroll,
+
+  useEffect(() => {
+    setHeaderPopoverView(null)
+    setSearchOpen(false)
+    setSearchQuery('')
+    setDebouncedSearchQuery('')
+    setActiveMatchIndex(-1)
+  }, [session?.sessionId, hostId])
+
+  useEffect(() => {
+    if (trajectory) {
+      setSearchOpen(false)
+      setSearchQuery('')
+      setDebouncedSearchQuery('')
+      setActiveMatchIndex(-1)
+    }
+  }, [trajectory])
+
+  useEffect(() => {
+    if (!searchOpen) {
+      setDebouncedSearchQuery('')
+      return
+    }
+    if (searchQuery.trim().length === 0) {
+      setDebouncedSearchQuery('')
+      return
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 120)
+    return () => clearTimeout(timer)
+  }, [searchOpen, searchQuery])
+
+  const { listRef, displaySections, maintainVisibleContentPosition, viewability, awayFromLatest, newContent, jumpToLatest, scrollToSectionKey, onScrollToIndexFailed, beginSendScroll,
     onListLayout, onListContentSizeChange, onListScroll, onListDragEnd, onListMomentumEnd,
     onScrollBeginDrag, onMomentumScrollBegin } = useChatScroll({
     session, messages, visibleMessages, visibleSections: chunkedSections, memoryScope, memoryKey,
-    panelOpen, historyLoadingOlder, busy, setTrajectory,
+    panelOpen, searchActive, historyLoadingOlder, busy, setTrajectory,
     drawerOpenRef, cancelScrollRef, onDrawerClosedRef,
   })
+
+  const normalizedSearchQuery = searchActive ? normalizeSearchQuery(debouncedSearchQuery) : ''
+  const searchIndex = useMemo(
+    () => (normalizedSearchQuery.length === 0 ? undefined : buildChatSearchIndex(chunkedSections, normalizedSearchQuery, parseMarkdownBlocks)),
+    [chunkedSections, normalizedSearchQuery],
+  )
+  const searchMatchCount = searchIndex?.matches.length ?? 0
+
+  useEffect(() => {
+    if (!searchActive || searchIndex === undefined) {
+      prevSearchQueryRef.current = normalizedSearchQuery
+      setActiveMatchIndex(-1)
+      return
+    }
+    if (prevSearchQueryRef.current !== normalizedSearchQuery) {
+      prevSearchQueryRef.current = normalizedSearchQuery
+      const initialIdx = resolveInitialSearchIndex(searchIndex.matches.length)
+      setActiveMatchIndex(initialIdx)
+      const initialMatch = initialIdx >= 0 ? searchIndex.matches[initialIdx] : undefined
+      if (initialMatch !== undefined) {
+        scrollToSectionKey(initialMatch.sectionKey)
+      }
+      return
+    }
+    setActiveMatchIndex(prev => clampSearchIndex(prev, searchIndex.matches.length))
+  }, [searchActive, normalizedSearchQuery, searchIndex, scrollToSectionKey])
+
+  const activeMatch = searchIndex !== undefined && activeMatchIndex >= 0 && activeMatchIndex < searchIndex.matches.length
+    ? searchIndex.matches[activeMatchIndex]
+    : undefined
+
+  const openSearchInChat = () => {
+    if (trajectory || visibleMessages.length === 0) return
+    setSearchOpen(true)
+    if (searchFocusTimerRef.current !== undefined) clearTimeout(searchFocusTimerRef.current)
+    searchFocusTimerRef.current = setTimeout(() => {
+      searchFocusTimerRef.current = undefined
+      searchInputRef.current?.focus()
+    }, Platform.OS === 'ios' ? 60 : 40)
+  }
+
+  const closeSearchInChat = () => {
+    if (searchFocusTimerRef.current !== undefined) {
+      clearTimeout(searchFocusTimerRef.current)
+      searchFocusTimerRef.current = undefined
+    }
+    Keyboard.dismiss()
+    setSearchOpen(false)
+    setSearchQuery('')
+    setDebouncedSearchQuery('')
+    setActiveMatchIndex(-1)
+  }
+
+  const stepSearch = (direction: 'prev' | 'next') => {
+    if (searchIndex === undefined || searchIndex.matches.length === 0) return
+    const nextIdx = resolveNextSearchIndex(activeMatchIndex, searchIndex.matches.length, direction)
+    setActiveMatchIndex(nextIdx)
+    const target = nextIdx >= 0 ? searchIndex.matches[nextIdx] : undefined
+    if (target !== undefined) scrollToSectionKey(target.sectionKey)
+  }
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1004,6 +1124,13 @@ const ChatConversationPane = memo(function ChatConversationPane({
   // Artifact changes must invalidate FlatList cells even when their section is
   // reused (a later turn can patch a card owned by an earlier turn).
   const renderChatItem = useCallback(({ item }: { item: DisplayChatSection }) => {
+    const sectionHighlight: SearchHighlightState | undefined = searchIndex !== undefined
+      && (searchIndex.countBySectionKey.get(item.key) ?? 0) > 0
+      ? {
+          query: searchIndex.query,
+          activeLocalIndex: activeMatch?.sectionKey === item.key ? activeMatch.localIndex : null,
+        }
+      : undefined
     if (item.kind === 'markdown-chunk') {
       const uiEntry = uiBySection.get(item.sourceKey)
       return (
@@ -1013,6 +1140,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
           updatedArtifacts={uiEntry?.pointers ?? EMPTY_UI_ARTIFACTS}
           availableUiIds={visibleUiIds}
           turnUsage={item.turn !== undefined ? turnUsageByTurn.get(item.turn) : undefined}
+          searchHighlight={sectionHighlight}
         />
       )
     }
@@ -1025,6 +1153,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
           availableUiIds={visibleUiIds}
           isTurnRunning={false}
           hiddenResponseItemId={item.hiddenResponseItemId}
+          searchHighlight={sectionHighlight}
           onApproval={respondApproval}
           onQuestion={respondQuestion}
         />
@@ -1039,13 +1168,14 @@ const ChatConversationPane = memo(function ChatConversationPane({
           availableUiIds={visibleUiIds}
           isTurnRunning={item.key === lastDisplaySectionKey && (session?.running === true || stopping)}
           turnUsage={turnUsageByTurn.get(item.turn)}
+          searchHighlight={sectionHighlight}
           onApproval={respondApproval}
           onQuestion={respondQuestion}
         />
       )
     }
-    return <ChatItemView item={item.item} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />
-  }, [lastDisplaySectionKey, respondApproval, respondQuestion, session?.running, stopping, turnUsageByTurn, uiBySection, visibleUiIds])
+    return <ChatItemView item={item.item} compact={false} searchHighlight={sectionHighlight} onApproval={respondApproval} onQuestion={respondQuestion} />
+  }, [activeMatch, lastDisplaySectionKey, respondApproval, respondQuestion, searchIndex, session?.running, stopping, turnUsageByTurn, uiBySection, visibleUiIds])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can
@@ -1082,7 +1212,14 @@ const ChatConversationPane = memo(function ChatConversationPane({
     { open: modelPickerOpen, close: () => setModelPickerOpen(false) },
     { open: modePickerOpen, close: () => setModePickerOpen(false) },
     { open: permissionPickerOpen, close: () => setPermissionPickerOpen(false) },
-    { open: workspacePickerOpen, close: () => setWorkspacePickerOpen(false) },
+    {
+      open: headerPopoverView !== null,
+      close: () => {
+        if (headerPopoverView === 'workspace-from-menu') setHeaderPopoverView('menu')
+        else setHeaderPopoverView(null)
+      },
+    },
+    { open: searchOpen, close: closeSearchInChat },
     { open: toolPickerOpen, close: () => setToolPickerOpen(false) },
     { open: promptEditing !== null, close: () => { setPromptEditing(null); setPromptsManagerOpen(true) } },
     { open: promptsManagerOpen, close: () => { setPromptsManagerOpen(false); setPromptsPickerOpen(true) } },
@@ -1625,7 +1762,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   }
 
   const pickWorkspace = (workspace: WorkspaceView) => {
-    setWorkspacePickerOpen(false)
+    setHeaderPopoverView(null)
     if (!connected) {
       Alert.alert(strings.chat.moveFailedTitle, strings.chat.offlineNotice)
       return
@@ -1635,9 +1772,10 @@ const ChatConversationPane = memo(function ChatConversationPane({
       void moveSessionToWorkspace(workspace)
       return
     }
+    const workspaceLabel = workspace.title?.trim() || workspace.path
     Alert.alert(
       strings.chat.moveStartedTitle,
-      strings.chat.moveStartedBody(workspace.title),
+      strings.chat.moveStartedBody(workspaceLabel),
       [
         { text: strings.common.cancel, style: 'cancel' },
         { text: strings.chat.moveStartedConfirm, onPress: () => void moveSessionToWorkspace(workspace) },
@@ -1661,9 +1799,41 @@ const ChatConversationPane = memo(function ChatConversationPane({
   }
 
   const sessionBackend = session.backend ?? 'harness'
+  const canPinCurrentSession = !isSubagentSession(session)
+    && (sessionBackend === 'harness' || isAcpManagedBackend(sessionBackend))
+  const sessionPinned = canPinCurrentSession && pinnedSessionIds.includes(session.sessionId)
   const canArchiveSession = !isSubagentSession(session)
     && (sessionBackend === 'harness' || sessionBackend === 'codex' || sessionBackend === 'opencode')
   const sessionArchived = sessionBackend === 'harness' && archivedSessionIds.includes(session.sessionId)
+
+  const runAfterHeaderPopover = (action: () => void) => {
+    const generation = sessionGenerationRef.current
+    headerPopoverActions.run(
+      () => setHeaderPopoverView(null),
+      () => {
+        if (sessionGenerationRef.current === generation) action()
+      },
+    )
+  }
+
+  const togglePinCurrentSession = () => {
+    if (!connected || busy !== undefined) return
+    const targetId = session.sessionId
+    const targetBackend = session.backend
+    if (sessionPinned) {
+      void unpinSession(targetId, targetBackend).then(ok => {
+        if (!ok && useAppStore.getState().error === undefined) {
+          Alert.alert(strings.sessions.unpinSession, strings.sessions.unpinFailed)
+        }
+      })
+      return
+    }
+    void pinSession(targetId, targetBackend).then(ok => {
+      if (!ok && useAppStore.getState().error === undefined) {
+        Alert.alert(strings.sessions.pinSession, strings.sessions.pinFailed)
+      }
+    })
+  }
 
   const toggleArchiveCurrentSession = () => {
     if (!connected || busy !== undefined) return
@@ -1816,47 +1986,62 @@ const ChatConversationPane = memo(function ChatConversationPane({
   ) : undefined
 
   const header = <>
-      <TopBar
-        title={sessionTitle(session)}
-        subtitle={sessionModels !== undefined ? (currentModelLabel || strings.chat.selectModel) : undefined}
-        subtitleLabel={strings.chat.selectModel}
-        subtitleAccessory={modelSelecting
-          ? <View style={{ width: 13, height: 13, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="small" color={colors.muted} style={{ transform: [{ scale: 0.65 }] }} /></View>
-          : undefined}
-        onSubtitlePress={sessionModels !== undefined ? () => { Keyboard.dismiss(); setMentionType(null); setModelPickerOpen(true) } : undefined}
-        titleLines={1}
-        titleAlign="between"
-        onBack={trajectory ? handleBack : (splitNav ? undefined : onOpenSessionsDrawer)}
-        backIcon={trajectory ? ArrowLeft : Menu}
-        backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
-        action={<>
-          {trajectory
-            ? (
-              <IconButton
-                label={strings.trajectory.close}
-                icon={MessageSquare}
-                dense
-                tint={colors.primary}
-                onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(false) }}
-              />
-            )
-            : (
-              <IconButton
-                label={strings.chat.newChat}
-                icon={OfficialMenuIcons.newChat}
-                dense
-                onPress={() => void startNewSession()}
-                disabled={(sessionBlank && !hasComposerContent) || newSessionPending || busy !== undefined}
-              />
-            )}
-          <IconButton
-            label={strings.sessions.moreActions}
-            icon={MoreHorizontal}
-            dense
-            onPress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
-          />
-        </>}
-      />
+      {searchActive ? (
+        <ChatSearchBar
+          inputRef={searchInputRef}
+          query={searchQuery}
+          hasActiveQuery={normalizedSearchQuery.length > 0}
+          matchCount={searchMatchCount}
+          activeIndex={clampSearchIndex(activeMatchIndex, searchMatchCount)}
+          onChangeQuery={setSearchQuery}
+          onPrev={() => stepSearch('prev')}
+          onNext={() => stepSearch('next')}
+          onSubmit={() => Keyboard.dismiss()}
+          onClose={closeSearchInChat}
+        />
+      ) : (
+        <TopBar
+          title={sessionTitle(session)}
+          subtitle={sessionModels !== undefined ? (currentModelLabel || strings.chat.selectModel) : undefined}
+          subtitleLabel={strings.chat.selectModel}
+          subtitleAccessory={modelSelecting
+            ? <View style={{ width: 13, height: 13, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="small" color={colors.muted} style={{ transform: [{ scale: 0.65 }] }} /></View>
+            : undefined}
+          onSubtitlePress={sessionModels !== undefined ? () => { Keyboard.dismiss(); setMentionType(null); setModelPickerOpen(true) } : undefined}
+          titleLines={1}
+          titleAlign="between"
+          onBack={trajectory ? handleBack : (splitNav ? undefined : onOpenSessionsDrawer)}
+          backIcon={trajectory ? ArrowLeft : Menu}
+          backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
+          action={<>
+            {trajectory
+              ? (
+                <IconButton
+                  label={strings.trajectory.close}
+                  icon={MessageSquare}
+                  dense
+                  tint={colors.primary}
+                  onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(false) }}
+                />
+              )
+              : (
+                <IconButton
+                  label={strings.chat.newChat}
+                  icon={OfficialMenuIcons.newChat}
+                  dense
+                  onPress={() => void startNewSession()}
+                  disabled={(sessionBlank && !hasComposerContent) || newSessionPending || busy !== undefined}
+                />
+              )}
+            <IconButton
+              label={strings.sessions.moreActions}
+              icon={MoreHorizontal}
+              dense
+              onPress={() => { Keyboard.dismiss(); setMentionType(null); setHeaderPopoverView('menu') }}
+            />
+          </>}
+        />
+      )}
       {!connected && (
         <Pressable style={styles.connectionBanner} accessibilityRole="button"
           accessibilityLabel={connectionRetrying ? strings.chat.reconnecting : strings.chat.offline}
@@ -1931,9 +2116,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
           onContentSizeChange={onListContentSizeChange}
           onScroll={onListScroll}
           onViewableItemsChanged={viewability}
-          onScrollToIndexFailed={info => {
-            listRef.current?.scrollToOffset({offset: Math.max(0, info.averageItemLength * info.index), animated: false})
-          }}
+          onScrollToIndexFailed={onScrollToIndexFailed}
           maintainVisibleContentPosition={maintainVisibleContentPosition}
           scrollEventThrottle={16}
           onScrollBeginDrag={onScrollBeginDrag}
@@ -1992,36 +2175,38 @@ const ChatConversationPane = memo(function ChatConversationPane({
           accessibilityLabel={strings.common.close}
         />
       )}
-      <View ref={composerAnchorRef} collapsable={false} style={styles.composerWrap}>
-        <View style={[styles.composerInner, readableColumn]}>
-        {connected && (session.backend === undefined || session.backend === 'harness' || Boolean(session.projections?.values?.todos) || Boolean(session.projections?.values?.goal) || childSessions.length > 0 || (teamState !== undefined && teamState.members.length > 0)) && (
-          <SessionActivityDock
-            session={session}
-            connectionGeneration={chatImageConnectionGeneration()}
-            childSessions={childSessions}
-            teamState={teamState}
-            sessions={sessions}
-            onOpenSession={targetSession => void openSession(targetSession)}
-          />
-        )}
-        {queueItems.length > 0 && <QueueDock items={queueItems} />}
-        <ComposerFocusGate disabled={composerExpanded}>
-          <ChatComposer
-            backend={session.backend} draft={draft} input={mentionInput}
-            quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
-            headerSlot={composerHeaderSlot}
-            replyActive={replyActive && !acpReadOnly} stopping={stopping} commandRunning={commandRunning}
-            hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
-            composerDisabled={composerDisabled} sendDisabled={sendDisabled}
-            compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
-            onOpenExpand={() => setComposerExpanded(true)}
-            onOpenActions={openPlusMenu}
-            onOpenPrompts={openPromptsPicker}
-            onSubmit={() => void submit()} onStop={stopOrCancel}
-          />
-        </ComposerFocusGate>
+      {!searchActive && (
+        <View ref={composerAnchorRef} collapsable={false} style={styles.composerWrap}>
+          <View style={[styles.composerInner, readableColumn]}>
+          {connected && (session.backend === undefined || session.backend === 'harness' || Boolean(session.projections?.values?.todos) || Boolean(session.projections?.values?.goal) || childSessions.length > 0 || (teamState !== undefined && teamState.members.length > 0)) && (
+            <SessionActivityDock
+              session={session}
+              connectionGeneration={chatImageConnectionGeneration()}
+              childSessions={childSessions}
+              teamState={teamState}
+              sessions={sessions}
+              onOpenSession={targetSession => void openSession(targetSession)}
+            />
+          )}
+          {queueItems.length > 0 && <QueueDock items={queueItems} />}
+          <ComposerFocusGate disabled={composerExpanded}>
+            <ChatComposer
+              backend={session.backend} draft={draft} input={mentionInput}
+              quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
+              headerSlot={composerHeaderSlot}
+              replyActive={replyActive && !acpReadOnly} stopping={stopping} commandRunning={commandRunning}
+              hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
+              composerDisabled={composerDisabled} sendDisabled={sendDisabled}
+              compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
+              onOpenExpand={() => setComposerExpanded(true)}
+              onOpenActions={openPlusMenu}
+              onOpenPrompts={openPromptsPicker}
+              onSubmit={() => void submit()} onStop={stopOrCancel}
+            />
+          </ComposerFocusGate>
+          </View>
         </View>
-      </View>
+      )}
       <ExpandedComposer
         visible={composerExpanded}
         onClose={() => setComposerExpanded(false)}
@@ -2054,7 +2239,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
             permissionDisabled={permissionSelecting || (replyActive && !hasComposerContent)}
             permissionLabel={permissions === undefined ? undefined : permissionDisplayName(permissions.currentValue, currentPermission?.name)}
             onReferenceChat={(session.backend ?? 'harness') === 'harness' ? () => setReferenceChatOpen(true) : undefined}
-            onOpenWorkspace={() => setWorkspacePickerOpen(true)} onOpenMode={() => setModePickerOpen(true)}
+            onOpenWorkspace={() => setHeaderPopoverView('workspace-standalone')} onOpenMode={() => setModePickerOpen(true)}
             onOpenTools={() => setToolPickerOpen(true)} onOpenPermissions={() => setPermissionPickerOpen(true)}
           />
         )}
@@ -2128,6 +2313,40 @@ const ChatConversationPane = memo(function ChatConversationPane({
           <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
         )}
       />
+      <ChatHeaderMenuPopover
+        view={headerPopoverView}
+        onChangeView={setHeaderPopoverView}
+        onDismiss={headerPopoverActions.onDismiss}
+        runAfterClose={runAfterHeaderPopover}
+        sessionTitle={sessionTitle(session)}
+        sessionId={session.sessionId}
+        workspaces={workspaces}
+        sessionBackend={session.backend}
+        busy={busy}
+        connected={connected}
+        canSearch={!trajectory && visibleMessages.length > 0}
+        canPin={canPinCurrentSession}
+        isPinned={sessionPinned}
+        trajectory={trajectory}
+        canHandoff={canHandoffCurrentSession}
+        canArchive={canArchiveSession}
+        archived={sessionArchived}
+        onSearchInChat={openSearchInChat}
+        onTogglePin={togglePinCurrentSession}
+        onToggleTrajectory={() => {
+          Keyboard.dismiss()
+          setMentionType(null)
+          setTrajectory(value => !value)
+        }}
+        onHandoff={() => onOpenHandoff(session, currentWorkspace)}
+        onOpenSessionInfo={() => setSessionInfoOpen(true)}
+        onToggleArchive={toggleArchiveCurrentSession}
+        onPickWorkspace={pickWorkspace}
+        onManageWorkspaces={() => {
+          if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
+          else onOpenSessionsDrawer()
+        }}
+      />
       <LazySheetHost
         visible={sessionInfoOpen}
         render={() => (
@@ -2135,9 +2354,6 @@ const ChatConversationPane = memo(function ChatConversationPane({
             visible={sessionInfoOpen}
             session={session}
             workspace={currentWorkspace}
-            trajectory={trajectory}
-            archived={sessionArchived}
-            archiveDisabled={!connected || busy !== undefined}
             onClose={closeSessionInfo}
             onDismiss={sessionInfoActions.onDismiss}
             runAfterClose={runAfterSessionInfo}
@@ -2145,20 +2361,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
               if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
               else onOpenSessionsDrawer()
             }}
-            onToggleTrajectory={() => {
-              Keyboard.dismiss()
-              setMentionType(null)
-              setTrajectory(value => !value)
-            }}
-            onHandoff={canHandoffCurrentSession ? () => onOpenHandoff(session, currentWorkspace) : undefined}
-            onToggleArchive={canArchiveSession ? toggleArchiveCurrentSession : undefined}
           />
-        )}
-      />
-      <LazySheetHost
-        visible={workspacePickerOpen}
-        render={() => (
-          <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); onOpenSessionsDrawer() }} />
         )}
       />
       <LazySheetHost

@@ -16,11 +16,19 @@ import { resolveChatMetrics } from './theme'
 import { monoFontFamily } from './platform-style'
 import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE, partitionHighlightedCodeTokens, type SyntaxPalette, type SyntaxToken, type SyntaxTokenKind } from './syntax-highlight'
 import { IconWrapFill, IconNowrapFill, IconCopyOutline, IconCheckOutline } from './dsh-icons'
+import { findMatchRanges, type TextMatchRange } from '../screens/chat/chat-search'
+
+export interface CodeBlockSearchHighlight {
+  query: string
+  activeLocalIndex: number | null
+  baseIndex: number
+}
 
 export interface CodeBlockProps {
   code: string
   language?: string
   style?: StyleProp<ViewStyle>
+  searchHighlight?: CodeBlockSearchHighlight
 }
 
 const COPY_RESET_MS = 2000
@@ -96,11 +104,103 @@ function renderCoalescedCodeTokens(tokens: readonly SyntaxToken[], palette: Synt
   return out
 }
 
-function splitHighlightedLines(tokens: readonly SyntaxToken[], palette: SyntaxPalette): React.ReactNode[][] {
+function renderHighlightedLineTokens(
+  lineTokens: readonly SyntaxToken[],
+  ranges: readonly TextMatchRange[],
+  baseIndex: number,
+  activeLocalIndex: number | null,
+  palette: SyntaxPalette,
+  scheme: 'light' | 'dark',
+): React.ReactNode[] {
+  const tokenStyles = getPaletteTokenStyles(palette)
+  if (ranges.length === 0) {
+    return lineTokens.map((token, i) =>
+      token.kind === 'plain' ? token.text : <Text key={i} style={tokenStyles[token.kind]}>{token.text}</Text>,
+    )
+  }
+  const activeBg = '#F59E0B'
+  const inactiveBg = scheme === 'dark' ? 'rgba(250, 204, 21, 0.34)' : 'rgba(253, 224, 71, 0.52)'
+  const out: React.ReactNode[] = []
+  let pos = 0
+  let rangeIdx = 0
+  let keyCounter = 0
+  for (let i = 0; i < lineTokens.length; i += 1) {
+    const token = lineTokens[i]!
+    const tokenEnd = pos + token.text.length
+    let cursor = pos
+    while (rangeIdx < ranges.length && ranges[rangeIdx]!.end <= cursor) {
+      rangeIdx += 1
+    }
+    while (cursor < tokenEnd) {
+      const range = rangeIdx < ranges.length ? ranges[rangeIdx] : undefined
+      if (range === undefined || range.start >= tokenEnd) {
+        const chunk = token.text.slice(cursor - pos)
+        if (chunk.length > 0) {
+          out.push(token.kind === 'plain' ? chunk : <Text key={keyCounter++} style={tokenStyles[token.kind]}>{chunk}</Text>)
+        }
+        cursor = tokenEnd
+      } else if (cursor < range.start) {
+        const end = Math.min(tokenEnd, range.start)
+        const chunk = token.text.slice(cursor - pos, end - pos)
+        if (chunk.length > 0) {
+          out.push(token.kind === 'plain' ? chunk : <Text key={keyCounter++} style={tokenStyles[token.kind]}>{chunk}</Text>)
+        }
+        cursor = end
+      } else {
+        const end = Math.min(tokenEnd, range.end)
+        const chunk = token.text.slice(cursor - pos, end - pos)
+        const isActive = activeLocalIndex === baseIndex + rangeIdx
+        if (chunk.length > 0) {
+          out.push(
+            <Text
+              key={keyCounter++}
+              style={[
+                tokenStyles[token.kind],
+                {
+                  backgroundColor: isActive ? activeBg : inactiveBg,
+                  color: isActive ? '#0F0F0F' : (token.kind === 'plain' ? palette.plain : palette[token.kind]),
+                  fontWeight: isActive ? '700' : undefined,
+                },
+              ]}
+            >
+              {chunk}
+            </Text>,
+          )
+        }
+        cursor = end
+        if (cursor >= range.end) rangeIdx += 1
+      }
+    }
+    pos = tokenEnd
+  }
+  return out
+}
+
+function splitHighlightedLines(
+  tokens: readonly SyntaxToken[],
+  palette: SyntaxPalette,
+  searchHighlight?: CodeBlockSearchHighlight,
+  scheme: 'light' | 'dark' = 'light',
+): React.ReactNode[][] {
   const tokenStyles = getPaletteTokenStyles(palette)
   const tokenChunks = partitionHighlightedCodeTokens(tokens)
+  let lineBase = searchHighlight?.baseIndex ?? 0
   return tokenChunks.map(chunkTokens => {
     if (chunkTokens.length === 0) return [' ']
+    if (searchHighlight !== undefined) {
+      const lineText = chunkTokens.map(t => t.text).join('')
+      const ranges = findMatchRanges(lineText, searchHighlight.query)
+      const nodes = renderHighlightedLineTokens(
+        chunkTokens,
+        ranges,
+        lineBase,
+        searchHighlight.activeLocalIndex,
+        palette,
+        scheme,
+      )
+      lineBase += ranges.length
+      return nodes
+    }
     const nodes: React.ReactNode[] = []
     for (let i = 0; i < chunkTokens.length; i += 1) {
       const token = chunkTokens[i]!
@@ -120,10 +220,11 @@ function splitHighlightedLines(tokens: readonly SyntaxToken[], palette: SyntaxPa
 
 const ANDROID_SPLIT_LINE_TOKEN_THRESHOLD = 24
 
-export const CodeBlockView = memo(function CodeBlockView({ code, language, style }: CodeBlockProps) {
+export const CodeBlockView = memo(function CodeBlockView({ code, language, style, searchHighlight }: CodeBlockProps) {
   const { colors, scheme, appearance } = useTheme()
   const metrics = resolveChatMetrics(appearance)
   const useDarkCode = appearance.codeTheme === 'dark' || (appearance.codeTheme === 'auto' && scheme === 'dark')
+  const codeScheme: 'light' | 'dark' = useDarkCode ? 'dark' : 'light'
   const palette = useDarkCode ? DARK_CODE_PALETTE : LIGHT_CODE_PALETTE
   const [wrap, setWrap] = useState<boolean>(false)
   const [copied, setCopied] = useState<boolean>(false)
@@ -133,13 +234,22 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
   const label = (language || 'code').toLowerCase()
   const tokens = React.useMemo(() => highlightCodeCached(cleanCode, language), [cleanCode, language])
   const splitByLine = Platform.OS === 'android' && tokens.length > ANDROID_SPLIT_LINE_TOKEN_THRESHOLD
-  const tokenChildren = React.useMemo(
-    () => (splitByLine ? null : renderCoalescedCodeTokens(tokens, palette)),
-    [splitByLine, tokens, palette],
-  )
+  const tokenChildren = React.useMemo(() => {
+    if (splitByLine) return null
+    if (searchHighlight === undefined) return renderCoalescedCodeTokens(tokens, palette)
+    const ranges = findMatchRanges(cleanCode, searchHighlight.query)
+    return renderHighlightedLineTokens(
+      tokens,
+      ranges,
+      searchHighlight.baseIndex,
+      searchHighlight.activeLocalIndex,
+      palette,
+      codeScheme,
+    )
+  }, [splitByLine, tokens, palette, searchHighlight, cleanCode, codeScheme])
   const highlightedLines = React.useMemo(
-    () => (splitByLine ? splitHighlightedLines(tokens, palette) : null),
-    [splitByLine, tokens, palette],
+    () => (splitByLine ? splitHighlightedLines(tokens, palette, searchHighlight, codeScheme) : null),
+    [splitByLine, tokens, palette, searchHighlight, codeScheme],
   )
 
   useEffect(() => {
