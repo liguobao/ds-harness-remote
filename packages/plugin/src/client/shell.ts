@@ -11,6 +11,7 @@ export function installStyle(clientModuleId: string): () => void {
     '.dshRemoteWebFooter a{color:inherit;text-decoration:none;text-underline-offset:2px;pointer-events:auto;white-space:nowrap}',
     '.dshRemoteWebFooter a:is(:hover,:focus-visible){color:var(--dsw-alias-brand-primary,LinkText);text-decoration:underline}',
     '.dshRemoteWebFooter button{appearance:none;display:inline-grid;place-items:center;width:24px;height:24px;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;cursor:pointer;pointer-events:auto}.dshRemoteWebFooter button:hover{background:transparent;color:var(--dsw-alias-label-primary)}.dshRemoteWebFooter button:focus-visible{outline:2px solid currentColor;outline-offset:-2px}',
+    '@media(any-pointer:coarse){.dshRemoteWebFooter button{width:44px;height:44px}.dshRemoteWebFooter button svg{width:14px;height:14px}}',
     '.dshRemoteConnectedPanelHeader{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;margin-bottom:6px}.dshRemoteConnectedPanelHeader .dshRemoteConnectedPanelTitle{margin-bottom:0}',
     '.dshRemoteHostNameLine{display:flex;align-items:center;flex-wrap:wrap;gap:8px}',
     '.dshRemoteServerNotice{font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}.dshRemoteServerNotice.isWarning{color:var(--dsw-alias-state-warning-primary,#946200)}.dshRemoteServerNotice.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteServerNotice.isRestored{color:var(--dsw-alias-state-success-primary)}',
