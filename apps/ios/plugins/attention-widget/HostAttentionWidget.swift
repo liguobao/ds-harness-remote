@@ -40,7 +40,8 @@ struct HostAttentionWidget: Widget {
 
   private func badge(_ state: HostAttentionAttributes.ContentState) -> some View {
     let pending = state.pendingApprovals + state.pendingQuestions
-    return Text(verbatim: String(pending > 0 ? pending : state.runningSessions))
+    let remaining = state.runningSessions > 0 ? state.runningSessions : state.completedUnread
+    return Text(verbatim: String(pending > 0 ? pending : remaining))
       .foregroundStyle(pending > 0 ? Color.orange : Color.primary)
       .monospacedDigit()
   }

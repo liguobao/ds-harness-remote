@@ -1,4 +1,4 @@
-import { RemoteClientError, type RemoteClientCore, type RemoteRpcOptions } from '@dsh-remote/client-core'
+import { canReplayOversizedResponse, RemoteClientError, type RemoteClientCore, type RemoteRpcOptions } from '@dsh-remote/client-core'
 import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_HARNESS_API_TRANSFER_BYTES,
@@ -133,7 +133,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
           ? await this.client.rpc<unknown>('harness.remote.call', request, signal)
           : await this.client.rpc<unknown>('harness.remote.call', request, signal, rpcOptions)
       } catch (error) {
-        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE')) throw error
+        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE') || !canReplayOversizedResponse(endpoint)) throw error
         response = await this.callTransferred(encoded, signal, rpcOptions)
       }
     }

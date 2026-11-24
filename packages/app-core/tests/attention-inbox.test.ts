@@ -27,6 +27,7 @@ import {
   type LiveSurfaceForegroundBridge,
 } from '../src/services/live-surface'
 import {
+  deriveAttentionDigest,
   deriveLegacyAttentionItems,
   resolveHostAttentionOverview,
   selectAttentionCounts,
@@ -478,6 +479,35 @@ describe('attentionStore', () => {
 })
 
 describe('live-surface unified bridge', () => {
+  it('clears a queued Android task when the Host disconnects before the first update settles', async () => {
+    const calls: string[] = []
+    const foreground: LiveSurfaceForegroundBridge = {
+      notifyTask: vi.fn(),
+      async updateLiveTask() { calls.push('update') },
+      async clearLiveTask() { calls.push('clear') },
+    }
+    const controller = createLiveSurfaceController({ foreground, getReactNative: () => ({ Platform: { OS: 'android' } }) })
+    const snapshot = { hostId: 'host', connected: true, notificationsEnabled: true, appState: 'active',
+      items: [makeItem({ id: 'run', sessionId: 's', status: 'running' })], digest: null }
+    await Promise.all([controller.sync(snapshot), controller.sync({ ...snapshot, connected: false })])
+    expect(calls).toEqual(['update', 'clear'])
+  })
+
+  it('includes a failed unread turn in the local digest and iOS activity with or without that digest', async () => {
+    const items = [makeItem({ id: 'fail', sessionId: 's', status: 'failed_unread' })]
+    const digest = deriveAttentionDigest(items, 1)
+    expect(digest).toMatchObject({ completedUnread: 1, urgentKind: 'turn_failed' })
+    for (const snapshotDigest of [null, digest]) {
+      const update = vi.fn()
+      const controller = createLiveSurfaceController({ getReactNative: () => ({
+        Platform: { OS: 'ios' }, NativeModules: { DshRemoteLiveActivity: { update } },
+      }) })
+      await controller.sync({ hostId: 'host', connected: true, notificationsEnabled: true, appState: 'background',
+        items, digest: snapshotDigest })
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({ completedUnread: 1 }), expect.any(String))
+    }
+  })
+
   it('updates Android LiveTaskV2 with extraCount & deep link, deduplicates alerts, and clears alerts when approvals resolve', async () => {
     const foreground: LiveSurfaceForegroundBridge = {
       notifyTask: vi.fn(),

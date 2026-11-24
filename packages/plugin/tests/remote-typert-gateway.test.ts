@@ -93,6 +93,16 @@ describe('RemoteTypertGateway', () => {
     ])
   }, 15000)
 
+  it('does not resubmit an executed command when its response is too large', async () => {
+    const error = Object.assign(new Error('response too large'), { code: 'RESPONSE_TOO_LARGE' })
+    const rpc = vi.fn().mockRejectedValue(error)
+    const client = { rpc } as unknown as RemoteClientCore
+    await expect(new RemoteTypertGateway(client).dispatch(
+      'commands/execute', { args: {} }, new AbortController().signal,
+    )).rejects.toBe(error)
+    expect(rpc).toHaveBeenCalledTimes(1)
+  })
+
   it('retries an oversized direct response through the bounded transfer path', async () => {
     const methods: string[] = []
     const rpc = vi.fn(async (method: string, params: unknown) => {
@@ -758,7 +768,7 @@ describe('RemoteTypertGateway', () => {
         },
       },
       {
-        name: 'transferred speech/transcribe fallback passes 3-minute timeout to commit',
+        name: 'transferred speech/transcribe large request passes 3-minute timeout to commit',
         run: async () => {
           const rpc = vi.fn(async (method: string) => {
             if (method === 'harness.remote.call') {
@@ -771,11 +781,11 @@ describe('RemoteTypertGateway', () => {
             return { accepted: true }
           })
           const signal = new AbortController().signal
-          const payload = { args: { request: { audioBase64: 'UklGRg==' } } }
+          const payload = { args: { request: { audioBase64: 'A'.repeat(2 * 1024 * 1024) } } }
           await expect(
             new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).dispatch('speech/transcribe', payload, signal),
           ).resolves.toEqual({ ok: true, value: { text: 'hello' } })
-          expect(rpc).toHaveBeenCalledWith(
+          expect(rpc).not.toHaveBeenCalledWith(
             'harness.remote.call',
             { endpoint: 'speech/transcribe', payload },
             signal,

@@ -872,6 +872,14 @@ describe('RemoteTypertGateway', () => {
     await closing
   })
 
+  it('preserves the original size error after a mutation without submitting a second call', async () => {
+    const error = Object.assign(new Error('response too large'), { code: 'RESPONSE_TOO_LARGE' })
+    const rpc = vi.fn().mockRejectedValue(error)
+    const client = { rpc } as unknown as RemoteClientCore
+    await expect(new RemoteTypertGateway(client).call('session/prompt', { args: {} })).rejects.toBe(error)
+    expect(rpc).toHaveBeenCalledTimes(1)
+  })
+
   it('applies a 3-minute default timeout to speech/transcribe with upload headroom while honoring explicit overrides', async () => {
     await runScenarios(
       [

@@ -224,7 +224,7 @@ export function createLiveSurfaceController(
   }
 
   const clearSurfaces = (hostId?: string): Promise<void> => {
-    if (lastLiveKey === '' || (lastLiveKey === undefined && !ios)) return Promise.resolve()
+    if (lastLiveKey === '' || (lastLiveKey === undefined && !ios)) return tail
     lastLiveKey = ''
     return enqueue(async () => {
       await fgs.clearLiveTask().catch(() => undefined)
@@ -324,7 +324,7 @@ export function createLiveSurfaceController(
       }
 
       if (ios) {
-        const summary = digest ?? counts
+        const summary = digest ?? { ...counts, completedUnread: counts.completedUnread + counts.failedUnread }
         if (!notificationsEnabled || !(summary.pendingApprovals || summary.pendingQuestions || summary.runningSessions || summary.completedUnread)) {
           return clearSurfaces(previousHost === hostId ? hostId : undefined)
         }
@@ -386,38 +386,40 @@ export function createLiveSurfaceController(
       }
       const nextKey = JSON.stringify(payload)
       if (nextKey === lastLiveKey) {
-        return clearAlertsPromise ?? Promise.resolve()
+        return clearAlertsPromise ?? tail
       }
 
-      const targetKey = nextKey
+      lastLiveKey = nextKey
       return enqueue(async () => {
         if (disposed) return
-        if (typeof fgs.updateLiveTaskV2 === 'function') {
-          await fgs.updateLiveTaskV2(
-            payload.hostId,
-            payload.deepLinkUrl,
-            payload.badge,
-            payload.title,
-            payload.statusText,
-            payload.isWaitingInput,
-            payload.updatedAtMs,
-            payload.summary,
-            payload.extraCount,
-          )
-        } else {
-          await fgs.updateLiveTask(
-            payload.hostId,
-            topActive.sessionId,
-            payload.badge,
-            payload.title,
-            payload.statusText,
-            payload.isWaitingInput,
-            payload.updatedAtMs,
-            payload.summary,
-          )
+        try {
+          if (typeof fgs.updateLiveTaskV2 === 'function') {
+            await fgs.updateLiveTaskV2(
+              payload.hostId,
+              payload.deepLinkUrl,
+              payload.badge,
+              payload.title,
+              payload.statusText,
+              payload.isWaitingInput,
+              payload.updatedAtMs,
+              payload.summary,
+              payload.extraCount,
+            )
+          } else {
+            await fgs.updateLiveTask(
+              payload.hostId,
+              topActive.sessionId,
+              payload.badge,
+              payload.title,
+              payload.statusText,
+              payload.isWaitingInput,
+              payload.updatedAtMs,
+              payload.summary,
+            )
+          }
+        } catch {
+          if (lastLiveKey === nextKey) lastLiveKey = undefined
         }
-
-        lastLiveKey = targetKey
       })
     },
 

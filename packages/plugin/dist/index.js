@@ -66002,6 +66002,54 @@ var RemoteClientError = class extends Error {
 };
 
 // packages/client-core/dist/remote-gateway.js
+var replayableReads = /* @__PURE__ */ new Set([
+  "agentPresets/list",
+  "agentPresets/read",
+  "commands/list",
+  "credentials/describe",
+  "directoryPicker/list",
+  "fileReferences/list",
+  "job/list",
+  "llm/listConfigurableProviders",
+  "llm/listProviders",
+  "messageFeedback/list",
+  "permissionPresets/catalog",
+  "pluginInventory/list",
+  "pluginManager/listBundles",
+  "pluginManager/listPlugins",
+  "pluginManager/listVersions",
+  "pluginManager/readBundleDetail",
+  "schedule/list",
+  "schedule/catalog",
+  "schedule/history",
+  "session/attachment",
+  "session/list",
+  "session/events",
+  "session/history",
+  "session/page",
+  "session/projections",
+  "session/search",
+  "session/modelCatalog",
+  "sessionReferenceResolver/candidates",
+  "settings/describe",
+  "skills/list",
+  "speech/catalog",
+  "subagent/history",
+  "subagents/list",
+  "workspaceFiles/list",
+  "workspaceFiles/stat",
+  "workspaceFiles/read",
+  "workspaceFiles/readBytes",
+  "workspaceFiles/readAll",
+  "workspaceFiles/readRelated",
+  "workspaceFiles/search",
+  "workspaceFiles/changes",
+  "officeKit/render",
+  "officeToPdf/render"
+]);
+function canReplayOversizedResponse(endpoint) {
+  return replayableReads.has(endpoint);
+}
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
 var SPEECH_TRANSCRIBE_TIMEOUT_MS = 3 * 6e4;
 function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id7, capability) {
@@ -85650,7 +85698,7 @@ var RemoteTypertGateway2 = class {
       try {
         response = rpcOptions === void 0 ? await this.client.rpc("harness.remote.call", request2, signal) : await this.client.rpc("harness.remote.call", request2, signal, rpcOptions);
       } catch (error62) {
-        if (!hasErrorCode(error62, "RESPONSE_TOO_LARGE")) throw error62;
+        if (!hasErrorCode(error62, "RESPONSE_TOO_LARGE") || !canReplayOversizedResponse(endpoint)) throw error62;
         response = await this.callTransferred(encoded, signal, rpcOptions);
       }
     }

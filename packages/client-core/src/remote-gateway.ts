@@ -18,6 +18,25 @@ import {
 } from '@dsh-remote/protocol'
 import type { RemoteClientCore, RemoteRpcOptions } from './index.js'
 
+// A size error is returned after the Host has already executed the endpoint.
+const replayableReads = new Set([
+  'agentPresets/list', 'agentPresets/read', 'commands/list', 'credentials/describe',
+  'directoryPicker/list', 'fileReferences/list', 'job/list', 'llm/listConfigurableProviders',
+  'llm/listProviders', 'messageFeedback/list', 'permissionPresets/catalog', 'pluginInventory/list',
+  'pluginManager/listBundles', 'pluginManager/listPlugins', 'pluginManager/listVersions',
+  'pluginManager/readBundleDetail', 'schedule/list', 'schedule/catalog', 'schedule/history',
+  'session/attachment', 'session/list', 'session/events', 'session/history', 'session/page', 'session/projections',
+  'session/search', 'session/modelCatalog', 'sessionReferenceResolver/candidates', 'settings/describe',
+  'skills/list', 'speech/catalog', 'subagent/history', 'subagents/list',
+  'workspaceFiles/list', 'workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes',
+  'workspaceFiles/readAll', 'workspaceFiles/readRelated', 'workspaceFiles/search', 'workspaceFiles/changes',
+  'officeKit/render', 'officeToPdf/render',
+])
+
+export function canReplayOversizedResponse(endpoint: string): boolean {
+  return replayableReads.has(endpoint)
+}
+
 const DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024
 const REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16] as const
 const REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17] as const
@@ -245,7 +264,7 @@ export class RemoteTypertGateway {
       try {
         response = await this.client.rpc<unknown>('harness.remote.call', request, activeSignal, directOptions)
       } catch (error) {
-        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE')) throw error
+        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE') || !canReplayOversizedResponse(endpoint)) throw error
         response = await this.callTransferred(encoded, activeSignal, options, defaultCommitTimeoutMs)
       }
     }

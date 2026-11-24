@@ -430,7 +430,7 @@ export function deriveAttentionDigest(
     pendingApprovals: capCount(counts.pendingApprovals),
     pendingQuestions: capCount(counts.pendingQuestions),
     runningSessions: capCount(counts.runningSessions),
-    completedUnread: capCount(counts.completedUnread),
+    completedUnread: capCount(counts.completedUnread + counts.failedUnread),
     urgentKind,
     urgency,
     updatedAt: Math.max(0, Math.floor(now)),

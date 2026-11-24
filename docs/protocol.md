@@ -1283,8 +1283,7 @@ permission id、decision enum 或额外响应状态机。
 288 MiB 总大小、严格有序/恰好一次、canonical base64、每连接输入/输出各两个 transfer 和
 2 分钟 idle 清理。重组后的 JSON 必须仍是
 `{ endpoint, payload }`，并再次经过同一固定 endpoint allowlist；它不能绕过 Gateway 或
-扩展可调用业务面。直接调用若收到 `RESPONSE_TOO_LARGE`，Client 必须以相同请求自动重试一次
-该分块路径；其他错误不得触发隐式重试。
+扩展可调用业务面。Host 执行端点后才检查响应大小。直接调用收到 `RESPONSE_TOO_LARGE` 时，Client 仅可对明确列为可重放的只读端点通过分块路径重试一次。写操作、命令、审批和未知端点必须返回原错误，避免重复执行。其他错误不得触发隐式重试。
 
 输入 open 为 `{transferId,totalBytes,totalChunks}`，chunk 为 `{transferId,index,data}`，commit 为 `{transferId}`；大响应返回 `{kind:"chunked",transferId,totalBytes,totalChunks}`，由 `{transferId,index}` 按序 read，最后 close。chunk 解码后最多 512 KiB；重复 ID、乱序、非规范编码、长度不符或跨连接句柄均拒绝，断线清理该连接全部 transfer。
 
