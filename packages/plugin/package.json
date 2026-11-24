@@ -47,8 +47,8 @@
   },
   "files": [
     "bin",
-    "dist",
-    "!dist/**/*.map",
+    "dist/index.js",
+    "dist/client.js",
     "dsh-plugin.json",
     "cordis.patch.yml",
     "locale",
@@ -77,7 +77,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/verify-version-sync.mjs && tsc -p tsconfig.json && node scripts/build-bundles.mjs",
+    "build": "node scripts/verify-version-sync.mjs && tsc --noEmit -p tsconfig.json && node scripts/build-bundles.mjs",
     "check": "node scripts/verify-version-sync.mjs && tsc -p tsconfig.test.json",
     "test": "node scripts/verify-version-sync.mjs && vitest run"
   },
