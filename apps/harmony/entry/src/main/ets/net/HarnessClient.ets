@@ -180,9 +180,9 @@ export class HarnessAlphaClient {
   private eventClientId: string = '';
 
   constructor(core: RemoteClientCore, hostSessionFormat: number,
-    onFrame: (frame: HarnessClientFrame) => void) {
+    onFrame: (frame: HarnessClientFrame) => void, transferFrames: boolean = false) {
     this.core = core;
-    this.gateway = new RemoteGateway(core);
+    this.gateway = new RemoteGateway(core, transferFrames);
     this.onFrame = onFrame;
     this.hostSessionFormat = hostSessionFormat;
   }

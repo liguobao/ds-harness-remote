@@ -1,6 +1,6 @@
 import { heartbeatMessageBody } from '../../ui/heartbeat-message'
 import { ChatImageView } from '../../ui/chat-image'
-import { ArrowRightLeft, ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, HelpCircle, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
+import { ArrowRightLeft, ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, HelpCircle, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -617,6 +617,33 @@ function HandoffContextCard({
   )
 }
 
+// A single unbroken paste can otherwise become a multi-megabyte native text layout.
+const USER_MESSAGE_INLINE_LIMIT = 8192
+const USER_MESSAGE_PAGE_SIZE = 1024
+
+function PagedUserText({ text, tint }: { text: string; tint: string }) {
+  const styles = useThemedStyles(createStyles)
+  const [selectedPage, setSelectedPage] = useState(0)
+  const count = Math.ceil(text.length / USER_MESSAGE_PAGE_SIZE)
+  const page = Math.min(selectedPage, count - 1)
+  function boundary(index: number) {
+    const offset = index * USER_MESSAGE_PAGE_SIZE
+    const before = text.charCodeAt(offset - 1)
+    const after = text.charCodeAt(offset)
+    return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff ? offset - 1 : offset
+  }
+  return <View>
+    <Text selectable style={[styles.userMessageInlineText, { color: tint }]}>
+      {text.slice(boundary(page), boundary(page + 1))}
+    </Text>
+    <View style={styles.userTextPagination}>
+      <IconButton dense label={zhCN.tools.previous} icon={ChevronLeft} tint={tint} disabled={page === 0} onPress={() => setSelectedPage(page - 1)} />
+      <Text style={{ color: tint }}>{page + 1} / {count}</Text>
+      <IconButton dense label={zhCN.tools.next} icon={ChevronRight} tint={tint} disabled={page + 1 === count} onPress={() => setSelectedPage(page + 1)} />
+    </View>
+  </View>
+}
+
 function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
   item: ChatMessage
   compact: boolean
@@ -687,6 +714,9 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
     const isSolid = !userBubble && appearance.bubbleStyle === 'solid'
     const userPalettes = getUserBubblePalettes(colors)
     const activePalette = userBubble ? userPalettes.bubble : isSolid ? userPalettes.solid : userPalettes.soft
+    const pagedBody = displayBody.length > USER_MESSAGE_INLINE_LIMIT
+      ? <PagedUserText key={item.id} text={displayBody} tint={activePalette.ink} />
+      : undefined
     const userBubbleStyle = userBubble
       ? styles.userBubble
       : !hasBubbleText
@@ -728,13 +758,13 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
                 </View>
               ))}
               {hasVisibleMessageText(displayBody) && (
-                <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{displayBody}</Text>
+                pagedBody ?? <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{displayBody}</Text>
               )}
             </View>
           ) : (
             hasVisibleMessageText(displayBody) && (
               <View style={styles.userMarkdownWrap}>
-                <NativeMarkdown text={displayBody} colors={activePalette} />
+                {pagedBody ?? <NativeMarkdown text={displayBody} colors={activePalette} />}
               </View>
             )
           )}

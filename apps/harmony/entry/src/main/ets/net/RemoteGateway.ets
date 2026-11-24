@@ -1,5 +1,6 @@
 import { RemoteClientCore, RemoteClientError, RemoteEvent } from './RemoteClientCore';
-import { jsonStr, jsonValue, asRecord, asBool } from '../protocol/Types';
+import { jsonStr, jsonNum, jsonValue, asRecord, asBool } from '../protocol/Types';
+import { util } from '@kit.ArkTS';
 import { randomId } from '../crypto/Bytes';
 
 /** Gateway-level failure raised by RemoteGateway and HarnessAlphaClient. */
@@ -31,10 +32,13 @@ export class RemoteGatewayStream {
   readonly streamId: string;
   private client: RemoteClientCore;
   private handler: StreamHandler;
+  private transferFrames: boolean;
+  private reading: boolean = false;
   private closed: boolean = false;
   private unsubscribes: (() => void)[] = [];
 
-  constructor(streamId: string, client: RemoteClientCore, handler: StreamHandler) {
+  constructor(streamId: string, client: RemoteClientCore, handler: StreamHandler, transferFrames: boolean = false) {
+    this.transferFrames = transferFrames;
     this.streamId = streamId;
     this.client = client;
     this.handler = handler;
@@ -93,9 +97,67 @@ export class RemoteGatewayStream {
     if (streamId !== this.streamId || !hasValue) {
       return;
     }
+    if (this.reading || data['transfer'] !== undefined) {
+      const descriptor = asRecord(data['transfer']);
+      if (this.reading || !this.transferFrames || descriptor === undefined || data['value'] !== undefined) {
+        this.rejectFrame();
+        return;
+      }
+      this.reading = true;
+      this.readFrame(descriptor).catch(() => this.rejectFrame());
+      return;
+    }
     const value: Object | undefined = jsonValue(data, 'value');
     if (value !== undefined) {
       this.handler.onFrame(value);
+    }
+  }
+
+  private rejectFrame(): void {
+    if (this.closed) return;
+    this.close(true);
+    this.handler.onClosed(new RemoteGatewayError('INVALID_MESSAGE', 'Invalid Harness stream transfer.'));
+  }
+
+  private async readFrame(descriptor: Record<string, Object>): Promise<void> {
+    const transferId = jsonStr(descriptor, 'transferId', '');
+    if (transferId.length === 0) throw new Error('Missing transfer ID.');
+    const chunkSize = 512 * 1024;
+    const total = jsonNum(descriptor, 'totalBytes', 0);
+    const count = jsonNum(descriptor, 'totalChunks', 0);
+    try {
+      if (descriptor['kind'] !== 'chunked' || !Number.isSafeInteger(total) || total <= 0 ||
+        total > 288 * 1024 * 1024 || count !== Math.ceil(total / chunkSize)) {
+        throw new Error('Invalid transfer dimensions.');
+      }
+      const bytes = new Uint8Array(total);
+      const helper = new util.Base64Helper();
+      for (let index = 0; index < count; index++) {
+        const params: Record<string, Object> = { 'transferId': transferId, 'index': index };
+        const result = asRecord(await this.client.rpc('harness.remote.transfer.read', params, 30000));
+        if (this.closed) return;
+        if (result === undefined || result['transferId'] !== transferId || result['index'] !== index) {
+          throw new Error('Invalid transfer chunk.');
+        }
+        const expected = Math.min(chunkSize, total - index * chunkSize);
+        const encoded = jsonStr(result, 'data', '');
+        if (encoded.length !== Math.ceil(expected / 3) * 4) throw new Error('Invalid encoded chunk size.');
+        const chunk = helper.decodeSync(encoded);
+        if (chunk.length !== expected) throw new Error('Invalid chunk size.');
+        bytes.set(chunk, index * chunkSize);
+      }
+      const decoder = util.TextDecoder.create('utf-8', { fatal: true });
+      const frame = asRecord(JSON.parse(decoder.decodeToString(bytes)) as Object);
+      if (frame === undefined || frame['streamId'] !== this.streamId || frame['hasValue'] !== true ||
+        frame['transfer'] !== undefined) throw new Error('Invalid transferred frame.');
+      const value = jsonValue(frame, 'value');
+      if (value !== undefined) this.handler.onFrame(value);
+    } catch (error) {
+      this.rejectFrame();
+    } finally {
+      this.reading = false;
+      const params: Record<string, Object> = { 'transferId': transferId };
+      await this.client.rpc('harness.remote.transfer.close', params, 5000).catch(() => undefined);
     }
   }
 
@@ -154,7 +216,10 @@ export class RemoteHostFeatures {
 export class RemoteGateway {
   private client: RemoteClientCore;
 
-  constructor(client: RemoteClientCore) {
+  private transferFrames: boolean;
+
+  constructor(client: RemoteClientCore, transferFrames: boolean = false) {
+    this.transferFrames = transferFrames;
     this.client = client;
   }
 
@@ -176,13 +241,14 @@ export class RemoteGateway {
   /** Open one `harness.remote.stream`; frames flow through `handler`. */
   async open(endpoint: string, payload: Object, handler: StreamHandler,
     timeoutMs?: number): Promise<RemoteGatewayStream> {
-    const stream: RemoteGatewayStream = new RemoteGatewayStream(randomId(), this.client, handler);
+    const stream: RemoteGatewayStream = new RemoteGatewayStream(randomId(), this.client, handler, this.transferFrames);
     stream.attach();
     const params: Record<string, Object> = {
       'streamId': stream.streamId,
       'endpoint': endpoint,
       'payload': payload
     };
+    if (this.transferFrames) params['transferFrames'] = true;
     try {
       await this.client.rpc('harness.remote.stream.open', params, timeoutMs, endpoint);
     } catch (error) {

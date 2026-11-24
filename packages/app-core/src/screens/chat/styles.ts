@@ -194,6 +194,7 @@ export function createStyles(
       flexWrap: 'wrap',
       gap: 4,
     },
+    userTextPagination: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
     userMessageInlineText: {
       ...t.body,
       fontSize: m.bodyFontSize,
