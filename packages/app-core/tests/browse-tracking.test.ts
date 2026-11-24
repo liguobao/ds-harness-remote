@@ -16,7 +16,7 @@ vi.mock('react-native', () => ({AppState:{
 vi.mock('../src/state/store', () => ({useAppStore:{getState:()=>f.state,subscribe:(fn:()=>void)=>{f.changed=fn;return()=>{}}}}))
 vi.mock('../src/services/foreground-service', () => ({foregroundService:{notifyTask:f.notify,updateLiveTask:vi.fn(),clearLiveTask:vi.fn()}}))
 vi.mock('../src/services/browse-memory', () => ({
-  browseScope:()=> 'scope',browseKey:(s:string,id:string)=>s+id,useBrowseMemory:{getState:()=>f.memory},
+  browseScope:()=> 'scope',browseKey:(s:string,id:string)=>s+id,useBrowseMemory:{getState:()=>f.memory,subscribe:()=>()=>{}},
   updateBrowseEntry:(s:string,id:string,p:unknown)=>{f.memory.entries[s+id]={...f.memory.entries[s+id],...p as object}},
   saveBrowseCatalog(){},browsePreference(){},flushBrowseMemory:()=>f.flush(),
 }))

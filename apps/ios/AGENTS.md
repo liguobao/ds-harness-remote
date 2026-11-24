@@ -59,7 +59,7 @@ profile、API key）不在仓库里，见下。
 
 ## config plugin 注意事项
 
-- `plugins/` 下四个插件都是必需的，顺序不能动：
+- `plugins/` 包含锁屏扩展的 target 配置与启动插件。启动插件有顺序依赖：
   `with-background-connection-grace` 必须在 `with-ios-scene-lifecycle` 之前
   （前者按锚点插入，后者会重写自己标记之后的整段内容）。
 - `with-ios-scene-lifecycle` 在 Expo 模板变动时会主动抛错，这是刻意设计：

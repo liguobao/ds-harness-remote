@@ -257,6 +257,7 @@ export function startBrowseTracking(): () => void {
 
     void liveSurface.sync({
       hostId: device.deviceId,
+      hostName: device.name,
       connected: true,
       appState: AppState.currentState,
       notificationsEnabled: memory.notifications,
@@ -286,6 +287,9 @@ export function startBrowseTracking(): () => void {
   }
 
   const unsubscribeApp = useAppStore.subscribe(scheduleObserve)
+  const unsubscribePreferences = useBrowseMemory.subscribe((next, prev) => {
+    if (next.notifications !== prev.notifications) observe()
+  })
   const unsubscribeBot = useBotTeamStore.subscribe(scheduleObserve)
   const unsubscribeAttention = useAttentionStore.subscribe((next, prev) => {
     if (next.items !== prev.items || next.digest !== prev.digest || next.supported !== prev.supported) {
@@ -294,7 +298,9 @@ export function startBrowseTracking(): () => void {
   })
 
   const background = AppState.addEventListener('change', phase => {
-    if (phase !== 'active') {
+    if (phase === 'active') {
+      scheduleObserve()
+    } else {
       flushPendingObserve()
       void flushBrowseMemory()
     }
@@ -306,6 +312,7 @@ export function startBrowseTracking(): () => void {
     disposed = true
     unsubscribeApp()
     unsubscribeBot()
+    unsubscribePreferences()
     unsubscribeAttention()
     background.remove()
     flushPendingObserve()

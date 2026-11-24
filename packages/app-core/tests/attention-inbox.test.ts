@@ -664,6 +664,15 @@ describe('live-surface unified bridge', () => {
       digest: makeDigest({ runningSessions: 1 }),
     })
     expect(iosUpdate).toHaveBeenCalledTimes(1)
+    expect(iosUpdate).toHaveBeenCalledWith({
+      hostId: 'host-1',
+      hostName: 'host-1',
+      pendingApprovals: 0,
+      pendingQuestions: 0,
+      runningSessions: 1,
+      completedUnread: 0,
+      attentionToken: undefined,
+    }, null)
     await linkedController.sync({
       hostId: 'host-1',
       connected: true,

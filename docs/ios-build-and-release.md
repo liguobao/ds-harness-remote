@@ -1,8 +1,8 @@
 # iOS build and release
 
 The iOS client is an Expo app at `apps/ios`. It shares all of its application
-code with the Android client through `packages/app-core`; `apps/ios` holds only
-the iOS build identity: `app.json`, `app.config.js`, config plugins, the Hermes
+code with the Android client through `packages/app-core`; `apps/ios` holds the native modules, WidgetKit extension and
+iOS build identity: `app.json`, `app.config.js`, config plugins, the Hermes
 wrapper scripts and the entry point.
 
 ## Layout
@@ -83,6 +83,9 @@ Xcode Cloud auto-increments the TestFlight build number, so
 Regenerating `ios/` means anything hand-edited in Xcode is lost. These are the
 non-obvious pieces and where they live:
 
+- **Attention widget.** `plugins/with-attention-widget.js` embeds the WidgetKit
+  extension. Device signing must cover both the app bundle identifier and its
+  `.attention` extension. Local ActivityKit updates require no push entitlement.
 - **Scene lifecycle.** `plugins/with-ios-scene-lifecycle.js` plus
   `plugins/ios-scene-lifecycle.swift` move React Native startup into
   `scene(_:willConnectTo:options:)`. Without it the app traps at launch on

@@ -1,4 +1,6 @@
 PODS:
+  - DshRemoteNative (1.0.0):
+    - ExpoModulesCore
   - EXApplication (57.0.2):
     - ExpoModulesCore
   - EXConstants (57.0.11):
@@ -2082,6 +2084,7 @@ PODS:
   - Yoga (0.0.0)
 
 DEPENDENCIES:
+  - DshRemoteNative (from `../modules/remote-native/apple`)
   - EXApplication (from `../../../node_modules/expo-application/ios`)
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
   - Expo (from `../../../node_modules/expo`)
@@ -2192,6 +2195,8 @@ SPEC REPOS:
     - JitsiWebRTC
 
 EXTERNAL SOURCES:
+  DshRemoteNative:
+    :path: "../modules/remote-native/apple"
   EXApplication:
     :path: "../../../node_modules/expo-application/ios"
   EXConstants:
@@ -2401,6 +2406,7 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/react-native/ReactCommon/yoga"
 
 SPEC CHECKSUMS:
+  DshRemoteNative: e3a18124580d3e46d77a717eaac3a16e2c960c5b
   EXApplication: bbd517d50878ca1d121fb3843392beb210181e28
   EXConstants: 13cc6ad9324d81223386074a523d4e16aed32cd2
   Expo: 092ab1f66de3246b5ffd87d85da9a78648013170
@@ -2418,14 +2424,14 @@ SPEC CHECKSUMS:
   ExpoKeepAwake: c26f14275017370cc8a4b7b43a0e23361f2053a5
   ExpoLocalization: 659243b03b3a3e9589793cee2f728a899e181329
   ExpoLogBox: 6bb73c341aca22e699bd4da6cc61afc844e1a648
-  ExpoModulesCore: d4220609bc81018b5a8761ea3d594ed4b53b9f62
+  ExpoModulesCore: 0e33f361e3bfd088c44c384e2d9d7d9e2e946a91
   ExpoModulesJSI: b20fefa4cdd9097e7e6b715466d1900b8c5d4711
   ExpoModulesWorklets: eaf2898a6621e3c9a09c0479c1a4cb5f1b368d53
   ExpoSecureStore: 94793113049a2d7478dfe1a13aa15081e9f61755
   ExpoSplashScreen: 9c11c0c7dd0c57853244d0ae640a63e42ede8ffd
   ExpoSystemUI: ff3142b323ae7b4d11dc0b1dc4acfa30d92be7dc
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
-  hermes-engine: a96697bbe72c5f35cb6845870e5671890b03b99c
+  hermes-engine: e3d135112c3818a97e6759bae30f7d6d41d745fd
   JitsiWebRTC: b47805ab5668be38e7ee60e2258f49badfe8e1d0
   RCTDeprecation: bccb6545c26db881ecddfd83a3f9ea82aba1605f
   RCTRequired: b2f74764d596fc0051f00fee94b49bf41a6f7f5a
@@ -2508,4 +2514,4 @@ SPEC CHECKSUMS:
 
 PODFILE CHECKSUM: 9de477258a641ef201d4b4ee7367361d76be17c7
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.17.0

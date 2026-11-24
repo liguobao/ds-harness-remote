@@ -24,14 +24,8 @@ import { foregroundService } from './foreground-service'
 
 export interface IosLiveActivityPayload {
   hostId: string
-  deepLinkUrl: string
-  badge: string
-  title: string
-  statusText: string
-  isWaitingInput: boolean
-  updatedAtMs: number
-  summary: string
-  extraCount: number
+  hostName: string
+  attentionToken?: string
   pendingApprovals: number
   pendingQuestions: number
   runningSessions: number
@@ -39,7 +33,7 @@ export interface IosLiveActivityPayload {
 }
 
 export interface DshRemoteLiveActivityNativeModule {
-  update?(payload: IosLiveActivityPayload): Promise<void> | void
+  update?(payload: IosLiveActivityPayload, alert: string | null): Promise<void> | void
   end?(hostId?: string): Promise<void> | void
   getPushTokens?(hostId: string): Promise<{
     activityPushToken?: string
@@ -50,6 +44,7 @@ export interface DshRemoteLiveActivityNativeModule {
 
 export interface LiveSurfaceSnapshot {
   hostId?: string
+  hostName?: string
   connected: boolean
   appState: string
   notificationsEnabled: boolean
@@ -114,7 +109,12 @@ const ALERTABLE_STATUSES: ReadonlySet<AttentionStatus> = new Set([
 
 function defaultGetReactNative(): LiveSurfaceReactNativeLike | undefined {
   try {
-    return require('react-native') as LiveSurfaceReactNativeLike
+    const rn = require('react-native') as LiveSurfaceReactNativeLike
+    if (rn.Platform?.OS !== 'ios') return rn
+    const expo = require('expo') as typeof import('expo')
+    return { Platform: rn.Platform, NativeModules: {
+      DshRemoteLiveActivity: expo.requireOptionalNativeModule('DshRemoteLiveActivity'),
+    } }
   } catch {
     return undefined
   }
@@ -213,7 +213,7 @@ export function createLiveSurfaceController(
   let disposed = false
   let lastLiveKey: string | undefined
   let lastHostId: string | undefined
-  let lastIosActive = false
+  const ios = getIosLiveActivityModule(getRn)
   let tail: Promise<void> = Promise.resolve()
   const seenAlertKeys = new Set<string>()
   const previousUrgentCountByHost = new Map<string, number>()
@@ -224,14 +224,10 @@ export function createLiveSurfaceController(
   }
 
   const clearSurfaces = (hostId?: string): Promise<void> => {
-    const hadLive = lastLiveKey !== undefined && lastLiveKey !== ''
-    const hadIos = lastIosActive
-    if (!hadLive && !hadIos) return Promise.resolve()
+    if (lastLiveKey === '' || (lastLiveKey === undefined && !ios)) return Promise.resolve()
     lastLiveKey = ''
-    lastIosActive = false
     return enqueue(async () => {
       await fgs.clearLiveTask().catch(() => undefined)
-      const ios = getIosLiveActivityModule(getRn)
       if (ios?.end !== undefined) {
         try {
           await ios.end(hostId)
@@ -253,12 +249,13 @@ export function createLiveSurfaceController(
           previousUrgentCountByHost.delete(lastHostId)
           lastHostId = undefined
         }
-        return clearSurfaces(hostId)
+        return clearSurfaces()
       }
 
       if (lastHostId !== undefined && lastHostId !== hostId) {
         seenAlertKeys.clear()
       }
+      const previousHost = lastHostId
       lastHostId = hostId
 
       const sorted = [...items].sort(compareAttentionItems)
@@ -281,6 +278,7 @@ export function createLiveSurfaceController(
         item => item.status === 'waiting_question' || item.status === 'waiting_approval',
       )
 
+      let iosAlert: string | null = null
       for (const item of sorted) {
         if (!ALERTABLE_STATUSES.has(item.status)) continue
         const key = `${hostId}:${item.id}:${item.status}`
@@ -293,6 +291,11 @@ export function createLiveSurfaceController(
           && (activeMode === undefined || activeMode === item.mode)
         if (!notificationsEnabled || viewingThisSession) continue
         if (snapshot.shouldNotifyItem !== undefined && !snapshot.shouldNotifyItem(item)) continue
+
+        if (ios) {
+          iosAlert ??= statusTextForLiveItem(item.status)
+          continue
+        }
 
         const useDigestToken = topUrgent?.id === item.id
           && digest?.attentionToken !== undefined
@@ -320,7 +323,33 @@ export function createLiveSurfaceController(
         }
       }
 
-      // 3. Aggregated Live Surface (Android Live Task V2 + optional iOS Live Activity)
+      if (ios) {
+        const summary = digest ?? counts
+        if (!notificationsEnabled || !(summary.pendingApprovals || summary.pendingQuestions || summary.runningSessions || summary.completedUnread)) {
+          return clearSurfaces(previousHost === hostId ? hostId : undefined)
+        }
+        const payload: IosLiveActivityPayload = {
+          hostId,
+          hostName: snapshot.hostName ?? hostId,
+          pendingApprovals: Math.min(99, summary.pendingApprovals),
+          pendingQuestions: Math.min(99, summary.pendingQuestions),
+          runningSessions: Math.min(99, summary.runningSessions),
+          completedUnread: Math.min(99, summary.completedUnread),
+          attentionToken: digest?.attentionToken,
+        }
+        const key = JSON.stringify(payload)
+        if (lastLiveKey === key && iosAlert === null) return tail
+        lastLiveKey = key
+        return enqueue(async () => {
+          try {
+            await ios.update?.(payload, iosAlert)
+          } catch {
+            if (lastLiveKey === key) lastLiveKey = undefined
+          }
+        })
+      }
+
+      // Android Live Task shows the highest-priority active session.
       const activeItems = sorted.filter(item => ACTIVE_LIVE_STATUSES.has(item.status))
       const topActive = activeItems[0]
 
@@ -340,7 +369,7 @@ export function createLiveSurfaceController(
       const updatedAtMs = topActive.updatedAt > 0 ? topActive.updatedAt : 0
       const deepLinkUrl = selectAttentionDeepLink(hostId, topActive, digest)
 
-      const payload: IosLiveActivityPayload = {
+      const payload = {
         hostId,
         deepLinkUrl,
         badge,
@@ -386,16 +415,6 @@ export function createLiveSurfaceController(
             payload.updatedAtMs,
             payload.summary,
           )
-        }
-
-        const ios = getIosLiveActivityModule(getRn)
-        if (ios?.update !== undefined) {
-          try {
-            await ios.update(payload)
-            lastIosActive = true
-          } catch {
-            // Best-effort iOS Live Activity update; never crash when unavailable.
-          }
         }
 
         lastLiveKey = targetKey

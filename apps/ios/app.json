@@ -13,6 +13,7 @@
       "bundleIdentifier": "io.github.liguobao.dshremote",
       "buildNumber": "76",
       "infoPlist": {
+        "NSSupportsLiveActivities": true,
         "NSLocalNetworkUsageDescription": "DSH Remote connects to trusted Harness hosts on your local network.",
         "NSCameraUsageDescription": "Allow DSH Remote to take photos that you choose to send in a conversation.",
         "NSMicrophoneUsageDescription": "DSH Remote does not capture or transmit audio. Microphone access is declared because the WebRTC peer-to-peer framework links the system microphone APIs.",
@@ -104,7 +105,8 @@
       "./plugins/with-background-connection-grace",
       "./plugins/with-ios-scene-lifecycle",
       "./plugins/with-ios-build-diagnostics",
-      "./plugins/with-ios-hermes-globals"
+      "./plugins/with-ios-hermes-globals",
+      "./plugins/with-attention-widget"
     ]
   }
 }

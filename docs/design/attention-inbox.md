@@ -71,9 +71,8 @@ struct DshHostAttentionAttributes: ActivityAttributes {
    - Expanded / Lock Screen：展示主机本地名称、待审批/待问答/运行中计数及通用本地化状态提示，不渲染任何会话标题或命令文本。
    - 点击深链：`dshremote://attention?host=<hostDeviceId>&token=<attentionToken>`（无 token 时省略 `token` 直接打开该 Host 的 Attention Inbox），App 在加密连接建立后调用 `attention.resolveToken` 导航。
 
-### 3.3 Xcode Widget Extension Target 延后说明
+### 3.3 iOS 本地实时活动
 
-本阶段仅交付协议契约、REST 注册类型与上述 Swift 扩展蓝图，**暂不直接提交原生 Xcode Widget Extension target**：
+iOS 客户端通过 `DshRemoteLiveActivity` 与随 App 嵌入的 `HostAttentionWidget` 展示当前连接的 Host。开启任务提醒且有待处理、运行中或未读项目时，用加密通道收到的摘要更新锁屏与灵动岛。点击后按 Host 和可选的不透明 token 打开收件箱。关闭提醒、断开连接或清空计数会结束活动。
 
-- ActivityKit Widget Extension 需要新增独立 Xcode target、配置 `NSSupportsLiveActivities = YES`、App Group 与独立 Extension Bundle ID / Provisioning Profile，并需在 macOS Xcode / Xcode Cloud 上真实编译、签名与真机验证 APNs `liveactivity` 推送投递与灵动岛渲染。
-- 当前开发环境（Windows）无法编译或验证 Swift Widget Extension 产物；为避免提交未经 Xcode 编译和真机验证的半成品工程文件，原生 Widget Extension target 将在具备 macOS / Xcode Cloud 校验条件的后续独立 PR 中落地并完成真机验收。
+当前原生模块使用本地 ActivityKit 更新。上文的 APNs token 注册、后台远程更新与签名真机投递仍待接入。打包时，扩展的 Bundle ID 使用主 App 的 Bundle ID 加 `.attention`，版本和构建号随主 App 同步。
