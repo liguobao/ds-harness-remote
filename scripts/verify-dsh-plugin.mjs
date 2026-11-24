@@ -68,7 +68,7 @@ for (const [label, pkgManifest] of [['root', manifest], ['npm', pluginManifest]]
   }
 }
 assert.ok(
-  manifest.dsh?.client?.inject?.includes('@deepseek-ai/dsh-client-ui-settings-plugins'),
+  manifest.dsh?.client?.inject?.includes('@deepseek-ai/dsh-client-ui-plugin-manager'),
   'root browser client must load after the official plugin settings surface',
 )
 assert.equal(manifest.main, './index.js', 'root package must expose a prebuilt Host entry at package root')

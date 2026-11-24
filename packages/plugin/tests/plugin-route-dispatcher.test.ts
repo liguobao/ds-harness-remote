@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
+import { apply as applyConnection, type HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import { describe, expect, it, vi } from 'vitest'
 import { createPluginRouteDispatcher } from '../src/plugin-route-dispatcher.js'
 import { PluginRouteBridge } from '../src/plugin-route-bridge.js'
@@ -9,7 +9,7 @@ describe('Host plugin route carrier', () => {
   it('dispatches registered Fetch routes through the official Connection without an HTTP server', async () => {
     const ctx = new Context()
     try {
-      await ctx.plugin(owner => { new HostConnectionService(owner, [], {} as never) }).await()
+      await ctx.plugin(owner => applyConnection(owner)).await()
       const connection = ctx.get('connection') as HostConnectionService
       const readPort = vi.fn(() => undefined)
       const fetch = vi.fn(async (request: Request) => {
@@ -34,7 +34,7 @@ describe('Host plugin route carrier', () => {
   it('never forwards official Harness RPCs to the shared Connection interceptor', async () => {
     const ctx = new Context()
     try {
-      await ctx.plugin(owner => { new HostConnectionService(owner, [], {} as never) }).await()
+      await ctx.plugin(owner => applyConnection(owner)).await()
       const connection = ctx.get('connection') as HostConnectionService
       const rpc = vi.fn(async () => ({ ok: true as const, value: 'local mutation' }))
       connection.rpc.intercept('/api', () => true, rpc)

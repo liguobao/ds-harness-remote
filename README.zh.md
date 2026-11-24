@@ -230,7 +230,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 **支持哪些 Harness 版本？**
 
-当前基线为 `dsh-v0.2.2-rc.1`；`dsh-v0.2.1-rc.5` 与 `0.2.0` rc.2 / rc.1 在同一官方 carrier 上继续兼容，详见[兼容性说明](docs/compatibility.zh.md)。
+当前基线为 `dsh-v0.2.3-alpha.2`；`dsh-v0.2.1-rc.5` 与 `0.2.0` rc.2 / rc.1 在同一官方 carrier 上继续兼容，详见[兼容性说明](docs/compatibility.zh.md)。
 
 Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；
 
@@ -284,7 +284,7 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 - [更新记录](docs/CHANGELOG.md)
 - [隐私说明](docs/PRIVACY.md)
 - [Android 说明](apps/android/README.md)
-- 当前开发适配基线为 `dsh-v0.2.2-rc.1`，验证范围见[兼容性说明](docs/compatibility.zh.md)。
+- 当前开发适配基线为 `dsh-v0.2.3-alpha.2`，验证范围见[兼容性说明](docs/compatibility.zh.md)。
 
 ## 友情链接
 

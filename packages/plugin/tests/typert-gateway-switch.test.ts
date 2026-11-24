@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
+import { apply as applyConnection, type HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import type { RemoteClientCore } from '@dsh-remote/client-core'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { RemoteTypertGateway } from '../src/remote-typert-gateway.js'
@@ -76,7 +76,7 @@ describe('TypertGatewaySwitch', () => {
   it('returns remote RPC refusals in the official HTTP envelope without calling local services', async () => {
     const ctx = new Context()
     try {
-      await ctx.plugin(owner => { new HostConnectionService(owner, [], {} as never) }).await()
+      await ctx.plugin(owner => applyConnection(owner)).await()
       const connection = ctx.get('connection') as HostConnectionService
       const localDispatch = vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => ({ ok: true as const, value: 'local' }))
       const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: localDispatch }
@@ -111,7 +111,7 @@ describe('TypertGatewaySwitch', () => {
   it('preserves preview bytes through the native Connection HTTP hop', async () => {
     const ctx = new Context()
     try {
-      await ctx.plugin(owner => { new HostConnectionService(owner, [], {} as never) }).await()
+      await ctx.plugin(owner => applyConnection(owner)).await()
       const connection = ctx.get('connection') as HostConnectionService
       const gateway = {
         invoke: vi.fn(async (_request: Parameters<TypertGatewayLike['invoke']>[0]) => 'local'),

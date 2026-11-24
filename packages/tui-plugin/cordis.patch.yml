@@ -23,8 +23,6 @@
       name: '@deepseek-ai/dsh-api-terminal-controller'
     - id: workspace-files
       name: '@deepseek-ai/dsh-api-workspace-files'
-    - id: account-controller
-      name: '@deepseek-ai/dsh-api-account-controller'
     - id: settings-controller
       name: '@deepseek-ai/dsh-api-settings-controller'
     - id: workspace-controller

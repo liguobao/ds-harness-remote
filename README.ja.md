@@ -226,7 +226,7 @@ Remote プラグインをインストールしてログインした Harness イ�
 
 **対応する Harness のバージョンは？**
 
-現在の基準バージョンは `dsh-v0.2.2-rc.1` です。`dsh-v0.2.1-rc.5` と `0.2.0` rc.2 / rc.1 は同じ公式 carrier 上で引き続き互換です。[互換性ガイド](docs/compatibility.md)を参照してください。
+現在の基準バージョンは `dsh-v0.2.3-alpha.2` です。`dsh-v0.2.1-rc.5` と `0.2.0` rc.2 / rc.1 は同じ公式 carrier 上で引き続き互換です。[互換性ガイド](docs/compatibility.md)を参照してください。
 
 Host プラグイン、同梱の Remote クライアント、Android では、Harness `0.1.1-rc.2` の ApiProxy 対応を削除しました。公式の Typert Remote carrier を提供する Host を使用してください。ApiProxy のみを提供する Host や機能検出に対応しない旧 Host への接続は拒否され、フォールバックは行いません。
 
@@ -277,7 +277,7 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
 - [変更履歴](docs/CHANGELOG.md)
 - [プライバシーポリシー](docs/PRIVACY.md)
 - [Android ガイド](apps/android/README.md)
-- 現在の開発基準は `dsh-v0.2.2-rc.1` です。検証範囲は[互換性ガイド](docs/compatibility.md)に記載しています。
+- 現在の開発基準は `dsh-v0.2.3-alpha.2` です。検証範囲は[互換性ガイド](docs/compatibility.md)に記載しています。
 
 ## 関連リンク
 

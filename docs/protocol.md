@@ -1115,7 +1115,7 @@ Message（含 role/content 数组）、ToolCall（含 callId/input/output）和 
 
 `harness.api.*` RPC、`harness.api.v1` / `harness.api.transfer.v1` capability 和相应事件仅保留于部分旧 Client 类型中。当前 Host 不注册这些路由，不能将它们作为安装或调用示例。旧定义可从版本历史追溯；当前业务使用下述 Typert carrier。
 
-### Harness Typert Remote bridge（当前基线 0.2.2-rc.1）
+### Harness Typert Remote bridge（当前基线 0.2.3-alpha.2）
 
 `harness.remote.v1` 只承载 `dsh-v0.1.2-alpha.1`–`rc.1` 官方 `TypertGateway` 已编码的 carrier
 envelope；`harness.remote.v3` 承载 `dsh-v0.1.5-rc.1` 的相同官方 carrier 与 Session V3

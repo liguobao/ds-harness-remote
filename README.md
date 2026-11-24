@@ -228,7 +228,7 @@ There is currently no limit on concurrent client connections, with RPC calls and
 
 **Which Harness versions are supported?**
 
-The current baseline is `dsh-v0.2.2-rc.1`; `dsh-v0.2.1-rc.5` and `0.2.0` rc.2 / rc.1 remain compatible on the same official carrier. See the [compatibility guide](docs/compatibility.md).
+The current baseline is `dsh-v0.2.3-alpha.2`; `dsh-v0.2.1-rc.5` and `0.2.0` rc.2 / rc.1 remain compatible on the same official carrier. See the [compatibility guide](docs/compatibility.md).
 
 Harness `0.1.1-rc.2` ApiProxy support has been removed from the Host plugin, its bundled Remote client, and Android. Use a Host with the official Typert Remote carrier; Hosts that only provide ApiProxy or lack capability discovery are rejected, with no fallback.
 
@@ -279,7 +279,7 @@ DS Bot is a bot plugin for DeepSeek Harness (dsh) that turns dsh into a bot. You
 - [Changelog](docs/CHANGELOG.md)
 - [Privacy policy](docs/PRIVACY.md)
 - [Android guide](apps/android/README.md)
-- The current development baseline is `dsh-v0.2.2-rc.1`; validation scope is documented in [the compatibility guide](docs/compatibility.md).
+- The current development baseline is `dsh-v0.2.3-alpha.2`; validation scope is documented in [the compatibility guide](docs/compatibility.md).
 
 ## Links
 
