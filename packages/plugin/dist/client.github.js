@@ -1641,23 +1641,23 @@ Minimum version required to store current data is: ` + bestVersion + `.
         throw new Error(envelope.result?.error?.message ?? "Remote upload requires an updated Host plugin.");
       if (method === "status") {
         let mode = envelope.result.value?.mode;
-        typeof mode == "string" && (lastMode = mode);
+        (mode === "local" || mode === "remote") && (lastMode = mode);
       }
       return envelope.result.value;
     };
     return async (input, init) => {
       let url = new URL(input instanceof Request ? input.url : String(input), baseUrl), target = new URL("api/session/uploadFileBinary", baseUrl);
       if (url.origin !== target.origin || url.pathname !== target.pathname) return original(input, init);
-      let request = new Request(url, input instanceof Request ? new Request(input, init) : init);
-      if (request.method !== "POST") return original(input, init);
-      let signal = AbortSignal.any([request.signal, AbortSignal.timeout(6e4)]), status = await control("status", {}, signal);
+      let source = input instanceof Request ? input : void 0;
+      if ((init?.method ?? source?.method ?? "GET").toUpperCase() !== "POST") return original(input, init);
+      let signal = AbortSignal.any([init?.signal ?? source?.signal ?? new AbortController().signal, AbortSignal.timeout(6e4)]), status = await control("status", {}, signal);
       if (status.mode === "local") return original(input, init);
       if (status.mode !== "remote" || !status.connected) throw new Error("Remote Host is disconnected. Reconnect before uploading a file.");
       if (status.backend !== void 0 && status.backend !== "harness" && status.backend !== "codex") throw new Error("Remote attachment receipts require a Harness or CodeX session.");
       let sessionId = url.searchParams.get("sessionId"), mediaType = url.searchParams.get("mediaType");
       if (!sessionId || mediaType !== null && !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mediaType))
         throw new Error("A Session and a supported image media type, when provided, are required.");
-      let reader = request.body?.getReader(), abortRead = () => {
+      let reader = (source ? new Request(source, init) : new Request(url, init)).body?.getReader(), abortRead = () => {
         reader?.cancel(signal.reason).catch(() => {
         });
       };

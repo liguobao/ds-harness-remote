@@ -85110,7 +85110,12 @@ function registerControlRoute(connection, handler, webServer, statusStream) {
     };
   }
   const rpcHandle = connection.rpc.handle;
-  if (rpcHandle === void 0) return async () => void 0;
+  if (rpcHandle === void 0) {
+    console.warn("ds-harness-remote: local control unavailable (missing Web server and RPC route registries).");
+    return async () => {
+      statusStream?.close();
+    };
+  }
   return rpcHandle(CONTROL_RPC_PREFIX, handler, {
     authority: "loopback"
   });

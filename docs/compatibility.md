@@ -13,6 +13,8 @@
 
 On 0.2.3-alpha.2, the official Gateway, Connection and Session Controller descriptor have been exercised for session list discovery and dispatch. The cross-device Relay validation above used 0.2.2-rc.1.
 
+If the upload status probe returns HTTP 404 or 405 before a remote mode is reported, the upload hook passes the original request to the local uploader. After remote mode is reported, control failures stop the upload until local mode is explicitly confirmed. Remote upload mutations are never replayed locally.
+
 Enable only one Remote Host entry per TUI profile. Use the `ds-harness-remote` CLI for authorization. See the [bundle instructions](../packages/tui/README.md).
 
 ## Harness carrier and attachments

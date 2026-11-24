@@ -138,11 +138,11 @@ describe('Remote attachment upload', () => {
     const passthrough = vi.fn(async () => new Response('local-response'))
     const original = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith('/status')) return new Response('', { status })
-      expect(init?.body).toBe('local-image')
+      expect(await (input as Request).text()).toBe('local-image')
       return passthrough()
     }) as unknown as typeof fetch
     const upload = createRemoteUploadFetch(original, base)
-    const response = await upload(`${base}api/session/uploadFileBinary?sessionId=s&mediaType=image/png`, { method: 'POST', body: 'local-image' })
+    const response = await upload(new Request(`${base}api/session/uploadFileBinary?sessionId=s&mediaType=image/png`, { method: 'POST', body: 'local-image' }))
     expect(await response.text()).toBe('local-response')
     expect(passthrough).toHaveBeenCalledOnce()
     expect(original).toHaveBeenCalledTimes(2)

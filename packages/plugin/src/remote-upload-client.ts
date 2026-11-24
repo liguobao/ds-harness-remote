@@ -36,7 +36,7 @@ export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch
     }
     if (method === 'status') {
       const mode = (envelope.result.value as { mode?: unknown } | undefined)?.mode
-      if (typeof mode === 'string') lastMode = mode
+      if (mode === 'local' || mode === 'remote') lastMode = mode
     }
     return envelope.result.value
   }
@@ -44,9 +44,9 @@ export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch
     const url = new URL(input instanceof Request ? input.url : String(input), baseUrl)
     const target = new URL('api/session/uploadFileBinary', baseUrl)
     if (url.origin !== target.origin || url.pathname !== target.pathname) return original(input, init)
-    const request = new Request(url, input instanceof Request ? new Request(input, init) : init)
-    if (request.method !== 'POST') return original(input, init)
-    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(60_000)])
+    const source = input instanceof Request ? input : undefined
+    if ((init?.method ?? source?.method ?? 'GET').toUpperCase() !== 'POST') return original(input, init)
+    const signal = AbortSignal.any([init?.signal ?? source?.signal ?? new AbortController().signal, AbortSignal.timeout(60_000)])
     const status = await control('status', {}, signal) as { mode?: string; connected?: boolean; backend?: string; target?: { deviceId: string } }
     if (status.mode === 'local') return original(input, init)
     if (status.mode !== 'remote' || !status.connected) throw new Error('Remote Host is disconnected. Reconnect before uploading a file.')
@@ -57,6 +57,7 @@ export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch
       throw new Error('A Session and a supported image media type, when provided, are required.')
     }
     // Read incrementally so even an unbounded stream cannot exhaust the client.
+    const request = source ? new Request(source, init) : new Request(url, init)
     const reader = request.body?.getReader()
     const abortRead = () => { void reader?.cancel(signal.reason).catch(() => {}) }
     signal.addEventListener('abort', abortRead, { once: true })

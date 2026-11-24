@@ -13,6 +13,8 @@
 
 0.2.3-alpha.2 已使用官方 Gateway、Connection 和 Session Controller 描述验证会话列表探测及调用，跨设备 Relay 验收记录仍对应上表的 0.2.2-rc.1 组合。
 
+上传钩子在尚未探测到远程模式时遇到状态路由返回 HTTP 404 或 405，会将原请求交还本地上传实现。探测到远程模式后，control 失败会中止上传，直到明确切回本地模式。已发起的远程上传不会在本地重放。
+
 TUI profile 只启用一个 Remote Host entry，授权使用 `ds-harness-remote` CLI。完整安装方式见[组合包说明](../packages/tui/README.md)。
 
 ## Harness carrier 与附件

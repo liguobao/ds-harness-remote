@@ -80,7 +80,10 @@ export function registerControlRoute(
   // route registry nor the legacy RPC helper.  Do not let that optional
   // compatibility path abort plugin activation and leave the UI stuck in
   // "control is still starting".
-  if (rpcHandle === undefined) return async () => undefined
+  if (rpcHandle === undefined) {
+    console.warn('ds-harness-remote: local control unavailable (missing Web server and RPC route registries).')
+    return async () => { statusStream?.close() }
+  }
   return rpcHandle(CONTROL_RPC_PREFIX, handler, {
     authority: 'loopback',
   })
