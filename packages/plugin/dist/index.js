@@ -44698,9 +44698,6 @@ var require_lib = __commonJS({
   }
 });
 
-// packages/plugin/src/index.ts
-import * as DshConnection from "@deepseek-ai/dsh-client-connection";
-
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -117313,7 +117310,11 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   let controlRuntime;
   try {
     const nativeTypertGateway = ctx.get("typertGateway");
-    const connectionExports = DshConnection;
+    let connectionExports = {};
+    try {
+      connectionExports = await import("@deepseek-ai/dsh-client-connection");
+    } catch {
+    }
     const connectionService = ctx.get("connection", false);
     const createOwnerPeer = createOwnerPeerFactory(
       ctx,
