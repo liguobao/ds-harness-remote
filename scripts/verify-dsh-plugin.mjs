@@ -193,8 +193,8 @@ assert.deepEqual(
     .map(match => match[1])
     .filter(specifier => !isBuiltin(specifier))
     .filter(specifier => !specifier.startsWith('node:')),
-  ['@deepseek-ai/dsh-client-connection'],
-  'Host bundle must only leave the official Connection peer external; inline all other runtime packages so node_modules-free installs load',
+  [],
+  'Host bundle must inline all runtime packages; the optional Connection peer is loaded lazily so node_modules-free installs load',
 )
 assert.doesNotMatch(
   hostBundle,
