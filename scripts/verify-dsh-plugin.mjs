@@ -153,6 +153,7 @@ assert.doesNotMatch(patch, /ds-harness-remote-tui/, 'root patch must not insert 
 assert.doesNotMatch(patch, /!!js/, 'root patch must stay static while dsh-TUI integration is deferred')
 
 const npmPatch = readFileSync(join(root, 'packages/plugin/cordis.patch.yml'), 'utf8')
+assert.match(npmPatch, /inject:\s*(?:-\s*webServer|\[.*?webServer.*?\])/, 'npm patch must declare the webServer service for host control')
 assert.doesNotMatch(npmPatch, /ds-harness-remote-tui/, 'npm patch must not insert the retired dsh-TUI Host entry')
 assert.doesNotMatch(npmPatch, /!!js/, 'npm patch must stay static while dsh-TUI integration is deferred')
 

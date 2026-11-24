@@ -3,6 +3,8 @@
 - insert:
     - id: ds-harness-remote
       name: 'ds-harness-remote'
+      inject:
+        - webServer
       config:
         enabled: true
         role: host

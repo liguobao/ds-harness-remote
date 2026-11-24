@@ -7,7 +7,7 @@
 | Remote | Source version 0.6.8; Android versionCode / Expo iOS buildNumber 76. This does not establish publication status |
 | Harness development baseline | 0.2.3-alpha.2, Node.js `^24.22.3 || >=26.13.1` |
 | Older Harness | Official Typert / Session V3 paths for 0.2.2 RCs, 0.2.1-rc.5 and 0.2.0-rc.2 / rc.1 |
-| Peer range | 0.2.1 / 0.2.2 / 0.2.3 (≥ alpha.2) prereleases and stable versions; range acceptance is not runtime validation of every version |
+| Peer range | 0.2.1 / 0.2.2 / 0.2.3 prereleases and stable versions; range acceptance is not runtime validation of every version |
 | TUI | Matching standalone `ds-harness-remote-tui`; core Android Relay flow validated with dsh-TUI 0.20.1 + Harness 0.2.2-rc.1 |
 | DS-Bot | Fixed named routes aligned with 0.3.8; route coverage is not full mobile E2E coverage |
 
