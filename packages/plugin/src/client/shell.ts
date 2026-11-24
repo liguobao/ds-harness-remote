@@ -7,6 +7,10 @@ export function installStyle(clientModuleId: string): () => void {
   style.dataset.plugin = clientModuleId
   style.dataset.pluginCss = 'dsh-remote'
   style.textContent = [
+    '.dshRemoteWebFooter{position:fixed;inset-inline:8px;bottom:env(safe-area-inset-bottom,0px);z-index:10;text-align:center;font-size:11px;line-height:1.4;color:var(--dsw-alias-label-secondary);pointer-events:none}',
+    '.dshRemoteWebFooter a{color:inherit;text-decoration:underline;text-underline-offset:2px;pointer-events:auto;white-space:nowrap}',
+    '.dshRemoteWebFooter button{min-width:24px;min-height:24px;margin-inline-start:3px;vertical-align:middle;border:0;border-radius:4px;background:transparent;color:inherit;font:inherit;font-size:15px;cursor:pointer;pointer-events:auto}.dshRemoteWebFooter button:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteWebFooter button:focus-visible{outline:2px solid currentColor;outline-offset:-2px}',
+    '@media(max-width:760px){.dshRemoteWebFooterDetail{display:none}}',
     '.dshRemoteConnectedPanelHeader{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;margin-bottom:6px}.dshRemoteConnectedPanelHeader .dshRemoteConnectedPanelTitle{margin-bottom:0}',
     '.dshRemoteHostNameLine{display:flex;align-items:center;flex-wrap:wrap;gap:8px}',
     '.dshRemoteServerNotice{font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}.dshRemoteServerNotice.isWarning{color:var(--dsw-alias-state-warning-primary,#946200)}.dshRemoteServerNotice.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteServerNotice.isRestored{color:var(--dsw-alias-state-success-primary)}',

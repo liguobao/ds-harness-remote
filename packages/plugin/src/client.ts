@@ -653,6 +653,44 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.locale.register(localeNamespace, { zh, en, ru, uk }), 'ds-harness-remote: dictionaries')
       ctx.effect(() => installStyle(clientModuleId), 'ds-harness-remote: client styles')
       ctx.effect(() => installTerminalAvailabilityNotice(statusFeed, t), 'ds-harness-remote: terminal availability notice')
+      if (isHostcTunnel) {
+        const linkProps = { target: '_blank', rel: 'noopener noreferrer' }
+        const dismissedKey = 'ds-harness-remote.web-footer.dismissed'
+        const dismissedCookie = '__Secure-dsh-remote-web-footer-dismissed=1'
+        const dismissalSeconds = 3 * 24 * 60 * 60
+        function WebFooter(): unknown {
+          const [dismissed, setDismissed] = React.useState(() => {
+            try {
+              if (document.cookie.split(';').some(value => value.trim() === dismissedCookie)) return true
+            } catch { /* The browser may block cookies. */ }
+            try {
+              const stored = window.localStorage.getItem(dismissedKey)
+              return stored === '1' || Number(stored) > Date.now()
+            }
+            catch { return false }
+          })
+          if (dismissed) return null
+          const dismiss = (): void => {
+            setDismissed(true)
+            try {
+              document.cookie = `${dismissedCookie}; Domain=4ba.io; Path=/; Max-Age=${dismissalSeconds}; Secure; SameSite=Strict`
+            } catch { /* Fall back to this tunnel's local storage. */ }
+            try { window.localStorage.setItem(dismissedKey, String(Date.now() + dismissalSeconds * 1000)) }
+            catch { /* Storage is optional for dismissal in the current page. */ }
+          }
+          return renderBodyPortal(portal, React.createElement('footer', { className: 'dshRemoteWebFooter' },
+            'Power by ',
+            React.createElement('a', { ...linkProps, href: 'https://github.com/liguobao/ds-harness-remote' },
+              React.createElement('span', { className: 'dshRemoteWebFooterDetail' }, 'liguobao/'), 'ds-harness-remote'),
+            ' - ', React.createElement('span', { className: 'dshRemoteWebFooterDetail' }, '更快更强？'),
+            React.createElement('a', { ...linkProps, href: 'https://dsh.r2049.cn' }, '会员计划'),
+            React.createElement('button', { type: 'button', onClick: dismiss, 'aria-label': t('close'), title: t('close') }, '×')))
+        }
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'ds-harness-remote-web-footer',
+        }, WebFooter))
+      }
       const nativeTitlebar = document.documentElement.hasAttribute('data-windows-titlebar')
         || document.documentElement.dataset.platform === 'darwin'
       const headerSlot = nativeTitlebar ? 'shell.overlay' : 'conversation.session.header.utilities'

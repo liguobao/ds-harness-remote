@@ -4,7 +4,7 @@
 
 | Component | Scope |
 | --- | --- |
-| Remote | Source version 0.6.7; Android versionCode / Expo iOS buildNumber 75. This does not establish publication status |
+| Remote | Source version 0.6.8; Android versionCode / Expo iOS buildNumber 76. This does not establish publication status |
 | Harness development baseline | 0.2.3-alpha.2, Node.js `^24.22.3 || >=26.13.1` |
 | Older Harness | Official Typert / Session V3 paths for 0.2.2 RCs, 0.2.1-rc.5 and 0.2.0-rc.2 / rc.1 |
 | Peer range | 0.2.1 / 0.2.2 / 0.2.3 (≥ alpha.2) prereleases and stable versions; range acceptance is not runtime validation of every version |

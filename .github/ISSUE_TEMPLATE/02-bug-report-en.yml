@@ -62,7 +62,7 @@ body:
     attributes:
       label: Version or commit SHA
       description: Client version (include versionCode / buildNumber on mobile), plugin version, or source commit hash.
-      placeholder: "Example: 0.6.7 (75) or 0123456"
+      placeholder: "Example: 0.6.8 (76) or 0123456"
     validations:
       required: true
 

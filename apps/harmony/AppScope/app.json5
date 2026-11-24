@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "dsh.r2049.huawei",
     "vendor": "r2049",
-    "versionCode": 75,
-    "versionName": "0.6.7",
+    "versionCode": 76,
+    "versionName": "0.6.8",
     "icon": "$media:icon",
     "label": "$string:app_name"
   }

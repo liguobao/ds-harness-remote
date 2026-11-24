@@ -62,7 +62,7 @@ body:
     attributes:
       label: 版本或 Commit (Version or commit)
       description: 客户端版本（移动端可附 versionCode / buildNumber）、插件版本或源码 commit SHA。
-      placeholder: "例如: 0.6.7 (75) 或 0123456"
+      placeholder: "例如: 0.6.8 (76) 或 0123456"
     validations:
       required: true
 

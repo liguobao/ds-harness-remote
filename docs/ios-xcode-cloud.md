@@ -15,7 +15,7 @@ Xcode Cloud 只执行 **workspace 旁边** 的 `ci_scripts/ci_post_clone.sh`（�
 `apps/ios/ios/` 原生工程。仓库侧已全部就绪：
 
 - `apps/ios/ios/DSHRemote.xcodeproj`（`DEVELOPMENT_TEAM = 857C9KMARL`，
-  `MARKETING_VERSION = 0.6.7`，`CURRENT_PROJECT_VERSION = 75`）
+  `MARKETING_VERSION = 0.6.8`，`CURRENT_PROJECT_VERSION = 76`）
 - `apps/ios/ios/Podfile.lock`
 - `apps/ios/ios/ci_scripts/ci_post_clone.sh`：Node 22 + pnpm 9.15.4 →
   `pnpm install`（应用 `patches/`）→ workspace 构建 + 渲染器（Intelligent UI

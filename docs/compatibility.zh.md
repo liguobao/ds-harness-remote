@@ -4,7 +4,7 @@
 
 | 组件 | 范围 |
 | --- | --- |
-| Remote | 当前源码 0.6.7；Android versionCode / Expo iOS buildNumber 75。版本号不等于已经发布 |
+| Remote | 当前源码 0.6.8；Android versionCode / Expo iOS buildNumber 76。版本号不等于已经发布 |
 | Harness 开发基线 | 0.2.3-alpha.2，Node.js `^24.22.3 || >=26.13.1` |
 | 旧 Harness | 保留 0.2.2 RC、0.2.1-rc.5、0.2.0-rc.2 / rc.1 的官方 Typert / Session V3 路径 |
 | peer range | 接纳 0.2.1 / 0.2.2 / 0.2.3 (≥ alpha.2) 预发布及正式版；范围接纳不等于每个版本均有运行时验收 |
