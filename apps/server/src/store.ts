@@ -58,7 +58,7 @@ export class Store {
     const old = this.state.devices[descriptor.deviceId]
     if (old?.revoked) throw new ApiError('DEVICE_REVOKED', 403)
     if (old && (old.descriptor.identityKey !== descriptor.identityKey || old.descriptor.role !== descriptor.role)) throw new ApiError('PEER_IDENTITY_MISMATCH', 409)
-    if (!old && Object.keys(this.state.devices).length >= 256) throw new ApiError('RATE_LIMITED', 429)
+    if (!old && this.list().length >= 256) throw new ApiError('RATE_LIMITED', 429)
     this.state.devices[descriptor.deviceId] = { descriptor, revoked: false, lastSeenAt: old?.lastSeenAt ?? 0 }
     this.invalidate(descriptor.deviceId)
     return this.issue(descriptor.deviceId)

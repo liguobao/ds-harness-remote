@@ -10,6 +10,8 @@
 
 首页地址是 `/`，点击“开始使用”进入登录页；登录成功后进入 `/app/remote` 设备列表。Host 和客户端都填写同一个 Server 地址，并使用相同的账号密码登录。设备凭据由 Server 保存，Web 登录会话使用 HttpOnly Cookie。
 
+设备列表可改动设备名称，也可撤销不再使用的设备（`DELETE /api/v1/account/devices/:id`，需 Web 登录会话）。撤销后该设备立即从列表消失、原有 access/refresh 凭据全部失效，设备记录保留为已撤销状态（同一 `deviceId` 不能再用原密钥或新密钥重新登记）；设备侧收到 `DEVICE_REVOKED` 后会清除本地凭据，重新登录即轮换新身份重新登记。
+
 ## 刷新响应丢失恢复
 
 刷新成功但响应丢失时，重试旧 refresh token 会返回同一组后继凭据，Server 重启后也可恢复。恢复持续到后继再次轮换、撤销或过期，不延长任何 token 的生命周期。若恢复的 access token 已过期，可用恢复的 refresh token 再次轮换。更早的旧 token 会被拒绝，但不撤销当前有效凭据。
