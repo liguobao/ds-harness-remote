@@ -1,6 +1,6 @@
 import { heartbeatMessageBody } from '../../ui/heartbeat-message'
 import { ChatImageView } from '../../ui/chat-image'
-import { ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, HelpCircle, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
+import { ArrowRightLeft, ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, HelpCircle, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -19,6 +19,7 @@ import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import { triggerLightHaptic } from '../../ui/haptics'
 import Svg, { Path } from 'react-native-svg'
+import { parseHandoffMessage, type ParsedHandoffMessage } from '../../lib/handoff-context'
 import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
 import { readToolHistoryDetail, useAppStore } from '../../state/store'
@@ -36,10 +37,12 @@ import type {
 } from '../../types'
 import { Button, IconButton } from '../../ui/components'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
-import { NativeMarkdown, useMarkdownLink } from '../../ui/markdown'
+import { NativeMarkdown, useWorkspaceFilePress } from '../../ui/markdown'
 import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-preview'
 import { PresentedFileGroup } from '../../ui/file-card'
-import { useTheme } from '../../ui/theme-context'
+import { extractUserSubmittedFiles } from './submitted-files'
+import { SubmittedFileStack } from './submitted-file-stack'
+import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from '../../ui/syntax-highlight'
 import { parseBotReplyPayload } from '../bot/replies'
@@ -49,10 +52,52 @@ import type { ProcessActivity, ProcessSegment } from '../chat-process'
 import { aggregateTurnUsage, processSummary, processDetail, processSegments, sameUsage, shouldShowTurnResponseActions, toolActivity, toolDisplayName } from '../chat-process'
 import { MessageActions } from '../message-actions'
 import { IntelligentUiCard } from '../intelligent-ui-card'
+import { harnessDisplayName, handoffPresetLabel } from './handoff-modal'
 import { createStyles } from './styles'
+import type { MarkdownChunkSection } from './transcript-chunks'
+
+function collectEditedFiles(items: readonly ChatItem[]): { path: string; name?: string; action?: 'created' | 'edited' }[] {
+  const files: { path: string; name?: string; action?: 'created' | 'edited' }[] = []
+  const seen = new Set<string>()
+  for (const item of items) {
+    if (item.kind !== 'tool' || item.state !== 'finished') continue
+    const name = (item.toolKey ?? item.toolName).toLowerCase()
+    if (!item.arguments) continue
+    try {
+      const args = JSON.parse(item.arguments) as Record<string, unknown>
+      let path: string | undefined
+      let action: 'created' | 'edited' = 'edited'
+      if (name === 'write' || name === 'write_file') {
+        path = (args.file_path || args.path || args.filename) as string | undefined
+        action = 'created'
+      } else if (name === 'edit' || name === 'edit_file' || name === 'patch') {
+        path = (args.file_path || args.path || args.filename) as string | undefined
+        action = 'edited'
+      } else if (name === 'str_replace_editor') {
+        const cmd = args.command as string | undefined
+        if (cmd === 'view') continue // Read-only command does not modify files
+        path = (args.path || args.file_path) as string | undefined
+        action = cmd === 'create' ? 'created' : 'edited'
+      }
+      if (typeof path === 'string' && path.trim() && !seen.has(path.trim())) {
+        seen.add(path.trim())
+        files.push({ path: path.trim(), action })
+      }
+    } catch {}
+  }
+  return files
+}
+
+function collectUnavailableUi(items: readonly ChatItem[], availableUiIds: ReadonlySet<string>) {
+  return items.filter(item => item.kind === 'tool' && item.state === 'finished'
+    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget' || item.toolKey === 'ui_compose')
+    && !availableUiIds.has(item.id)
+    && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
+      || (item.uiResultMeta as { ok?: unknown }).ok !== false))
+}
 
 /** Only activity ranges fold; completing a turn must never hide spoken replies. */
-export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, isTurnRunning = false, turnUsage, onApproval, onQuestion }: {
+export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, isTurnRunning = false, turnUsage, hiddenResponseItemId, onApproval, onQuestion }: {
   items: ChatItem[]
   artifacts: UiArtifact[]
   updatedArtifacts: UiArtifact[]
@@ -60,6 +105,8 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   busyAction?: string
   isTurnRunning?: boolean
   turnUsage?: ChatMessage['usage']
+  /** When the final assistant response is split into markdown-chunk FlatList rows, hide it here. */
+  hiddenResponseItemId?: string
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
@@ -95,48 +142,20 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending })
     return result
   }), [items])
-  const unavailableUi = items.filter(item => item.kind === 'tool' && item.state === 'finished'
-    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget' || item.toolKey === 'ui_compose')
-    && !availableUiIds.has(item.id)
-    && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
-      || (item.uiResultMeta as { ok?: unknown }).ok !== false))
+  const unavailableUi = useMemo(
+    () => (hiddenResponseItemId !== undefined ? [] : collectUnavailableUi(items, availableUiIds)),
+    [hiddenResponseItemId, items, availableUiIds],
+  )
   const hasGroupRelayReplies = segments.some(segment => segment.kind === 'botReplies' && segment.groupRelay)
   const hasToolSummary = segments.some(segment => segment.kind === 'activity'
     && segment.items.some(item => item.kind === 'tool'))
   const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
     : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
-  const onFilePress = useMarkdownLink()
-  const editedFiles = useMemo(() => {
-    const files: { path: string; name?: string; action?: 'created' | 'edited' }[] = []
-    const seen = new Set<string>()
-    for (const item of items) {
-      if (item.kind !== 'tool' || item.state !== 'finished') continue
-      const name = (item.toolKey ?? item.toolName).toLowerCase()
-      if (!item.arguments) continue
-      try {
-        const args = JSON.parse(item.arguments) as Record<string, unknown>
-        let path: string | undefined
-        let action: 'created' | 'edited' = 'edited'
-        if (name === 'write' || name === 'write_file') {
-          path = (args.file_path || args.path || args.filename) as string | undefined
-          action = 'created'
-        } else if (name === 'edit' || name === 'edit_file' || name === 'patch') {
-          path = (args.file_path || args.path || args.filename) as string | undefined
-          action = 'edited'
-        } else if (name === 'str_replace_editor') {
-          const cmd = args.command as string | undefined
-          if (cmd === 'view') continue // Read-only command does not modify files
-          path = (args.path || args.file_path) as string | undefined
-          action = cmd === 'create' ? 'created' : 'edited'
-        }
-        if (typeof path === 'string' && path.trim() && !seen.has(path.trim())) {
-          seen.add(path.trim())
-          files.push({ path: path.trim(), action })
-        }
-      } catch {}
-    }
-    return files
-  }, [items])
+  const onFilePress = useWorkspaceFilePress()
+  const editedFiles = useMemo(
+    () => (hiddenResponseItemId !== undefined ? [] : collectEditedFiles(items)),
+    [hiddenResponseItemId, items],
+  )
   const lastResponseIndex = segments.map(s => s.kind).lastIndexOf('response')
   return <View style={styles.processGroup}>
     {end !== undefined && !(end.reason === 'completed' && (hasGroupRelayReplies || hasToolSummary)) && <View style={styles.turnProcessHeader}>
@@ -144,6 +163,9 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     </View>}
     {segments.map((segment, index) => {
       if (segment.kind === 'response') {
+        if (hiddenResponseItemId !== undefined && segment.item.id === hiddenResponseItemId && index === lastResponseIndex) {
+          return null
+        }
         const showActions = shouldShowTurnResponseActions({
           segmentIndex: index,
           lastResponseIndex,
@@ -176,15 +198,21 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
         />
       )
     })}
-    {lastResponseIndex === -1 && <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />}
-    {lastResponseIndex === -1 && artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
-    {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
-    {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
+    {hiddenResponseItemId === undefined && lastResponseIndex === -1 && <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />}
+    {hiddenResponseItemId === undefined && lastResponseIndex === -1 && artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
+    {hiddenResponseItemId === undefined && updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
+    {hiddenResponseItemId === undefined && unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
   </View>
 }, (prev, next) => {
   // Every field below is a reference that streaming rebuilds, so compare their
   // contents: a group whose text did not change keeps its rendered subtree.
-  if (prev.busyAction !== next.busyAction) return false
+  if (prev.hiddenResponseItemId !== next.hiddenResponseItemId) return false
+  if (prev.busyAction !== next.busyAction) {
+    const needsBusy = next.items.some(
+      item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined,
+    )
+    if (needsBusy) return false
+  }
   if (prev.isTurnRunning !== next.isTurnRunning) return false
   if (!sameUsage(prev.turnUsage, next.turnUsage)) return false
   if (prev.onApproval !== next.onApproval || prev.onQuestion !== next.onQuestion) return false
@@ -202,6 +230,94 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     if (before.size !== after.size) return false
     for (const id of before) {
       if (!after.has(id)) return false
+    }
+  }
+  return true
+})
+
+export const MarkdownChunkRow = memo(function MarkdownChunkRow({
+  section,
+  artifacts,
+  updatedArtifacts,
+  availableUiIds,
+  turnUsage,
+}: {
+  section: MarkdownChunkSection
+  artifacts: UiArtifact[]
+  updatedArtifacts: UiArtifact[]
+  availableUiIds: ReadonlySet<string>
+  turnUsage?: ChatMessage['usage']
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const onFilePress = useWorkspaceFilePress()
+  const { item, nodes, referencedFiles, chunkIndex, chunkCount, compact, showActions, isProcessSection, processItems } = section
+  const isFirst = chunkIndex === 0
+  const isLast = chunkIndex === chunkCount - 1
+  const showReasoning = isFirst && !compact && hasVisibleMessageText(item.reasoning ?? '')
+  const showImages = isFirst && item.images !== undefined && item.images.length > 0
+  const fallbackTurnUsage = useMemo(
+    () => (isLast && isProcessSection && processItems !== undefined ? aggregateTurnUsage(processItems) : undefined),
+    [isLast, isProcessSection, processItems],
+  )
+  const resolvedTurnUsage = turnUsage ?? fallbackTurnUsage
+  const editedFiles = useMemo(
+    () => (isLast && isProcessSection && processItems !== undefined ? collectEditedFiles(processItems) : []),
+    [isLast, isProcessSection, processItems],
+  )
+  const unavailableUi = useMemo(
+    () => (isLast && isProcessSection && processItems !== undefined ? collectUnavailableUi(processItems, availableUiIds) : []),
+    [isLast, isProcessSection, processItems, availableUiIds],
+  )
+  const actionsItem = resolvedTurnUsage === undefined || resolvedTurnUsage === item.usage
+    ? item
+    : { ...item, usage: resolvedTurnUsage }
+
+  return (
+    <View
+      style={[
+        styles.assistantBlock,
+        !isFirst && { marginTop: -2 },
+        !isLast && { marginBottom: 0, gap: 0 },
+      ]}
+    >
+      {showReasoning && <ReasoningDisclosure item={item} />}
+      {showImages && <ChatImages images={item.images!} />}
+      <View style={styles.assistantProseWrap}>
+        <NativeMarkdown
+          text=""
+          preparsedNodes={nodes}
+          suppressReferencedFiles={!isLast}
+          referencedFilesOverride={isLast ? referencedFiles : undefined}
+        />
+      </View>
+      {isLast && artifacts.map(ui => (
+        <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />
+      ))}
+      {isLast && editedFiles.length > 0 && onFilePress ? <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} /> : null}
+      {isLast && showActions && !item.streaming && <MessageActions item={actionsItem} />}
+      {isLast && updatedArtifacts.map(ui => (
+        <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>
+          {ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.
+        </Text>
+      ))}
+      {isLast && unavailableUi.map(missing => (
+        <Text key={'ui-missing:' + missing.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>
+          Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.
+        </Text>
+      ))}
+    </View>
+  )
+}, (prev, next) => {
+  if (prev.section !== next.section) return false
+  if (prev.section.chunkIndex !== prev.section.chunkCount - 1) return true
+  if (!sameUsage(prev.turnUsage, next.turnUsage)) return false
+  if (prev.artifacts !== next.artifacts) return false
+  if (prev.updatedArtifacts !== next.updatedArtifacts) return false
+  if (prev.availableUiIds !== next.availableUiIds) {
+    if (prev.availableUiIds.size !== next.availableUiIds.size) return false
+    for (const id of prev.availableUiIds) {
+      if (!next.availableUiIds.has(id)) return false
     }
   }
   return true
@@ -283,8 +399,24 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
   artifacts?: UiArtifact[]
   onSendPrompt?: (text: string) => Promise<boolean>
 }) {
-  if (item.kind === 'approval') return <ApprovalCard item={item} busy={busyAction === `approval:${item.id}`} onRespond={onApproval} />
-  if (item.kind === 'question') return <QuestionCard item={item} busy={busyAction === `question:${item.id}`} onRespond={onQuestion} />
+  if (item.kind === 'approval') {
+    return (
+      <ApprovalCard
+        item={item}
+        busy={busyAction !== undefined ? busyAction === `approval:${item.id}` : undefined}
+        onRespond={onApproval}
+      />
+    )
+  }
+  if (item.kind === 'question') {
+    return (
+      <QuestionCard
+        item={item}
+        busy={busyAction !== undefined ? busyAction === `question:${item.id}` : undefined}
+        onRespond={onQuestion}
+      />
+    )
+  }
   if (item.kind === 'tool') return <ToolRow item={item} compact={compact} />
   const hasArtifacts = artifacts !== undefined && artifacts.length > 0
   if (!compact && item.role === 'assistant'
@@ -298,9 +430,9 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
 function UserRowResend({ item, status }: { item: ChatMessage; status: string }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const busyAction = useAppStore(state => state.busyAction)
+  const hasBusyAction = useAppStore(state => state.busyAction !== undefined)
   const missingImages = (item.images?.length ?? 0) > 0 && (item.promptImages?.length ?? 0) === 0
-  const disabled = busyAction !== undefined || missingImages
+  const disabled = hasBusyAction || missingImages
   const retry = () => {
     const state = useAppStore.getState()
     const backend = state.sessions.find(row => row.sessionId === item.sessionId)?.backend ?? state.selectedSession?.backend
@@ -362,6 +494,129 @@ function AssistantMessageCallout({ item }: { item: ChatMessage }) {
   )
 }
 
+interface UserBubblePalettes {
+  bubble: ThemeColors
+  solid: ThemeColors
+  soft: ThemeColors
+}
+
+const userBubblePaletteCache = new WeakMap<ThemeColors, UserBubblePalettes>()
+
+export function getUserBubblePalettes(colors: ThemeColors): UserBubblePalettes {
+  const cached = userBubblePaletteCache.get(colors)
+  if (cached !== undefined) return cached
+  const solidText = colors.onPrimary ?? colors.white
+  const palettes: UserBubblePalettes = {
+    bubble: { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse },
+    solid: { ...colors, ink: solidText, muted: solidText, subtle: solidText, primary: solidText, surfaceStrong: 'rgba(255,255,255,0.18)' },
+    soft: { ...colors, surfaceStrong: colors.border },
+  }
+  userBubblePaletteCache.set(colors, palettes)
+  return palettes
+}
+
+function HandoffContextCard({
+  parsed,
+  userBubble,
+  isSolid,
+  solidText,
+  palette,
+  hasTrailingBody,
+}: {
+  parsed: ParsedHandoffMessage
+  userBubble: boolean
+  isSolid: boolean
+  solidText: string
+  palette: ReturnType<typeof useTheme>['colors']
+  hasTrailingBody: boolean
+}) {
+  const { colors, scheme } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const [expanded, setExpanded] = useState(false)
+  const { meta } = parsed
+  const darkSolidText = isSolid && !/^#(?:fff|ffffff)$/iu.test(solidText.trim())
+  const cardBg = userBubble
+    ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.08)' : 'rgba(255, 255, 255, 0.12)')
+    : isSolid
+      ? (darkSolidText ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.14)')
+      : colors.surface
+  const cardBorder = userBubble
+    ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.16)' : 'rgba(255, 255, 255, 0.22)')
+    : isSolid
+      ? (darkSolidText ? 'rgba(0, 0, 0, 0.14)' : 'rgba(255, 255, 255, 0.24)')
+      : palette.surfaceStrong
+  const chipBg = userBubble
+    ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.12)' : 'rgba(255, 255, 255, 0.18)')
+    : isSolid
+      ? (darkSolidText ? 'rgba(0, 0, 0, 0.12)' : palette.surfaceStrong)
+      : colors.primarySoft
+  const chipText = userBubble || isSolid ? palette.ink : colors.primary
+  const bodyBg = userBubble
+    ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.06)' : 'rgba(0, 0, 0, 0.18)')
+    : isSolid
+      ? (darkSolidText ? 'rgba(0, 0, 0, 0.06)' : 'rgba(0, 0, 0, 0.16)')
+      : (colors.codeSurface ?? colors.surfaceStrong)
+  const stats = meta.filesCount > 0
+    ? zhCN.handoff.cardStats(meta.turnsCount, meta.filesCount)
+    : zhCN.handoff.cardStatsNoFiles(meta.turnsCount)
+  const title = zhCN.handoff.cardTitle(
+    harnessDisplayName(meta.sourceBackend),
+    harnessDisplayName(meta.targetBackend),
+  )
+
+  return (
+    <View
+      style={[
+        styles.handoffCard,
+        hasTrailingBody && styles.handoffCardSpacing,
+        { backgroundColor: cardBg, borderColor: cardBorder },
+      ]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={expanded ? zhCN.handoff.collapseContext : zhCN.handoff.expandContext}
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded(value => !value)}
+        style={styles.handoffCardHeader}
+      >
+        <View style={styles.handoffCardTitleRow}>
+          <ArrowRightLeft size={14} color={userBubble || isSolid ? palette.ink : palette.primary} />
+          <Text style={[styles.handoffCardTitle, { color: palette.ink }]} numberOfLines={2}>
+            {title}
+          </Text>
+          {meta.preset !== 'custom' && (
+            <View style={[styles.handoffCardPresetChip, { backgroundColor: chipBg }]}>
+              <Text style={[styles.handoffCardPresetText, { color: chipText }]}>
+                {handoffPresetLabel(meta.preset)}
+              </Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.handoffCardMetaRow}>
+          <Text
+            style={[styles.handoffCardStats, { color: palette.muted }, (userBubble || isSolid) && { opacity: 0.82 }]}
+            numberOfLines={1}
+          >
+            {stats}
+          </Text>
+          {expanded
+            ? <ChevronUp size={15} color={palette.muted} />
+            : <ChevronDown size={15} color={palette.muted} />}
+        </View>
+      </Pressable>
+      {expanded && (
+        <View style={[styles.handoffCardBody, { borderTopColor: cardBorder, backgroundColor: bodyBg }]}>
+          <ScrollView style={styles.handoffCardBodyScroll} nestedScrollEnabled showsVerticalScrollIndicator>
+            <Text selectable style={[styles.handoffCardBodyText, { color: palette.ink }]}>
+              {parsed.contextBody}
+            </Text>
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  )
+}
+
 function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
   item: ChatMessage
   compact: boolean
@@ -375,6 +630,8 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
 }) {
   const { colors, appearance } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const fallbackFilePress = useWorkspaceFilePress()
+  const resolvedFilePress = onFilePress ?? fallbackFilePress
   const user = item.role === 'user'
   const remote = item.role === 'assistant'
   const showReasoning = !compact && remote && hasVisibleMessageText(item.reasoning ?? '')
@@ -382,6 +639,17 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
   const showImages = item.images !== undefined && item.images.length > 0
   const showStreaming = item.streaming === true && item.streamingPhase !== 'reasoning'
   const hasArtifacts = artifacts !== undefined && artifacts.length > 0
+  const userMessageParts = useMemo(() => {
+    if (!user) return undefined
+    const parsedHandoff = parseHandoffMessage(item.text)
+    const heartbeatBody = parsedHandoff === undefined ? heartbeatMessageBody(item.text, 'user') : undefined
+    const effectiveMessageText = parsedHandoff !== undefined ? parsedHandoff.instruction : item.text
+    const { quotes, body } = parseMessageQuotes(effectiveMessageText)
+    const extracted = heartbeatBody === undefined
+      ? extractUserSubmittedFiles(body, item.files)
+      : { files: [], displayText: body }
+    return { parsedHandoff, heartbeatBody, quotes, extracted }
+  }, [user, item.text, item.files])
 
   // Harness renders assistant prose directly on the conversation canvas.
   if (remote) {
@@ -407,17 +675,18 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
     )
   }
 
-  if (user) {
+  if (user && userMessageParts !== undefined) {
     const undelivered = item.sendState === 'failed' || item.sendState === 'unconfirmed'
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
-    const heartbeatBody = heartbeatMessageBody(item.text, 'user')
-    const { quotes, body } = parseMessageQuotes(item.text)
-    const hasBubbleText = heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(body)
+    const { parsedHandoff, heartbeatBody, quotes, extracted } = userMessageParts
+    const submittedFiles = extracted.files
+    const displayBody = extracted.displayText
+    const hasBubbleText = parsedHandoff !== undefined || heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(displayBody)
+    const showBubbleContent = hasBubbleText || showImages
     const solidText = colors.onPrimary ?? colors.white
     const isSolid = !userBubble && appearance.bubbleStyle === 'solid'
-    const bubblePalette = { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse }
-    const solidPalette = { ...colors, ink: solidText, muted: solidText, subtle: solidText, primary: solidText, surfaceStrong: 'rgba(255,255,255,0.18)' }
-    const softBubblePalette = { ...colors, surfaceStrong: colors.border }
+    const userPalettes = getUserBubblePalettes(colors)
+    const activePalette = userBubble ? userPalettes.bubble : isSolid ? userPalettes.solid : userPalettes.soft
     const userBubbleStyle = userBubble
       ? styles.userBubble
       : !hasBubbleText
@@ -430,31 +699,47 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
               ? styles.userMinimalBubble
               : styles.userSoftBubble
     const quoteTint = userBubble ? colors.onInverse : isSolid ? solidText : colors.primary
+    const hasTrailingInstruction = quotes.length > 0 || hasVisibleMessageText(displayBody)
     return <View style={styles.userBlock}>
-      <View style={[styles.userContent, userBubbleStyle]}>
-        {showImages && <ChatImages images={item.images!} alignEnd />}
-        {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
-          <View style={styles.userMessageInlineWrap}>
-            {quotes.map((quoteText, index) => (
-              <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
-                <QuoteMarkIcon size={14} color={quoteTint} />
-                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: quoteTint, maxWidth: 200 }]}>
-                  “{formatQuoteDraftSnippet(quoteText, 16)}”
-                </Text>
-              </View>
-            ))}
-            {hasVisibleMessageText(body) && (
-              <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{body}</Text>
-            )}
-          </View>
-        ) : (
-          hasVisibleMessageText(body) && (
-            <View style={styles.userMarkdownWrap}>
-              <NativeMarkdown text={body} colors={userBubble ? bubblePalette : isSolid ? solidPalette : softBubblePalette} />
+      {submittedFiles.length > 0 && (
+        <SubmittedFileStack files={submittedFiles} sessionId={item.sessionId} onFilePress={resolvedFilePress} />
+      )}
+      {showBubbleContent && (
+        <View style={[styles.userContent, userBubbleStyle]}>
+          {showImages && <ChatImages images={item.images!} alignEnd />}
+          {parsedHandoff !== undefined && (
+            <HandoffContextCard
+              parsed={parsedHandoff}
+              userBubble={Boolean(userBubble)}
+              isSolid={isSolid}
+              solidText={solidText}
+              palette={activePalette}
+              hasTrailingBody={hasTrailingInstruction}
+            />
+          )}
+          {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
+            <View style={styles.userMessageInlineWrap}>
+              {quotes.map((quoteText, index) => (
+                <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
+                  <QuoteMarkIcon size={14} color={quoteTint} />
+                  <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: quoteTint, maxWidth: 200 }]}>
+                    “{formatQuoteDraftSnippet(quoteText, 16)}”
+                  </Text>
+                </View>
+              ))}
+              {hasVisibleMessageText(displayBody) && (
+                <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{displayBody}</Text>
+              )}
             </View>
-          )
-        )}
-      </View>
+          ) : (
+            hasVisibleMessageText(displayBody) && (
+              <View style={styles.userMarkdownWrap}>
+                <NativeMarkdown text={displayBody} colors={activePalette} />
+              </View>
+            )
+          )}
+        </View>
+      )}
       {item.sendState === 'canceled'
         ? <Text style={styles.canceledText}>{zhCN.chat.sendCanceled}</Text>
         : undelivered
@@ -645,11 +930,14 @@ function compactActivityText(value: string | undefined): string | undefined {
 
 function ApprovalCard({ item, busy, onRespond }: {
   item: ApprovalActivity
-  busy: boolean
+  busy?: boolean
   onRespond: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const storeBusy = useAppStore(state =>
+    busy === undefined && item.outcome === undefined && state.busyAction === `approval:${item.id}`)
+  const isBusy = busy ?? storeBusy
   if (item.outcome !== undefined) {
     const denied = item.outcome === 'rejected' || item.outcome === 'cancelled' || item.outcome === 'unavailable'
     const handledElsewhere = item.outcome === 'unavailable'
@@ -676,8 +964,8 @@ function ApprovalCard({ item, busy, onRespond }: {
       )}
       <Text style={styles.permissionScope}>{zhCN.chat.permissionScope}</Text>
       <View style={styles.permissionActions}>
-        <Button label={zhCN.chat.allowOnce} variant="inverse" onPress={() => void onRespond(item.id, 'allowed-once')} loading={busy} />
-        <Button label={zhCN.chat.deny} variant="secondary" onPress={() => void onRespond(item.id, 'rejected')} disabled={busy} />
+        <Button label={zhCN.chat.allowOnce} variant="inverse" onPress={() => void onRespond(item.id, 'allowed-once')} loading={isBusy} />
+        <Button label={zhCN.chat.deny} variant="secondary" onPress={() => void onRespond(item.id, 'rejected')} disabled={isBusy} />
       </View>
     </View>
   )
@@ -685,11 +973,14 @@ function ApprovalCard({ item, busy, onRespond }: {
 
 function QuestionCard({ item, busy, onRespond }: {
   item: QuestionActivity
-  busy: boolean
+  busy?: boolean
   onRespond: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const storeBusy = useAppStore(state =>
+    busy === undefined && item.outcome === undefined && state.busyAction === `question:${item.id}`)
+  const isBusy = busy ?? storeBusy
   const [selected, setSelected] = useState<Record<string, string[]>>({})
   const [custom, setCustom] = useState<Record<string, string>>({})
   const [now, setNow] = useState(Date.now())
@@ -777,7 +1068,7 @@ function QuestionCard({ item, busy, onRespond }: {
           />
         </View>
       ))}
-      <Button label={zhCN.chat.submitAnswer} variant="inverse" onPress={() => void onRespond(item.id, selected, custom)} loading={busy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
+      <Button label={zhCN.chat.submitAnswer} variant="inverse" onPress={() => void onRespond(item.id, selected, custom)} loading={isBusy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
     </View>
   )
 }

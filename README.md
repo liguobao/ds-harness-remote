@@ -1,6 +1,5 @@
 <p align="center">
-
-  <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
+  <img src="docs/images/hero-en.png" alt="DeepSeek Harness Remote — Connect once. Ready everywhere." width="100%">
 </p>
 
 <p align="center">
@@ -37,7 +36,7 @@ Harness keeps running on your work computer, with the same workspaces, tools, an
 
 The DeepSeek Harness desktop edition is supported. Install the latest release:
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
 ## Features
 
@@ -74,10 +73,10 @@ Several clients can connect to the same Host at once; RPC calls and streams are 
 Open **Extensions / Plugin management** in DeepSeek Harness Desktop, choose installation
 from npm, and enter this package:
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
-with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.5`.
+with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.7`.
 
 On DSH 0.2.2+, npm installations support version checks and updates in Plugin management, with an attempt to restore the previous version if hot updating fails. GitHub and local link installations must switch to npm first; see [online updates](docs/installation.md#online-updates-in-dsh-plugin-management).
 
@@ -104,7 +103,7 @@ After installing the ds-harness-remote plugin in DSH Go on your phone, you can a
 ## Quick start
 
 1. Open **Remote** from the DeepSeek Harness sidebar.
-2. Choose Zhihu, GitHub, or Google authorization, or sign in with an account and password. Account registration requires an invitation code; email the repository author to request one.
+2. Sign in with Zhihu, GitHub, or Google.
 3. On another device, install the same plugin in DeepSeek Harness and sign in as described in steps 1–2. Alternatively, use Remote Web, iOS, Android, or DSH Go directly without installing a plugin.
 4. Select an online Host, then choose an existing workspace or browse remote directories to open one.
 
@@ -116,23 +115,20 @@ For self-hosting, use the repository's [minimal Server](apps/server/README.md). 
 
 ### Desktop
 
-On another computer, select an online Host and open its workspace. The workspace opens in the native Harness interface, with the active Host and encrypted connection status in the header.
+On another computer, select an online Host and open its Harness or ACP workspace. Sessions run directly inside the native Harness interface, with live host status and end-to-end encrypted P2P route diagnostics in the header.
 
 <p align="center">
-  <img src="docs/images/host-list.png" alt="Remote workspace picker listing online Hosts" width="40%">
-  <img src="docs/images/remote.png" alt="A Harness conversation running through an encrypted remote connection" width="40%">
+  <img src="docs/images/desktop-showcase-en.png" alt="DSH Desktop remote session with P2P Noise IK route diagnostics and multi-agent Workspace Hub" width="100%">
 </p>
 
 To prevent this computer from controlling other Hosts, open the Host list at [https://dsh.r2049.cn/](https://dsh.r2049.cn/) and enable **Controlled only**. This device will no longer see other devices under your account, while Web and other clients can still connect to it remotely.
 
 ### Android
 
-Use text or image prompts, switch models, and access supported workspace files and terminals.
+Switch across online Hosts, ACP backends, and DS-Bot rooms in one drawer; send text or image prompts, preview delivered files, inspect native Git diffs, and open remote terminals in light or dark mode.
 
 <p align="center">
-  <img src="docs/images/mobile-list.jpg" alt="Android client listing online and offline computers" width="30%">
-  <img src="docs/images/image-msg.jpg" alt="Sending an image prompt from the Android client" width="30%">
-  <img src="docs/images/image-result.jpg" alt="Viewing the image response in the Android client" width="30%">
+  <img src="docs/images/mobile-showcase-en.png" alt="Android client showcasing multi-host ACP drawer, native chat with file delivery, and native Git diff review" width="100%">
 </p>
 
 Mobile Settings includes a global **Compact conversations** switch, off by default and applied when a conversation is next opened.
@@ -232,7 +228,7 @@ There is currently no limit on concurrent client connections, with RPC calls and
 
 **Which Harness versions are supported?**
 
-The current baseline is `dsh-v0.2.2-rc.1`; `dsh-v0.2.1-rc.5` and `0.2.0` rc.2 / rc.1 remain compatible on the same official carrier. See the [compatibility guide](docs/compatibility.md).
+The current baseline is `dsh-v0.2.3-alpha.2`; `dsh-v0.2.1-rc.5` and `0.2.0` rc.2 / rc.1 remain compatible on the same official carrier. See the [compatibility guide](docs/compatibility.md).
 
 Harness `0.1.1-rc.2` ApiProxy support has been removed from the Host plugin, its bundled Remote client, and Android. Use a Host with the official Typert Remote carrier; Hosts that only provide ApiProxy or lack capability discovery are rejected, with no fallback.
 
@@ -283,7 +279,7 @@ DS Bot is a bot plugin for DeepSeek Harness (dsh) that turns dsh into a bot. You
 - [Changelog](docs/CHANGELOG.md)
 - [Privacy policy](docs/PRIVACY.md)
 - [Android guide](apps/android/README.md)
-- The current development baseline is `dsh-v0.2.2-rc.1`; validation scope is documented in [the compatibility guide](docs/compatibility.md).
+- The current development baseline is `dsh-v0.2.3-alpha.2`; validation scope is documented in [the compatibility guide](docs/compatibility.md).
 
 ## Links
 

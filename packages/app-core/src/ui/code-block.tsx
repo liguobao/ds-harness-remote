@@ -1,18 +1,20 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
   type StyleProp,
+  type TextStyle,
   type ViewStyle,
 } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useTheme } from './theme-context'
 import { resolveChatMetrics } from './theme'
 import { monoFontFamily } from './platform-style'
-import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from './syntax-highlight'
+import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE, partitionHighlightedCodeTokens, type SyntaxPalette, type SyntaxToken, type SyntaxTokenKind } from './syntax-highlight'
 import { IconWrapFill, IconNowrapFill, IconCopyOutline, IconCheckOutline } from './dsh-icons'
 
 export interface CodeBlockProps {
@@ -22,6 +24,101 @@ export interface CodeBlockProps {
 }
 
 const COPY_RESET_MS = 2000
+export const MAX_HIGHLIGHT_CACHE_ENTRIES = 256
+export const MAX_HIGHLIGHT_CACHE_CODE_LEN = 16_384
+
+const highlightCache = new Map<string, SyntaxToken[]>()
+
+export function highlightCodeCached(cleanCode: string, language?: string): SyntaxToken[] {
+  if (cleanCode.length > MAX_HIGHLIGHT_CACHE_CODE_LEN) {
+    return highlightCode(cleanCode, language)
+  }
+  const key = `${language ?? ''}\0${cleanCode}`
+  const cached = highlightCache.get(key)
+  if (cached !== undefined) {
+    highlightCache.delete(key)
+    highlightCache.set(key, cached)
+    return cached
+  }
+  const tokens = highlightCode(cleanCode, language)
+  if (highlightCache.size >= MAX_HIGHLIGHT_CACHE_ENTRIES) {
+    const oldestKey = highlightCache.keys().next().value
+    if (oldestKey !== undefined) highlightCache.delete(oldestKey)
+  }
+  highlightCache.set(key, tokens)
+  return tokens
+}
+
+const paletteStylesCache = new WeakMap<SyntaxPalette, Record<SyntaxTokenKind, StyleProp<TextStyle>>>()
+
+function getPaletteTokenStyles(palette: SyntaxPalette): Record<SyntaxTokenKind, StyleProp<TextStyle>> {
+  const cached = paletteStylesCache.get(palette)
+  if (cached !== undefined) return cached
+  const map: Record<SyntaxTokenKind, StyleProp<TextStyle>> = {
+    plain: undefined,
+    comment: [{ color: palette.comment }, styles.commentToken],
+    string: { color: palette.string },
+    keyword: [{ color: palette.keyword }, styles.keywordToken],
+    number: { color: palette.number },
+    type: { color: palette.type },
+    function: { color: palette.function },
+    property: { color: palette.property },
+    operator: { color: palette.operator },
+  }
+  paletteStylesCache.set(palette, map)
+  return map
+}
+
+function renderCoalescedCodeTokens(tokens: readonly SyntaxToken[], palette: SyntaxPalette) {
+  const tokenStyles = getPaletteTokenStyles(palette)
+  const out: React.ReactNode[] = []
+  let plainBuffer = ''
+  const flushPlain = () => {
+    if (plainBuffer.length > 0) {
+      out.push(plainBuffer)
+      plainBuffer = ''
+    }
+  }
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!
+    if (token.kind === 'plain' || token.text.trim().length === 0) {
+      plainBuffer += token.text
+      continue
+    }
+    flushPlain()
+    out.push(
+      <Text key={i} style={tokenStyles[token.kind]}>
+        {token.text}
+      </Text>,
+    )
+  }
+  flushPlain()
+  return out
+}
+
+function splitHighlightedLines(tokens: readonly SyntaxToken[], palette: SyntaxPalette): React.ReactNode[][] {
+  const tokenStyles = getPaletteTokenStyles(palette)
+  const tokenChunks = partitionHighlightedCodeTokens(tokens)
+  return tokenChunks.map(chunkTokens => {
+    if (chunkTokens.length === 0) return [' ']
+    const nodes: React.ReactNode[] = []
+    for (let i = 0; i < chunkTokens.length; i += 1) {
+      const token = chunkTokens[i]!
+      if (token.kind === 'plain') {
+        nodes.push(token.text)
+      } else {
+        nodes.push(
+          <Text key={i} style={tokenStyles[token.kind]}>
+            {token.text}
+          </Text>,
+        )
+      }
+    }
+    return nodes
+  })
+}
+
+const ANDROID_SPLIT_LINE_TOKEN_THRESHOLD = 24
 
 export const CodeBlockView = memo(function CodeBlockView({ code, language, style }: CodeBlockProps) {
   const { colors, scheme, appearance } = useTheme()
@@ -34,7 +131,16 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
 
   const cleanCode = (code || '').replace(/\n+$/u, '')
   const label = (language || 'code').toLowerCase()
-  const tokens = React.useMemo(() => highlightCode(cleanCode, language), [cleanCode, language])
+  const tokens = React.useMemo(() => highlightCodeCached(cleanCode, language), [cleanCode, language])
+  const splitByLine = Platform.OS === 'android' && tokens.length > ANDROID_SPLIT_LINE_TOKEN_THRESHOLD
+  const tokenChildren = React.useMemo(
+    () => (splitByLine ? null : renderCoalescedCodeTokens(tokens, palette)),
+    [splitByLine, tokens, palette],
+  )
+  const highlightedLines = React.useMemo(
+    () => (splitByLine ? splitHighlightedLines(tokens, palette) : null),
+    [splitByLine, tokens, palette],
+  )
 
   useEffect(() => {
     return () => {
@@ -57,35 +163,27 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
     }
   }, [cleanCode])
 
-  const renderedTokens = (
-    <Text
-      selectable
-      style={[
-        styles.codeText,
-        {
-          color: palette.plain,
-          fontSize: metrics.codeFontSize,
-          lineHeight: metrics.codeLineHeight,
-          flexShrink: wrap ? 1 : 0,
-        },
-      ]}
-    >
-      {tokens.map((token, index) => (
-        token.kind === 'plain'
-          ? token.text
-          : (
-            <Text
-              key={index}
-              style={[
-                { color: palette[token.kind] },
-                token.kind === 'comment' && styles.commentToken,
-                token.kind === 'keyword' && styles.keywordToken,
-              ]}
-            >
-              {token.text}
-            </Text>
-          )
+  const codeTextStyle: StyleProp<TextStyle> = [
+    styles.codeText,
+    {
+      color: palette.plain,
+      fontSize: metrics.codeFontSize,
+      lineHeight: metrics.codeLineHeight,
+      flexShrink: wrap ? 1 : 0,
+    },
+  ]
+
+  const renderedTokens = highlightedLines !== null ? (
+    <View style={wrap ? styles.codeLinesWrap : styles.codeLinesScroll}>
+      {highlightedLines.map((lineNodes, lineIdx) => (
+        <Text key={lineIdx} selectable style={codeTextStyle}>
+          {lineNodes}
+        </Text>
       ))}
+    </View>
+  ) : (
+    <Text selectable style={codeTextStyle}>
+      {tokenChildren}
     </Text>
   )
 
@@ -188,6 +286,12 @@ const styles = StyleSheet.create({
     minWidth: '100%',
   },
   wrapBody: {},
+  codeLinesScroll: {
+    alignItems: 'flex-start',
+  },
+  codeLinesWrap: {
+    alignSelf: 'stretch',
+  },
   codeText: {
     fontFamily: monoFontFamily,
     includeFontPadding: false,

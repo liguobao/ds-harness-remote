@@ -22,6 +22,8 @@ const KEY_DRAFTS = 'dshremote.drafts.v1';
 const KEY_PROMPTS = 'dshremote.prompts.v1';
 /** 会话收藏与最近访问：{ favorites: string[], recents: string[] }。 */
 const KEY_SESSION_META = 'dshremote.sessionMeta.v1';
+/** 会话抽屉视图偏好：分组方式、排序方式与归档筛选。 */
+const KEY_SESSION_VIEW = 'dshremote.sessionView.v1';
 /** 上次连着的主机：下次启动自动连它（聊天客户端该有的行为）。 */
 const KEY_LAST_HOST = 'dshremote.lastHost.v1';
 const KEY_AUTO_CONNECT_LAST_HOST = 'dshremote.autoConnectLastHost.v1';
@@ -37,9 +39,6 @@ const KEY_THEME_TINT = 'dshremote.themeTint.v1';
 const KEY_PET = 'dshremote.pet.v1';
 /** 已发送文本里的 Key/Token 默认打码。 */
 const KEY_SECRET_MASK = 'dshremote.secretMask.v1';
-/** 多服务器/多账号：一份「已登录过的服务器」快照列表（含 token），存在 asset store 里。 */
-const ASSET_ALIAS_PROFILES = 'dshremote.profiles';
-
 // Secrets never live in the plaintext KV. They go to the system Asset Store, which is
 // guarded by the device lock credential and (with SyncType.NEVER) never leaves this device.
 const ASSET_ALIAS_CREDENTIALS = 'dshremote.credentials.v1';
@@ -360,58 +359,6 @@ export class SecureStore {
     await this.putSync(KEY_DEVICE_ALIASES, JSON.stringify(aliases));
   }
 
-  /** 已保存的一套「服务器 + 账号 + 凭据」，用于一键切换而不必重新登录。 */
-  loadProfiles(): SavedProfile[] {
-    const text: string = this.getSync(KEY_HOST_PINS + '.profiles', '');
-    if (text.length === 0) {
-      return [];
-    }
-    try {
-      const root: Object = JSON.parse(text) as Object;
-      const list: Object[] | undefined = asArray(root);
-      const out: SavedProfile[] = [];
-      if (list !== undefined) {
-        for (const item of list) {
-          const record: Record<string, Object> | undefined = asRecord(item);
-          if (record === undefined) {
-            continue;
-          }
-          const profile: SavedProfile = new SavedProfile();
-          profile.baseUrl = jsonStr(record, 'baseUrl', '');
-          profile.email = jsonStr(record, 'email', '');
-          profile.accessToken = jsonStr(record, 'accessToken', '');
-          profile.accessTokenExpiresAt = jsonNum(record, 'accessTokenExpiresAt', 0);
-          profile.refreshToken = jsonStr(record, 'refreshToken', '');
-          profile.refreshTokenExpiresAt = jsonNum(record, 'refreshTokenExpiresAt', 0);
-          profile.deviceId = jsonStr(record, 'deviceId', '');
-          if (profile.baseUrl.length > 0 && profile.email.length > 0) {
-            out.push(profile);
-          }
-        }
-      }
-      return out;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  async saveProfiles(profiles: SavedProfile[]): Promise<void> {
-    const list: Object[] = [];
-    for (const profile of profiles) {
-      const body: Record<string, Object> = {
-        'baseUrl': profile.baseUrl,
-        'email': profile.email,
-        'accessToken': profile.accessToken,
-        'accessTokenExpiresAt': profile.accessTokenExpiresAt,
-        'refreshToken': profile.refreshToken,
-        'refreshTokenExpiresAt': profile.refreshTokenExpiresAt,
-        'deviceId': profile.deviceId
-      };
-      list.push(body);
-    }
-    await this.putSync(KEY_HOST_PINS + '.profiles', JSON.stringify(list));
-  }
-
   loadAutoConnectLastHost(): boolean {
     return this.getSync(KEY_AUTO_CONNECT_LAST_HOST, '1') !== '0';
   }
@@ -525,6 +472,12 @@ export class SecureStore {
       }
     }
     await this.saveHostPins(next);
+  }
+
+  /** Remove all pinned Host identities when changing Server/account. */
+  async clearHostPins(): Promise<void> {
+    this.hostPins = {};
+    await this.saveHostPins({});
   }
 
   private async reloadHostPins(): Promise<void> {
@@ -809,6 +762,34 @@ export class SecureStore {
     }
   }
 
+  loadSessionView(): Record<string, string> {
+    const raw: string = this.getSync(KEY_SESSION_VIEW, '');
+    if (raw.length === 0) {
+      return {};
+    }
+    try {
+      const root: Record<string, Object> = JSON.parse(raw) as Record<string, Object>;
+      const out: Record<string, string> = {};
+      const groupBy: Object | undefined = root['groupBy'];
+      const orderBy: Object | undefined = root['orderBy'];
+      const filterMode: Object | undefined = root['filterMode'];
+      if (typeof groupBy === 'string') out['groupBy'] = groupBy;
+      if (typeof orderBy === 'string') out['orderBy'] = orderBy;
+      if (typeof filterMode === 'string') out['filterMode'] = filterMode;
+      return out;
+    } catch (error) {
+      return {};
+    }
+  }
+
+  saveSessionView(groupBy: string, orderBy: string, filterMode: string): void {
+    try {
+      this.putSync(KEY_SESSION_VIEW, JSON.stringify({ groupBy, orderBy, filterMode }));
+    } catch (error) {
+      logWarn('session view save failed');
+    }
+  }
+
   /** 上次连着的主机 deviceId（空 = 没有，别自动连）。 */
   loadLastHost(): string {
     return this.getSync(KEY_LAST_HOST, '');
@@ -959,15 +940,4 @@ export class SecureStore {
     prefs.putSync(key, value);
     await prefs.flush();
   }
-}
-
-/** 一套已保存的登录态：服务器 + 账号 + token（token 与主凭据同源，切换时直接复用）。 */
-export class SavedProfile {
-  baseUrl: string = '';
-  email: string = '';
-  accessToken: string = '';
-  accessTokenExpiresAt: number = 0;
-  refreshToken: string = '';
-  refreshTokenExpiresAt: number = 0;
-  deviceId: string = '';
 }

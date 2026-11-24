@@ -13,6 +13,8 @@ import {
   MAX_PDF_PREVIEW_BYTES,
   MAX_PREVIEW_BYTES,
   PREVIEW_CHUNK_BYTES,
+  safeOpenMimeType,
+  sanitizeOpenFileName,
   WORKSPACE_PREVIEW_CHANGED,
   WORKSPACE_PREVIEW_INVALID,
   WORKSPACE_PREVIEW_TOO_LARGE,
@@ -818,4 +820,21 @@ describe('workspace download maximum', () => {
     expect(written).toBe(MAX_DOWNLOAD_BYTES)
     expect(mocks.statFile).toHaveBeenCalledTimes(2)
   }, 25000)
+})
+
+describe('open/save filename sanitization and MIME allowlist', () => {
+  it('preserves file extension when truncating filenames longer than 120 chars', () => {
+    const longPdf = `${'长文件名样本'.repeat(30)}.pdf`
+    const sanitized = sanitizeOpenFileName(longPdf)
+    expect(sanitized.length).toBeLessThanOrEqual(120)
+    expect(sanitized.endsWith('.pdf')).toBe(true)
+    expect(safeOpenMimeType(sanitized)).toBe('application/pdf')
+  })
+
+  it('downgrades unsafe extensions like apk and html to application/octet-stream', () => {
+    expect(safeOpenMimeType('installer.apk')).toBe('application/octet-stream')
+    expect(safeOpenMimeType('page.html')).toBe('application/octet-stream')
+    expect(safeOpenMimeType('vector.svg')).toBe('application/octet-stream')
+    expect(sanitizeOpenFileName('../dir/..')).toBe('file')
+  })
 })

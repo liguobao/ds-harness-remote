@@ -16,7 +16,7 @@ import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, PHASE_BOOT, PHA
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
   getAppRuntime, errorMessage, maskSecrets } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
-import { DirectoryEntry, HarnessWorkspace, WORKSPACE_TEXT_PAGE_LINES, WorkspaceTextPage } from '../net/HarnessClient';
+import { DirectoryEntry, HarnessWorkspace, WORKSPACE_TEXT_PAGE_LINES, WorkspaceTextPage, WorkspaceGitFile, WorkspaceGitStatus, WorkspaceGitDiff } from '../net/HarnessClient';
 import { HarnessRemoteSession, HarnessSchedule, HarnessScheduleDelivery } from '../net/HarnessClient';
 import { applyTint, darkPalette, lightPalette, Palette } from '../services/Theme';
 import { AccountMembership, OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
@@ -26,7 +26,6 @@ import {
   isCompactWidth, isExpandedWidth
 } from '../services/Adaptive';
 import { PickedImage, compressPixelMap, pickImages } from '../services/ImagePicker';
-import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
 import { RtcBridge } from '../services/RtcBridge';
 import { heartbeatBodyOf } from '../services/Heartbeat';
@@ -44,16 +43,19 @@ import { LoginServerEditor } from '../ui/LoginServerEditor';
 import BuildProfile from 'BuildProfile';
 
 const MEMBERSHIP_PRICING_URL: string = 'https://dsh.r2049.cn/pricing';
+const RELEASES_URL: string = 'https://github.com/liguobao/ds-harness-remote/releases/latest';
 
 class SessionFolder {
   key: string;
   title: string;
   sessions: HarnessRemoteSession[];
+  depth: number;
 
-  constructor(key: string, title: string, sessions: HarnessRemoteSession[]) {
+  constructor(key: string, title: string, sessions: HarnessRemoteSession[], depth: number = 0) {
     this.key = key;
     this.title = title;
     this.sessions = sessions;
+    this.depth = depth;
   }
 }
 
@@ -164,20 +166,13 @@ struct Index {
   /** 按住说话：波形条高度、计时、是否处于「上滑取消」区。 */
   /** 文字大小档位与倍数（0 小 / 1 标准 / 2 大 / 3 特大）。 */
   @State textScaleMode: number = 1;
-  @State profilesList: SavedProfile[] = [];
   /** 「更多」面板（替代系统菜单，自己控制对比度）。 */
   @State showMoreMenu: boolean = false;
-  /** 服务器切换面板。 */
-  @State showServerSwitch: boolean = false;
   /** 通用设置的点选面板。 */
   @State choiceOpen: boolean = false;
   @State choiceKind: string = '';
   /** 单台设备的操作面板（卡片 ⋯）。 */
   @State deviceMenuId: string = '';
-  /** 按下中的服务器行 key，用来做明显的按压反馈。 */
-  @State pressedChoiceKey: string = '';
-  /** 官方服务器固定地址，切换时直接可选，不用手输。 */
-  private static readonly OFFICIAL_SERVER: string = 'https://dsh.r2049.cn';
   @State textScaleValue: number = 1;
   /** 窗口尺寸（vp），PC 上放大窗口时据此调整布局。 */
   @State windowWidthVp: number = 0;
@@ -188,9 +183,6 @@ struct Index {
   @State foldState: FoldState = 'expanded';
   /** 键盘是否弹起：弹起时收起语境胶囊、收窄列表底部留白。 */
   @State keyboardVisible: boolean = false;
-  /** 切换服务器中（与 runtime 同步），用于设备页的即时提示与防重复点击。 */
-  @State switchingServer: boolean = false;
-  @State switchingTo: string = '';
   /** 提示词面板（本地提示词库）。 */
   @State promptPanelOpen: boolean = false;
   /** 执行轨迹面板：把本次会话里的工具调用按顺序列成时间线。 */
@@ -203,6 +195,15 @@ struct Index {
   @State filePreviewLoading: boolean = false;
   @State filePreviewError: string = '';
   @State filePreviewPage: WorkspaceTextPage = new WorkspaceTextPage();
+  @State previewIsOffice: boolean = false;
+  @State workspaceGitOpen: boolean = false;
+  @State workspaceGitStatus: WorkspaceGitStatus = new WorkspaceGitStatus();
+  @State workspaceGitScope: string = 'all';
+  @State workspaceGitLoading: boolean = false;
+  @State workspaceGitError: string = '';
+  @State workspaceGitDiffPath: string = '';
+  @State workspaceGitDiff: WorkspaceGitDiff = new WorkspaceGitDiff();
+  @State workspaceGitDiffLoading: boolean = false;
   /** 预览的是不是 PDF（走系统 PDF Kit 渲染）。 */
   @State previewIsPdf: boolean = false;
   @State pdfError: string = '';
@@ -221,8 +222,10 @@ struct Index {
   @State messageActionCode: string = '';
   /** 设备详情面板（点 ⋯ 菜单里的「查看详情」打开）。 */
   @State deviceDetailId: string = '';
-  /** 会话列表只看收藏。 */
-  @State favoriteOnly: boolean = false;
+  /** 会话抽屉视图选项，与 Android 端的分组/排序/归档筛选一致。 */
+  @State sessionGroupBy: string = 'workspace';
+  @State sessionOrderBy: string = 'updated';
+  @State sessionFilterMode: string = 'hideArchived';
   /** 展开看原文的心跳消息 id（默认折叠成可读正文）。 */
   @State heartbeatExpanded: string[] = [];
   /** 全屏编辑面板（长文写作时用，对齐 Android 的 composer expand）。 */
@@ -239,8 +242,6 @@ struct Index {
   /** 当前会话还有更早历史可翻（同上，运行时字段要镜像）。 */
   @State historyHasMore: boolean = false;
   @State loadingOlderHistory: boolean = false;
-  /** 会话抽屉里是否把已归档的会话也列出来。 */
-  @State showArchived: boolean = false;
   /** 按工作区过滤会话（存完整 cwd；空 = 全部）。 */
   @State workspaceFilter: string = '';
   /** 会话内搜索（只在当前会话里找）。 */
@@ -511,9 +512,8 @@ struct Index {
       this.backFromFiles();
       return true;
     }
-    if (this.showServerSwitch || this.showMoreMenu
+    if (this.showMoreMenu
       || this.showSessionPanel || this.showBrowser || this.showSettings) {
-      this.showServerSwitch = false;
       this.showMoreMenu = false;
       this.showModelPicker = false;
       this.showSessionPanel = false;
@@ -743,12 +743,14 @@ struct Index {
     this.currentModelProvider = this.runtime.currentModelProvider;
     this.currentModelEffort = this.runtime.currentModelEffort;
     this.textScaleMode = this.runtime.textScaleMode;
-    this.profilesList = this.runtime.profiles.slice();
     this.textScaleValue = this.runtime.textScale();
     this.permissionPreset = this.runtime.permissionPreset;
     this.permissionOptionsList = this.runtime.permissionOptions.slice();
     this.workspaces = this.runtime.workspaces;
     this.selectedWorkspaceId = this.runtime.selectedWorkspaceId;
+    this.sessionGroupBy = this.runtime.sessionGroupBy;
+    this.sessionOrderBy = this.runtime.sessionOrderBy;
+    this.sessionFilterMode = this.runtime.sessionFilterMode;
     this.filePreviewPath = this.runtime.filePreviewPath;
     this.filePreviewLoading = this.runtime.filePreviewLoading;
     this.filePreviewError = this.runtime.filePreviewError;
@@ -757,6 +759,13 @@ struct Index {
     this.browseLoading = this.runtime.browseLoading;
     this.browseError = this.runtime.browseError;
     this.directoryEntries = this.runtime.directoryEntries;
+    this.workspaceGitStatus = this.runtime.workspaceGitStatus;
+    this.workspaceGitScope = this.runtime.workspaceGitScope;
+    this.workspaceGitLoading = this.runtime.workspaceGitLoading;
+    this.workspaceGitError = this.runtime.workspaceGitError;
+    this.workspaceGitDiffPath = this.runtime.workspaceGitDiffPath;
+    this.workspaceGitDiff = this.runtime.workspaceGitDiff;
+    this.workspaceGitDiffLoading = this.runtime.workspaceGitDiffLoading;
     if (this.sessionSearchActive) {
       const found: HarnessRemoteSession[] | undefined = this.runtime.searchResults;
       this.sessionSearchResults = found !== undefined ? found : [];
@@ -786,8 +795,6 @@ struct Index {
         }
       }
     }
-    this.switchingServer = this.runtime.switchingServer;
-    this.switchingTo = this.runtime.switchingTo;
     this.connectedHostName = this.runtime.connectedHostName;
     if (this.reconnecting || this.connectedDeviceId !== this.runtime.connectedDeviceId) {
       this.dshWebOpen = false;
@@ -1060,78 +1067,6 @@ struct Index {
     return this.currentSessionTitle.length > 12;
   }
 
-  /** 当前服务器胶囊文案  /** 顶栏切换按钮的文案：只给「官方 / 本地 / 自定义」短标签，长邮箱不该出现在这里。 */
-  private accountSwitchLabel(): string {
-    const url: string = this.runtime.serverUrl;
-    if (url.length === 0) {
-      return this.tr('切换账号');
-    }
-    const host: string = serverHostLabel(url);
-    if (url.indexOf('dsh.r2049.cn') >= 0) {
-      return this.tr('官方') + ' · ' + host;
-    }
-    if (url.indexOf('192.168.') >= 0 || url.indexOf('127.0.0.1') >= 0 || url.indexOf('localhost') >= 0) {
-      return this.tr('本地') + ' · ' + host;
-    }
-    return host;
-  }
-
-  /** 主机选择页直接切换服务器/账号：列出已保存的登录态，点了就换（不用重输密码）。 */
-  private openAccountSwitcher(): void {
-    this.showMoreMenu = false;
-    this.showServerSwitch = true;
-  }
-
-  /** 服务器候选：已保存的登录态 + 内置的官方/本地出口（去重）。 */
-  private serverChoices(): ServerChoice[] {
-    const out: ServerChoice[] = [];
-    const currentUrl: string = this.runtime.serverUrl;
-    const currentEmail: string = this.runtime.email;
-    const push = (url: string, email: string, profile: SavedProfile | undefined): void => {
-      const emailFull: string = email;
-      for (const existing of out) {
-        // 同一个服务器只留一条（先入为主的是已保存的登录态）
-        if (existing.url === url) {
-          return;
-        }
-      }
-      const choice: ServerChoice = new ServerChoice();
-      choice.url = url;
-      choice.account = this.shortEmail(emailFull);
-      choice.accountFull = emailFull;
-      choice.profile = profile;
-      choice.host = serverHostLabel(url);
-      choice.label = this.serverTag(url);
-      choice.active = url === currentUrl && emailFull === currentEmail;
-      out.push(choice);
-    };
-    for (const profile of this.profilesList) {
-      push(profile.baseUrl, profile.email, profile);
-    }
-    push('https://dsh.r2049.cn', '', undefined);
-    push('http://192.168.11.128:8080', '', undefined);
-    return out;
-  }
-
-  /** 服务器短标签：官方 / 本地 / 自定义。 */
-  private serverTag(url: string): string {
-    if (url.indexOf('dsh.r2049.cn') >= 0) {
-      return this.tr('官方服务器');
-    }
-    if (url.indexOf('192.168.') >= 0 || url.indexOf('127.0.0.1') >= 0 || url.indexOf('localhost') >= 0) {
-      return this.tr('本地服务器');
-    }
-    return this.tr('自定义服务器');
-  }
-
-  /** 邮箱只留前缀并截断，避免长数字串撑行。 */
-  private shortEmail(email: string): string {
-    const at: number = email.indexOf('@');
-    const head: string = at > 0 ? email.substring(0, at) : email;
-    return head.length > 16 ? head.substring(0, 16) + '…' : head;
-  }
-
-  /** 选中某条服务器：有保存的登录态就直接切，没有就带上地址去登录页。 */
   /** 跨天时插一条日期分隔；同一天不打断。 */
   private shouldShowDayDivider(index: number): boolean {
     const rows: ChatItem[] = this.chatRows();
@@ -1270,28 +1205,6 @@ struct Index {
   }
 
   /** 会话列表实际展示的条目：搜索优先，其次「只看收藏」。 */
-  /** 会话列表里出现过的不同工作区（按会话数降序，最多 6 个）。 */
-  private sessionWorkspaces(): string[] {
-    const counts: Map<string, number> = new Map<string, number>();
-    for (const session of this.sessions) {
-      if (session.cwd.length === 0) {
-        continue;
-      }
-      // 被隐藏的空白/subagent 会话也不该贡献工作区筛选 chip。
-      if (!isVisibleSession(session.sessionId, session.blank, session.origin, this.currentSessionId,
-        this.sessionSearchActive ? this.sessionSearchInput.trim() : '')) {
-        continue;
-      }
-      counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1);
-    }
-    const keys: string[] = [];
-    counts.forEach((count: number, cwd: string) => {
-      keys.push(cwd);
-    });
-    keys.sort((a: string, b: string) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0));
-    return keys.slice(0, 6);
-  }
-
   private isArchivedSession(sessionId: string): boolean {
     return this.archivedIds.includes(sessionId);
   }
@@ -1310,29 +1223,29 @@ struct Index {
       if (!isVisibleSession(session.sessionId, session.blank, session.origin, this.currentSessionId, query)) {
         continue;
       }
-      // 归档的会话默认不进列表；搜索时照常给结果，别让搜到的会话凭空消失
       if (this.workspaceFilter.length > 0 && session.cwd !== this.workspaceFilter) {
         continue;
       }
       const archived: boolean = this.isArchivedSession(session.sessionId);
-      if (archived && !this.showArchived && !this.sessionSearchActive) {
+      if (this.sessionFilterMode === 'hideArchived' && archived) {
         continue;
       }
-      if (this.favoriteOnly && !this.runtime.isFavoriteSession(session.sessionId)) {
+      if (this.sessionFilterMode === 'archivedOnly' && !archived) {
         continue;
       }
       list.push(session);
     }
-    // 置顶最先，其次运行中，其余保持服务端给的时间顺序
+    // Android 端先按置顶分区，再按最近更新时间排序；手动排序保留 Host 返回顺序。
     return list.sort((a: HarnessRemoteSession, b: HarnessRemoteSession) => {
       const aPin: number = this.runtime.isPinnedSession(a.sessionId) ? 1 : 0;
       const bPin: number = this.runtime.isPinnedSession(b.sessionId) ? 1 : 0;
       if (aPin !== bPin) {
         return bPin - aPin;
       }
-      const aRunning: number = a.running ? 1 : 0;
-      const bRunning: number = b.running ? 1 : 0;
-      return bRunning - aRunning;
+      if (this.sessionOrderBy === 'updated') {
+        return b.updatedAt - a.updatedAt;
+      }
+      return 0;
     });
   }
 
@@ -1357,14 +1270,90 @@ struct Index {
     return this.tr('默认');
   }
 
+  private workspaceParentIds(): Map<string, string | undefined> {
+    const byPath: Map<string, string> = new Map<string, string>();
+    for (const workspace of this.workspaces) {
+      if (workspace.path.length > 0) {
+        byPath.set(workspace.path.replace(/\\/g, '/').replace(/\/+$/, ''), workspace.workspaceId);
+      }
+    }
+    const parents: Map<string, string | undefined> = new Map<string, string | undefined>();
+    for (const workspace of this.workspaces) {
+      const childPath: string = workspace.path.replace(/\\/g, '/').replace(/\/+$/, '');
+      let parentId: string | undefined = undefined;
+      let parentLength: number = -1;
+      if (childPath.length > 0) {
+        byPath.forEach((candidateId: string, candidatePath: string) => {
+          if (candidatePath.length > parentLength && candidatePath !== childPath
+            && childPath.startsWith(candidatePath + '/')) {
+            parentId = candidateId;
+            parentLength = candidatePath.length;
+          }
+        });
+      }
+      parents.set(workspace.workspaceId, parentId);
+    }
+    return parents;
+  }
+
+  private workspaceTreeSessions(sessions: HarnessRemoteSession[]): SessionFolder[] {
+    const parents: Map<string, string | undefined> = this.workspaceParentIds();
+    const children: Map<string, HarnessWorkspace[]> = new Map<string, HarnessWorkspace[]>();
+    const assigned: Set<string> = new Set<string>();
+    for (const workspace of this.workspaces) {
+      for (const sessionId of workspace.sessionIds) {
+        assigned.add(sessionId);
+      }
+      const parentId: string | undefined = parents.get(workspace.workspaceId);
+      const list: HarnessWorkspace[] = children.get(parentId ?? '') ?? [];
+      list.push(workspace);
+      children.set(parentId ?? '', list);
+    }
+    const groups: SessionFolder[] = [];
+    const append = (workspace: HarnessWorkspace, depth: number): void => {
+      const entries: HarnessRemoteSession[] = sessions.filter((session: HarnessRemoteSession) =>
+        workspace.sessionIds.includes(session.sessionId));
+      groups.push(new SessionFolder('workspace:' + workspace.workspaceId,
+        workspace.title || cwdTail(workspace.path) || this.tr('默认'), entries, depth));
+      const nested: HarnessWorkspace[] = children.get(workspace.workspaceId) ?? [];
+      for (const child of nested) {
+        append(child, depth + 1);
+      }
+    };
+    const roots: HarnessWorkspace[] = children.get('') ?? [];
+    for (const root of roots) {
+      append(root, 0);
+    }
+    const unassigned: HarnessRemoteSession[] = sessions.filter((session: HarnessRemoteSession) =>
+      !assigned.has(session.sessionId));
+    if (unassigned.length > 0) {
+      groups.push(new SessionFolder('default', this.tr('默认'), unassigned));
+    }
+    return groups;
+  }
+
   private groupedSessions(): SessionFolder[] {
     const sessions: HarnessRemoteSession[] = this.visibleSessions();
-    const byWorkspace: Map<string, HarnessRemoteSession[]> = new Map<string, HarnessRemoteSession[]>();
+    if (this.sessionGroupBy === 'list') {
+      return sessions.length > 0
+        ? [new SessionFolder('all', this.tr('全部会话'), sessions)]
+        : [];
+    }
     const recent: HarnessRemoteSession[] = [];
     for (const session of sessions) {
       if (session.sessionId === this.currentSessionId || this.runtime.recentSessions.includes(session.sessionId)) {
         recent.push(session);
       }
+    }
+    if (this.sessionGroupBy === 'workspace-tree') {
+      const groups: SessionFolder[] = this.workspaceTreeSessions(sessions);
+      if (recent.length > 0) {
+        groups.unshift(new SessionFolder('recent', this.workspaceGroupTitle('recent'), recent));
+      }
+      return groups;
+    }
+    const byWorkspace: Map<string, HarnessRemoteSession[]> = new Map<string, HarnessRemoteSession[]>();
+    for (const session of sessions) {
       const key: string = this.workspaceGroupKey(session);
       const entries: HarnessRemoteSession[] = byWorkspace.get(key) ?? [];
       entries.push(session);
@@ -1393,48 +1382,6 @@ struct Index {
       this.collapsedSessionGroups = this.collapsedSessionGroups.filter((value: string) => value !== folder.key);
       this.expandedSessionGroups = this.expandedSessionGroups.concat([folder.key]);
     }
-  }
-
-  /** 最近访问的会话标题；列表里没有（已归档/换主机）时给个短 id。 */
-  private recentSessionTitle(sessionId: string): string {
-    for (const session of this.sessions) {
-      if (session.sessionId === sessionId) {
-        return formatSessionTitle(session);
-      }
-    }
-    return '#' + sessionId.substring(sessionId.length - 6);
-  }
-
-  private chooseServerChoice(choice: ServerChoice): void {
-    if (this.switchingServer) {
-      return;
-    }
-    this.showServerSwitch = false;
-    const profile: SavedProfile | undefined = choice.profile;
-    if (profile !== undefined) {
-      if (!choice.active) {
-        this.runtime.switchProfile(profile);
-      }
-      return;
-    }
-    this.prefillAndLogout(choice.url);
-  }
-
-  /** 在已保存登录态里按服务器找一条。 */  /** 在已保存登录态里按服务器找一条。 */
-  private findProfile(baseUrl: string): SavedProfile | undefined {
-    for (const profile of this.profilesList) {
-      if (profile.baseUrl === baseUrl) {
-        return profile;
-      }
-    }
-    return undefined;
-  }
-
-  /** 退出登录并把登录页的服务器地址预填成指定值（点击官方/本地切换时用）。 */
-  private prefillAndLogout(baseUrl: string): void {
-    this.serverInput = baseUrl;
-    this.fieldsPrefilled = true;
-    this.runtime.logout();
   }
 
   /** 文字大小：所有关键字号都过这个函数，改档位就是整体缩放。 */
@@ -2257,7 +2204,9 @@ struct Index {
             this.passwordInput = '';
             this.passwordLoginOpen = false;
             this.loginServerEditor = false;
-            this.runtime.loadProviders(server);
+            this.runtime.selectServer(server).then((selected: string | undefined) => {
+              if (selected !== undefined) this.serverInput = selected;
+            });
           },
           onClose: () => { this.loginServerEditor = false; }
         })
@@ -2342,6 +2291,9 @@ struct Index {
       if (this.filePreviewOpen) {
         this.FilePreviewOverlay()
       }
+      if (this.workspaceGitOpen) {
+        this.WorkspaceGitOverlay()
+      }
       if (this.inSessionSearchOpen) {
         this.InSessionSearchOverlay()
       }
@@ -2372,9 +2324,6 @@ struct Index {
       }
       if (this.showMoreMenu) {
         this.MoreMenuOverlay()
-      }
-      if (this.showServerSwitch) {
-        this.ServerSwitchOverlay()
       }
       if (this.deviceMenuId.length > 0) {
         this.DeviceMenuOverlay()
@@ -2417,143 +2366,6 @@ struct Index {
     })
   }
 
-  /**
-   * 服务器切换面板：自绘列表，选中项有明确的三重反馈
-   * （左侧青色竖条 + 高亮底 + 右侧 ✓），按下时行底色再压暗一档。
-   */
-  @Builder
-  ServerSwitchOverlay() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.pal().backdrop)
-        .onClick(() => {
-          this.showServerSwitch = false;
-        })
-      Column({ space: 10 }) {
-        Row() {
-          Column({ space: 2 }) {
-            Text(this.tr('切换服务器'))
-              .fontSize(17)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.pal().text)
-            Text(this.tr('点一下即切换，不用重输密码'))
-              .fontSize(11)
-              .fontColor(this.pal().text3)
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-          Text('✕')
-            .fontSize(15)
-            .fontColor(this.pal().text3)
-            .width(30)
-            .height(30)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.showServerSwitch = false;
-            })
-        }
-        .width('100%')
-        .padding({ bottom: 4 })
-        Scroll() {
-          Column({ space: 10 }) {
-            ForEach(this.serverChoices(), (choice: ServerChoice) => {
-          Row({ space: 12 }) {
-            // 单选指示：选中填满品牌色并带内圈白点
-            Stack() {
-              Column()
-                .width(18)
-                .height(18)
-                .borderRadius(9)
-                .border({ width: 2, color: choice.active ? this.pal().primary : this.pal().borderStrong })
-              if (choice.active) {
-                Column()
-                  .width(9)
-                  .height(9)
-                  .borderRadius(4.5)
-                  .backgroundColor(this.pal().primary)
-              }
-            }
-            .width(18)
-            .height(18)
-            Column({ space: 3 }) {
-              Text(choice.label)
-                .fontSize(14)
-                .fontWeight(choice.active ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.pal().text)
-                .width('100%')
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text(choice.account.length > 0 ? choice.host + ' · ' + choice.account : choice.host)
-                .fontSize(11)
-                .fontColor(this.pal().text3)
-                .width('100%')
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-            }
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-            Text(choice.active ? '✓' : '›')
-              .fontSize(choice.active ? 17 : 15)
-              .fontColor(choice.active ? this.pal().primary : this.pal().text3)
-          }
-          .width('100%')
-          .padding({ top: 12, bottom: 12, left: 14, right: 14 })
-          .backgroundColor(choice.active
-            ? this.pal().primarySoft
-            : (this.pressedChoiceKey === choice.url + '|' + choice.account ? this.pal().inputBg : this.pal().card))
-          .borderRadius(14)
-          .border({
-            width: choice.active ? 1.5 : 1,
-            color: choice.active ? this.pal().primary : this.pal().border
-          })
-          .onTouch((event: TouchEvent) => {
-            const key: string = choice.url + '|' + choice.account;
-            if (event.type === TouchType.Down) {
-              this.pressedChoiceKey = key;
-            } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-              this.pressedChoiceKey = '';
-            }
-          })
-          .onClick(() => {
-            this.chooseServerChoice(choice);
-          })
-            }, (choice: ServerChoice) => 'sv-' + choice.url + '|' + choice.account)
-          }
-          .width('100%')
-        }
-        .scrollable(ScrollDirection.Vertical)
-        .scrollBar(BarState.Auto)
-        .constraintSize({ maxHeight: this.windowHeightVp > 0 ? this.windowHeightVp * 0.62 : 460 })
-        .width('100%')
-        Text(this.tr('登录其他服务器…'))
-          .fontSize(13)
-          .fontColor(this.pal().text2)
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .backgroundColor(this.pal().chip)
-          .borderRadius(14)
-          .onClick(() => {
-            this.showServerSwitch = false;
-            this.runtime.logout();
-          })
-      }
-      .width('100%')
-      .constraintSize({ maxWidth: 480 })
-      .padding({ left: 20, right: 20, top: 18, bottom: 24 })
-      .backgroundColor(this.pal().panel)
-      .borderRadius({ topLeft: 20, topRight: 20 })
-      .border({ width: 1, color: this.pal().border })
-      .transition(TransitionEffect.translate({ y: 320 })
-        .combine(TransitionEffect.opacity(0))
-        .animation({ duration: 220, curve: Curve.Friction }))
-    }
-    .width('100%')
-    .height('100%')
-  }
-
   @Builder
   MoreMenuOverlay() {
     Stack({ alignContent: Alignment.TopEnd }) {
@@ -2563,51 +2375,34 @@ struct Index {
         .backgroundColor(this.pal().backdrop)
         .onClick(() => { this.showMoreMenu = false; })
       Column() {
-        this.MoreMenuRow(this.tr('切换服务器'), false, () => {
-          if (this.phase === PHASE_SETUP) {
+        if (this.phase === PHASE_SETUP) {
+          this.MoreMenuRow($r('app.media.ic_refresh'), this.tr('切换服务器'), false, () => {
             this.loginServerEditor = true;
-          } else {
-            this.openAccountSwitcher();
-          }
-        })
-        this.MoreMenuRow(this.tr('会员方案'), false, () => {
-          this.openBrowserLink(MEMBERSHIP_PRICING_URL);
-        })
-        if (this.phase === PHASE_CHAT && !this.reconnecting) {
-          this.MoreMenuRow(this.tr('插件管理'), false, () => {
-            this.pluginsOpen = true;
-            this.pluginSelected = '';
-            this.reloadPlugins();
           })
-        }
-        this.MoreMenuRow(this.tr('设置'), false, () => { this.showSettings = true; })
-        this.MoreMenuRow(this.tr('关于'), false, () => { this.aboutOpen = true; })
-        if (this.phase === PHASE_SETUP && this.profilesList.length > 0) {
-          this.MoreMenuRow(this.tr('已保存的登录（一键进入）'), false, () => { this.openAccountSwitcher(); })
-        }
-        if (this.phase !== PHASE_SETUP) {
-          this.MoreMenuRow(this.tr('管理远程主机'), false, () => { this.openHostManagement(); })
-        }
-        if (this.phase !== PHASE_SETUP) {
-          this.MoreMenuRow(this.tr('执行轨迹'), false, () => { this.trajectoryOpen = true; })
-          this.MoreMenuRow(this.tr('退出登录'), true, () => {
-            AlertDialog.show({
-              title: this.tr('退出登录'),
-              message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
-              autoCancel: true,
-              primaryButton: {
-                value: this.tr('取消'),
-                action: () => {
-                }
-              },
-              secondaryButton: {
-                value: this.tr('退出'),
-                fontColor: this.pal().danger,
-                action: () => {
-                  this.runtime.logout();
-                }
-              }
-            });
+          this.MoreMenuRow($r('app.media.ic_zap'), this.tr('会员方案'), false, () => {
+            this.openBrowserLink(MEMBERSHIP_PRICING_URL);
+          })
+          this.MoreMenuRow($r('app.media.ic_settings'), this.tr('设置'), false, () => { this.showSettings = true; })
+          this.MoreMenuRow($r('app.media.ic_info'), this.tr('关于'), false, () => { this.aboutOpen = true; })
+          this.MoreMenuRow($r('app.media.ic_download'), this.tr('检查更新'), false, () => {
+            this.openBrowserLink(RELEASES_URL);
+          })
+        } else if (this.phase === PHASE_CHAT) {
+          if (!this.reconnecting) {
+            this.MoreMenuRow($r('app.media.ic_puzzle'), this.tr('插件管理'), false, () => {
+              this.pluginsOpen = true;
+              this.pluginSelected = '';
+              this.reloadPlugins();
+            })
+          }
+          this.MoreMenuRow($r('app.media.ic_clock'), this.tr('自动化任务'), false, () => {
+            this.schedulesOpen = true;
+          })
+          this.MoreMenuDivider()
+          this.MoreMenuRow($r('app.media.ic_settings'), this.tr('设置'), false, () => { this.showSettings = true; })
+          this.MoreMenuRow($r('app.media.ic_info'), this.tr('关于'), false, () => { this.aboutOpen = true; })
+          this.MoreMenuRow($r('app.media.ic_download'), this.tr('检查更新'), false, () => {
+            this.openBrowserLink(RELEASES_URL);
           })
         }
       }
@@ -2624,19 +2419,39 @@ struct Index {
   }
 
   @Builder
-  MoreMenuRow(label: string, danger: boolean, action: () => void) {
-    Button(label, { type: ButtonType.Normal })
+  MoreMenuRow(icon: Resource, label: string, danger: boolean, action: () => void) {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: 12 }) {
+        Image(icon)
+          .width(20)
+          .height(20)
+          .fillColor(danger ? this.pal().danger : this.pal().text)
+        Text(label)
+          .fontSize(15)
+          .fontColor(danger ? this.pal().danger : this.pal().text)
+          .layoutWeight(1)
+          .textAlign(TextAlign.Start)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+    }
       .width('100%')
       .height(48)
-      .fontSize(15)
-      .fontColor(danger ? this.pal().danger : this.pal().text)
       .backgroundColor(Color.Transparent)
       .align(Alignment.Start)
-      .padding({ left: 14, right: 14 })
+      .padding({ left: 12, right: 12 })
       .onClick(() => {
         this.showMoreMenu = false;
         action();
       })
+  }
+
+  @Builder
+  MoreMenuDivider() {
+    Divider()
+      .strokeWidth(0.5)
+      .color(this.pal().border)
+      .margin({ left: 12, right: 12, top: 4, bottom: 4 })
   }
 
   private loadMembership(): void {
@@ -2756,10 +2571,6 @@ struct Index {
                     new Date(this.membershipExpiry).toLocaleDateString(this.en() ? 'en-US' : 'zh-CN'), false, undefined)
                 }
               }
-              this.SettingsRow(this.tr('切换服务器'), this.currentServerSummary(), false, () => {
-                this.showSettings = false;
-                this.showServerSwitch = true;
-              })
             }
             .width('100%')
             .backgroundColor(this.pal().card)
@@ -3102,7 +2913,11 @@ struct Index {
           Row({ space: 4 }) {
             ForEach([0, 1, 2, 3, 4], (tint: number) => {
               Column({ space: 6 }) {
-                Button(this.runtime.themeTint === tint ? '✓' : '', { type: ButtonType.Circle })
+                Button({ type: ButtonType.Circle }) {
+                  if (this.runtime.themeTint === tint) {
+                    Image($r('app.media.ic_check')).width(18).height(18).fillColor(this.pal().primary)
+                  }
+                }
                   .width(36)
                   .height(36)
                   .padding(0)
@@ -3110,7 +2925,6 @@ struct Index {
                     this.isDarkUi).bg)
                   .border({ width: 2, color: this.runtime.themeTint === tint
                     ? this.pal().primary : this.pal().borderStrong })
-                  .fontColor(this.pal().primary)
                   .accessibilityText(this.tintName(tint))
                   .onClick(() => { this.runtime.setThemeTint(tint); })
                 Text(this.tintName(tint))
@@ -3194,7 +3008,7 @@ struct Index {
         .fontSize(12)
         .fontColor(this.pal().text3)
       if (this.membershipStatus === 'none') {
-        Text('›').fontSize(15).fontColor(this.pal().text3)
+        Image($r('app.media.ic_chevron_right')).width(16).height(16).fillColor(this.pal().text3)
       }
     }
     .width('100%')
@@ -3223,7 +3037,7 @@ struct Index {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       if (action !== undefined) {
-        Text('›').fontSize(15).fontColor(this.pal().text3)
+        Image($r('app.media.ic_chevron_right')).width(16).height(16).fillColor(this.pal().text3)
       }
     }
     .width('100%')
@@ -3233,10 +3047,6 @@ struct Index {
     .onClick(() => {
       action?.();
     })
-  }
-
-  private currentServerSummary(): string {
-    return this.accountSwitchLabel();
   }
 
   private textScaleLabel(): string {
@@ -3358,12 +3168,11 @@ struct Index {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.pal().text)
           Blank()
-          Text('✕')
-            .fontSize(15)
-            .fontColor(this.pal().text3)
-            .width(30)
-            .height(30)
-            .textAlign(TextAlign.Center)
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text3)
+            .padding(2)
             .onClick(() => {
               this.choiceOpen = false;
             })
@@ -3383,9 +3192,10 @@ struct Index {
             .alignItems(HorizontalAlign.Start)
             .layoutWeight(1)
             if (this.choiceCurrentValue() === choice.value) {
-              Text('✓')
-                .fontSize(16)
-                .fontColor(this.pal().primary)
+              Image($r('app.media.ic_check'))
+                .width(18)
+                .height(18)
+                .fillColor(this.pal().primary)
             }
           }
           .width('100%')
@@ -3609,12 +3419,15 @@ struct Index {
   DevicesScreen() {
     Column() {
       Row({ space: 8 }) {
-        Button('‹', { type: ButtonType.Normal })
+        Button({ type: ButtonType.Normal }) {
+          Image($r('app.media.ic_arrow_left'))
+            .width(20)
+            .height(20)
+            .fillColor(this.pal().text)
+        }
           .width(36)
           .height(44)
           .padding(0)
-          .fontSize(28)
-          .fontColor(this.pal().text)
           .backgroundColor(Color.Transparent)
           .accessibilityText(this.tr('返回'))
           .onClick(() => {
@@ -3642,19 +3455,6 @@ struct Index {
         .onClick(() => {
           this.runtime.refreshDevices();
         })
-        Button({ type: ButtonType.Normal }) {
-          Image($r('app.media.ic_more'))
-            .width(19)
-            .height(19)
-            .rotate({ angle: 90 })
-            .fillColor(this.pal().text)
-        }
-        .width(44)
-        .height(44)
-        .padding(0)
-        .backgroundColor(Color.Transparent)
-        .accessibilityText(this.tr('更多'))
-        .onClick(() => { this.showMoreMenu = true; })
       }
       .width('100%')
       .padding({ left: 20, right: 12, top: 12 })
@@ -3670,9 +3470,7 @@ struct Index {
             .width(18)
             .height(18)
             .color(this.pal().primary)
-          Text(this.switchingServer && this.switchingTo.length > 0
-            ? this.tr('正在切换服务器…') + ' ' + serverHostLabel(this.switchingTo)
-            : this.tr('正在刷新设备…'))
+          Text(this.tr('正在刷新设备…'))
             .fontSize(13)
             .fontColor(this.pal().text2)
             .layoutWeight(1)
@@ -3705,10 +3503,11 @@ struct Index {
                 this.runtime.retryLastError();
               })
           }
-          Text('✕')
-            .fontSize(this.fs(12))
-            .fontColor(this.pal().danger)
-            .padding({ left: 6, right: 2, top: 2, bottom: 2 })
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().danger)
+            .padding(2)
             .onClick(() => {
               this.runtime.clearError();
             })
@@ -3768,8 +3567,10 @@ struct Index {
       if (this.devices.length === 0 && !this.busy) {
         // 空态别只留一行灰字：给一张卡片说清楚下一步该做什么
         Column({ space: 10 }) {
-          Text('🖥')
-            .fontSize(26)
+          Image($r('app.media.ic_host'))
+            .width(28)
+            .height(28)
+            .fillColor(this.pal().text2)
           Text(this.tr('还没有可用的主机'))
             .fontSize(this.fs(14))
             .fontWeight(FontWeight.Medium)
@@ -3788,16 +3589,6 @@ struct Index {
               .borderRadius(10)
               .onClick(() => {
                 this.runtime.refreshDevices();
-              })
-            Text(this.tr('切换服务器'))
-              .fontSize(this.fs(12))
-              .fontColor(this.pal().text2)
-              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-              .backgroundColor(this.pal().chip)
-              .borderRadius(10)
-              .border({ width: 1, color: this.pal().border })
-              .onClick(() => {
-                this.showServerSwitch = true;
               })
           }
           .padding({ top: 2 })
@@ -3861,9 +3652,14 @@ struct Index {
             Text(this.tr('切换主机'))
               .fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.pal().text).layoutWeight(1)
             this.TopIcon($r('app.media.ic_refresh'), () => { this.runtime.refreshDevices(); })
-            Button('×', { type: ButtonType.Normal })
+            Button({ type: ButtonType.Normal }) {
+              Image($r('app.media.ic_close'))
+                .width(20)
+                .height(20)
+                .fillColor(this.pal().text)
+            }
               .width(40).height(40).padding(0).fontSize(22)
-              .fontColor(this.pal().text).backgroundColor(Color.Transparent)
+              .backgroundColor(Color.Transparent)
               .accessibilityText(this.tr('关闭'))
               .onClick(() => { this.dismissHostSwitcher(); })
           }
@@ -3896,7 +3692,7 @@ struct Index {
           Row({ space: 12 }) {
             Image($r('app.media.ic_settings')).width(20).height(20).fillColor(this.pal().text)
             Text(this.tr('管理远程主机')).fontSize(16).fontColor(this.pal().text).layoutWeight(1)
-            Text('›').fontSize(18).fontColor(this.pal().text2)
+            Image($r('app.media.ic_chevron_right')).width(18).height(18).fillColor(this.pal().text2)
           }
           .width('100%')
           .height(58)
@@ -4017,6 +3813,7 @@ struct Index {
           (this.currentModelLabel.length > 0 ? this.chatModelLabel() : this.tr('更换模型')),
         drawerInline: this.isLandscape,
         hasSession: this.currentSessionId.length > 0,
+        trajectoryOpen: this.trajectoryOpen,
         titleSize: this.fs(15.5),
         subtitleSize: this.fs(12),
         onDrawer: () => {
@@ -4031,7 +3828,7 @@ struct Index {
           this.runtime.refreshModelCatalog();
           this.showModelPicker = true;
         },
-        onTrajectory: () => { this.trajectoryOpen = true; },
+        onCloseTrajectory: () => { this.trajectoryOpen = false; },
         onNewChat: () => {
           this.closeDrawer();
           this.runtime.createNewSession();
@@ -4096,10 +3893,11 @@ struct Index {
                 this.runtime.retryLastError();
               })
           }
-          Text('✕')
-            .fontSize(this.fs(12))
-            .fontColor(this.pal().danger)
-            .padding({ left: 6, right: 2, top: 2, bottom: 2 })
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().danger)
+            .padding(2)
             .onClick(() => {
               this.runtime.clearError();
             })
@@ -4307,9 +4105,12 @@ struct Index {
 
       if (!this.stickToBottom) {
         Row() {
-          Text('↓ ' + this.tr('回到最新'))
-            .fontSize(12)
-            .fontColor(this.pal().text2)
+          Row({ space: 4 }) {
+            Image($r('app.media.ic_arrow_down')).width(14).height(14).fillColor(this.pal().text2)
+            Text(this.tr('回到最新'))
+              .fontSize(12)
+              .fontColor(this.pal().text2)
+          }
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
             .backgroundColor(this.pal().card)
             .borderRadius(14)
@@ -4356,7 +4157,10 @@ struct Index {
         Row({ space: 12 }) {
           Image($r('app.media.ic_image')).width(22).height(22).fillColor(this.pal().text)
           Text(this.tr('相册')).fontSize(16).fontColor(this.pal().text).layoutWeight(1)
-          Text('›').fontSize(18).fontColor(this.pal().text2)
+          Image($r('app.media.ic_arrow_right'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text2)
         }
         .width('100%').height(58)
         .padding({ left: 16, right: 16 })
@@ -4400,9 +4204,10 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text('›')
-            .fontSize(this.fs(15))
-            .fontColor(this.pal().text3)
+          Image($r('app.media.ic_chevron_right'))
+            .width(16)
+            .height(16)
+            .fillColor(this.pal().text3)
         }
         .width('100%')
         .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -4426,9 +4231,10 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text('›')
-            .fontSize(this.fs(15))
-            .fontColor(this.pal().text3)
+          Image($r('app.media.ic_chevron_right'))
+            .width(16)
+            .height(16)
+            .fillColor(this.pal().text3)
         }
         .width('100%')
         .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -4481,12 +4287,11 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text('✕')
-            .fontSize(this.fs(14))
-            .fontColor(this.pal().text3)
-            .width(30)
-            .height(30)
-            .textAlign(TextAlign.Center)
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text3)
+            .padding(2)
             .onClick(() => {
               this.sendModeOpen = false;
             })
@@ -4527,9 +4332,12 @@ struct Index {
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
-      Text(selected ? '✓' : '')
-        .fontSize(this.fs(14))
-        .fontColor(steer ? '#F5A623' : this.pal().primary)
+      if (selected) {
+        Image($r('app.media.ic_check'))
+          .width(18)
+          .height(18)
+          .fillColor(steer ? '#F5A623' : this.pal().primary)
+      }
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -4630,12 +4438,11 @@ struct Index {
                     .backgroundColor('rgba(0,0,0,0.45)')
                     .borderRadius(6)
                     .margin({ top: 58, right: 2 })
-                  Text('✕')
-                    .fontSize(this.fs(11))
-                    .fontColor('#FFFFFF')
+                  Image($r('app.media.ic_close'))
                     .width(18)
                     .height(18)
-                    .textAlign(TextAlign.Center)
+                    .fillColor('#FFFFFF')
+                    .padding(4)
                     .backgroundColor('rgba(0,0,0,0.55)')
                     .borderRadius(9)
                     .onClick(() => {
@@ -4678,9 +4485,10 @@ struct Index {
           // 展开：只在有空间时给（手机上会挤占输入框宽度，长文交给全屏编辑入口）
           if (!this.compactDock()) {
           Row() {
-            Text('⤢')
-              .fontSize(this.fs(15))
-              .fontColor(this.pal().text2)
+            Image($r('app.media.ic_expand'))
+              .width(18)
+              .height(18)
+              .fillColor(this.pal().text2)
           }
           .width(this.compactDock() ? 30 : 34)
           .height(this.compactDock() ? 40 : 46)
@@ -4762,12 +4570,11 @@ struct Index {
             this.writingMenuOpen = true;
           })
           if (this.generating && !this.compactDock()) {
-            Text('■')
-              .fontSize(this.fs(16))
-              .fontColor(this.pal().danger)
+            Image($r('app.media.ic_stop'))
               .width(46)
               .height(46)
-              .textAlign(TextAlign.Center)
+              .padding(14)
+              .fillColor(this.pal().danger)
               .backgroundColor('rgba(248,87,73,0.12)')
               .borderRadius(23)
               .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
@@ -4796,14 +4603,12 @@ struct Index {
               this.runtime.stopGeneration();
             })
           } else {
-          Text('↑')
-            .fontSize(this.fs(20))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.promptInput.trim().length > 0 || this.pendingImages.length > 0
-              ? this.pal().onInverse : this.pal().text2)
+          Image($r('app.media.ic_arrow_up'))
             .width(this.compactDock() ? 36 : 42)
             .height(this.compactDock() ? 36 : 42)
-            .textAlign(TextAlign.Center)
+            .padding(this.compactDock() ? 9 : 11)
+            .fillColor(this.promptInput.trim().length > 0 || this.pendingImages.length > 0
+              ? this.pal().onInverse : this.pal().text2)
             .backgroundColor(this.promptInput.trim().length > 0 || this.pendingImages.length > 0
               ? this.pal().inverse : this.pal().chip)
             .borderRadius(23)
@@ -4856,34 +4661,88 @@ struct Index {
     this.runtime.searchSessions('');
   }
 
+  private applySessionView(groupBy: string, orderBy: string, filterMode: string): void {
+    this.sessionGroupBy = groupBy;
+    this.sessionOrderBy = orderBy;
+    this.sessionFilterMode = filterMode;
+    this.runtime.setSessionView(groupBy, orderBy, filterMode);
+    this.workspaceOptionsOpen = false;
+  }
+
+  @Builder
+  WorkspaceOptionItem(label: string, selected: boolean, action: () => void) {
+    Row() {
+      Text(label)
+        .fontSize(this.fs(12.5))
+        .fontColor(this.pal().text)
+        .layoutWeight(1)
+      if (selected) {
+        Image($r('app.media.ic_check'))
+          .width(16)
+          .height(16)
+          .fillColor(this.pal().text)
+      }
+    }
+    .width('100%')
+    .padding({ left: 4, right: 4, top: 7, bottom: 7 })
+    .onClick(action)
+  }
+
+  @Builder
+  WorkspaceOptionSectionTitle(title: string) {
+    Text(title)
+      .fontSize(this.fs(11))
+      .fontWeight(FontWeight.Medium)
+      .fontColor(this.pal().text2)
+      .width('100%')
+      .margin({ bottom: 2 })
+  }
+
   @Builder
   WorkspaceOptions() {
-    Stack({ alignContent: Alignment.Bottom }) {
+    Stack({ alignContent: Alignment.TopEnd }) {
       Column()
         .width('100%').height('100%')
-        .backgroundColor(this.pal().backdrop)
+        .backgroundColor(Color.Transparent)
         .onClick(() => { this.workspaceOptionsOpen = false; })
-      Column({ space: 12 }) {
-        this.SheetTitle(this.tr('视图选项'), () => { this.workspaceOptionsOpen = false; })
-        Column() {
-          this.SettingsRow(this.tr('只看收藏'), this.favoriteOnly ? this.tr('开') : this.tr('关'), false, () => {
-            this.favoriteOnly = !this.favoriteOnly;
-          })
-          this.SettingsRow(this.tr('显示归档'), this.showArchived ? this.tr('开') : this.tr('关'), false, () => {
-            this.showArchived = !this.showArchived;
-          })
-          this.SettingsRow(this.tr('列表密度'), this.layoutDensityLabel(), false, () => {
-            this.workspaceOptionsOpen = false;
-            this.openChoice('density');
-          })
-        }
-        .width('100%').backgroundColor(this.pal().card).borderRadius(22).clip(true)
+      Column({ space: 4 }) {
+        this.WorkspaceOptionSectionTitle(this.tr('分组方式'))
+        this.WorkspaceOptionItem(this.tr('按工作区'), this.sessionGroupBy === 'workspace', () => {
+          this.applySessionView('workspace', this.sessionOrderBy, this.sessionFilterMode);
+        })
+        this.WorkspaceOptionItem(this.tr('按工作区树'), this.sessionGroupBy === 'workspace-tree', () => {
+          this.applySessionView('workspace-tree', this.sessionOrderBy, this.sessionFilterMode);
+        })
+        this.WorkspaceOptionItem(this.tr('单列表'), this.sessionGroupBy === 'list', () => {
+          this.applySessionView('list', this.sessionOrderBy, this.sessionFilterMode);
+        })
+        Divider().strokeWidth(0.5).color(this.pal().border).margin({ top: 3, bottom: 3 })
+        this.WorkspaceOptionSectionTitle(this.tr('排序方式'))
+        this.WorkspaceOptionItem(this.tr('手动排序'), this.sessionOrderBy === 'manual', () => {
+          this.applySessionView(this.sessionGroupBy, 'manual', this.sessionFilterMode);
+        })
+        this.WorkspaceOptionItem(this.tr('最近更新'), this.sessionOrderBy === 'updated', () => {
+          this.applySessionView(this.sessionGroupBy, 'updated', this.sessionFilterMode);
+        })
+        Divider().strokeWidth(0.5).color(this.pal().border).margin({ top: 3, bottom: 3 })
+        this.WorkspaceOptionSectionTitle(this.tr('筛选会话'))
+        this.WorkspaceOptionItem(this.tr('隐藏归档'), this.sessionFilterMode === 'hideArchived', () => {
+          this.applySessionView(this.sessionGroupBy, this.sessionOrderBy, 'hideArchived');
+        })
+        this.WorkspaceOptionItem(this.tr('全部'), this.sessionFilterMode === 'all', () => {
+          this.applySessionView(this.sessionGroupBy, this.sessionOrderBy, 'all');
+        })
+        this.WorkspaceOptionItem(this.tr('仅归档'), this.sessionFilterMode === 'archivedOnly', () => {
+          this.applySessionView(this.sessionGroupBy, this.sessionOrderBy, 'archivedOnly');
+        })
       }
-      .width('100%')
-      .constraintSize({ maxWidth: 540 })
-      .padding({ left: 20, right: 20, top: 18, bottom: 24 })
-      .backgroundColor(this.pal().bg)
-      .borderRadius({ topLeft: 28, topRight: 28 })
+      .width(236)
+      .padding(14)
+      .margin({ top: this.topSafePadding() + 168, right: 10 })
+      .backgroundColor(this.pal().card)
+      .borderRadius(18)
+      .border({ width: 0.5, color: this.pal().border })
+      .shadow({ radius: 18, color: 'rgba(0,0,0,0.18)', offsetX: 0, offsetY: 6 })
     }
     .width('100%').height('100%')
   }
@@ -4932,7 +4791,7 @@ struct Index {
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
-          Text('›').fontSize(17).fontColor(this.pal().text3)
+          Image($r('app.media.ic_chevron_right')).width(17).height(17).fillColor(this.pal().text3)
         }
         .width('100%').height(60).padding({ left: 14, right: 14 })
         .border({ width: { bottom: 0.5 }, color: this.pal().border })
@@ -5004,16 +4863,20 @@ struct Index {
   @Builder
   SessionsPanelBody(connected: boolean = true) {
     Column() {
-      Row({ space: 8 }) {
-        Image($r('app.media.ic_fish'))
-          .width(22)
-          .height(16)
-          .fillColor(this.pal().text)
-        Text('DS Harness Remote')
-          .fontSize(this.fs(20))
-          .lineHeight(this.fs(25))
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.pal().text)
+      Row() {
+        Row({ space: 8 }) {
+          Image($r('app.media.ic_fish'))
+            .width(22)
+            .height(16)
+            .fillColor(this.pal().text)
+          Text('DS Harness Remote')
+            .fontSize(this.fs(20))
+            .lineHeight(this.fs(25))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+        }
+        .accessibilityText('DS Harness Remote · ' + this.tr('关于'))
+        .onClick(() => { this.aboutOpen = true; })
         Blank()
         Button({ type: ButtonType.Circle }) {
           Image($r('app.media.ic_more'))
@@ -5031,6 +4894,7 @@ struct Index {
         palette: this.pal(),
         connected: connected,
         botMode: this.botTabOpen,
+        platformLabel: this.currentAgentPlatformLabel(),
         searchOpen: this.workspaceSearchOpen,
         onAgents: () => { this.botTabOpen = false; },
         onBots: () => {
@@ -5109,10 +4973,11 @@ struct Index {
             .onChange((value: string) => {
               this.workspaceTitleInput = value;
             })
-          Text('✓')
-            .fontSize(this.fs(14))
-            .fontColor(this.pal().success)
-            .padding({ left: 8, right: 8 })
+          Image($r('app.media.ic_check'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().success)
+            .padding(2)
             .onClick(() => {
               this.runtime.renameWorkspace(this.editingWorkspaceId, this.workspaceTitleInput);
               this.editingWorkspaceId = '';
@@ -5120,155 +4985,6 @@ struct Index {
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 2, bottom: 6 })
-      }
-      if (this.workspaces.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text('跟随当前会话')
-              .fontSize(this.fs(11))
-              .fontColor(this.selectedWorkspaceId.length === 0 ? this.pal().primary : this.pal().text3)
-              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-              .backgroundColor(this.selectedWorkspaceId.length === 0
-                ? this.pal().primarySoft : this.pal().inputBg)
-              .borderRadius(9)
-              .border({ width: 1, color: this.selectedWorkspaceId.length === 0
-                ? this.pal().primary : this.pal().border })
-              .onClick(() => {
-                this.runtime.setSelectedWorkspace('');
-              })
-            Text('＋ ' + this.tr('新建'))
-              .fontSize(this.fs(11))
-              .fontColor(this.pal().primary)
-              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-              .backgroundColor(this.pal().primarySoft)
-              .borderRadius(9)
-              .border({ width: 1, color: this.pal().primary })
-              .onClick(() => {
-                this.workspacePathInput = this.runtime.browsePath.length > 0
-                  ? this.runtime.browsePath : '';
-                this.workspaceNameDraft = '';
-                this.workspaceCreateOpen = true;
-              })
-            ForEach(this.workspaces, (workspace: HarnessWorkspace) => {
-              Text(workspace.title.length > 0 ? workspace.title : workspace.path)
-                .fontSize(this.fs(11))
-                .maxLines(1)
-                .constraintSize({ maxWidth: 140 })
-                .fontColor(this.selectedWorkspaceId === workspace.workspaceId
-                  ? this.pal().primary : this.pal().text3)
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.selectedWorkspaceId === workspace.workspaceId
-                  ? this.pal().primarySoft : this.pal().inputBg)
-                .borderRadius(9)
-                .border({ width: 1, color: this.selectedWorkspaceId === workspace.workspaceId
-                  ? this.pal().primary : this.pal().border })
-                .onClick(() => {
-                  this.runtime.setSelectedWorkspace(workspace.workspaceId);
-                })
-                .gesture(LongPressGesture().onAction(() => {
-                  ActionSheet.show({
-                    title: workspace.title.length > 0 ? workspace.title : workspace.path,
-                    message: workspace.path,
-                    sheets: [
-                      {
-                        title: this.tr('浏览文件'),
-                        action: () => {
-                          this.openWorkspaceFiles(workspace.path);
-                        }
-                      },
-                      {
-                        title: this.tr('重命名'),
-                        action: () => {
-                          this.editingWorkspaceId = workspace.workspaceId;
-                          this.workspaceTitleInput = workspace.title;
-                        }
-                      },
-                      {
-                        title: this.tr('删除工作区'),
-                        action: () => {
-                          this.runtime.deleteWorkspace(workspace.workspaceId);
-                        }
-                      }
-                    ]
-                  });
-                }))
-            }, (workspace: HarnessWorkspace) => `${workspace.workspaceId}#${this.languageMode}`)
-          }
-          .padding({ left: 16, right: 16 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .padding({ top: 2, bottom: 6 })
-      }
-      Column()
-        .width('100%')
-        .height(0.5)
-        .backgroundColor(this.pal().border)
-      if (!this.sessionSearchActive && this.runtime.recentSessions.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text(this.tr('最近'))
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
-            ForEach(this.runtime.recentSessions, (id: string) => {
-              Text(this.recentSessionTitle(id))
-                .fontSize(this.fs(11))
-                .fontColor(this.pal().text2)
-                .maxLines(1)
-                .constraintSize({ maxWidth: 120 })
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.pal().inputBg)
-                .borderRadius(9)
-                .border({ width: 1, color: this.pal().border })
-                .onClick(() => {
-                  this.closeDrawer();
-                  this.runtime.openSession(id);
-                })
-            }, (id: string) => 'recent-' + id)
-          }
-          .padding({ left: 16, right: 16, bottom: 6 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-      }
-      if (!this.sessionSearchActive && this.sessionWorkspaces().length > 1) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text(this.tr('工作区'))
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
-            Text(this.tr('全部'))
-              .fontSize(this.fs(11))
-              .fontColor(this.workspaceFilter.length === 0 ? this.pal().primary : this.pal().text3)
-              .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-              .backgroundColor(this.workspaceFilter.length === 0
-                ? this.pal().primarySoft : this.pal().inputBg)
-              .borderRadius(8)
-              .onClick(() => {
-                this.workspaceFilter = '';
-              })
-            ForEach(this.sessionWorkspaces(), (cwd: string) => {
-              Text(cwdTail(cwd))
-                .fontSize(this.fs(11))
-                .fontColor(this.workspaceFilter === cwd ? this.pal().primary : this.pal().text3)
-                .maxLines(1)
-                .constraintSize({ maxWidth: 110 })
-                .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-                .backgroundColor(this.workspaceFilter === cwd
-                  ? this.pal().primarySoft : this.pal().inputBg)
-                .borderRadius(8)
-                .onClick(() => {
-                  this.workspaceFilter = this.workspaceFilter === cwd ? '' : cwd;
-                })
-            }, (cwd: string) => 'ws-' + cwd)
-          }
-          .padding({ left: 16, right: 16, bottom: 6 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
       }
       if (this.visibleSessions().length === 0) {
         Column({ space: 6 }) {
@@ -5294,18 +5010,26 @@ struct Index {
           }, (session: HarnessRemoteSession) => session.sessionId)
         } else {
           ForEach(this.groupedSessions(), (folder: SessionFolder) => {
-            ListItemGroup({ header: this.SessionFolderHeader(folder) }) {
-              if (this.sessionFolderExpanded(folder)) {
-                ForEach(folder.sessions, (session: HarnessRemoteSession) => {
-                  ListItem() {
-                    this.SessionCatalogRow(session)
-                  }
-                }, (session: HarnessRemoteSession) => session.sessionId)
+            if (this.sessionGroupBy === 'list') {
+              ForEach(folder.sessions, (session: HarnessRemoteSession) => {
+                ListItem() {
+                  this.SessionCatalogRow(session)
+                }
+              }, (session: HarnessRemoteSession) => session.sessionId)
+            } else {
+              ListItemGroup({ header: this.SessionFolderHeader(folder) }) {
+                if (this.sessionFolderExpanded(folder)) {
+                  ForEach(folder.sessions, (session: HarnessRemoteSession) => {
+                    ListItem() {
+                      this.SessionCatalogRow(session)
+                    }
+                  }, (session: HarnessRemoteSession) => session.sessionId)
+                }
               }
+              .backgroundColor(this.pal().card)
+              .borderRadius(22)
+              .clip(true)
             }
-            .backgroundColor(this.pal().card)
-            .borderRadius(22)
-            .clip(true)
           }, (folder: SessionFolder) => folder.key)
         }
       }
@@ -5343,7 +5067,7 @@ struct Index {
             .backgroundColor(connected ? this.connectionDotColor() : this.pal().text3)
           Text(connected && !this.reconnecting ? this.tr('在线') : this.tr('未连接'))
             .fontSize(12).fontColor(this.pal().text2)
-          Text('⌃').fontSize(12).fontColor(this.pal().text2)
+          Image($r('app.media.ic_chevron_up')).width(14).height(14).fillColor(this.pal().text2)
           Blank()
         }
         .layoutWeight(1)
@@ -5364,6 +5088,32 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+  }
+
+  private currentAgentPlatformLabel(): string {
+    const sessionId: string = this.currentSessionId;
+    if (sessionId.startsWith('codex:')) {
+      return 'Codex';
+    }
+    if (sessionId.startsWith('claude:')) {
+      return 'Claude';
+    }
+    if (sessionId.startsWith('cursor:')) {
+      return 'Cursor';
+    }
+    if (sessionId.startsWith('opencode:')) {
+      return 'OpenCode';
+    }
+    if (sessionId.startsWith('antigravity:')) {
+      return 'Antigravity';
+    }
+    if (sessionId.startsWith('hermes:')) {
+      return 'Hermes';
+    }
+    if (sessionId.startsWith('pi:')) {
+      return 'Pi';
+    }
+    return 'DeepSeek';
   }
 
   private openCatalogSession(session: HarnessRemoteSession): void {
@@ -5455,13 +5205,15 @@ struct Index {
         .borderRadius(12)
         .backgroundColor(this.pal().chip)
       Blank()
-      Text(this.sessionFolderExpanded(folder) ? '⌄' : '›')
-        .fontSize(17)
-        .fontColor(this.pal().text2)
+      Image(this.sessionFolderExpanded(folder)
+        ? $r('app.media.ic_chevron_down') : $r('app.media.ic_chevron_right'))
+        .width(17)
+        .height(17)
+        .fillColor(this.pal().text2)
     }
     .width('100%')
     .height(48)
-    .padding({ left: 16, right: 16 })
+    .padding({ left: 16 + folder.depth * 14, right: 16 })
     .onClick(() => { this.toggleSessionFolder(folder); })
   }
 
@@ -5882,9 +5634,23 @@ struct Index {
                 this.showSessionPanel = false;
                 this.openWorkspaceFiles(this.sessionFileRoot(), this.currentSessionId);
               })
+              this.SettingsRow(this.tr('工作区改动'), '', false, () => {
+                this.showSessionPanel = false;
+                this.workspaceGitOpen = true;
+                this.runtime.loadWorkspaceGitStatus();
+              })
             }
 
             this.SettingsRow(this.tr('终端'), '', false, () => { this.openTerminalPage(); })
+            this.SettingsRow(
+              this.trajectoryOpen ? this.tr('切换到对话模式') : this.tr('切换到轨迹模式'),
+              '',
+              false,
+              () => {
+                this.showSessionPanel = false;
+                this.trajectoryOpen = !this.trajectoryOpen;
+              }
+            )
 
             // —— 模型 ——
             Row({ space: 10 }) {
@@ -6165,7 +5931,10 @@ struct Index {
                 .layoutWeight(1)
                 .alignItems(HorizontalAlign.Start)
                 if (preset === this.permissionPreset) {
-                  Text('✓').fontSize(16).fontColor(this.pal().primary)
+                  Image($r('app.media.ic_check'))
+                    .width(18)
+                    .height(18)
+                    .fillColor(this.pal().primary)
                 }
               }
               .width('100%')
@@ -6213,7 +5982,7 @@ struct Index {
   }
 
   @Builder
-  ModelOptionRow(label: string, selected: boolean, onSelect: () => void) {
+  ModelOptionRow(label: string, selected: boolean, onSelect: () => void, trailingChevron: boolean = false) {
     Row() {
       Text(label)
         .fontSize(this.fs(15))
@@ -6222,7 +5991,15 @@ struct Index {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
       if (selected) {
-        Text('✓').fontSize(16).fontColor(this.pal().primary)
+        Image($r('app.media.ic_check'))
+          .width(18)
+          .height(18)
+          .fillColor(this.pal().primary)
+      } else if (trailingChevron) {
+        Image($r('app.media.ic_chevron_right'))
+          .width(17)
+          .height(17)
+          .fillColor(this.pal().text2)
       }
     }
     .width('100%')
@@ -6237,11 +6014,16 @@ struct Index {
   SheetTitle(title: string, onClose: () => void, back: boolean = false) {
     Row({ space: 8 }) {
       if (back) {
-        Button('‹', { type: ButtonType.Circle })
+        Button({ type: ButtonType.Circle }) {
+          Image($r('app.media.ic_arrow_left'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text)
+        }
           .width(36)
           .height(36)
           .fontSize(24)
-          .fontColor(this.pal().text)
+          .padding(0)
           .backgroundColor(Color.Transparent)
           .accessibilityText(this.tr('返回'))
           .onClick(() => { this.pendingModel = undefined; })
@@ -6253,11 +6035,15 @@ struct Index {
         .layoutWeight(1)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-      Button('×', { type: ButtonType.Circle })
+      Button({ type: ButtonType.Circle }) {
+        Image($r('app.media.ic_close'))
+          .width(20)
+          .height(20)
+          .fillColor(this.pal().text)
+      }
         .width(40)
         .height(40)
-        .fontSize(22)
-        .fontColor(this.pal().text)
+        .padding(0)
         .backgroundColor(Color.Transparent)
         .accessibilityText(this.tr('关闭'))
         .onClick(onClose)
@@ -6324,11 +6110,11 @@ struct Index {
         .constraintSize({ maxHeight: '78%' })
         .scrollBar(BarState.Auto)
         if (this.pendingModel === undefined && this.currentModelEfforts().length > 0) {
-          this.ModelOptionRow(this.tr('推理等级') + ' · ' + (this.currentModelEffort || this.tr('默认')) + '  ›',
+          this.ModelOptionRow(this.tr('推理等级') + ' · ' + (this.currentModelEffort || this.tr('默认')),
             false, () => {
               this.pendingModel = this.modelOptions.find((option: ModelOption) =>
                 option.model === this.currentModelLabel && option.provider === this.currentModelProvider);
-            })
+            }, true)
         }
       }
       .width('100%')
@@ -6443,8 +6229,9 @@ struct Index {
               Column({ space: 4 }) {
                 ForEach(item.files, (label: string, index: number) => {
                   Row({ space: 6 }) {
-                    Text('📎')
-                      .fontSize(12)
+                    Image($r('app.media.ic_file'))
+                      .width(14)
+                      .height(14)
                     Text(label)
                       .fontSize(12)
                       .fontColor(this.pal().text)
@@ -6837,8 +6624,9 @@ struct Index {
           })
       } else if (this.images.errorOf(line.imageSrc).length > 0) {
         Row({ space: 8 }) {
-          Text('🖼')
-            .fontSize(13)
+          Image($r('app.media.ic_image'))
+            .width(18)
+            .height(18)
           Column({ space: 2 }) {
             Text(t('图片加载失败'))
               .fontSize(12)
@@ -7074,7 +6862,10 @@ struct Index {
   private openFilePreview(path: string, offset: number = 1): void {
     this.releasePdfPreview();
     const request: number = this.pdfRequest;
-    this.previewIsPdf = path.toLowerCase().endsWith('.pdf');
+    const lowerPath = path.toLowerCase();
+    this.previewIsOffice = ['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx']
+      .some((extension: string) => lowerPath.endsWith(extension));
+    this.previewIsPdf = lowerPath.endsWith('.pdf') || this.previewIsOffice;
     this.pdfError = '';
     if (!this.previewIsPdf) {
       const requestPath = this.browseSessionId.length > 0 && path.startsWith(this.browsePrefix())
@@ -7087,7 +6878,10 @@ struct Index {
     this.runtime.filePreviewLoading = true;
     this.runtime.filePreviewError = '';
     this.runtime.notify();
-    this.runtime.readFileBuffer(path).then(async (buffer: ArrayBuffer) => {
+    const source = this.previewIsOffice
+      ? this.runtime.readOfficePdfBuffer(path)
+      : this.runtime.readFileBuffer(path);
+    source.then(async (buffer: ArrayBuffer) => {
       if (request !== this.pdfRequest) {
         return;
       }
@@ -7143,11 +6937,18 @@ struct Index {
 
   @Builder
   PdfTool(symbol: string, label: string, enabled: boolean, action: () => void) {
-    Button(symbol, { type: ButtonType.Normal })
+    Button({ type: ButtonType.Normal }) {
+      if (symbol === '‹') {
+        Image($r('app.media.ic_arrow_left')).width(20).height(20).fillColor(this.pal().text)
+      } else if (symbol === '›') {
+        Image($r('app.media.ic_arrow_right')).width(20).height(20).fillColor(this.pal().text)
+      } else {
+        Text(symbol).fontSize(22).fontColor(this.pal().text)
+      }
+    }
       .width(56)
       .height(48)
-      .fontSize(24)
-      .fontColor(this.pal().text)
+      .padding(0)
       .backgroundColor(Color.Transparent)
       .opacity(enabled ? 1 : 0.36)
       .accessibilityText(this.tr(label))
@@ -7363,6 +7164,141 @@ struct Index {
   }
 
   /** 文本文件预览：主机上读回来直接显示，二进制给提示。 */
+  @Builder
+  WorkspaceGitOverlay() {
+    Column() {
+      ScreenHeader({
+        palette: this.pal(),
+        title: this.tr('工作区改动'),
+        onBack: () => {
+          this.workspaceGitOpen = false;
+          this.workspaceGitDiffPath = '';
+          this.workspaceGitDiff = new WorkspaceGitDiff();
+        }
+      })
+        .margin({ left: 16, right: 16 })
+      Row({ space: 10 }) {
+        Text(this.workspaceGitStatus.branch.length > 0 ? this.workspaceGitStatus.branch : this.tr('当前分支未知'))
+          .fontSize(this.fs(14))
+          .fontColor(this.pal().text)
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text('+' + this.workspaceGitStatus.totalAdditions + ' / −' + this.workspaceGitStatus.totalDeletions)
+          .fontSize(this.fs(11))
+          .fontColor(this.pal().text2)
+        Image($r('app.media.ic_refresh'))
+          .width(20)
+          .height(20)
+          .fillColor(this.pal().primary)
+          .onClick(() => { this.runtime.loadWorkspaceGitStatus(); })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+      Row({ space: 6 }) {
+        this.WorkspaceGitScopeButton('all', this.tr('全部'))
+        this.WorkspaceGitScopeButton('staged', this.tr('已暂存'))
+        this.WorkspaceGitScopeButton('unstaged', this.tr('未暂存'))
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: 8 })
+      if (this.workspaceGitLoading) {
+        LoadingProgress().width(24).height(24).color(this.pal().primary).margin(18)
+      } else if (this.workspaceGitError.length > 0) {
+        Text(this.workspaceGitError).fontSize(this.fs(13)).fontColor(this.pal().danger).padding(16)
+      } else if (!this.workspaceGitStatus.isGitRepo) {
+        Text(this.tr('当前工作区不是 Git 仓库')).fontSize(this.fs(13)).fontColor(this.pal().text3).padding(16)
+      } else if (this.workspaceGitDiffPath.length > 0) {
+        Row({ space: 8 }) {
+          Text(this.workspaceGitDiffPath)
+            .fontSize(this.fs(13))
+            .fontColor(this.pal().text)
+            .layoutWeight(1)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.tr('返回文件列表'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().primary)
+            .onClick(() => {
+              this.workspaceGitDiffPath = '';
+              this.workspaceGitDiff = new WorkspaceGitDiff();
+            })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 8 })
+        if (this.workspaceGitDiffLoading) {
+          LoadingProgress().width(24).height(24).color(this.pal().primary).margin(18)
+        } else {
+          Scroll() {
+            Text(this.workspaceGitDiff.diff.length > 0 ? this.workspaceGitDiff.diff : this.tr('没有可显示的改动'))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text)
+              .fontFamily('monospace')
+              .width('100%')
+              .copyOption(CopyOptions.LocalDevice)
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .scrollBar(BarState.Auto)
+          .padding({ left: 16, right: 16, bottom: 16 })
+        }
+      } else {
+        List() {
+          ForEach(this.workspaceGitStatus.files, (file: WorkspaceGitFile) => {
+            ListItem() {
+              Row({ space: 8 }) {
+                Text(file.status.substring(0, 1).toUpperCase())
+                  .fontSize(this.fs(11))
+                  .fontColor(file.status === 'deleted' ? this.pal().danger : this.pal().primary)
+                  .width(22)
+                  .textAlign(TextAlign.Center)
+                Text(file.path)
+                  .fontSize(this.fs(13))
+                  .fontColor(this.pal().text)
+                  .layoutWeight(1)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(this.gitCountLabel(file.additions, '+') + ' / ' + this.gitCountLabel(file.deletions, '−'))
+                  .fontSize(this.fs(10))
+                  .fontColor(this.pal().text3)
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .onClick(() => { this.runtime.loadWorkspaceGitDiff(file.path); })
+            }
+          }, (file: WorkspaceGitFile) => file.path)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .divider({ strokeWidth: 0.5, color: this.pal().border, startMargin: 16, endMargin: 16 })
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.pal().bg)
+  }
+
+  @Builder
+  WorkspaceGitScopeButton(scope: string, label: string) {
+    Text(label)
+      .fontSize(this.fs(12))
+      .fontColor(this.workspaceGitScope === scope ? this.pal().primary : this.pal().text2)
+      .backgroundColor(this.workspaceGitScope === scope ? this.pal().primarySoft : this.pal().card)
+      .borderRadius(10)
+      .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+      .onClick(() => {
+        if (this.workspaceGitScope !== scope) {
+          this.workspaceGitDiffPath = '';
+          this.workspaceGitDiff = new WorkspaceGitDiff();
+          this.runtime.loadWorkspaceGitStatus(scope);
+        }
+      })
+  }
+
+  private gitCountLabel(value: number, prefix: string): string {
+    return value < 0 ? '—' : prefix + value;
+  }
+
   @Builder
   FilePreviewOverlay() {
     Column() {
@@ -8022,7 +7958,7 @@ struct Index {
       })
       Scroll() {
         Column() {
-          Image($r('app.media.about_icon'))
+          Image($r('app.media.icon'))
             .width(84)
             .height(84)
             .borderRadius(22)
@@ -8075,12 +8011,15 @@ struct Index {
       Column({ space: 10 }) {
         Row() {
           Blank()
-          Button('↘', { type: ButtonType.Circle })
+          Button({ type: ButtonType.Circle }) {
+            Image($r('app.media.ic_collapse'))
+              .width(19)
+              .height(19)
+              .fillColor(this.pal().text)
+          }
             .width(36)
             .height(36)
             .padding(0)
-            .fontSize(20)
-            .fontColor(this.pal().text)
             .backgroundColor(Color.Transparent)
             .accessibilityText(this.tr('收起'))
             .onClick(() => { this.composerExpanded = false; })
@@ -8118,21 +8057,28 @@ struct Index {
           }
           Blank()
           if (this.generating && this.promptInput.trim().length === 0 && this.pendingImages.length === 0) {
-            Button('■', { type: ButtonType.Circle })
+            Button({ type: ButtonType.Circle }) {
+              Image($r('app.media.ic_stop'))
+                .width(18)
+                .height(18)
+                .fillColor(Color.White)
+            }
               .width(44)
               .height(44)
               .padding(0)
-              .fontColor(Color.White)
               .backgroundColor(this.pal().text)
               .accessibilityText(this.tr('停止'))
               .onClick(() => { this.runtime.stopGeneration(); })
           } else {
-            Button('↑', { type: ButtonType.Circle })
+            Button({ type: ButtonType.Circle }) {
+              Image($r('app.media.ic_arrow_up'))
+                .width(20)
+                .height(20)
+                .fillColor(Color.White)
+            }
               .width(44)
               .height(44)
               .padding(0)
-              .fontSize(21)
-              .fontColor(Color.White)
               .backgroundColor(this.pal().primary)
               .accessibilityText(this.tr('发送'))
               .enabled(this.promptInput.trim().length > 0 || this.pendingImages.length > 0)
@@ -8494,12 +8440,11 @@ struct Index {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.pal().text)
           Blank()
-          Text('✕')
-            .fontSize(15)
-            .fontColor(this.pal().text3)
-            .width(30)
-            .height(30)
-            .textAlign(TextAlign.Center)
+          Image($r('app.media.ic_close'))
+            .width(18)
+            .height(18)
+            .fillColor(this.pal().text3)
+            .padding(2)
             .onClick(() => {
               this.promptPanelOpen = false;
             })
@@ -8516,10 +8461,11 @@ struct Index {
                   .maxLines(3)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                   .layoutWeight(1)
-                Text('✕')
-                  .fontSize(this.fs(12))
-                  .fontColor(this.pal().text3)
-                  .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+                Image($r('app.media.ic_close'))
+                  .width(18)
+                  .height(18)
+                  .fillColor(this.pal().text3)
+                  .padding(3)
                   .onClick(() => {
                     this.runtime.removePrompt(item);
                   })
@@ -8653,9 +8599,10 @@ struct Index {
       } else {
         Blank()
       }
-      Text(item.rev === 1 ? '⌃' : '⌄')
-        .fontSize(this.fs(12))
-        .fontColor(this.pal().text3)
+      Image(item.rev === 1 ? $r('app.media.ic_chevron_up') : $r('app.media.ic_chevron_down'))
+        .width(14)
+        .height(14)
+        .fillColor(this.pal().text3)
     }
     .width('100%')
     .padding({ top: 4, bottom: 4 })
@@ -9081,19 +9028,6 @@ function decodeBase64Image(base64: string): Promise<PixelMap> {
   const bytes: Uint8Array = new util.Base64Helper().decodeSync(base64);
   const source: image.ImageSource = image.createImageSource(bytes.buffer as ArrayBuffer);
   return source.createPixelMap();
-}
-
-/** 服务器切换面板的一行。 */
-class ServerChoice {
-  url: string = '';
-  /** 显示用的短账号（截断过）。 */
-  account: string = '';
-  /** 完整账号，用来判定「是不是当前这条」。 */
-  accountFull: string = '';
-  label: string = '';
-  host: string = '';
-  active: boolean = false;
-  profile: SavedProfile | undefined = undefined;
 }
 
 /** 设置面板里的一项主题选择。 */

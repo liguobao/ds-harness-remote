@@ -285,6 +285,7 @@ export interface ChatMessage extends ChatItemBase {
   replyGroup?: string
   reasoning?: string
   images?: ChatImage[]
+  files?: ChatFile[]
   streaming?: boolean
   streamingPhase?: 'reasoning' | 'text'
   /** Native session.prompt rpcId used to reconcile an optimistic user message. */
@@ -350,6 +351,14 @@ export interface ChatImage {
   bytes?: number
   width?: number
   height?: number
+}
+
+export interface ChatFile {
+  path: string
+  name: string
+  bytes?: number
+  attachmentId?: string
+  source: 'attachment' | 'upload' | 'reference'
 }
 
 export interface ImageAttachmentLimits {

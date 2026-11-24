@@ -17,7 +17,7 @@
   - 数学公式由 `mathjax-full` 本地生成 SVG（[`math-svg.ts`](src/ui/math-svg.ts)）。
   - Mermaid（`mermaid@12.2.0`）经禁网严格 CSP 隐藏 WebView 渲染后，须按白名单正则重建元素与属性再交给 `react-native-svg`（防非法属性闪退 Android 原生）。
   - 含 `foreignObject` 图表仅走 `javaScriptEnabled={false}` 全屏查看。
-  - PDF 限单页画布只读预览（禁脚本、外链与明文缓存）；预览上限：图片 8 MiB、PDF 16 MiB、Office 源 50 MiB。
+  - PDF 限有界窗口画布垂直连续只读预览（禁脚本、外链与明文缓存，总像素预算受控）；预览上限：图片 8 MiB、PDF 16 MiB、Office 源 50 MiB。
 
 ## 原生模块、后台连接与外部导航
 

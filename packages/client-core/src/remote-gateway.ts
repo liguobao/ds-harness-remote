@@ -25,6 +25,7 @@ const REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17] as const
 const TRANSFER_CLOSE_TIMEOUT_MS = 5_000
 const DEFAULT_TRANSFER_TIMEOUT_MS = 60_000
 const DEFAULT_TRANSFER_CHUNK_TIMEOUT_MS = 30_000
+const SPEECH_TRANSCRIBE_TIMEOUT_MS = 3 * 60_000
 
 /** Gateway call options; `maxResponseBytes` caps what a transferred response may allocate locally. */
 export interface RemoteGatewayOptions extends RemoteRpcOptions {
@@ -222,18 +223,22 @@ export class RemoteTypertGateway {
     signal?: AbortSignal,
     options?: RemoteGatewayOptions,
   ): Promise<RemoteGatewayResult<T>> {
+    const defaultCommitTimeoutMs = endpoint === 'speech/transcribe' ? SPEECH_TRANSCRIBE_TIMEOUT_MS : undefined
+    const directOptions = defaultCommitTimeoutMs !== undefined && options?.timeoutMs === undefined
+      ? { ...options, timeoutMs: defaultCommitTimeoutMs }
+      : options
     const request = { endpoint, payload }
     const encoded = new TextEncoder().encode(JSON.stringify(request))
     let response: unknown
     const activeSignal = signal ?? new AbortController().signal
     if (encoded.byteLength > DIRECT_REMOTE_CALL_BYTES) {
-      response = await this.callTransferred(encoded, activeSignal, options)
+      response = await this.callTransferred(encoded, activeSignal, options, defaultCommitTimeoutMs)
     } else {
       try {
-        response = await this.client.rpc<unknown>('harness.remote.call', request, activeSignal, options)
+        response = await this.client.rpc<unknown>('harness.remote.call', request, activeSignal, directOptions)
       } catch (error) {
         if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE')) throw error
-        response = await this.callTransferred(encoded, activeSignal, options)
+        response = await this.callTransferred(encoded, activeSignal, options, defaultCommitTimeoutMs)
       }
     }
     const result = parseRpcResult<T>(response)
@@ -320,13 +325,16 @@ export class RemoteTypertGateway {
     encoded: Uint8Array,
     signal: AbortSignal,
     options?: RemoteGatewayOptions,
+    defaultCommitTimeoutMs?: number,
   ): Promise<unknown> {
     if (encoded.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
       throw new RemoteGatewayError('INVALID_MESSAGE', 'The Harness Remote request exceeds the transfer limit.')
     }
     const maxResponseBytes = transferResponseLimit(options)
     const totalChunks = Math.ceil(encoded.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES)
-    const overallTimeoutMs = options?.timeoutMs ?? Math.max(DEFAULT_TRANSFER_TIMEOUT_MS, totalChunks * 2_000)
+    const transferBudgetMs = Math.max(DEFAULT_TRANSFER_TIMEOUT_MS, totalChunks * 2_000)
+    const overallTimeoutMs = options?.timeoutMs
+      ?? (defaultCommitTimeoutMs === undefined ? transferBudgetMs : defaultCommitTimeoutMs + transferBudgetMs)
     if (!Number.isSafeInteger(overallTimeoutMs) || overallTimeoutMs <= 0 || overallTimeoutMs > 2_147_483_647) {
       throw new RemoteGatewayError('INVALID_MESSAGE', 'The requested Harness transfer timeout is invalid.')
     }

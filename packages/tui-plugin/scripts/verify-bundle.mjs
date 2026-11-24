@@ -61,7 +61,7 @@ assert.throws(
 )
 
 for (const packageName of developmentApiPackages) {
-  assert.equal(releaseManifest.dependencies[packageName], '0.2.2-rc.1')
+  assert.equal(releaseManifest.dependencies[packageName], manifest.devDependencies['@deepseek-ai/dsh-api-gateway'])
 }
 assert.match(releasePatch, /inject: \[settings, connection\]/)
 const { apply: applyRelease } = await import('../../tui/index.js')

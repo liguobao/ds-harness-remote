@@ -33,6 +33,7 @@ function jobsFrom(value: unknown, sessionId: string): BackgroundJob[] {
 
 export interface SessionActivityDockProps {
   session: RemoteSession
+  connectionGeneration?: number
   childSessions?: RemoteSession[]
   teamState?: {
     members: TeamMemberSnapshot[]
@@ -47,6 +48,7 @@ export interface SessionActivityDockProps {
 /** Current Host projections only. No inferred goals or locally persisted task state. */
 export function SessionActivityDock({
   session,
+  connectionGeneration = 0,
   childSessions,
   teamState,
   sessions,
@@ -63,15 +65,42 @@ export function SessionActivityDock({
   const todos = todosFrom(values?.todos)
   const projection = record(values?.goal) ? values.goal : undefined
   const goal = record(projection?.goal) && typeof projection.goal.objective === 'string' ? projection.goal : undefined
-  const [expanded, setExpanded] = useState<'todos' | 'goal' | 'jobs' | 'subagents' | 'team' | undefined>()
-  const toggle = (section: 'todos' | 'goal' | 'jobs' | 'subagents' | 'team') => setExpanded(value => value === section ? undefined : section)
-  const [activeModal, setActiveModal] = useState<'todos' | 'goal' | 'jobs' | 'subagents' | 'team' | undefined>()
+  const scopeKey = `${session.sessionId}:${connectionGeneration ?? 0}`
+  const panelScopeKey = `${scopeKey}:${effectiveMode}`
+  const [expandedState, setExpandedState] = useState<{
+    scope: string
+    section: 'todos' | 'goal' | 'jobs' | 'subagents' | 'team' | undefined
+  }>({ scope: panelScopeKey, section: undefined })
+  const expanded = expandedState.scope === panelScopeKey ? expandedState.section : undefined
+  const toggle = (section: 'todos' | 'goal' | 'jobs' | 'subagents' | 'team') =>
+    setExpandedState(current => ({
+      scope: panelScopeKey,
+      section: current.scope === panelScopeKey && current.section === section ? undefined : section,
+    }))
+  const [activeModalState, setActiveModalState] = useState<{
+    scope: string
+    section: 'todos' | 'goal' | 'jobs' | 'subagents' | 'team' | undefined
+  }>({ scope: panelScopeKey, section: undefined })
+  const activeModal = activeModalState.scope === panelScopeKey ? activeModalState.section : undefined
+  const setActiveModal = (section: 'todos' | 'goal' | 'jobs' | 'subagents' | 'team' | undefined) =>
+    setActiveModalState({ scope: panelScopeKey, section })
   const { height } = useWindowDimensions()
   const detailsHeight = Math.min(180, height * 0.24)
   const modalDetailsHeight = Math.min(380, height * 0.52)
-  const [jobs, setJobs] = useState<BackgroundJob[]>(() => initialJobs ?? [])
-  const [jobError, setJobError] = useState(false)
-  const [jobsLoading, setJobsLoading] = useState(initialJobs === undefined)
+  const [jobsState, setJobsState] = useState<{
+    scope: string
+    jobs: BackgroundJob[]
+    error: boolean
+    loading: boolean
+  }>(() => ({
+    scope: scopeKey,
+    jobs: initialJobs ?? [],
+    error: false,
+    loading: initialJobs === undefined,
+  }))
+  const jobs = jobsState.scope === scopeKey ? jobsState.jobs : (initialJobs ?? [])
+  const jobError = jobsState.scope === scopeKey ? jobsState.error : false
+  const jobsLoading = jobsState.scope === scopeKey ? jobsState.loading : (initialJobs === undefined)
   const [attempt, setAttempt] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const phase = (value: unknown) => value === 'complete' || value === 'completed' ? copy.complete
@@ -80,37 +109,45 @@ export function SessionActivityDock({
         : value === 'stopping' ? copy.stopping : value === 'pending' ? copy.pending : copy.active
 
   useEffect(() => {
-    setActiveModal(undefined)
-  }, [session.sessionId, effectiveMode])
-
-  useEffect(() => {
     const controller = new AbortController()
     let stream: RemoteGatewayStream | undefined
-    setJobs(initialJobs ?? [])
-    setJobError(false)
-    setJobsLoading(initialJobs === undefined)
+    setJobsState(prev => (
+      prev.scope === scopeKey && prev.error === false && prev.loading === (initialJobs === undefined) && (initialJobs !== undefined ? prev.jobs === initialJobs : prev.jobs.length === 0)
+        ? prev
+        : { scope: scopeKey, jobs: initialJobs ?? [], error: false, loading: initialJobs === undefined }
+    ))
     void (async () => {
       try {
         const tools = requireSessionTools(session.sessionId)
-        if (!tools.watchJobs) { setJobsLoading(false); setRefreshing(false); return }
+        if (!tools.watchJobs) {
+          setJobsState(prev => (prev.scope === scopeKey ? { ...prev, loading: false } : prev))
+          setRefreshing(false)
+          return
+        }
         stream = await tools.watchJobs(session.sessionId, controller.signal)
         if (controller.signal.aborted) return
         for await (const frame of stream) {
           if (controller.signal.aborted) return
           if (!record(frame) || frame.type !== 'rows' || !Array.isArray(frame.jobs)) throw new Error('Invalid job roster')
-          setJobs(jobsFrom(frame.jobs, session.sessionId))
-          setJobsLoading(false)
+          setJobsState({ scope: scopeKey, jobs: jobsFrom(frame.jobs, session.sessionId), error: false, loading: false })
         }
-        if (!controller.signal.aborted) setJobError(true)
+        if (!controller.signal.aborted) {
+          setJobsState(prev => (prev.scope === scopeKey ? { ...prev, error: true } : prev))
+        }
       } catch {
-        if (!controller.signal.aborted) setJobError(true)
+        if (!controller.signal.aborted) {
+          setJobsState(prev => (prev.scope === scopeKey ? { ...prev, error: true } : prev))
+        }
       } finally {
-        if (!controller.signal.aborted) { setJobsLoading(false); setRefreshing(false) }
+        if (!controller.signal.aborted) {
+          setJobsState(prev => (prev.scope === scopeKey ? { ...prev, loading: false } : prev))
+          setRefreshing(false)
+        }
         await stream?.close?.().catch(() => {})
       }
     })()
     return () => { controller.abort(); void stream?.close?.().catch(() => {}) }
-  }, [session.sessionId, attempt])
+  }, [session.sessionId, connectionGeneration, scopeKey, attempt])
 
   const hasTodos = todos.length > 0
   const hasGoal = goal !== undefined

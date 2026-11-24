@@ -9,8 +9,8 @@ import { HarnessRemoteBridge } from '../src/harness-remote-bridge.js'
 import { TypertGatewaySwitch } from '../src/typert-gateway-switch.js'
 import type { TypertGatewayLike } from '../src/typert-gateway-contract.js'
 
-// Exercise the installed RC.1 implementation, including its Peer identity check.
-describe('Harness RC.1 authenticated carrier', () => {
+// Exercise the installed Gateway implementation, including its Peer identity check.
+describe('Harness authenticated carrier', () => {
   it('reports an incomplete Host with the official Gateway and no Remote API packages', async () => {
     const ctx = new Context()
     try {

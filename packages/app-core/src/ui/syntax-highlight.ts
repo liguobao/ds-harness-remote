@@ -297,3 +297,68 @@ export function highlightCode(code: string, language?: string): SyntaxToken[] {
 
   return tokens
 }
+
+export const ANDROID_MAX_STYLED_SPANS_PER_CHUNK = 16
+export const ANDROID_MAX_LINES_PER_CHUNK = 4
+
+/**
+ * Partition syntax-highlighted tokens along newline boundaries into bounded
+ * chunks so Android Fabric builds small Spannables instead of one large O(S^2)
+ * SpannableStringBuilder. Joining each chunk's concatenated text with `\n`
+ * reproduces the exact input code.
+ */
+export function partitionHighlightedCodeTokens(
+  tokens: readonly SyntaxToken[],
+  maxStyledSpans = ANDROID_MAX_STYLED_SPANS_PER_CHUNK,
+  maxLines = ANDROID_MAX_LINES_PER_CHUNK,
+): SyntaxToken[][] {
+  const chunks: SyntaxToken[][] = []
+  let current: SyntaxToken[] = []
+  let plainBuffer = ''
+  let styledInChunk = 0
+  let linesInChunk = 0
+
+  const flushPlain = () => {
+    if (plainBuffer.length > 0) {
+      current.push({ kind: 'plain', text: plainBuffer })
+      plainBuffer = ''
+    }
+  }
+
+  const finishChunk = () => {
+    flushPlain()
+    chunks.push(current)
+    current = []
+    styledInChunk = 0
+    linesInChunk = 0
+  }
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!
+    const parts = token.text.split('\n')
+    for (let p = 0; p < parts.length; p += 1) {
+      const part = parts[p]!
+      if (part.length > 0) {
+        if (token.kind === 'plain' || part.trim().length === 0) {
+          plainBuffer += part
+        } else {
+          flushPlain()
+          current.push({ kind: token.kind, text: part })
+          styledInChunk += 1
+        }
+      }
+      if (p < parts.length - 1) {
+        linesInChunk += 1
+        if (styledInChunk >= maxStyledSpans || linesInChunk >= maxLines) {
+          finishChunk()
+        } else {
+          plainBuffer += '\n'
+        }
+      }
+    }
+  }
+  if (current.length > 0 || plainBuffer.length > 0 || chunks.length === 0) {
+    finishChunk()
+  }
+  return chunks
+}

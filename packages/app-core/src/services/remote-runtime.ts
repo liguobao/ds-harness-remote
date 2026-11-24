@@ -88,6 +88,7 @@ export class AndroidRemoteRuntime {
   requireCodex() { return this.client.requireCodex() }
   requireSessionTools(sessionId?: string) { return this.client.requireSessionTools(sessionId) }
   hasSessionEvents() { return typeof this.client.hasSessionEvents === 'function' ? this.client.hasSessionEvents() : false }
+  hasWorkspaceGit() { return typeof this.client.hasWorkspaceGit === 'function' ? this.client.hasWorkspaceGit() : false }
   hasCodex() { return this.client.hasCodex() }
   requireCursor() { return this.client.requireCursor() }
   hasCursor() { return this.client.hasCursor() }

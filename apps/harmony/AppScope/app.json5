@@ -2,9 +2,9 @@
   "app": {
     "bundleName": "dsh.r2049.huawei",
     "vendor": "r2049",
-    "versionCode": 1000226,
-    "versionName": "0.17.104-lan",
-    "icon": "$media:layered_image",
+    "versionCode": 75,
+    "versionName": "0.6.7",
+    "icon": "$media:icon",
     "label": "$string:app_name"
   }
 }

@@ -5,11 +5,13 @@
 | Component | Scope |
 | --- | --- |
 | Remote | Source version 0.6.7; Android versionCode / Expo iOS buildNumber 75. This does not establish publication status |
-| Harness development baseline | 0.2.2-rc.1, Node.js >=24.9 |
-| Older Harness | Official Typert / Session V3 paths for 0.2.1-rc.5 and 0.2.0-rc.2 / rc.1 |
-| Peer range | 0.2.1 / 0.2.2 prereleases and stable versions; range acceptance is not runtime validation of every version |
+| Harness development baseline | 0.2.3-alpha.2, Node.js `^24.22.3 || >=26.13.1` |
+| Older Harness | Official Typert / Session V3 paths for 0.2.2 RCs, 0.2.1-rc.5 and 0.2.0-rc.2 / rc.1 |
+| Peer range | 0.2.1 / 0.2.2 / 0.2.3 (≥ alpha.2) prereleases and stable versions; range acceptance is not runtime validation of every version |
 | TUI | Matching standalone `ds-harness-remote-tui`; core Android Relay flow validated with dsh-TUI 0.20.1 + Harness 0.2.2-rc.1 |
 | DS-Bot | Fixed named routes aligned with 0.3.8; route coverage is not full mobile E2E coverage |
+
+On 0.2.3-alpha.2, the official Gateway, Connection and Session Controller descriptor have been exercised for session list discovery and dispatch. The cross-device Relay validation above used 0.2.2-rc.1.
 
 Enable only one Remote Host entry per TUI profile. Use the `ds-harness-remote` CLI for authorization. See the [bundle instructions](../packages/tui/README.md).
 

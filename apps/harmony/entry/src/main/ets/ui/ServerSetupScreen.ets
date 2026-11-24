@@ -122,19 +122,17 @@ export struct ServerSetupScreen {
               Column({ space: 10 }) {
                 ForEach(this.providers, (item: OAuthProvider) => {
                   Button({ type: ButtonType.ROUNDED_RECTANGLE }) {
-                    Stack({ alignContent: Alignment.Center }) {
+                    Row({ space: 10 }) {
+                      this.ProviderIcon(item.id)
                       Text(this.providerTitle(item))
                         .fontSize(16)
                         .fontWeight(FontWeight.Medium)
                         .fontColor(this.palette.text)
-                      Row() {
-                        this.ProviderIcon(item.id)
-                        Blank()
-                      }
-                      .width('100%')
-                      .padding({ left: 18, right: 18 })
+                        .layoutWeight(1)
+                        .textAlign(TextAlign.Start)
                     }
                     .width('100%')
+                    .padding({ left: 18, right: 18 })
                   }
                     .padding(0)
                     .width('100%')

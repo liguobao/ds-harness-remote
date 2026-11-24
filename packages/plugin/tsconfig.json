@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
+    "noEmit": true,
     "rootDir": "src",
     "lib": ["ES2022", "DOM"],
     "moduleDetection": "legacy"

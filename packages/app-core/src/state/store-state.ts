@@ -1,4 +1,5 @@
 import type { AgentAcpFrameData } from '@dsh-remote/protocol'
+import type { HandoffPacket } from '../lib/handoff-context'
 import type { AppLanguage, LanguagePreference } from '../locales/i18n'
 import type { OAuthProviderInfo, OAuthQrPollResult, OAuthQrSession } from '../services/api'
 import type {
@@ -53,6 +54,24 @@ export interface QrLoginStart {
   session: OAuthQrSession
 }
 
+export interface HandoffSessionParams {
+  targetBackend: AgentBackend
+  targetWorkspaceId?: string
+  registerPath?: string
+  targetSessionId?: string
+  instruction: string
+  packet: HandoffPacket
+  mode: 'send' | 'draft'
+}
+
+export interface HandoffSessionResult {
+  ok: boolean
+  session?: RemoteSession
+  workspace?: WorkspaceView
+  delivered?: 'sent' | 'kept' | 'draft' | 'draft-fallback'
+  error?: string
+}
+
 export interface AppState {
   bootPhase: BootPhase
   config?: ServerConfig
@@ -66,6 +85,7 @@ export interface AppState {
   connectionNetworkDetails?: ConnectionNetworkDetails
   hostDescriptor?: HostDescriptor
   hostSessionEvents: boolean
+  hostWorkspaceGit: boolean
   codexAvailable: boolean
   cursorAvailable: boolean
   antigravityAvailable: boolean
@@ -85,6 +105,7 @@ export interface AppState {
   selectedSession?: RemoteSession
   /** History and the current connection's Codex event subscription are ready. */
   codexReadySessionId?: string
+  acpReadOnlySessionId?: string
   /** Successfully opened in this remote-use lifecycle; retained across transport recovery. */
   currentWorkSessionIds: string[]
   messages: Record<string, ChatItem[]>
@@ -173,7 +194,7 @@ export interface AppState {
   reconnect(options?: { forceRelay?: boolean; restoreSession?: boolean }): Promise<boolean>
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>
-  sendMessage(text: string, images?: PromptImage[], reuseRpcId?: string): Promise<SendMessageResult>
+  sendMessage(text: string, images?: PromptImage[], reuseRpcId?: string, files?: import('../types').ChatFile[]): Promise<SendMessageResult>
   retrySendMessage(itemId: string): Promise<boolean>
   updateQueueItem(itemId: string, action: 'remove' | 'steer', rpcId?: string): Promise<boolean>
   forkChatMessage(message: ChatMessage): Promise<boolean>
@@ -185,6 +206,8 @@ export interface AppState {
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
   createSession(workspaceId?: string, backend?: AgentBackend): Promise<boolean>
+  loadSessionHandoffItems(session: RemoteSession): Promise<ChatItem[]>
+  handoffSession(params: HandoffSessionParams): Promise<HandoffSessionResult>
   forkSession(sessionId: string, backend?: RemoteSession['backend']): Promise<RemoteSession | undefined>
   archiveSession(sessionId: string): Promise<boolean>
   unarchiveSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>
@@ -239,9 +262,9 @@ export function selectCustomAcpBackends(state: Pick<AppState, 'customAcpBackends
 }
 
 export function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'customAcpBackends' | 'workspaceCatalog' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'hostWorkspaceGit' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'customAcpBackends' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' | 'agentPresetOptions' | 'agentPresetLoading' | 'agentPresetSelecting' |
-  'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
+  'acpReadOnlySessionId' | 'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
     config: undefined,
@@ -253,6 +276,7 @@ export function initialData(): Pick<AppState,
     connectionNetworkDetails: undefined,
     hostDescriptor: undefined,
     hostSessionEvents: false,
+    hostWorkspaceGit: false,
     codexAvailable: false,
     cursorAvailable: false,
     antigravityAvailable: false,
@@ -270,6 +294,7 @@ export function initialData(): Pick<AppState,
     sessions: [],
     selectedSession: undefined,
     codexReadySessionId: undefined,
+    acpReadOnlySessionId: undefined,
     currentWorkSessionIds: [],
     messages: {},
     sessionLifecycles: {},

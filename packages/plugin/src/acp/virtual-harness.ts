@@ -1474,13 +1474,17 @@ const ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES = [
   'pluginRegistryProbe/',
   'credentials/',
   'llm/',
-  'speech/',
   'account/',
 ] as const
 
 const ALLOWED_HOST_CARRIER_DISPATCH_EXACT = new Set([
   'pluginInventory/list',
   'permissionPresets/catalog',
+  'speech/catalog',
+  'speech/transcribe',
+  'speech/prepare',
+  'speech/configure',
+  'speech/cancelPreparation',
 ])
 
 function isAllowedHostCarrierDispatch(endpoint: string): boolean {
@@ -1490,6 +1494,7 @@ function isAllowedHostCarrierDispatch(endpoint: string): boolean {
 
 function isAllowedHostCarrierOpen(endpoint: string): boolean {
   return endpoint === 'remoteAccess/follow'
+    || endpoint === 'speech/follow'
     || endpoint.startsWith('account/')
     || endpoint.startsWith('settings/')
 }

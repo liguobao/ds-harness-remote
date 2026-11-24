@@ -17,7 +17,6 @@ const requiredHostApiPackages = [
   '@deepseek-ai/dsh-api-job-controller',
   '@deepseek-ai/dsh-api-terminal-controller',
   '@deepseek-ai/dsh-api-workspace-files',
-  '@deepseek-ai/dsh-api-account-controller',
   '@deepseek-ai/dsh-api-settings-controller',
   '@deepseek-ai/dsh-api-workspace-controller',
   '@deepseek-ai/dsh-api-remotes',

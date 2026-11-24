@@ -881,6 +881,38 @@ export class HarnessAlphaClient {
     }
   }
 
+  /**
+   * Read another session's recent history without closing or displacing the
+   * currently followed session stream.
+   */
+  async sessionReadOnlyHistory(sessionId: string, maxMessages = 60, parentSessionId?: string): Promise<HarnessSessionHistoryPage> {
+    const address = this.sessionAddress(sessionId, parentSessionId)
+    let pageFallback: HarnessSessionHistoryPage | undefined
+    try {
+      const page = await this.callValue<ReadOnlyHistoryEnvelope | unknown[]>('session/page', {
+        request: { address, maxMessages },
+      })
+      const converted = readOnlyHistoryPageFromEnvelope(page, maxMessages, true)
+      if (converted !== undefined) {
+        if (converted.page.events.length > 0 || converted.usedRecords) return converted.page
+        pageFallback = converted.page
+      }
+    } catch (error) {
+      if (!isReadOnlyHistoryFallbackError(error)) throw error
+    }
+
+    try {
+      const eventsPayload = await this.callValue<ReadOnlyHistoryEnvelope | unknown[]>('session/events', {
+        request: { address },
+      })
+      const converted = readOnlyHistoryPageFromEnvelope(eventsPayload, maxMessages)
+      return converted?.page ?? pageFallback ?? { events: [], hasMore: false }
+    } catch (error) {
+      if (pageFallback !== undefined && isReadOnlyHistoryFallbackError(error)) return pageFallback
+      throw error
+    }
+  }
+
   /** Stage exact file bytes in the receiving Session; only its receipt may be submitted. */
   async sessionUploadFile(sessionId: string, data: string, name?: string): Promise<{ receiptId: string; file: unknown }> {
     return this.callValue('fileUploads/upload', { agentId: sessionId, request: { data, ...(name === undefined ? {} : { name }) } })
@@ -1744,6 +1776,122 @@ function normalizeWorkspaceList(value: Record<string, unknown>): HarnessWorkspac
       ? value.pinnedSessionIds.filter((item): item is string => typeof item === 'string')
       : [],
   }
+}
+
+type ReadOnlyHistoryEnvelope = {
+  records?: unknown[]
+  events?: unknown[]
+  hasMore?: boolean
+  throughSeq?: number
+  cursor?: number
+}
+
+const READ_ONLY_HISTORY_FALLBACK_CODES = new Set([
+  'METHOD_NOT_FOUND',
+  'method-not-found',
+  'gateway/method-not-found',
+  'gateway/arguments-invalid',
+  'FEATURE_NOT_SUPPORTED',
+  'UNSUPPORTED',
+  'unsupported',
+])
+
+function isReadOnlyHistoryFallbackError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && READ_ONLY_HISTORY_FALLBACK_CODES.has(code)
+}
+
+function sliceReadOnlyEntriesByMessageLimit(
+  entries: HarnessHistoryEntry[],
+  limit: number,
+): { events: HarnessHistoryEntry[]; sliced: boolean } {
+  if (limit <= 0) {
+    return { events: [], sliced: entries.length > 0 }
+  }
+  const groups: HarnessHistoryEntry[][] = []
+  let activeChunkGroup: HarnessHistoryEntry[] | undefined
+  for (const entry of entries) {
+    if (entry.event.type === 'assistant/chunk') {
+      if (activeChunkGroup === undefined) {
+        activeChunkGroup = [entry]
+        groups.push(activeChunkGroup)
+      } else {
+        activeChunkGroup.push(entry)
+      }
+    } else {
+      activeChunkGroup = undefined
+      groups.push([entry])
+    }
+  }
+  if (groups.length <= limit) {
+    return { events: entries, sliced: false }
+  }
+  return {
+    events: groups.slice(-limit).flat(),
+    sliced: true,
+  }
+}
+
+function readOnlyHistoryPageFromEnvelope(
+  value: unknown,
+  maxMessages?: number,
+  sliceOnlyWithoutRecords = false,
+): { page: HarnessSessionHistoryPage; usedRecords: boolean } | undefined {
+  let rawItems: unknown[] | undefined
+  let usedRecords = false
+  let hasMore = false
+  let explicitThroughSeq: number | undefined
+  if (Array.isArray(value)) {
+    rawItems = value
+  } else if (isRecord(value)) {
+    const records = Array.isArray(value.records) ? value.records : undefined
+    const events = Array.isArray(value.events) ? value.events : undefined
+    if (records !== undefined && (records.length > 0 || events === undefined)) {
+      rawItems = records
+      usedRecords = true
+    } else if (events !== undefined) {
+      rawItems = events
+    }
+    hasMore = value.hasMore === true
+    if (typeof value.throughSeq === 'number') explicitThroughSeq = value.throughSeq
+    else if (typeof value.cursor === 'number' && value.cursor >= 0) explicitThroughSeq = value.cursor
+  }
+  if (rawItems === undefined) return undefined
+  const converted = historyEntriesFromReadOnlyItems(rawItems)
+  const shouldSlice = maxMessages !== undefined && (!sliceOnlyWithoutRecords || !usedRecords)
+  const limit = shouldSlice ? (Number.isFinite(maxMessages) ? Math.max(0, Math.floor(maxMessages)) : 0) : undefined
+  const { events, sliced } = limit === undefined
+    ? { events: converted, sliced: false }
+    : sliceReadOnlyEntriesByMessageLimit(converted, limit)
+  let maxSeq: number | undefined
+  for (const entry of events) {
+    if (maxSeq === undefined || entry.event.seq > maxSeq) maxSeq = entry.event.seq
+  }
+  const throughSeq = explicitThroughSeq !== undefined && maxSeq !== undefined
+    ? Math.max(explicitThroughSeq, maxSeq)
+    : maxSeq ?? explicitThroughSeq
+  return {
+    page: {
+      events,
+      hasMore: hasMore || sliced,
+      ...(throughSeq === undefined ? {} : { throughSeq }),
+    },
+    usedRecords,
+  }
+}
+
+function historyEntriesFromReadOnlyItems(items: unknown[]): HarnessHistoryEntry[] {
+  const normalized = items.flatMap(item => {
+    if (!isRecord(item)) return []
+    if ((item.type === 'event' || item.type === 'chunks') && isRecord(item.event)) return [item]
+    if (typeof item.type === 'string' && typeof item.seq === 'number' && typeof item.time === 'number') {
+      return [{ type: 'event', event: item }]
+    }
+    if (isRecord(item.event)) return [{ type: 'event', event: item.event }]
+    return []
+  })
+  return historyEntriesFromRecords(normalized)
 }
 
 function historyEntriesFromRecords(records: unknown[]): HarnessHistoryEntry[] {

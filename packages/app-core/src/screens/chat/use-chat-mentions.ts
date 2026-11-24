@@ -73,21 +73,24 @@ export function useChatMentions({ session, sessions, workspaces, connectionPhase
     description: row.modelInvocable ? row.description : `${strings.mention.skillUserOnly} · ${row.description}`,
     onPress: () => insertMentionText(`/${row.name} `),
   })), [skillCatalog, strings])
-  // 「@」菜单：对话 / 文件 两组，均支持模糊检索。
-  const sessionItems: MentionItem[] = useMemo(() => sessions.filter(item => item.sessionId !== session?.sessionId && item.backend !== 'codex')
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .map(item => {
-      const title = resolveSessionDisplayTitle(item) ?? item.title ?? item.sessionId
-      const owner = workspaces.find(workspace => workspace.sessionIds.includes(item.sessionId))
-      return {
-        id: item.sessionId,
-        icon: OfficialMenuIcons.referenceSession,
-        title,
-        description: owner === undefined ? strings.chat.workspaceNone : `${owner.title} · ${maskPersonalPath(owner.path)}`,
-        meta: relativeTime(item.updatedAt),
-        onPress: () => insertMentionText(sessionMentionText(item.sessionId, title)),
-      }
-    }), [session?.sessionId, sessions, workspaces, strings])
+  // 「@」菜单：对话 / 文件 两组，均支持模糊检索。仅在打开 `@` 菜单时计算，避免切会话空跑全量扫描。
+  const sessionItems: MentionItem[] = useMemo(() => {
+    if (mentionType !== 'context') return []
+    return sessions.filter(item => item.sessionId !== session?.sessionId && item.backend !== 'codex')
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map(item => {
+        const title = resolveSessionDisplayTitle(item) ?? item.title ?? item.sessionId
+        const owner = workspaces.find(workspace => workspace.sessionIds.includes(item.sessionId))
+        return {
+          id: item.sessionId,
+          icon: OfficialMenuIcons.referenceSession,
+          title,
+          description: owner === undefined ? strings.chat.workspaceNone : `${owner.title} · ${maskPersonalPath(owner.path)}`,
+          meta: relativeTime(item.updatedAt),
+          onPress: () => insertMentionText(sessionMentionText(item.sessionId, title)),
+        }
+      })
+  }, [mentionType, session?.sessionId, sessions, workspaces, strings])
   const fileItems: MentionItem[] = useMemo(() => (workspaceFileRefs ?? []).map(ref => {
     const isDir = ref.kind === 'directory'
     const Icon = isDir ? OfficialMenuIcons.referenceFolder : OfficialMenuIcons.referenceFile

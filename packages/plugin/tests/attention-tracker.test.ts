@@ -954,6 +954,7 @@ describe('HostAttentionTracker', () => {
       undefined,
       undefined,
       undefined,
+      undefined, // workspaceGit
       tracker.createPeerRoute('conn-a', async event => { sentA.push(event) }),
     )
 
@@ -1194,6 +1195,7 @@ describe('HostAttentionTracker', () => {
       undefined,
       undefined,
       undefined,
+      undefined, // workspaceGit
       tracker.createPeerRoute('conn-interop', async event => {
         for (const listener of eventListeners) listener(event)
       }),

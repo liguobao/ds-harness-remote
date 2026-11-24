@@ -20,12 +20,15 @@ export struct ScreenHeader {
         .textAlign(TextAlign.Center)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-      Button('←', { type: ButtonType.Circle })
+      Button({ type: ButtonType.Circle }) {
+        Image($r('app.media.ic_arrow_left'))
+          .width(20)
+          .height(20)
+          .fillColor(this.palette.text)
+      }
         .width(44)
         .height(44)
         .padding(0)
-        .fontSize(18)
-        .fontColor(this.palette.text)
         .backgroundColor(this.palette.inputBg)
         .border({ width: 1, color: this.palette.border })
         .accessibilityText(t('返回'))

@@ -46,13 +46,13 @@ In DeepSeek Harness Desktop, open **Extensions / Plugin management**, choose ins
 from **npm**, and enter:
 
 ```text
-ds-harness-remote@0.6.5
+ds-harness-remote@0.6.7
 ```
 
 Restart Desktop after installation. Its official `dsh` launcher can also install the package:
 
 ```sh
-dsh plugin --profile desktop add -w ds-harness-remote@0.6.5
+dsh plugin --profile desktop add -w ds-harness-remote@0.6.7
 ```
 
 Use Desktop's official launcher to manage its reserved `desktop` profile.
@@ -62,7 +62,7 @@ Use Desktop's official launcher to manage its reserved `desktop` profile.
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.6.5
+dsh plugin --profile web add -w ds-harness-remote@0.6.7
 ```
 
 ## Highlights
@@ -78,7 +78,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.6.5
 
 ## Compatibility
 
-The development baseline is DeepSeek Harness `dsh-v0.2.2-rc.1`, retaining the official Typert Remote / Session V3 carrier from `0.2.1-rc.5` and `0.2.0` RC. Earlier Typert carrier support remains capability-based.
+The development baseline is DeepSeek Harness `dsh-v0.2.3-alpha.2`, retaining the official Typert Remote / Session V3 carrier from `0.2.1-rc.5` and `0.2.0` RC. Earlier Typert carrier support remains capability-based.
 
 `0.5.19` removes Harness `0.1.1-rc.2` ApiProxy support from the Host and bundled Remote client. ApiProxy-only Hosts and missing capability discovery are rejected. CodeX/ACP Desktop projection also uses Typert only.
 

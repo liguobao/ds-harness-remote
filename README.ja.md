@@ -1,6 +1,5 @@
 <p align="center">
-
-  <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
+  <img src="docs/images/hero-ja.png" alt="DeepSeek Harness Remote — 一度つなげば、どこからでも使える。" width="100%">
 </p>
 
 <p align="center">
@@ -37,7 +36,7 @@ Harness は作業用パソコン上で動作し続け、ワークスペース、
 
 DeepSeek Harness デスクトップ版に対応しています。最新リリースをインストールしてください。
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
 ## 主な機能
 
@@ -73,9 +72,9 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 
 DeepSeek Harness Desktop の **Extensions / Plugin management** を開き、npm からのインストールを選択して、次のパッケージを入力します。
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
-インストール後に Desktop を再起動してください。公式の `dsh` ランチャーでも、`dsh plugin --profile desktop add -w ds-harness-remote@0.6.5` を実行して指定バージョンをインストールできます。
+インストール後に Desktop を再起動してください。公式の `dsh` ランチャーでも、`dsh plugin --profile desktop add -w ds-harness-remote@0.6.7` を実行して指定バージョンをインストールできます。
 
 DSH 0.2.2 以降では、npm からインストールしたプラグインのバージョン確認とワンクリック更新をプラグイン管理画面から行えます。ホットアップデートに失敗した場合、DSH は旧バージョンへの復元を試みます。GitHub／ローカル link からのインストールは、先に npm に切り替える必要があります。[オンライン更新の説明](docs/installation.md#online-updates-in-dsh-plugin-management)を参照してください。
 
@@ -102,7 +101,7 @@ DSH 0.2.2 以降では、npm からインストールしたプラグインのバ
 ## クイックスタート
 
 1. DeepSeek Harness のサイドバーから **Remote** を開きます。
-2. 知乎、GitHub、Google の認可ログイン、またはアカウントとパスワードでログインします。アカウント登録には招待コードが必要です。リポジトリの作者にメールで申請できます。
+2. 知乎、GitHub、Google のいずれかでログインします。
 3. 別のデバイスの DeepSeek Harness に同じプラグインをインストールし、手順 1〜2 と同じ方法でログインします。Remote Web、iOS、Android、DSH Go のクライアントなら、プラグインのインストールなしですぐに利用できます。
 4. オンラインの Host を選び、既存のワークスペースを選択するか、リモートのディレクトリを参照して開きます。
 
@@ -114,23 +113,20 @@ DSH 0.2.2 以降では、npm からインストールしたプラグインのバ
 
 ### Desktop
 
-別のパソコンでオンラインの Host を選び、そのワークスペースを開きます。ネイティブの Harness UI で開かれ、ヘッダーに接続先の Host と暗号化接続の状態が表示されます。
+別のパソコンでオンラインの Host を選び、リモートワークスペースハブから DSH や各種 ACP ワークスペースを開きます。ネイティブの Harness UI でそのまま動作し、ヘッダーに接続先の Host や P2P エンドツーエンド暗号化ルート診断が表示されます。
 
 <p align="center">
-  <img src="docs/images/host-list.png" alt="オンラインの Host を表示する Remote ワークスペース選択画面" width="40%">
-  <img src="docs/images/remote.png" alt="暗号化されたリモート接続で利用する Harness の会話画面" width="40%">
+  <img src="docs/images/desktop-showcase-en.png" alt="P2P 暗号化ルート診断とマルチ Agent ワークスペース選択を備えたデスクトップ版リモート画面" width="100%">
 </p>
 
 このパソコンから他の Host を操作できないようにするには、[https://dsh.r2049.cn/](https://dsh.r2049.cn/) のホスト一覧で「被操作専用（仅被控）」を有効にしてください。このデバイスからは同じアカウントの他のデバイスが見えなくなりますが、Web や他のクライアントからこのデバイスへのリモート接続は引き続き利用できます。
 
 ### Android
 
-テキストや画像のプロンプト送信、モデルの切り替え、対応するワークスペースのファイルやターミナルへのアクセスが可能です。
+ライト／ダークの両テーマに対応し、ドロワーからオンライン Host・ACP バックエンド・DS-Bot を切り替えられます。テキスト／画像プロンプト、モデル切替、ファイルカード表示、ネイティブ Git Diff レビュー、リモートターミナルに対応しています。
 
 <p align="center">
-  <img src="docs/images/mobile-list.jpg" alt="オンラインとオフラインのパソコンを表示する Android クライアント" width="30%">
-  <img src="docs/images/image-msg.jpg" alt="Android クライアントから画像プロンプトを送信" width="30%">
-  <img src="docs/images/image-result.jpg" alt="Android クライアントで画像への応答を表示" width="30%">
+  <img src="docs/images/mobile-showcase-en.png" alt="マルチ Host・ACP ドロワー、ファイル配信対応チャット、ネイティブ Git Diff レビューを備えた Android クライアント" width="100%">
 </p>
 
 モバイルの設定には、全体に適用される **Compact conversations**（会話のコンパクト表示）スイッチがあります。デフォルトは無効で、次に会話を開くときに反映されます。
@@ -230,7 +226,7 @@ Remote プラグインをインストールしてログインした Harness イ�
 
 **対応する Harness のバージョンは？**
 
-現在の基準バージョンは `dsh-v0.2.2-rc.1` です。`dsh-v0.2.1-rc.5` と `0.2.0` rc.2 / rc.1 は同じ公式 carrier 上で引き続き互換です。[互換性ガイド](docs/compatibility.md)を参照してください。
+現在の基準バージョンは `dsh-v0.2.3-alpha.2` です。`dsh-v0.2.1-rc.5` と `0.2.0` rc.2 / rc.1 は同じ公式 carrier 上で引き続き互換です。[互換性ガイド](docs/compatibility.md)を参照してください。
 
 Host プラグイン、同梱の Remote クライアント、Android では、Harness `0.1.1-rc.2` の ApiProxy 対応を削除しました。公式の Typert Remote carrier を提供する Host を使用してください。ApiProxy のみを提供する Host や機能検出に対応しない旧 Host への接続は拒否され、フォールバックは行いません。
 
@@ -281,7 +277,7 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
 - [変更履歴](docs/CHANGELOG.md)
 - [プライバシーポリシー](docs/PRIVACY.md)
 - [Android ガイド](apps/android/README.md)
-- 現在の開発基準は `dsh-v0.2.2-rc.1` です。検証範囲は[互換性ガイド](docs/compatibility.md)に記載しています。
+- 現在の開発基準は `dsh-v0.2.3-alpha.2` です。検証範囲は[互換性ガイド](docs/compatibility.md)に記載しています。
 
 ## 関連リンク
 

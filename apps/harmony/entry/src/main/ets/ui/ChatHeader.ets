@@ -8,12 +8,13 @@ export struct ChatHeader {
   @Prop subtitle: string = '';
   @Prop drawerInline: boolean = false;
   @Prop hasSession: boolean = false;
+  @Prop trajectoryOpen: boolean = false;
   @Prop titleSize: number = 17;
   @Prop subtitleSize: number = 12;
   onDrawer: () => void = () => {};
   onSession: () => void = () => {};
   onModel: () => void = () => {};
-  onTrajectory: () => void = () => {};
+  onCloseTrajectory: () => void = () => {};
   onNewChat: () => void = () => {};
 
   @Builder
@@ -61,24 +62,32 @@ export struct ChatHeader {
             }
           })
         if (this.subtitle.length > 0) {
-          Text(this.subtitle + ' ⌄')
-            .fontSize(this.subtitleSize)
-            .lineHeight(16)
-            .fontColor(this.palette.text2)
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .onClick(this.onModel)
+          Row({ space: 3 }) {
+            Text(this.subtitle)
+              .fontSize(this.subtitleSize)
+              .lineHeight(16)
+              .fontColor(this.palette.text2)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Image($r('app.media.ic_chevron_down'))
+              .width(14)
+              .height(14)
+              .fillColor(this.palette.text2)
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+          .onClick(this.onModel)
         }
       }
       .layoutWeight(1)
       .padding({ left: 8, right: 8 })
       Row() {
-        if (this.hasSession) {
-          this.Action($r('app.media.ic_trajectory'), t('执行轨迹'), this.onTrajectory)
+        if (this.trajectoryOpen) {
+          this.Action($r('app.media.ic_message'), t('切换到对话模式'), this.onCloseTrajectory)
+        } else {
+          this.Action($r('app.media.ic_new_chat'), t('新对话'), this.onNewChat)
+          this.Action($r('app.media.ic_more'), t('更多操作'), this.onSession)
         }
-        this.Action($r('app.media.ic_new_chat'), t('新对话'), this.onNewChat)
       }
       .height(44)
       .padding({ left: 2, right: 2 })

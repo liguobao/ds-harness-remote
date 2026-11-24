@@ -1,4 +1,5 @@
 import {
+  WORKSPACE_GIT_CAPABILITY,
   ATTENTION_INBOX_CAPABILITY,
   ATTENTION_SIGNAL_CAPABILITY,
   DSH_WEB_CAPABILITY,
@@ -84,6 +85,7 @@ export class AndroidRemoteConnection {
   private dshWeb = false
   private lanUploads?: LanUploadRoutes
   private sessionEventsSupported = false
+  private workspaceGitSupported = false
   private pluginRouteSupported = false
   private attentionInboxSupported = false
   private pushWakeSupported = false
@@ -230,6 +232,7 @@ export class AndroidRemoteConnection {
         this.proxy = undefined
         this.codex = undefined
         this.sessionEventsSupported = false
+        this.workspaceGitSupported = false
         this.attentionInboxSupported = false
         this.pushWakeSupported = false
         this.attentionClient = undefined
@@ -357,6 +360,7 @@ export class AndroidRemoteConnection {
 
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
     this.sessionEventsSupported = features.sessionEvents
+    this.workspaceGitSupported = features.capabilities.includes(WORKSPACE_GIT_CAPABILITY)
     this.pluginRouteSupported = features.pluginRoute
     this.lanWeb = features.capabilities.includes(DSH_WEB_LAN_CAPABILITY)
     this.lanWebIpv6 = features.capabilities.includes(DSH_WEB_LAN_IPV6_CAPABILITY)
@@ -529,6 +533,10 @@ export class AndroidRemoteConnection {
 
   hasSessionEvents(): boolean {
     return this.sessionEventsSupported
+  }
+
+  hasWorkspaceGit(): boolean {
+    return this.workspaceGitSupported
   }
 
   hasCodex(): boolean {
@@ -718,6 +726,7 @@ export class AndroidRemoteConnection {
     this.proxy = undefined
     this.codex = undefined
     this.codexAvailable = false
+    this.workspaceGitSupported = false
     this.attentionInboxSupported = false
     this.pushWakeSupported = false
     this.attentionClient = undefined

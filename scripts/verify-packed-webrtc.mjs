@@ -11,6 +11,21 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const staging = mkdtempSync(join(tmpdir(), 'dsh-packed-webrtc-'))
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const forbiddenPackageImportPattern =
+  /(?:\bfrom\s+|\b(?:import|require)\s*\(\s*)['"](?:@dsh-remote\/|werift(?:\/|['"]))|^\s*(?:import|export)\s+['"](?:@dsh-remote\/|werift(?:\/|['"]))/m
+function collectJsFiles(directory) {
+  const results = []
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === 'node_modules') continue
+    const fullPath = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      results.push(...collectJsFiles(fullPath))
+    } else if (entry.isFile() && /\.(?:js|mjs|cjs)$/.test(entry.name)) {
+      results.push(fullPath)
+    }
+  }
+  return results.sort()
+}
 function run(command, args, cwd) {
   return execFileSync(command, args, { cwd, encoding: 'utf8', timeout: 180_000, stdio: ['ignore', 'pipe', 'pipe'] })
 }
@@ -67,6 +82,21 @@ try {
     const destination = join(staging, label)
     mkdirSync(destination)
     const pack = JSON.parse(run(npm, ['pack', '--ignore-scripts', '--json', '--pack-destination', destination], directory))[0]
+    assert.ok(Array.isArray(pack?.files), `${label}: npm pack --json must report packed files`)
+    const packedPaths = pack.files.map(file => file.path.replaceAll('\\', '/'))
+    if (label === 'npm') {
+      assert.deepEqual(
+        packedPaths.filter(path => path.startsWith('dist/')).sort(),
+        ['dist/client.js', 'dist/index.js'],
+        'npm tarball dist/ must only ship bundled index.js and client.js',
+      )
+    } else {
+      assert.deepEqual(
+        packedPaths.filter(path => path.startsWith('packages/plugin/dist/')).sort(),
+        ['packages/plugin/dist/client.github.js', 'packages/plugin/dist/index.js'],
+        'github tarball packages/plugin/dist/ must only ship bundled index.js and client.github.js',
+      )
+    }
     const generation = join(destination, 'generation')
     mkdirSync(generation)
     writeFileSync(join(generation, 'package.json'), '{"private":true,"type":"module"}\n')
@@ -77,6 +107,25 @@ try {
     const plugin = join(modules, 'ds-harness-remote')
     const manifest = JSON.parse(readFileSync(join(plugin, 'package.json'), 'utf8'))
     assert.equal(manifest.dependencies?.werift, undefined)
+    const clientExport = manifest.exports?.['./client']
+    assert.equal(typeof clientExport, 'string', `${label}: package exports['./client'] must be a string`)
+    assert.ok(existsSync(join(plugin, clientExport)), `${label}: missing packed client bundle ${clientExport}`)
+    const packedJsFiles = collectJsFiles(plugin)
+    assert.ok(packedJsFiles.length >= 2, `${label}: expected packed plugin to contain entry and client bundles`)
+    for (const filePath of packedJsFiles) {
+      const content = readFileSync(filePath, 'utf8')
+      assert.doesNotMatch(
+        content,
+        forbiddenPackageImportPattern,
+        `${label}: packed JS file ${relative(plugin, filePath)} must not reference @dsh-remote/* or werift`,
+      )
+    }
+    const cliBin = manifest.bin?.['ds-harness-remote']
+    assert.equal(typeof cliBin, 'string', `${label}: package bin['ds-harness-remote'] must be a string`)
+    const cliPath = join(plugin, cliBin)
+    assert.ok(existsSync(cliPath), `${label}: missing packed CLI entry ${cliBin}`)
+    const cliHelp = run(process.execPath, [cliPath, '--help'], generation)
+    assert.match(cliHelp, /ds-harness-remote/, `${label}: packed CLI --help output mismatch`)
     // An ordinary import tests the untouched package entry. A second import
     // uses a loader-only export seam to reach private transport functions in
     // the SAME packed bundle. It neither substitutes nor rebuilds their code.

@@ -1,6 +1,5 @@
 <p align="center">
-
-  <img src="docs/logo.svg" alt="DeepSeek Harness Remote" width="600">
+  <img src="docs/images/hero-zh.png" alt="DeepSeek Harness Remote — 一次连接，随时回到工作台" width="100%">
 </p>
 
 <p align="center">
@@ -37,7 +36,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 已支持 DeepSeek Harness 桌面版，使用最新版本安装即可：
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
 ## 主要特性
 
@@ -73,10 +72,10 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中，选择从 **npm** 安装，输入包名和版本：
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
 安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
-`dsh plugin --profile desktop add -w ds-harness-remote@0.6.5`。
+`dsh plugin --profile desktop add -w ds-harness-remote@0.6.7`。
 
 DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更新失败时由 DSH 尝试恢复旧版。GitHub / 本地 link 安装需先切换到 npm，见[在线更新说明](docs/installation.zh.md#dsh-插件页在线更新)。
 
@@ -104,7 +103,7 @@ DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更
 ## 快速开始
 
 1. 从 DeepSeek Harness 侧边栏打开 **Remote** 入口。
-2. 按需选择登录方式：「知乎」、「Github」、[Google ] 授权登录均已支持，账号密码登录（使用邀请码注册，可邮件本仓库作者申请）
+2. 按需选择登录方式：「知乎」、「Github」、[Google ] 授权登录均已支持
 3. 在另一台设备上使用 DeepSeek Harness安装同样插件，根据1、2完成同样方式的登录。也可以按需使用Remote Web、iOS、Android、DSH Go等客户端，即开即用，无需安装任何插件。
 4. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
 
@@ -118,24 +117,20 @@ DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更
 
 ### 桌面端
 
-在另一台电脑上选择在线 Host，然后打开它的 Workspace。Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加密连接状态。
-
+在另一台电脑上选择在线 Host，即可通过远程工作台打开 DSH 或各类 ACP 工作区。会话直接在 Harness 原生界面中运行，顶部显示当前主机、P2P 路由详情与端到端加密状态。
 
 <p align="center">
-  <img src="docs/images/host-list.png" alt="列出在线 Host 的远端工作区选择界面" width="40%">
-  <img src="docs/images/remote.png" alt="通过端到端加密远程连接运行的 Harness 会话" width="40%">
+  <img src="docs/images/desktop-showcase-zh.png" alt="桌面端远程会话、P2P 端到端加密链路状态面板与多引擎远程工作台" width="100%">
 </p>
 
 注意：如果想关闭当前电脑远控其他主机功能，可在[https://dsh.r2049.cn/](https://dsh.r2049.cn/) 「主机列表」中，打开「仅被控」开关，开启「仅被控」后当前设备无法看到账号下其他设备，Web端、其他客户端依旧可以远程当前设备。
 
 ### Android
 
-支持文字/图片 Prompt、模型切换，以及可用工作区的文件和终端。
+支持浅色/深色双主题，在抽屉内快速切换在线主机、多引擎 ACP 工作区与 DS-Bot；支持文字/图片 Prompt、模型与思考深度切换、文件卡片预览、原生 Git Diff 变更审查及远程终端。
 
 <p align="center">
-  <img src="docs/images/mobile-list.jpg" alt="Android 客户端中的在线和离线设备列表" width="30%">
-  <img src="docs/images/image-msg.jpg" alt="从 Android 客户端发送图片 Prompt" width="30%">
-  <img src="docs/images/image-result.jpg" alt="在 Android 客户端中查看图片理解结果" width="30%">
+  <img src="docs/images/mobile-showcase-zh.png" alt="Android 客户端多主机与 ACP 抽屉、原生对话与文件交付、原生 Git Diff 审查界面" width="100%">
 </p>
 
 移动端设置提供默认关闭的全局「会话精简模式」，下次打开会话生效。
@@ -235,7 +230,7 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 **支持哪些 Harness 版本？**
 
-当前基线为 `dsh-v0.2.2-rc.1`；`dsh-v0.2.1-rc.5` 与 `0.2.0` rc.2 / rc.1 在同一官方 carrier 上继续兼容，详见[兼容性说明](docs/compatibility.zh.md)。
+当前基线为 `dsh-v0.2.3-alpha.2`；`dsh-v0.2.1-rc.5` 与 `0.2.0` rc.2 / rc.1 在同一官方 carrier 上继续兼容，详见[兼容性说明](docs/compatibility.zh.md)。
 
 Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；
 
@@ -289,7 +284,7 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 - [更新记录](docs/CHANGELOG.md)
 - [隐私说明](docs/PRIVACY.md)
 - [Android 说明](apps/android/README.md)
-- 当前开发适配基线为 `dsh-v0.2.2-rc.1`，验证范围见[兼容性说明](docs/compatibility.zh.md)。
+- 当前开发适配基线为 `dsh-v0.2.3-alpha.2`，验证范围见[兼容性说明](docs/compatibility.zh.md)。
 
 ## 友情链接
 

@@ -33,6 +33,7 @@ import {
   type AttentionDigest,
 } from './attention.js'
 export * from './attention.js'
+import { WORKSPACE_GIT_METHODS } from './workspace-git.js'
 import { z } from 'zod'
 
 export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
@@ -227,6 +228,7 @@ export const sessionTransferMethods = [
 export const rpcMethods = [
   ...sessionTransferMethods,
   ...attentionRpcMethods,
+  ...WORKSPACE_GIT_METHODS,
   'workspace.upload.lan.open',
   'workspace.upload.open',
   'workspace.upload.chunk',
@@ -1680,3 +1682,4 @@ function cryptoRandomId(): string {
 }
 
 export * from './dsh-web.js'
+export * from './workspace-git.js'

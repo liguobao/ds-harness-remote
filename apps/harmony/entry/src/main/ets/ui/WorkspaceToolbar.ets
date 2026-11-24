@@ -7,6 +7,7 @@ export struct WorkspaceToolbar {
   @Prop palette: Palette = lightPalette();
   @Prop connected: boolean = false;
   @Prop botMode: boolean = false;
+  @Prop platformLabel: string = 'DeepSeek';
   @Prop searchOpen: boolean = false;
   onAgents: () => void = () => {};
   onBots: () => void = () => {};
@@ -18,9 +19,9 @@ export struct WorkspaceToolbar {
   Tab(icon: Resource, label: string, selected: boolean, action: () => void) {
     Column() {
       Row({ space: 6 }) {
-        Image(icon).width(15).height(15).fillColor(selected ? this.palette.text : this.palette.text2)
+        Image(icon).width(18).height(18).fillColor(selected ? this.palette.text : this.palette.text2)
         Text(label)
-          .fontSize(14)
+          .fontSize(17)
           .fontWeight(selected ? FontWeight.Bold : FontWeight.Medium)
           .fontColor(selected ? this.palette.text : this.palette.text2)
       }
@@ -30,7 +31,7 @@ export struct WorkspaceToolbar {
         .backgroundColor(selected ? this.palette.primary : Color.Transparent)
     }
     .layoutWeight(1)
-    .height(38)
+    .height(48)
     .accessibilityText(label)
     .onClick(action)
   }
@@ -52,17 +53,26 @@ export struct WorkspaceToolbar {
         this.Tab($r('app.media.ic_agents_tab'), t('智能体'), !this.botMode, this.onAgents)
         this.Tab($r('app.media.ic_bots_tab'), 'DS-Bot', this.botMode, this.onBots)
       }
-      .width('auto')
+      // Match the Android drawer tabs: both choices share the full available
+      // width so the active indicator stays centered on narrow phones.
+      .width('100%')
+      .height(42)
       .margin({ left: 16, right: 16, bottom: 8 })
       .border({ width: { bottom: 0.5 }, color: this.palette.border })
       if (!this.botMode) {
         Row({ space: 8 }) {
-          Text(t('工作区列表')).fontSize(14.5).fontColor(this.palette.text2)
+          Text(t('工作区'))
+            .fontSize(18)
+            .fontColor(this.palette.text2)
           Row({ space: 3 }) {
-            Text('DeepSeek').fontSize(12).fontWeight(FontWeight.Bold).fontColor(this.palette.text)
+            Text(this.platformLabel).fontSize(17).fontWeight(FontWeight.Bold).fontColor(this.palette.text)
+            Image($r('app.media.ic_chevron_down'))
+              .width(16)
+              .height(16)
+              .fillColor(this.palette.text2)
           }
-          .height(28).padding({ left: 10, right: 10 })
-          .borderRadius(14).backgroundColor(this.palette.chip)
+          .height(40).padding({ left: 14, right: 12 })
+          .borderRadius(20).backgroundColor(this.palette.chip)
           Blank()
           if (this.connected) {
             this.Action($r('app.media.ic_search_sessions'), t('搜索'), this.searchOpen, this.onSearch)

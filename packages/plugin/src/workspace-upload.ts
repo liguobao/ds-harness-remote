@@ -271,6 +271,7 @@ function decodeChunk(value: string | Uint8Array): Buffer {
 }
 function validName(name: string): boolean {
   return Buffer.byteLength(name, 'utf8') <= 220 && name !== '.' && name !== '..'
+    && name.toLowerCase() !== '.git'
     && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name) && !/[. ]$/u.test(name)
     && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name) && !name.startsWith('.dsh-upload-')
 }
