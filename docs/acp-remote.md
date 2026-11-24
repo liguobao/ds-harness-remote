@@ -58,7 +58,7 @@ HTTP 目标与认证不接受 Client 输入，禁止重定向，响应最多 64 
 
 不提供解除归档或已归档列表；其他后端不能仅移除本地列表就返回归档成功。上游参考：[v1 原生归档](https://github.com/anomalyco/opencode/blob/v1.19.3/packages/app/src/pages/session/session-archive.ts)、[v2 ACP](https://opencode.ai/v2/docs/cli/acp/)。
 
-OpenCode 历史回放通过独立临时进程执行，采用 120s `session/load` 预算并流式合并 `session/update`；多轮长会话按完整轮次从头部淘汰较早轮次，保留 8 MiB / 10,000 条折叠事件内的最近对话，单轮超 16 MiB（或 20,000 折叠事件 / 256 MiB / 500,000 原始更新防线）fail-closed 返回 `OPENCODE_HISTORY_TOO_LARGE`。网关将已识别的 OpenCode/Cursor 适配器错误转换为静态文案的 `RpcError`（保留错误码且不透传原始引导路径），Client 对 `dsh/sessionHistory` 与 `session/load` 采用 150s RPC 超时并映射本地化提示。
+OpenCode 历史回放通过独立临时进程执行，采用 120s `session/load` 预算并流式合并 `session/update`；多轮长会话按完整轮次从头部淘汰较早轮次，保留 8 MiB / 10,000 条折叠事件内的最近对话（可用 Host 配置 `acp.historyMaxBytes` 256 KiB–16 MiB、`acp.historyMaxEvents` 100–20,000 收紧预算；硬上限不变），单轮超 16 MiB（或 20,000 折叠事件 / 256 MiB / 500,000 原始更新防线）fail-closed 返回 `OPENCODE_HISTORY_TOO_LARGE`。网关将已识别的 OpenCode/Cursor 适配器错误转换为静态文案的 `RpcError`（保留错误码且不透传原始引导路径），Client 对 `dsh/sessionHistory` 与 `session/load` 采用 150s RPC 超时并映射本地化提示。
 
 ### Pi Agent（Issue #97，实验性）
 

@@ -174,7 +174,8 @@ export class AcpRemoteGateway {
       if (backend.id === 'hermes') return new HermesAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       if (backend.id === 'pi') return new PiAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd })
       if (backend.id === 'opencode') {
-        return new OpencodeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
+        return new OpencodeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd,
+          historyLimits: { maxBytes: this.config.historyMaxBytes, maxEvents: this.config.historyMaxEvents } })
       }
       if (backend.id === 'cursor') {
         return new IsolatedAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd, backend: 'cursor' })

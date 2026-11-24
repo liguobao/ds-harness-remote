@@ -103,3 +103,23 @@ describe('plugin config', () => {
     expect(() => resolveConfig({ reconnect: { initialDelayMs: 5_000, maxDelayMs: 1_000 } })).toThrow(/maxDelayMs/)
   })
 })
+
+describe('ACP history budgets', () => {
+  it('carries configured history budgets into the resolved ACP config', () => {
+    const config = resolveConfig({ acp: { historyMaxBytes: 4 * 1024 * 1024, historyMaxEvents: 2_500 } }, {})
+
+    expect(config.acp?.historyMaxBytes).toBe(4 * 1024 * 1024)
+    expect(config.acp?.historyMaxEvents).toBe(2_500)
+    expect(config.acp).not.toHaveProperty('historyMaxBytes', undefined)
+  })
+
+  it('leaves the budgets unset by default and rejects values outside the supported range', () => {
+    expect(resolveConfig({}, {}).acp).not.toHaveProperty('historyMaxBytes')
+    expect(resolveConfig({}, {}).acp).not.toHaveProperty('historyMaxEvents')
+
+    expect(() => resolveConfig({ acp: { historyMaxBytes: 1024 } }, {})).toThrow()
+    expect(() => resolveConfig({ acp: { historyMaxBytes: 32 * 1024 * 1024 } }, {})).toThrow()
+    expect(() => resolveConfig({ acp: { historyMaxEvents: 10 } }, {})).toThrow()
+    expect(() => resolveConfig({ acp: { historyMaxEvents: 50_000 } }, {})).toThrow()
+  })
+})

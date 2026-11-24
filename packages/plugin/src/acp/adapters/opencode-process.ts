@@ -13,7 +13,7 @@ import { realpath } from 'node:fs/promises'
 import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
 import type { CursorAcpInbound, CursorAcpLike } from './cursor-process.js'
-import { AcpHistoryAccumulator } from '../history-events.js'
+import { AcpHistoryAccumulator, type AcpHistoryLimits } from '../history-events.js'
 import { AcpSessionModelState } from './session-models.js'
 import { OpencodeNativeApi, opencodeHasNativeApi, opencodeLoopbackPort, opencodePrivateArgs } from './opencode-native-api.js'
 
@@ -98,7 +98,13 @@ export class OpencodeAcpClient implements CursorAcpLike {
     private readonly binary: string = 'opencode',
     private readonly logger?: SafeLogger,
     private readonly spawnAcp?: SpawnOpencodeAcp,
-    private readonly options: { args?: string[]; cwd?: string; historyReader?: boolean } = {},
+    private readonly options: {
+      args?: string[]
+      cwd?: string
+      historyReader?: boolean
+      /** Soft folded-history budgets; the hard ceilings below always apply. */
+      historyLimits?: AcpHistoryLimits
+    } = {},
   ) {}
 
   diagnostics(): AcpAuthDiagnostic {
@@ -154,10 +160,12 @@ export class OpencodeAcpClient implements CursorAcpLike {
     let stopping: Promise<void> | undefined
     const stop = () => stopping ??= client.close()
     this.historyStop = stop
+    // The configured budgets narrow the retained window; the hard ceilings keep a
+    // single oversized turn from reaching the transfer layer and stay fixed.
     const accumulator = new AcpHistoryAccumulator(sessionId, 'opencode', {
-      maxBytes: ACP_HISTORY_MAX_BYTES,
+      maxBytes: this.options.historyLimits?.maxBytes ?? ACP_HISTORY_MAX_BYTES,
       hardMaxBytes: ACP_HISTORY_HARD_MAX_BYTES,
-      maxEvents: ACP_HISTORY_MAX_EVENTS,
+      maxEvents: this.options.historyLimits?.maxEvents ?? ACP_HISTORY_MAX_EVENTS,
       hardMaxEvents: ACP_HISTORY_HARD_MAX_EVENTS,
     })
     let rawBytes = 0

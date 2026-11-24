@@ -66,6 +66,10 @@ export interface ResolvedAcpBackendConfig {
 export interface ResolvedAcpConfig {
   enabled: boolean
   backends: ResolvedAcpBackendConfig[]
+  /** Soft byte budget for folded ACP history; older turns are evicted first. */
+  historyMaxBytes?: number
+  /** Soft folded-history event budget for ACP history reads. */
+  historyMaxEvents?: number
 }
 
 export interface ResolvedConfig {
@@ -187,7 +191,7 @@ const configSchema = z.object({
     enabled: z.boolean().optional(),
     binary: z.string().trim().min(1).max(4096).optional(),
   }).strict().optional(),
-  acp: z.object({ enabled:z.boolean().optional(), backends:z.array(z.object({ id:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled:z.boolean().optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict()).max(12).optional(), backend:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict().optional(),
+  acp: z.object({ enabled:z.boolean().optional(), historyMaxBytes:z.number().int().min(256*1024).max(16*1024*1024).optional(), historyMaxEvents:z.number().int().min(100).max(20_000).optional(), backends:z.array(z.object({ id:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled:z.boolean().optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict()).max(12).optional(), backend:z.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command:z.string().trim().min(1).max(4096).optional(), args:z.array(z.string().max(4096)).max(32).optional(), cwd:z.string().max(4096).optional() }).strict().optional(),
 }).strict()
 
 export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
@@ -242,6 +246,8 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     },
     acp: {
       enabled: acpEnabled,
+      ...(parsed.acp?.historyMaxBytes === undefined ? {} : { historyMaxBytes: parsed.acp.historyMaxBytes }),
+      ...(parsed.acp?.historyMaxEvents === undefined ? {} : { historyMaxEvents: parsed.acp.historyMaxEvents }),
       backends: [...new Set(['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes', ...(parsed.acp?.backends?.filter(item => item.id !== 'kimi').map(item => item.id) ?? [])])].map(id => {
         const configured = parsed.acp?.backends?.find(item => item.id === id)
         const legacy = parsed.acp?.backend === id ? parsed.acp : undefined

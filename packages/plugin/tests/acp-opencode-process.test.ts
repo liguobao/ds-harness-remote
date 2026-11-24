@@ -72,6 +72,7 @@ describe('OpencodeAcpClient', () => {
       'tool first step',
       'many chunks',
       'rolling turns',
+      'rolling turns narrow budget',
       'close during initialize',
       'close during load',
       'overflow',
@@ -109,7 +110,7 @@ describe('OpencodeAcpClient', () => {
               })).join('\n')
               fake.stdout.write(`${lines}\n`)
               respond(message.id, {})
-            } else if (scenario === 'rolling turns') {
+            } else if (scenario.startsWith('rolling turns')) {
               // 4 complete turns x ~3 MiB (>8 MiB total) keep the trailing window within 8 MiB cleanly.
               const payload = 't'.repeat(3 * 1024 * 1024)
               for (const tag of ['turn-1', 'turn-2', 'turn-3', 'turn-4']) {
@@ -129,7 +130,8 @@ describe('OpencodeAcpClient', () => {
           }
         }
       })
-      const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
+      const client = new OpencodeAcpClient('opencode', logger(), () => fake.child,
+        scenario === 'rolling turns narrow budget' ? { historyLimits: { maxBytes: 4 * 1024 * 1024 } } : {})
       const pending = client.history('saved', '/tmp').then(result => ({ result, error: undefined }), error => ({ result: undefined, error }))
       try {
         if (scenario.startsWith('close')) {
@@ -158,14 +160,17 @@ describe('OpencodeAcpClient', () => {
           const assistant = (outcome.result as Array<{ event: { type: string; data: { message: { content: Array<{ text: string }> } } } }>)
             .find(entry => entry.event.type === 'assistant/message')
           expect(assistant?.event.data.message.content[0]?.text).toHaveLength(12_000)
-        } else if (scenario === 'rolling turns') {
+        } else if (scenario.startsWith('rolling turns')) {
           expect(outcome.error).toBeUndefined()
           const events = outcome.result as Array<{ event: { type: string; seq: number; data: { content?: Array<{ text: string }> } } }>
           expect(events.map(e => e.event.seq)).toEqual(events.map((_, idx) => idx))
           const texts = events
             .filter(e => e.event.type === 'user/message')
             .map(e => e.event.data.content?.[0]?.text)
-          expect(texts).toEqual(['turn-3-question', 'turn-4-question'])
+          expect(texts).toEqual(scenario === 'rolling turns'
+            ? ['turn-3-question', 'turn-4-question']
+            // A narrower configured budget evicts the older complete turns.
+            : ['turn-4-question'])
         } else {
           expect(outcome.error).toMatchObject({ code: scenario === 'overflow' ? 'OPENCODE_HISTORY_TOO_LARGE' : 'OPENCODE_CLOSED' })
         }
