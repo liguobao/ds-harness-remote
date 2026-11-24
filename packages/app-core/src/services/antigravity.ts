@@ -44,8 +44,8 @@ export function mergeAntigravityCatalog(
 }
 
 /** History can contain several images; always use the bounded ACP transfer response. */
-export async function readAntigravityHistory(client: AgentAcpClient, sessionId: string): Promise<unknown[]> {
-  const result = await client.transferCall('dsh/sessionHistory', { sessionId, backend: 'antigravity' })
+export async function readAntigravityHistory(client: AgentAcpClient, sessionId: string, signal?: AbortSignal): Promise<unknown[]> {
+  const result = await client.transferCall('dsh/sessionHistory', { sessionId, backend: 'antigravity' }, signal)
   if (!record(result) || !Array.isArray(result.events)) throw new Error('Invalid AGY history response.')
   return result.events
 }

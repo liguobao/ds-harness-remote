@@ -957,7 +957,10 @@ describe('session-actions handoff integration', () => {
             blank: false,
           }
           const result = await useAppStore.getState().loadSessionHandoffItems(session)
-          expect(acp.transferCall).toHaveBeenCalledWith('dsh/sessionHistory', { sessionId: 's1', backend })
+          expect(acp.transferCall).toHaveBeenCalledWith(
+            'dsh/sessionHistory', { sessionId: 's1', backend },
+            ...(backend === 'antigravity' ? [undefined] : []),
+          )
           expect(result.map(item => (item as ChatMessage).text)).toEqual([`${backend} item`])
         },
       })))

@@ -26,7 +26,7 @@ describe('AGY catalog and recovery', () => {
         { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }],
     } } }] }))
     const events = await readAntigravityHistory({ transferCall } as unknown as AgentAcpClient, 'durable')
-    expect(transferCall).toHaveBeenCalledWith('dsh/sessionHistory', { backend: 'antigravity', sessionId: 'durable' })
+    expect(transferCall).toHaveBeenCalledWith('dsh/sessionHistory', { backend: 'antigravity', sessionId: 'durable' }, undefined)
     const user = foldAcpHistory(events, 'antigravity:durable')[0]
     expect(user).toMatchObject({ role: 'user', images: [{ uri: 'data:image/png;base64,aGVsbG8=' }] })
   })

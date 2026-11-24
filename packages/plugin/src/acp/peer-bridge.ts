@@ -75,6 +75,7 @@ export class AcpPeerBridge {
   private readonly streams = new Map<string, string>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
+  private readonly historyCommits = new Map<string, AbortController>()
   private closed = false
 
   constructor(
@@ -92,10 +93,11 @@ export class AcpPeerBridge {
     if (!this.closed) await this.publish('agent.acp.catalog.changed', data)
   }
 
-  private async callDomain(input: unknown, logFailure: boolean): Promise<unknown> {
+  private async callDomain(input: unknown, logFailure: boolean, signal?: AbortSignal): Promise<unknown> {
     this.requireOpen()
     try {
-      const result = await this.domain.call(this.context.connectionId, input)
+      const result = await this.domain.call(this.context.connectionId, input, signal)
+      signal?.throwIfAborted()
       return this.compactHistoryEnabled && safeMethod(input) === 'dsh/sessionHistory' ? compactHistory(result) : result
     } catch (error) {
       if (logFailure) {
@@ -193,7 +195,7 @@ export class AcpPeerBridge {
     if (params.totalChunks !== Math.ceil(params.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError('INVALID_MESSAGE', 'The ACP transfer chunk count is invalid.')
     }
-    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
+    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId) || this.historyCommits.has(params.transferId)) {
       throw new RpcError('REQUEST_CONFLICT', 'The ACP transfer id is already active.')
     }
     if (this.incomingTransfers.size >= MAX_ACTIVE_TRANSFERS) {
@@ -250,15 +252,32 @@ export class AcpPeerBridge {
     } catch {
       throw new RpcError('INVALID_MESSAGE', 'The ACP transfer does not contain a valid request.')
     }
+    const method = safeMethod(request)
+    let controller: AbortController | undefined
+    if (method === 'dsh/sessionHistory') {
+      if (this.historyCommits.size >= MAX_ACTIVE_TRANSFERS) {
+        throw new RpcError('RATE_LIMITED', 'Too many ACP history transfers are active.', undefined, true)
+      }
+      controller = new AbortController()
+      this.historyCommits.set(params.transferId, controller)
+    }
     let response: unknown
+    let cancelCommit: (() => void) | undefined
     try {
-      response = await this.callDomain(request, false)
-    } catch (error) {
-      this.logger?.warn('ACP transfer call failed', {
-        method: safeMethod(request),
-        code: safeErrorCode(error),
+      const signal = controller?.signal
+      const cancelled = signal && new Promise<never>((_resolve, reject) => {
+        cancelCommit = () => reject(signal.reason)
+        signal.addEventListener('abort', cancelCommit, { once: true })
       })
+      const result = this.callDomain(request, false, signal)
+      response = await (cancelled ? Promise.race([result, cancelled]) : result)
+      controller?.signal.throwIfAborted()
+    } catch (error) {
+      if (!controller?.signal.aborted) this.logger?.warn('ACP transfer call failed', { method, code: safeErrorCode(error) })
       throw error
+    } finally {
+      if (cancelCommit !== undefined) controller?.signal.removeEventListener('abort', cancelCommit)
+      if (controller !== undefined) this.historyCommits.delete(params.transferId)
     }
     this.requireOpen()
     const responseBytes = new TextEncoder().encode(JSON.stringify(response))
@@ -305,7 +324,9 @@ export class AcpPeerBridge {
 
   closeTransfer(input: unknown): { closed: boolean; transferId: string } {
     const params = transferIdSchema.parse(input)
-    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId)
+    const controller = this.historyCommits.get(params.transferId)
+    controller?.abort(new RpcError('ACP_HISTORY_CANCELLED', 'The ACP history read was cancelled.'))
+    const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId) || controller !== undefined
     return { closed, transferId: params.transferId }
   }
 
@@ -366,6 +387,9 @@ export class AcpPeerBridge {
     this.streams.clear()
     for (const controller of this.toolControllers.values()) controller.abort()
     this.toolControllers.clear()
+    for (const controller of this.historyCommits.values()) {
+      controller.abort(new RpcError('ACP_CONNECTION_CLOSED', 'The ACP connection is closed.'))
+    }
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
     this.domain.dropPeer(this.context.connectionId)

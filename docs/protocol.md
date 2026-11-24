@@ -1482,6 +1482,9 @@ Web / Desktop 可在 Client 内存中把 ACP Workspace / Session 投影到原生
 配置或工作区 ID 的迁移逻辑；该限制不表示 ACP 尚未实现或发布。
 `dsh/sessionHistory` 使用有界 ACP transfer 读取含图片或大文本的响应；图片 Prompt 的
 transfer commit 使用与普通 Prompt 相同的长超时，chunk 顺序、大小与连接归属校验不变。
+切换会话时，Client 可用 `agent.acp.transfer.close` 取消本连接仍在处理的历史读取。
+同一历史读取仍有其他请求等待时继续执行；最后一个等待者取消后跳过排队中的读取，
+原生 Antigravity 已开始的读取则关闭其独立历史进程。关闭 transfer 不取消 Prompt。
 History 显式后端及 Session 前缀必须与已绑定的后端一致；Cursor History 不读取 AGY transcript。
 
 Pi 使用独立 `agent.acp.pi.v1`，工作区 ID 为 `pi:cwd:<encoded-path>`、展示 Session ID 为 `pi:<native-id>`。Pi 首版仅接收文字 Prompt，不因上游支持 image 而放宽 Remote 图片策略。Host 从 `pi-acp` 的标准 `session/list` 获取目录 authority，所有目录仍须 `realpath` 确认为真实目录；历史经独立 wrapper 的 `session/load` 通知恢复。活动 Session 的 wrapper 不与历史读取共享，Client 断线不取消正在运行的 Prompt。Pi 工具由本机 Pi 执行，默认无逐工具审批；Host Pi 扩展发出的 confirm 经上游 `session/request_permission` 使用同一单次审批契约，Remote 不自动安装扩展或虚构工具沙箱。Pi 目录/历史读取失败必须保留错误，不投影为成功的空结果。历史工具输出使用原生 `tool/result` 事件，并保留 bash terminal 输出及失败状态；`pi-acp@0.0.34` 未重放的原始 thinking、工具输入、消息 ID 和时间不能由 Remote 伪造，未知时间为 `0`，消息 ID 仅为稳定投影标识。后端前缀、归属和工具 scope 校验与其他 ACP 后端相同，不扩大 Harness/Codex API。
