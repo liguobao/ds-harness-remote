@@ -683,7 +683,7 @@ window.__ModuleLoader__.load({
             React.createElement('a', { ...linkProps, href: 'https://github.com/liguobao/ds-harness-remote' },
               React.createElement('span', { className: 'dshRemoteWebFooterDetail' }, 'liguobao/'), 'ds-harness-remote'),
             ' - ', React.createElement('span', { className: 'dshRemoteWebFooterDetail' }, '更快更强？'),
-            React.createElement('a', { ...linkProps, href: 'https://dsh.r2049.cn' }, '会员计划'),
+            React.createElement('a', { ...linkProps, className: 'dshRemoteMembershipLink', href: 'https://dsh.r2049.cn' }, '会员计划'),
             React.createElement('button', { type: 'button', onClick: dismiss, 'aria-label': t('close'), title: t('close') }, '×')))
         }
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
