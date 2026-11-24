@@ -17,6 +17,7 @@ __pycache__/
 *.sqlite3
 .env
 .DS_Store
+/.vscode/
 .codegraph/
 artifacts/
 # Local verification screenshots and recordings
