@@ -1,6 +1,7 @@
 import { hydrateBrowseMemory, useBrowseMemory, browseKey, browsePreference, browseScope, saveHostMode } from './src/services/browse-memory'
 import { startBrowseTracking } from './src/services/browse-tracking'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { selectKnownMember } from './src/state/store-state'
 import { Animated, AppState, BackHandler, Easing, Keyboard, Linking, PanResponder, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import NetInfo from '@react-native-community/netinfo'
 import { useLocales } from 'expo-localization'
@@ -13,7 +14,7 @@ import { ChatAppearanceScreen } from './src/screens/chat-appearance-screen'
 import { ConnectionScreen, DeviceDetailScreen } from './src/screens/device-screens'
 import { HostSwitcherSheet } from './src/screens/host-switcher-sheet'
 import { RemoteHostsScreen } from './src/screens/remote-hosts-screen'
-import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen, useStartupUpdateCheck } from './src/screens/setup-screens'
+import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen, openMembershipPlan, useStartupUpdateCheck } from './src/screens/setup-screens'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
 import { useAttentionStore } from './src/state/attention-store'
 import { useBotTeamStore } from './src/state/bot-store'
@@ -155,6 +156,43 @@ function AppNavigator() {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const knownMember = useAppStore(selectKnownMember)
+  const account = useAppStore(state => state.account)
+  useEffect(() => {
+    if (bootPhase !== 'ready' || !account || !config || knownMember) return
+    let pending = false
+    const check = async () => {
+      if (pending) return
+      pending = true
+      try { await useAppStore.getState().refreshAccountMembership() }
+      catch { /* An offline check leaves the shortcut preference unchanged. */ }
+      finally { pending = false }
+    }
+    void check()
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') void check()
+    })
+    return () => subscription.remove()
+  }, [bootPhase, config, account, knownMember])
+
+  const membershipLinkHiddenUntil = useAppStore(state => state.membershipLinkHiddenUntil)
+  useEffect(() => {
+    if (!membershipLinkHiddenUntil) return
+    let timer: ReturnType<typeof setTimeout>
+    const checkExpiry = () => {
+      clearTimeout(timer)
+      if (useAppStore.getState().membershipLinkHiddenUntil !== membershipLinkHiddenUntil) return
+      const remaining = membershipLinkHiddenUntil - Date.now()
+      if (remaining <= 0) useAppStore.setState({ membershipLinkHiddenUntil: 0 })
+      else timer = setTimeout(checkExpiry, Math.min(remaining, 2_147_483_647))
+    }
+    checkExpiry()
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') checkExpiry()
+    })
+    return () => { clearTimeout(timer); subscription.remove() }
+  }, [membershipLinkHiddenUntil])
+
   useStartupUpdateCheck(bootPhase === 'ready')
 
   useEffect(() => {
@@ -753,6 +791,7 @@ function AppNavigator() {
             device={entryDevice}
             onBack={pop}
             onConnect={() => replace({ name: 'connecting', deviceId: entryDevice.deviceId })}
+            onOpenMembershipPlan={openMembershipPlan}
             onWorkspaces={goHomeChat}
           />
         )

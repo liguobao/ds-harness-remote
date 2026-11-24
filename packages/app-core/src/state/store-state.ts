@@ -1,7 +1,7 @@
 import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import type { HandoffPacket } from '../lib/handoff-context'
 import type { AppLanguage, LanguagePreference } from '../locales/i18n'
-import type { OAuthProviderInfo, OAuthQrPollResult, OAuthQrSession } from '../services/api'
+import type { AccountMembership, OAuthProviderInfo, OAuthQrPollResult, OAuthQrSession } from '../services/api'
 import type {
   AgentBackend,
   AgentPresetOption,
@@ -134,6 +134,8 @@ export interface AppState {
   setCompactHistory(value: boolean): Promise<void>
   languagePreference: LanguagePreference
   language: AppLanguage
+  memberShortcutScopes: string[]
+  membershipLinkHiddenUntil: number
   statusBarVisible: boolean
   themePreference: ThemePreference
   chatAppearance: ChatAppearance
@@ -231,6 +233,8 @@ export interface AppState {
   hostListDirectory(path?: string): Promise<import('../types').DirectoryListing | undefined>
   setTransportPreference(preference: TransportPreference): Promise<void>
   setLanguagePreference(preference: LanguagePreference): Promise<void>
+  refreshAccountMembership(): Promise<AccountMembership | undefined>
+  hideMembershipLink(): Promise<void>
   setStatusBarVisible(visible: boolean): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
   setChatAppearance(appearance: Partial<ChatAppearance>): Promise<void>
@@ -323,4 +327,8 @@ export function initialData(): Pick<AppState,
 export interface StoreAccess {
   get: () => AppState
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
+}
+
+export function selectKnownMember(state: AppState): boolean {
+  return !!state.config && !!state.account && state.memberShortcutScopes.includes(JSON.stringify([state.config.baseUrl, state.account]))
 }

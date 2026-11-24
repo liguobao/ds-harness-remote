@@ -201,6 +201,13 @@ export class RemoteServerApi {
     return { account: body.account }
   }
 
+  async membershipPageUrl(): Promise<string> {
+    const body = await this.request<unknown>('/api/v1/auth/device-web-login', { method: 'POST' })
+    if (!isRecord(body) || typeof body.token !== 'string' || !body.token.trim()) invalidResponse('device web login')
+    // Keep the web credential on the configured server, including its proxy prefix.
+    return `${this.baseUrl}/pricing?token=${encodeURIComponent(body.token)}`
+  }
+
   async deviceAccountMembership(): Promise<AccountMembership> {
     const body = await this.request<unknown>('/api/v1/devices/self/membership')
     if (!isRecord(body)) invalidResponse('device account membership')

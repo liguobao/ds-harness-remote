@@ -1,3 +1,4 @@
+import { serverSession } from '../services/server-session'
 import { applyLanguagePreference, updateSystemLocales } from '../locales/i18n'
 import { DEFAULT_CHAT_APPEARANCE, normalizeChatAppearance } from '../ui/theme'
 import {
@@ -9,6 +10,9 @@ import {
   saveCompactHistory,
   saveLanguagePreference,
   saveThemePreference,
+  MEMBERSHIP_LINK_HIDE_MS,
+  saveMemberShortcutScopes,
+  saveMembershipLinkHiddenUntil,
   saveStatusBarVisible,
   saveTransportPreference,
 } from '../services/storage'
@@ -16,7 +20,7 @@ import type { AppState } from './store-state'
 import type { SessionAccess } from './session-runtime'
 
 export function createPreferenceActions({ set, get, runtime }: SessionAccess): Pick<AppState,
-  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setChatAppearance' | 'resetChatAppearance' | 'setActivityDockMode' | 'setQuickPromptActionMode' | 'setBusySendMode' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
+  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setChatAppearance' | 'resetChatAppearance' | 'setActivityDockMode' | 'setQuickPromptActionMode' | 'setBusySendMode' | 'setStatusBarVisible' | 'hideMembershipLink' | 'refreshAccountMembership' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
   return {
     async setCompactHistory(compactHistory) {
       await saveCompactHistory(compactHistory)
@@ -58,6 +62,29 @@ export function createPreferenceActions({ set, get, runtime }: SessionAccess): P
       await saveLanguagePreference(languagePreference)
       const language = applyLanguagePreference(languagePreference)
       set({ languagePreference, language })
+    },
+
+    async refreshAccountMembership() {
+      const { config, identity, account } = get()
+      if (!config || !identity || !account) return
+      const { api, credentials } = await serverSession.authenticate(config.baseUrl, identity)
+      if (credentials.account !== undefined && credentials.account !== account) return
+      const membership = await api.deviceAccountMembership()
+      const current = get()
+      if (current.config?.baseUrl !== config.baseUrl || current.account !== account || current.identity !== identity) return
+      const scope = JSON.stringify([config.baseUrl, account])
+      if (membership.status === 'active' && !current.memberShortcutScopes.includes(scope)) {
+        const scopes = [...current.memberShortcutScopes, scope]
+        await saveMemberShortcutScopes(scopes)
+        if (get().identity === identity) set({ memberShortcutScopes: scopes })
+      }
+      return membership
+    },
+
+    async hideMembershipLink() {
+      const membershipLinkHiddenUntil = Date.now() + MEMBERSHIP_LINK_HIDE_MS
+      await saveMembershipLinkHiddenUntil(membershipLinkHiddenUntil)
+      set({ membershipLinkHiddenUntil })
     },
 
     async setStatusBarVisible(statusBarVisible) {

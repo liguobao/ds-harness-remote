@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(), reconcile: vi.fn(), createContext: vi.fn(), signInWith: vi.fn(),
   storage: Object.fromEntries([
     'loadTrustedHosts', 'forgetHost', 'clearCodexPermissionPresets', 'clearDeviceCredentials',
-    'saveServerConfig', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
+    'saveServerConfig', 'saveMemberShortcutScopes', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
     'saveCompactHistory', 'saveThemePreference', 'saveChatAppearance', 'loadChatAppearance', 'saveActivityDockMode', 'loadActivityDockMode', 'saveQuickPromptActionMode', 'loadQuickPromptActionMode', 'saveBusySendMode', 'loadBusySendMode', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
     'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
   ].map(name => [name, vi.fn()])),

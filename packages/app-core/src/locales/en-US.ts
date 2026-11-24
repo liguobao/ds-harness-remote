@@ -673,7 +673,7 @@ const enUS = {
     server: 'Server address', serverHint: 'Use an HTTPS address.', trustTitle: 'Protect your devices and conversations', trustBody: 'Conversation data is encrypted in transit. Only trusted devices signed in to the same account can access it.',
   },
   settings: {
-    membership: { plan: "Membership plan", title: "Membership", expiresAt: "Expiration date", loading: "Loading…", none: "Not enrolled", active: "Active", expired: "Expired", revoked: "Revoked" },
+    membership: { hideLink: "Hide membership plan shortcut", plan: "Membership plan", title: "Membership", expiresAt: "Expiration date", loading: "Loading…", none: "Not enrolled", active: "Active", expired: "Expired", revoked: "Revoked" },
     identityHint: "Tap a field to view and copy its full value.",
     copyIdentity: "Copy",
     identityCopyFailed: "Could not copy. Try again.",

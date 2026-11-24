@@ -35,6 +35,8 @@ const KEYS = {
   quickPromptActionMode: 'dshremote.quick-prompt-action-mode.v1',
   busySendMode: 'dshremote.busy-send-mode.v1',
   compactHistory: 'dshremote.compact-history.v1',
+  memberShortcutScopes: 'dshremote.member-shortcut-scopes.v1',
+  membershipLinkHiddenUntil: 'dshremote.membership-link-hidden.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
   collapsedWorkspaces: 'dshremote.collapsed-workspaces.v1',
@@ -183,6 +185,32 @@ export async function loadLanguagePreference(): Promise<LanguagePreference> {
 
 export async function saveLanguagePreference(value: LanguagePreference): Promise<void> {
   await writeJson(KEYS.languagePreference, { value })
+}
+
+export async function loadMemberShortcutScopes(): Promise<string[]> {
+  const scopes = await readJson<unknown>(KEYS.memberShortcutScopes)
+  return Array.isArray(scopes) ? scopes.filter((scope): scope is string => typeof scope === 'string') : []
+}
+
+export async function saveMemberShortcutScopes(scopes: string[]): Promise<void> {
+  await writeJson(KEYS.memberShortcutScopes, scopes)
+}
+
+export const MEMBERSHIP_LINK_HIDE_MS = 3 * 24 * 60 * 60 * 1000
+
+export async function loadMembershipLinkHiddenUntil(): Promise<number> {
+  const stored = await readJson<unknown>(KEYS.membershipLinkHiddenUntil)
+  if (stored === true) {
+    // Older versions stored a permanent dismissal without a timestamp.
+    const until = Date.now() + MEMBERSHIP_LINK_HIDE_MS
+    await saveMembershipLinkHiddenUntil(until)
+    return until
+  }
+  return typeof stored === 'number' && Number.isSafeInteger(stored) && stored > Date.now() ? stored : 0
+}
+
+export async function saveMembershipLinkHiddenUntil(until: number): Promise<void> {
+  await writeJson(KEYS.membershipLinkHiddenUntil, until)
 }
 
 export async function loadStatusBarVisible(): Promise<boolean> {

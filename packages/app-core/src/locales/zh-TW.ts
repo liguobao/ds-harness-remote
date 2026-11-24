@@ -671,7 +671,7 @@ const zhTW = {
     server: '服務地址', serverHint: '請使用 HTTPS 地址。', trustTitle: '保護你的裝置和對話', trustBody: '對話內容會加密傳輸。只有登入同一賬號的可信裝置才能訪問。',
   },
   settings: {
-    membership: { plan: "會員方案", title: "會員狀態", expiresAt: "到期日期", loading: "查詢中…", none: "未開通", active: "有效", expired: "已過期", revoked: "已撤銷" },
+    membership: { hideLink: "隱藏會員計畫入口", plan: "會員計畫", title: "會員狀態", expiresAt: "到期日期", loading: "查詢中…", none: "未開通", active: "有效", expired: "已過期", revoked: "已撤銷" },
     identityHint: "點按欄位查看完整內容並複製。",
     copyIdentity: "複製",
     identityCopyFailed: "複製失敗，請重試。",

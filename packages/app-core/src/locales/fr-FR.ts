@@ -673,7 +673,7 @@ const frFR = {
     server: "Adresse du serveur", serverHint: "Utilisez une adresse HTTPS.", trustTitle: "Protégez vos appareils et vos conversations", trustBody: "Les données de conversation sont cryptées pendant leur transit. Seuls les appareils de confiance connectés au même compte peuvent y accéder.",
   },
   settings: {
-    membership: { plan: "Offre d’abonnement", title: "Abonnement", expiresAt: "Date d’expiration", loading: "Chargement…", none: "Aucun abonnement", active: "Actif", expired: "Expiré", revoked: "Révoqué" },
+    membership: { hideLink: "Masquer le raccourci vers l’abonnement", plan: "Offre d’abonnement", title: "Abonnement", expiresAt: "Date d’expiration", loading: "Chargement…", none: "Aucun abonnement", active: "Actif", expired: "Expiré", revoked: "Révoqué" },
     identityHint: "Touchez un champ pour afficher et copier sa valeur complète.",
     copyIdentity: "Copier",
     identityCopyFailed: "Impossible de copier. Réessayez.",

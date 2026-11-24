@@ -673,7 +673,7 @@ const jaJP = {
     server: "サーバーアドレス", serverHint: "HTTPS アドレスを使用します。", trustTitle: "デバイスと会話を保護する", trustBody: "会話データは転送中に暗号化されます。同じアカウントにサインインしている信頼できるデバイスのみがアクセスできます。",
   },
   settings: {
-    membership: { plan: "会員プラン", title: "会員ステータス", expiresAt: "有効期限", loading: "読み込み中…", none: "未加入", active: "有効", expired: "期限切れ", revoked: "取り消し済み" },
+    membership: { hideLink: "会員プランへのショートカットを非表示", plan: "会員プラン", title: "会員ステータス", expiresAt: "有効期限", loading: "読み込み中…", none: "未加入", active: "有効", expired: "期限切れ", revoked: "取り消し済み" },
     identityHint: "項目をタップすると全文を表示してコピーできます。",
     copyIdentity: "コピー",
     identityCopyFailed: "コピーできませんでした。再試行してください。",

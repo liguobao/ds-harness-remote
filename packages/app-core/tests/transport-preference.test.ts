@@ -5,6 +5,7 @@ import type { SessionRuntime } from '../src/state/session-runtime'
 
 const storage = vi.hoisted(() => ({ saveTransportPreference: vi.fn(async () => {}) }))
 vi.mock('../src/services/storage', () => storage)
+vi.mock('../src/services/server-session', () => ({ serverSession: { authenticate: vi.fn() } }))
 vi.mock('../src/locales/i18n', () => ({ applyLanguagePreference: vi.fn(), updateSystemLocales: vi.fn() }))
 import { createPreferenceActions } from '../src/state/preference-actions'
 

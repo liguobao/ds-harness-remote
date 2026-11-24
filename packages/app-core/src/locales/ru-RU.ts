@@ -681,7 +681,7 @@ const ruRU = {
     server: 'Адрес сервера', serverHint: 'Используйте адрес HTTPS.', trustTitle: 'Защитите свои устройства и диалоги', trustBody: 'Данные диалогов шифруются при передаче. Доступ к ним есть только у доверенных устройств, вошедших в тот же аккаунт.',
   },
   settings: {
-    membership: { plan: "План подписки", title: "Подписка", expiresAt: "Дата окончания", loading: "Загрузка…", none: "Нет подписки", active: "Активна", expired: "Истекла", revoked: "Отозвана" },
+    membership: { hideLink: "Скрыть ссылку на план подписки", plan: "План подписки", title: "Подписка", expiresAt: "Дата окончания", loading: "Загрузка…", none: "Нет подписки", active: "Активна", expired: "Истекла", revoked: "Отозвана" },
     quickPromptActionMode: 'Нажатие на быстрый запрос', quickPromptActionFill: 'Вставить в поле ввода', quickPromptActionSend: 'Отправить сразу', quickPromptActionSaveFailed: 'Не удалось сохранить настройку быстрых запросов',
     busySendMode: 'Отправка во время генерации', busySendQueue: 'В очередь', busySendQueueNote: 'Отложить над полем ввода; нажмите, чтобы вставить в любой момент', busySendSteer: 'Вне очереди', busySendSteerNote: 'Сразу вставить в текущий ход ответа', busySendModeSaveFailed: 'Не удалось сохранить настройку режима отправки',
     identityHint: "Нажмите на поле, чтобы посмотреть и скопировать полное значение.",

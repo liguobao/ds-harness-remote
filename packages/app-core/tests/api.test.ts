@@ -31,6 +31,18 @@ describe('Remote Server API compatibility', () => {
     } })))
   })
 
+  it('opens plans on the device server using only the exchanged web credential', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () => jsonResponse({
+      token: 'web+/=', redirectUrl: 'https://other.example/app/remote',
+    }))
+    const api = new RemoteServerApi('https://remote.example.com/prefix', 'device-token', fetchImplementation)
+    expect(await api.membershipPageUrl()).toBe('https://remote.example.com/prefix/pricing?token=web%2B%2F%3D')
+    expect(fetchImplementation).toHaveBeenCalledWith('https://remote.example.com/prefix/api/v1/auth/device-web-login',
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ Authorization: 'Bearer device-token' }) }))
+    fetchImplementation.mockResolvedValueOnce(jsonResponse({ token: ' ' }))
+    await expect(api.membershipPageUrl()).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+  })
+
   it('renames an account-owned device with authenticated PATCH and the canonical server name', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async () => jsonResponse({ name: '书房电脑' }))
     const api = new RemoteServerApi('https://remote.example.com/prefix', 'client-device-token', fetchImplementation)

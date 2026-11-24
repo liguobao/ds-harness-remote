@@ -35,6 +35,8 @@ import {
   loadActivityDockMode,
   loadQuickPromptActionMode,
   loadBusySendMode,
+  loadMemberShortcutScopes,
+  loadMembershipLinkHiddenUntil,
   loadStatusBarVisible,
   loadTransportPreference,
   loadTrustedHosts,
@@ -49,6 +51,8 @@ import {
   saveActivityDockMode,
   saveQuickPromptActionMode,
   saveBusySendMode,
+  saveMemberShortcutScopes,
+  saveMembershipLinkHiddenUntil,
   saveStatusBarVisible,
   trustHost,
 } from '../services/storage'
@@ -115,7 +119,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async bootstrap() {
       set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
       try {
-        const [config, identity, transportPreference, languagePreference, themePreference, chatAppearance, activityDockMode, quickPromptActionMode, busySendMode, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
+        const [config, identity, transportPreference, languagePreference, themePreference, chatAppearance, activityDockMode, quickPromptActionMode, busySendMode, memberShortcutScopes, membershipLinkHiddenUntil, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
           loadServerConfig(),
           loadOrCreateIdentity(),
           loadTransportPreference(),
@@ -125,6 +129,8 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           loadActivityDockMode(),
           loadQuickPromptActionMode(),
           loadBusySendMode(),
+          loadMemberShortcutScopes(),
+          loadMembershipLinkHiddenUntil(),
           loadStatusBarVisible(),
           loadFavoriteWorkspaces(),
           loadRecentWorkspaces(),
@@ -145,6 +151,8 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           activityDockMode,
           quickPromptActionMode,
           busySendMode,
+          memberShortcutScopes,
+          membershipLinkHiddenUntil,
           statusBarVisible,
           compactHistory,
           defaultPermissionPreset,
@@ -553,6 +561,8 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         activityDockMode: 'compact',
         quickPromptActionMode: 'fill',
         busySendMode: 'queue',
+        memberShortcutScopes: [],
+        membershipLinkHiddenUntil: 0,
         statusBarVisible: true,
         compactHistory: false,
         defaultPermissionPreset: 'default',
@@ -564,7 +574,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     },
 
     async signOut() {
-      const { config, identity, languagePreference, themePreference, chatAppearance, activityDockMode, quickPromptActionMode, busySendMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
+      const { config, identity, languagePreference, themePreference, chatAppearance, activityDockMode, quickPromptActionMode, busySendMode, memberShortcutScopes, membershipLinkHiddenUntil, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
       await get().disconnect()
       useAttentionStore.getState().reset()
       await clearBrowseMemory()
@@ -583,6 +593,8 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       await saveActivityDockMode(activityDockMode)
       await saveQuickPromptActionMode(quickPromptActionMode)
       await saveBusySendMode(busySendMode)
+      await saveMemberShortcutScopes(memberShortcutScopes)
+      if (membershipLinkHiddenUntil > Date.now()) await saveMembershipLinkHiddenUntil(membershipLinkHiddenUntil)
       await saveStatusBarVisible(statusBarVisible)
       await saveCompactHistory(compactHistory)
       await saveDefaultPermissionPreset(defaultPermissionPreset)

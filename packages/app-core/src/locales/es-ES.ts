@@ -673,7 +673,7 @@ const esES = {
     server: "Dirección del servidor", serverHint: "Utilice una dirección HTTPS.", trustTitle: "Protege tus dispositivos y conversaciones", trustBody: "Los datos de la conversación se cifran en tránsito. Solo los dispositivos confiables que hayan iniciado sesión en la misma cuenta pueden acceder a él.",
   },
   settings: {
-    membership: { plan: "Plan de membresía", title: "Membresía", expiresAt: "Fecha de vencimiento", loading: "Cargando…", none: "Sin membresía", active: "Activa", expired: "Vencida", revoked: "Revocada" },
+    membership: { hideLink: "Ocultar el acceso al plan de membresía", plan: "Plan de membresía", title: "Membresía", expiresAt: "Fecha de vencimiento", loading: "Cargando…", none: "Sin membresía", active: "Activa", expired: "Vencida", revoked: "Revocada" },
     identityHint: "Toca un campo para ver y copiar su valor completo.",
     copyIdentity: "Copiar",
     identityCopyFailed: "No se pudo copiar. Inténtalo de nuevo.",

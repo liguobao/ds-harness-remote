@@ -49,7 +49,7 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
-import { selectCustomAcpBackends } from '../state/store-state'
+import { selectCustomAcpBackends, selectKnownMember } from '../state/store-state'
 import { dispatchSessionCatalogCommand } from '../state/session-catalog-commands'
 import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
 import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
@@ -91,7 +91,7 @@ import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeft
 import { createStoreGate, shouldAllowDrawerClose, useStoreGateSelector, type StoreGate } from '../lib/gated-store'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
 import { BotModalsHost, BotSidebarSection, useBotTeamLoad } from './bot-sidebar-section'
-import { HomeActionsMenu } from './setup-screens'
+import { HomeActionsMenu, openMembershipPlan } from './setup-screens'
 import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } from './workspace-modals'
 
 const SESSION_PAGE_SIZE = 3
@@ -600,6 +600,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
 }: HostSessionsDrawerBodyProps) {
   const language = useStoreGateSelector(useAppStore, state => state.language, gate)
   const deviceId = useStoreGateSelector(useAppStore, state => state.selectedDevice?.deviceId, gate)
+  const membershipLinkHidden = useStoreGateSelector(useAppStore, state => !!state.membershipLinkHiddenUntil || selectKnownMember(state), gate)
   const deviceName = useStoreGateSelector(useAppStore, state => state.selectedDevice?.name, gate)
   const platform = useStoreGateSelector(useAppStore, state => state.selectedDevice?.platform, gate)
   const connectionPhase = useStoreGateSelector(useAppStore, state => state.connection.phase, gate)
@@ -1891,27 +1892,40 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
       <View style={[styles.container, fullWidthCentered && styles.centeredColumn]}>
       {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
-          disabled={onOpenAbout === undefined}
-          onPress={() => {
-            Keyboard.dismiss()
-            onOpenAbout?.()
-          }}
-          hitSlop={8}
-          style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
-        >
-          <Svg
-            width={22}
-            height={(22 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
-            viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
-            accessible={false}
+        <View style={styles.brandGroup}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
+            disabled={onOpenAbout === undefined}
+            onPress={() => {
+              Keyboard.dismiss()
+              onOpenAbout?.()
+            }}
+            hitSlop={{ top: 6, left: 6, right: 6 }}
+            style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
           >
-            <Path d={FISH_LOGO_PATH} fill={colors.ink} />
-          </Svg>
-          <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
-        </Pressable>
+            <Svg
+              width={22}
+              height={(22 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
+              viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
+              accessible={false}
+            >
+              <Path d={FISH_LOGO_PATH} fill={colors.ink} />
+            </Svg>
+            <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
+          </Pressable>
+          {!membershipLinkHidden && <>
+            <Pressable accessibilityRole="link" onPress={() => void openMembershipPlan()}
+              style={({ pressed }) => [styles.membershipLink, pressed && styles.pressedFade]}>
+              <Text numberOfLines={1} style={styles.membershipText}>{strings.settings.membership.plan}</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel={strings.settings.membership.hideLink}
+              onPress={() => void useAppStore.getState().hideMembershipLink().catch(() => setGroupStorageError(strings.comfort.cacheSaveFailed))}
+              style={({ pressed }) => [styles.dismissMembership, pressed && styles.pressedFade]}>
+              <X size={13} color={colors.muted} />
+            </Pressable>
+          </>}
+        </View>
         <View style={styles.brandRight}>
           {onOpenSettings !== undefined && (
             <Pressable
@@ -3075,6 +3089,10 @@ const createStyles = (colors: ThemeColors) =>
       paddingTop: spacing.md,
       paddingBottom: spacing.md,
     },
+    brandGroup: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm },
+    membershipLink: { maxWidth: '45%', minHeight: 36, justifyContent: 'center' },
+    dismissMembership: { width: 32, minHeight: 40, alignItems: 'center', justifyContent: 'center' },
+    membershipText: { ...type.smallStrong, color: colors.primary },
     brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 8 },
     brandTitle: { ...type.heading, fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.2, color: colors.ink, flexShrink: 1 },
     brandRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },

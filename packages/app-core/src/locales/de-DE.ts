@@ -673,7 +673,7 @@ const deDE = {
     server: "Serveradresse", serverHint: "Verwenden Sie eine HTTPS-Adresse.", trustTitle: "Schützen Sie Ihre Geräte und Gespräche", trustBody: "Gesprächsdaten werden während der Übertragung verschlüsselt. Nur vertrauenswürdige Geräte, die bei demselben Konto angemeldet sind, können darauf zugreifen.",
   },
   settings: {
-    membership: { plan: "Mitgliedschaftsplan", title: "Mitgliedschaft", expiresAt: "Ablaufdatum", loading: "Wird geladen…", none: "Keine Mitgliedschaft", active: "Aktiv", expired: "Abgelaufen", revoked: "Widerrufen" },
+    membership: { hideLink: "Verknüpfung zum Mitgliedschaftsplan ausblenden", plan: "Mitgliedschaftsplan", title: "Mitgliedschaft", expiresAt: "Ablaufdatum", loading: "Wird geladen…", none: "Keine Mitgliedschaft", active: "Aktiv", expired: "Abgelaufen", revoked: "Widerrufen" },
     identityHint: "Tippe auf ein Feld, um den vollständigen Wert anzuzeigen und zu kopieren.",
     copyIdentity: "Kopieren",
     identityCopyFailed: "Kopieren fehlgeschlagen. Versuche es erneut.",

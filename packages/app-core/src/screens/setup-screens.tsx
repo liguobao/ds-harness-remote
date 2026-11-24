@@ -43,7 +43,6 @@ import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 const defaultServerUrl = 'https://dsh.r2049.cn'
-const membershipPricingUrl = 'https://dsh.r2049.cn/pricing'
 const updateUrl = 'https://github.com/liguobao/ds-harness-remote/releases/latest'
 const testFlightUrl = 'https://testflight.apple.com/join/aSkJfmUJ'
 const releaseApiUrl = 'https://api.github.com/repos/liguobao/ds-harness-remote/releases/latest'
@@ -663,6 +662,30 @@ async function openSettingsUrl(url: string) {
   }
 }
 
+let membershipPageOpening = false
+
+export async function openMembershipPlan() {
+  if (membershipPageOpening) return
+  const { config, identity, account } = useAppStore.getState()
+  if (!config || !identity || !account) {
+    await openSettingsUrl(`${config?.baseUrl ?? defaultServerUrl}/pricing`)
+    return
+  }
+  membershipPageOpening = true
+  try {
+    const { api } = await serverSession.authenticate(config.baseUrl, identity)
+    const url = await api.membershipPageUrl()
+    const current = useAppStore.getState()
+    if (current.config?.baseUrl === config.baseUrl && current.identity?.deviceId === identity.deviceId && current.account === account) {
+      await Linking.openURL(url)
+    }
+  } catch {
+    Alert.alert(zhCN.settings.linkFailedTitle, zhCN.settings.linkFailedBody)
+  } finally {
+    membershipPageOpening = false
+  }
+}
+
 function copySettingsValue(value: string, onCopied?: () => void) {
   void Clipboard.setStringAsync(value).then(
     onCopied,
@@ -677,8 +700,7 @@ function AccountMembershipRows({ active, baseUrl, identity }: { active: boolean;
     if (!active) return
     let current = true
     setMembership(undefined)
-    void serverSession.authenticate(baseUrl, identity)
-      .then(({ api }) => current ? api.deviceAccountMembership() : undefined)
+    void useAppStore.getState().refreshAccountMembership()
       .then(result => { if (current && result !== undefined) setMembership(result) })
       .catch(() => { if (current) setMembership(null) })
     return () => { current = false }
@@ -692,7 +714,7 @@ function AccountMembershipRows({ active, baseUrl, identity }: { active: boolean;
       label={labels.title}
       value={value}
       accessibilityLabel={`${labels.title} · ${value}`}
-      onPress={membership?.status === 'none' ? () => void openSettingsUrl(membershipPricingUrl) : undefined}
+      onPress={() => void openMembershipPlan()}
     />
     {membership?.expiresAt !== undefined && (
       <GroupRow icon={Clock} label={labels.expiresAt} value={new Date(membership.expiresAt).toLocaleDateString(language)} />
@@ -1487,7 +1509,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
           {onSwitchServer !== undefined && <HomeMenuRow icon={RotateCcw} label={zhCN.setup.switchServer} onPress={onSwitchServer} />}
           <HomeMenuRow icon={ShieldCheck} label={zhCN.settings.membership.plan} onPress={() => {
             onClose()
-            void openSettingsUrl(membershipPricingUrl)
+            void openMembershipPlan()
           }} />
           <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
           <HomeMenuRow icon={Info} label={zhCN.settings.about} onPress={onAbout} />

@@ -671,7 +671,7 @@ const zhCN = {
     server: '服务地址', serverHint: '请使用 HTTPS 地址。', trustTitle: '保护你的设备和对话', trustBody: 'P2P网络优先，TURN 转发候选，对话内容全程端到端加密。',
   },
   settings: {
-    membership: { plan: "会员方案", title: "会员状态", expiresAt: "到期日期", loading: "查询中…", none: "未开通", active: "有效", expired: "已过期", revoked: "已撤销" },
+    membership: { hideLink: "隐藏会员计划入口", plan: "会员计划", title: "会员状态", expiresAt: "到期日期", loading: "查询中…", none: "未开通", active: "有效", expired: "已过期", revoked: "已撤销" },
     identityHint: "点击字段查看完整内容并复制。",
     copyIdentity: "复制",
     identityCopyFailed: "复制失败，请重试。",

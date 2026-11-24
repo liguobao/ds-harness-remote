@@ -266,11 +266,12 @@ export function ConnectionScreen({ device, onBack, onConnected, embedded = false
   )
 }
 
-export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: {
+export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces, onOpenMembershipPlan }: {
   device: RemoteDevice
   onBack: () => void
   onConnect: () => void
   onWorkspaces?: () => void
+  onOpenMembershipPlan: () => void
 }) {
   const selected = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)
@@ -326,6 +327,10 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                 <Button label={zhCN.common.retry} variant="secondary" onPress={() => void reconnect()} />
               </View>
             )}
+
+            <View style={styles.membershipAction}>
+              <Button variant="secondary" icon={ShieldCheck} label={zhCN.settings.membership.plan} onPress={onOpenMembershipPlan} />
+            </View>
 
             {!device.trusted
               ? <View style={styles.connectArea}>
@@ -669,6 +674,7 @@ function createStyles(colors: ThemeColors) {
   connectionErrorTitle: { ...type.bodyStrong, color: colors.ink },
   connectionErrorBody: { ...type.small, color: colors.muted },
   group: { borderRadius: radius.xl, backgroundColor: colors.card, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
+  membershipAction: { marginBottom: spacing.sm },
   quickActions: { gap: spacing.sm, marginBottom: spacing.xs },
   primaryArea: { marginTop: spacing.xxl },
   secondaryArea: { marginTop: spacing.sm },

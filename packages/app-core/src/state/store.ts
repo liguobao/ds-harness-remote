@@ -100,6 +100,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   activityDockMode: 'compact',
   quickPromptActionMode: 'fill',
   busySendMode: 'queue',
+  memberShortcutScopes: [],
+  membershipLinkHiddenUntil: 0,
   statusBarVisible: true,
   defaultPermissionPreset: 'default',
   authPhase: 'idle',
