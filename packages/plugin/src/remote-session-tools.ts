@@ -14,9 +14,11 @@ const MAX_REMOTE_SESSIONS = 2048
 const MAX_SESSIONS_PER_WORKSPACE = 2048
 const MAX_REMOTE_PRESETS = 256
 const sequence = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
-const hostTarget = z.object({ hostId: id, backend: z.literal('harness') }).strict()
+const hostTarget = z.object({ hostId: id, backend: z.literal('harness').default('harness') }).strict()
 const workspace = hostTarget.extend({ workspaceId: id })
 const session = workspace.extend({ sessionId: id })
+/** A session reference where the owning workspace may be resolved from the Host catalogue. */
+const sessionRef = hostTarget.extend({ workspaceId: id.optional(), sessionId: id })
 const operationId = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/)
 const cursor = z.object({ throughSeq: sequence, beforeSeq: sequence }).strict().refine(value => value.beforeSeq <= value.throughSeq)
 export const sessionToolInputs = {
@@ -28,7 +30,7 @@ export const sessionToolInputs = {
   remote_read_session: session.extend({ cursor: cursor.optional(), maxMessages: z.number().int().min(1).max(50).default(20) }),
   remote_create_session: workspace.extend({ operationId, preset: presetId.optional() }),
   remote_select_preset: session.extend({ operationId, preset: presetId }),
-  remote_send_message: session.extend({ operationId, message: z.string().min(1).max(64 * 1024).refine(value => value.trim().length > 0) }),
+  remote_send_message: sessionRef.extend({ operationId, message: z.string().min(1).max(64 * 1024).refine(value => value.trim().length > 0) }),
   remote_interrupt_session: session.extend({ operationId }),
   remote_wait_sessions: z.object({ targets: z.array(session).min(1).max(8), timeoutMs: z.number().int().min(0).max(60_000).default(30_000) }).strict(),
   remote_get_operation: z.object({ operationId }).strict(),
@@ -184,7 +186,15 @@ export class RemoteSessionTools {
       case 'remote_wait_sessions': return this.wait(sessionToolInputs[operation].parse(input), signal)
       case 'remote_create_session': return this.mutate(operation, sessionToolInputs[operation].parse(input), signal)
       case 'remote_select_preset': return this.mutate(operation, sessionToolInputs[operation].parse(input), signal)
-      case 'remote_send_message': return this.mutate(operation, sessionToolInputs[operation].parse(input), signal)
+      case 'remote_send_message': {
+        const args = sessionToolInputs[operation].parse(input)
+        // The owning workspace is derivable from the session id, so a caller that only
+        // knows the session (an agent resuming a task) still reaches the right Host.
+        const resolved: SessionTarget & { operationId: string; message: string } = args.workspaceId !== undefined
+          ? { ...args, workspaceId: args.workspaceId }
+          : { ...args, workspaceId: (await this.onHost(args, signal, (gateway, active) => this.resolveSessionTarget(gateway, args, active))).workspaceId }
+        return this.mutate(operation, resolved, signal)
+      }
       case 'remote_interrupt_session': return this.mutate(operation, sessionToolInputs[operation].parse(input), signal)
     }
   }
@@ -260,6 +270,16 @@ export class RemoteSessionTools {
     // Workspace ownership comes from the official catalog, never a guessed cwd.
     const owned = rows.filter(row => allowed.has(row.sessionId) && row.parentSessionId === undefined && row.origin !== 'subagent')
     return owned.length > MAX_REMOTE_SESSIONS ? owned.slice(0, MAX_REMOTE_SESSIONS) : owned
+  }
+
+  /** Resolve the workspace that owns a session from the Host catalogue. */
+  private async resolveSessionTarget(gateway: RemoteTypertGateway, args: z.infer<typeof sessionRef>, signal: AbortSignal): Promise<SessionTarget> {
+    const baseline = await first(gateway, 'workspace/follow', {}, signal)
+    if (baseline.type !== 'baseline') fail('INVALID_WORKSPACE_BASELINE')
+    const rows = z.array(workspaceRow).max(MAX_REMOTE_WORKSPACES).parse(record(baseline.value).items)
+    const owner = rows.find(row => row.sessionIds.includes(args.sessionId))
+    if (!owner) fail('SESSION_NOT_IN_WORKSPACE')
+    return { hostId: args.hostId, backend: args.backend, workspaceId: owner!.workspaceId, sessionId: args.sessionId }
   }
 
   private async requireSession(gateway: RemoteTypertGateway, args: SessionTarget, signal: AbortSignal) {

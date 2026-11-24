@@ -133,8 +133,8 @@ export function remoteSessionTools(resolve: () => Pick<ClientModeRuntime, 'runSe
       }, [...Object.keys(session), 'operationId', 'preset']),
     },
     remote_send_message: {
-      description: 'Send a text task or follow-up to a native Harness session only when the user authorizes messaging that remote session. Uses the Host queue and existing permissions; accepted means queued, not completed. Never automatically resend on timeout or unknown outcome. Use the SAME operationId for receipt lookup; deduplication lasts only until this local Remote runtime/account is reset. An unknown outcome may already be executing.',
-      parameters: object({ ...session, operationId: operation, message: { ...string, description: 'Nonempty text, at most 65536 characters. Include only context needed for this task.' } }, [...Object.keys(session), 'operationId', 'message']),
+      description: 'Send a text task or follow-up to a native Harness session only when the user authorizes messaging that remote session. Uses the Host queue and existing permissions; accepted means queued, not completed. Never automatically resend on timeout or unknown outcome. Use the SAME operationId for receipt lookup; deduplication lasts only until this local Remote runtime/account is reset. An unknown outcome may already be executing. workspaceId may be omitted: the Host catalogue resolves the workspace that owns the session.',
+      parameters: object({ ...session, operationId: operation, message: { ...string, description: 'Nonempty text, at most 65536 characters. Include only context needed for this task.' } }, [...Object.keys(session).filter(key => key !== 'workspaceId'), 'operationId', 'message']),
     },
     remote_interrupt_session: {
       description: 'Request cancellation of the current execution of a native Harness session when the user requests stopping it. Does not undo edits or delete queued messages. Accepted is a stop-request acknowledgment; use read/wait to check actual state. Never blindly retry an unknown outcome, since a later turn might have started.',

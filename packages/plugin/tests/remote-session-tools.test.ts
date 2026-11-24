@@ -328,3 +328,38 @@ describe('Native Remote session tool boundaries', () => {
     expect(JSON.stringify(locked)).not.toContain('private')
   })
 })
+
+describe('Session target resolution', () => {
+  it('sends a message with the session id alone and resolves its owning workspace', async () => {
+    const f = fixture()
+    const { workspaceId: _workspace, backend: _backend, ...sessionOnly } = target
+
+    const receipt = await f.tools.run('remote_send_message', { ...sessionOnly, operationId, message: 'Task' }, signal())
+
+    expect(receipt).toMatchObject({ status: 'accepted', workspaceId: 'workspace', sessionId: 'session' })
+    expect(f.open.mock.calls.filter(([endpoint]) => endpoint === 'workspace/follow')).toHaveLength(2)
+    expect(f.dispatch).toHaveBeenCalledWith('session/prompt', {
+      args: { request: expect.objectContaining({ sessionId: 'session', content: [{ type: 'text', text: 'Task' }] }) },
+    }, expect.any(AbortSignal))
+  })
+
+  it('keeps the explicit workspace without consulting the catalogue', async () => {
+    const f = fixture()
+
+    await f.tools.run('remote_send_message', { ...target, operationId, message: 'Task' }, signal())
+
+    expect(f.open.mock.calls.filter(([endpoint]) => endpoint === 'workspace/follow')).toHaveLength(1)
+    expect(f.dispatch).toHaveBeenCalledWith('session/prompt', expect.anything(), expect.any(AbortSignal))
+  })
+
+  it('refuses a session that no workspace owns and never dispatches a prompt', async () => {
+    const f = fixture()
+    f.state.ids = ['another-session']
+    const { workspaceId: _workspace, ...sessionOnly } = target
+
+    await expect(f.tools.run('remote_send_message', { ...sessionOnly, operationId, message: 'Task' }, signal()))
+      .rejects.toThrow('SESSION_NOT_IN_WORKSPACE')
+    expect(f.dispatch).not.toHaveBeenCalled()
+    expect(await f.tools.run('remote_get_operation', { operationId }, signal())).toMatchObject({ status: 'not_found' })
+  })
+})
