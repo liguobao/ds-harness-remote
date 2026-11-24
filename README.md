@@ -36,7 +36,7 @@ Harness keeps running on your work computer, with the same workspaces, tools, an
 
 The DeepSeek Harness desktop edition is supported. Install the latest release:
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
 ## Features
 
@@ -73,10 +73,10 @@ Several clients can connect to the same Host at once; RPC calls and streams are 
 Open **Extensions / Plugin management** in DeepSeek Harness Desktop, choose installation
 from npm, and enter this package:
 
-`ds-harness-remote@0.6.5`
+`ds-harness-remote@0.6.7`
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
-with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.5`.
+with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.7`.
 
 On DSH 0.2.2+, npm installations support version checks and updates in Plugin management, with an attempt to restore the previous version if hot updating fails. GitHub and local link installations must switch to npm first; see [online updates](docs/installation.md#online-updates-in-dsh-plugin-management).
 
@@ -103,7 +103,7 @@ After installing the ds-harness-remote plugin in DSH Go on your phone, you can a
 ## Quick start
 
 1. Open **Remote** from the DeepSeek Harness sidebar.
-2. Choose Zhihu, GitHub, or Google authorization, or sign in with an account and password. Account registration requires an invitation code; email the repository author to request one.
+2. Sign in with Zhihu, GitHub, or Google.
 3. On another device, install the same plugin in DeepSeek Harness and sign in as described in steps 1–2. Alternatively, use Remote Web, iOS, Android, or DSH Go directly without installing a plugin.
 4. Select an online Host, then choose an existing workspace or browse remote directories to open one.
 
