@@ -3,6 +3,7 @@ import { create } from 'zustand'
 const filesystem = () => import('expo-file-system/legacy')
 import { encryptFrame, decryptFrame, fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
 import { parseHandoffMessage, parseHandoffMeta, type PendingHandoffDraft } from '../lib/handoff-context'
+import { firstLineSnippet, isHandoffRawText, type SessionHandoffOrigin } from '../lib/handoff-preview'
 import { acpWorkspaceSuppressionKey, isAcpManagedBackend, isDeletedAcpWorkspace } from '../lib/workspace-key'
 import type { AgentBackend, ChatImage, ChatItem, PromptImage, RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../types'
 
@@ -21,11 +22,12 @@ type Snapshot = {
   catalogs: Record<string, { workspaces: WorkspaceView[]; sessions: RemoteSession[] }>
   deletedWorkspaces: Record<string, string[]>
   hostModes: Record<string, 'agent' | 'bot'>
+  handoffOrigins: Record<string, Record<string, SessionHandoffOrigin>>
   resume: boolean; notifications: boolean; autoConnectHost: boolean
   last?: { scope: string; deviceId: string; sessionId: string }
 }
 type Memory = Snapshot & { ready: boolean; error?: string }
-const empty = (): Snapshot => ({ entries: {}, catalogs: {}, deletedWorkspaces: {}, hostModes: {}, resume: false, notifications: true, autoConnectHost: true })
+const empty = (): Snapshot => ({ entries: {}, catalogs: {}, deletedWorkspaces: {}, hostModes: {}, handoffOrigins: {}, resume: false, notifications: true, autoConnectHost: true })
 export const useBrowseMemory = create<Memory>(() => ({ ...empty(), ready: false }))
 export const browseScope = (state: {config?: ServerConfig; selectedDevice?: RemoteDevice}): string => JSON.stringify([
   state.config?.baseUrl, state.config?.account, state.selectedDevice?.deviceId, state.selectedDevice?.identityKey,
@@ -42,6 +44,7 @@ const aad = 'dsh-remote-private-browse-v1'
 export const MAX_CACHED_MESSAGES_PER_SESSION = 30
 export const MAX_CACHED_SESSIONS = 10
 const MAX_DELETED_WORKSPACES_PER_SCOPE = 500
+const MAX_HANDOFF_ORIGINS_PER_SCOPE = 500
 const MAX_TEXT_CHARS = 32768
 
 const capText = (text?: string): string | undefined =>
@@ -130,6 +133,81 @@ function safeSession(session: RemoteSession): RemoteSession {
     parentSessionId: session.parentSessionId, running: false,
     projections: {values: {remoteStatusKnown: false, codexStatus: 'unknown'}} }
 }
+function sanitizeHandoffOrigin(value: unknown): SessionHandoffOrigin | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const sourceBackend = typeof record.sourceBackend === 'string' ? record.sourceBackend.trim() : ''
+  if (!sourceBackend) return undefined
+  const targetBackend = typeof record.targetBackend === 'string' && record.targetBackend.trim()
+    ? record.targetBackend.trim()
+    : undefined
+  const sourceSessionId = typeof record.sourceSessionId === 'string' && record.sourceSessionId.trim()
+    ? record.sourceSessionId.trim()
+    : undefined
+  const rawTitle = typeof record.sourceTitle === 'string'
+    ? record.sourceTitle.replace(/\s+/gu, ' ').trim().slice(0, 200)
+    : undefined
+  const sourceTitle = rawTitle && !isHandoffRawText(rawTitle) ? rawTitle : undefined
+  const fallbackTitle = typeof record.fallbackTitle === 'string'
+    ? firstLineSnippet(record.fallbackTitle, 120)
+    : undefined
+  const preset = record.preset === 'review' || record.preset === 'continue' || record.preset === 'custom'
+    ? record.preset
+    : undefined
+  const createdAt = typeof record.createdAt === 'number' && Number.isFinite(record.createdAt) && record.createdAt >= 0
+    ? record.createdAt
+    : undefined
+  return {
+    sourceBackend,
+    ...(targetBackend !== undefined ? { targetBackend } : {}),
+    ...(sourceSessionId !== undefined ? { sourceSessionId } : {}),
+    ...(sourceTitle !== undefined ? { sourceTitle } : {}),
+    ...(fallbackTitle !== undefined ? { fallbackTitle } : {}),
+    ...(preset !== undefined ? { preset } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
+  }
+}
+
+function capScopeHandoffOrigins(
+  map: Record<string, SessionHandoffOrigin>,
+): Record<string, SessionHandoffOrigin> {
+  const entries = Object.entries(map)
+  if (entries.length <= MAX_HANDOFF_ORIGINS_PER_SCOPE) return map
+  entries.sort((a, b) => (b[1].createdAt ?? 0) - (a[1].createdAt ?? 0))
+  return Object.fromEntries(entries.slice(0, MAX_HANDOFF_ORIGINS_PER_SCOPE))
+}
+
+function sanitizeHandoffOrigins(
+  value: unknown,
+): Record<string, Record<string, SessionHandoffOrigin>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const result: Record<string, Record<string, SessionHandoffOrigin>> = {}
+  for (const [scope, rawMap] of Object.entries(value)) {
+    if (!rawMap || typeof rawMap !== 'object' || Array.isArray(rawMap)) continue
+    const cleanScope: Record<string, SessionHandoffOrigin> = {}
+    for (const [sessionId, origin] of Object.entries(rawMap)) {
+      if (!sessionId) continue
+      const sanitized = sanitizeHandoffOrigin(origin)
+      if (sanitized !== undefined) cleanScope[sessionId] = sanitized
+    }
+    if (Object.keys(cleanScope).length > 0) {
+      result[scope] = capScopeHandoffOrigins(cleanScope)
+    }
+  }
+  return result
+}
+
+function handoffOriginEqual(a: SessionHandoffOrigin | undefined, b: SessionHandoffOrigin): boolean {
+  if (a === undefined) return false
+  return a.sourceBackend === b.sourceBackend
+    && a.targetBackend === b.targetBackend
+    && a.sourceSessionId === b.sourceSessionId
+    && a.sourceTitle === b.sourceTitle
+    && a.fallbackTitle === b.fallbackTitle
+    && a.preset === b.preset
+    && a.createdAt === b.createdAt
+}
+
 function sanitizeDeletedWorkspaces(value: unknown): Record<string, string[]> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const result: Record<string, string[]> = {}
@@ -282,6 +360,7 @@ function snapshot(): Snapshot {
     catalogs: state.catalogs,
     deletedWorkspaces: sanitizeDeletedWorkspaces(state.deletedWorkspaces),
     hostModes: state.hostModes,
+    handoffOrigins: sanitizeHandoffOrigins(state.handoffOrigins),
     resume: state.resume,
     notifications: state.notifications,
     autoConnectHost: state.autoConnectHost,
@@ -322,6 +401,7 @@ export async function hydrateBrowseMemory(): Promise<void> {
       const encrypted = JSON.parse(await FileSystem.readAsStringAsync(file(FileSystem)))
       const data = JSON.parse(new TextDecoder().decode(decryptFrame(key, encrypted, aad))) as Snapshot
       const deletedWorkspaces = sanitizeDeletedWorkspaces(data.deletedWorkspaces)
+      const handoffOrigins = sanitizeHandoffOrigins(data.handoffOrigins)
       const catalogs = Object.fromEntries(
         Object.entries(data.catalogs ?? {}).map(([scope, catalog]) => [
           scope,
@@ -337,6 +417,7 @@ export async function hydrateBrowseMemory(): Promise<void> {
         entries: limitedEntries,
         catalogs,
         deletedWorkspaces,
+        handoffOrigins,
         ready: true,
       })
       if (Object.values(data.entries ?? {}).some(value => value.messages && !value.messages.every(isValidCachedChatItem))) {
@@ -414,6 +495,42 @@ export async function clearBrowseMemory(): Promise<void> {
 export function saveHostMode(scope: string, mode: 'agent' | 'bot'): void {
   useBrowseMemory.setState(state => ({hostModes: {...state.hostModes, [scope]: mode}}))
   void flushBrowseMemory()
+}
+
+export function getHandoffOrigin(scope: string, sessionId: string): SessionHandoffOrigin | undefined {
+  return useBrowseMemory.getState().handoffOrigins[scope]?.[sessionId]
+}
+
+export function recordHandoffOrigin(
+  scope: string,
+  sessionId: string,
+  origin: SessionHandoffOrigin,
+): void {
+  if (!scope || !sessionId) return
+  const incoming = sanitizeHandoffOrigin(origin)
+  if (incoming === undefined) return
+  const currentScopeMap = useBrowseMemory.getState().handoffOrigins[scope]
+  const existing = currentScopeMap?.[sessionId]
+  const merged: SessionHandoffOrigin = existing === undefined
+    ? incoming
+    : {
+        sourceBackend: incoming.sourceBackend || existing.sourceBackend,
+        targetBackend: incoming.targetBackend ?? existing.targetBackend,
+        sourceSessionId: incoming.sourceSessionId ?? existing.sourceSessionId,
+        sourceTitle: incoming.sourceTitle ?? existing.sourceTitle,
+        fallbackTitle: incoming.fallbackTitle ?? existing.fallbackTitle,
+        preset: incoming.preset ?? existing.preset,
+        createdAt: incoming.createdAt ?? existing.createdAt,
+      }
+  if (handoffOriginEqual(existing, merged)) return
+  useBrowseMemory.setState(state => {
+    const scopeMap = state.handoffOrigins[scope] ?? {}
+    const nextScopeMap = capScopeHandoffOrigins({ ...scopeMap, [sessionId]: merged })
+    return {
+      handoffOrigins: { ...state.handoffOrigins, [scope]: nextScopeMap },
+    }
+  })
+  schedule()
 }
 
 // Keep the same session LRU, encryption and reset lifecycle as ordinary history.

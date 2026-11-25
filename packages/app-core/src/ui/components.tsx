@@ -230,7 +230,22 @@ export function TopBar({
         ]}
       >
         {onTitlePress === undefined
-          ? <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+          ? (
+            titleAccessory === undefined
+              ? <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+              : (
+                <View
+                  style={[
+                    compactHeader ? styles.topBarTitleRowCompact : styles.topBarTitleRow,
+                    betweenAligned && styles.topBarTitleRowBetween,
+                    compactHeader && !hasSubtitle && styles.topBarTitleRowCompactSingle,
+                  ]}
+                >
+                  <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft, { flexShrink: 1 }]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+                  {titleAccessory}
+                </View>
+              )
+          )
           : (
             <Pressable
               accessibilityRole="button"
@@ -652,8 +667,8 @@ function createStyles(colors: ThemeColors) {
     topBarTitleCompact: { fontSize: 15.5, lineHeight: 20 },
     topBarTitleLeft: { textAlign: 'left' },
     topBarTitleLink: { flexShrink: 1 },
-    topBarTitleRow: { alignSelf: 'stretch', minHeight: 48, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
-    topBarTitleRowCompact: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', borderRadius: radius.sm },
+    topBarTitleRow: { alignSelf: 'stretch', minHeight: 48, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
+    topBarTitleRowCompact: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 6, borderRadius: radius.sm },
     topBarTitleRowBetween: { alignSelf: 'center', justifyContent: 'center' },
     topBarTitleRowCompactSingle: { minHeight: 40 },
     topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },

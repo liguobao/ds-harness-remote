@@ -117,7 +117,10 @@ import {
 import { sessionTitle } from './chat/presentation'
 import { ChatSearchBar } from './chat/search-bar'
 import { SessionActivityDock } from './chat/session-activity'
-import { HandoffDraftPreviewModal, HandoffModal, harnessDisplayName } from './chat/handoff-modal'
+import { HandoffOriginBadge } from './chat/handoff-badge'
+import { HandoffDraftPreviewModal, HandoffModal } from './chat/handoff-modal'
+import { resolveSessionHandoffBadge } from './session-title'
+import { harnessDisplayName } from '../lib/handoff-preview'
 import { SessionInfo } from './chat/session-info'
 import { createStyles } from './chat/styles'
 import { formatUploadedChatFiles } from './chat/submitted-files'
@@ -838,6 +841,20 @@ const ChatConversationPane = memo(function ChatConversationPane({
     updateBrowseEntry(memoryScope, session?.sessionId ?? '', {quotes: typeof value === 'function' ? value(previous) : value})
   }, [memoryKey, memoryScope, session?.sessionId])
   const pendingHandoff = useBrowseMemory(state => state.entries[memoryKey]?.handoff)
+  const storedHandoffOrigin = useBrowseMemory(state =>
+    session === undefined ? undefined : state.handoffOrigins[memoryScope]?.[session.sessionId],
+  )
+  const effectiveStoredOrigin = useMemo(
+    () => storedHandoffOrigin ?? (pendingHandoff === undefined ? undefined : {
+      sourceBackend: pendingHandoff.meta.sourceBackend,
+      targetBackend: pendingHandoff.meta.targetBackend,
+      sourceSessionId: pendingHandoff.meta.sourceSessionId,
+      ...(pendingHandoff.meta.sourceTitle !== undefined ? { sourceTitle: pendingHandoff.meta.sourceTitle } : {}),
+      preset: pendingHandoff.meta.preset,
+      createdAt: pendingHandoff.meta.createdAt,
+    }),
+    [storedHandoffOrigin, pendingHandoff],
+  )
   const setPendingHandoff = (value?: PendingHandoffDraft) => {
     updateBrowseEntry(memoryScope, session?.sessionId ?? '', { handoff: value })
   }
@@ -1053,6 +1070,19 @@ const ChatConversationPane = memo(function ChatConversationPane({
     [chunkedSections, normalizedSearchQuery],
   )
   const searchMatchCount = searchIndex?.matches.length ?? 0
+  const handoffBadge = useMemo(
+    () => (session === undefined ? undefined : resolveSessionHandoffBadge(session, effectiveStoredOrigin, visibleMessages)),
+    [session, effectiveStoredOrigin, visibleMessages],
+  )
+  const chatSessionTitle = useMemo(
+    () => (session === undefined ? strings.sessions.newSession : sessionTitle(session, handoffBadge?.origin, visibleMessages)),
+    [session, handoffBadge?.origin, visibleMessages],
+  )
+  const handoffSourceLabel = handoffBadge === undefined
+    ? undefined
+    : handoffBadge.sourceBackend !== undefined
+      ? harnessDisplayName(handoffBadge.sourceBackend)
+      : ''
 
   useEffect(() => {
     if (!searchActive || searchIndex === undefined) {
@@ -2001,7 +2031,13 @@ const ChatConversationPane = memo(function ChatConversationPane({
         />
       ) : (
         <TopBar
-          title={sessionTitle(session)}
+          title={chatSessionTitle}
+          titleAccessory={handoffSourceLabel !== undefined
+            ? <HandoffOriginBadge sourceLabel={handoffSourceLabel} compact />
+            : undefined}
+          onTitlePress={handoffBadge !== undefined
+            ? () => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }
+            : undefined}
           subtitle={sessionModels !== undefined ? (currentModelLabel || strings.chat.selectModel) : undefined}
           subtitleLabel={strings.chat.selectModel}
           subtitleAccessory={modelSelecting
@@ -2318,7 +2354,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
         onChangeView={setHeaderPopoverView}
         onDismiss={headerPopoverActions.onDismiss}
         runAfterClose={runAfterHeaderPopover}
-        sessionTitle={sessionTitle(session)}
+        sessionTitle={chatSessionTitle}
         sessionId={session.sessionId}
         workspaces={workspaces}
         sessionBackend={session.backend}
@@ -2354,6 +2390,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
             visible={sessionInfoOpen}
             session={session}
             workspace={currentWorkspace}
+            handoffOrigin={handoffBadge?.origin}
             onClose={closeSessionInfo}
             onDismiss={sessionInfoActions.onDismiss}
             runAfterClose={runAfterSessionInfo}
@@ -2361,6 +2398,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
               if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
               else onOpenSessionsDrawer()
             }}
+            onOpenSession={target => { void openSession(target) }}
           />
         )}
       />

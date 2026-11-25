@@ -154,7 +154,16 @@ export class RemoteClientCore {
     if (message.type === 'rpc.error') this.handleError(message as RemoteMessage<RpcErrorPayload>)
     if (message.type === 'event') {
       const event = message.payload as EventPayload
-      for (const handler of this.eventHandlers) handler(event)
+      for (const handler of [...this.eventHandlers]) {
+        if (!this.eventHandlers.has(handler)) continue
+        try {
+          handler(event)
+        } catch (error) {
+          // One failing subscriber must neither skip remaining listeners nor tear
+          // down the underlying encrypted transport.
+          console.error('[dsh-remote] event handler error:', error instanceof Error ? error.name : 'unknown')
+        }
+      }
     }
   }
 
@@ -196,7 +205,14 @@ export class RemoteClientCore {
   private notifyClose(error?: Error): void {
     if (this.closeNotified) return
     this.closeNotified = true
-    for (const handler of this.closeHandlers) handler(error)
+    for (const handler of [...this.closeHandlers]) {
+      if (!this.closeHandlers.has(handler)) continue
+      try {
+        handler(error)
+      } catch (handlerError) {
+        console.error('[dsh-remote] close handler error:', handlerError instanceof Error ? handlerError.name : 'unknown')
+      }
+    }
   }
 }
 

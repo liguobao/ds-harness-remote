@@ -776,6 +776,16 @@ unary 调用随对端连接关闭一并取消）；超过 2 MiB 的请求（如�
 客户端自动切换至 `harness.remote.transfer.*` 分片传输（受有界传输上限约束，且客户端分片传输
 总预算额外留出分片上传余量）。
 
+Harness Remote 固定白名单允许 DS Bot 插件的 `dsBot/call` unary 调用与 `dsBot/feed` stream 订阅；
+不开放 `dsBot/*` 命名空间的其他方法，且严格区分 unary 与 stream（通过 `harness.remote.call`
+调用 `dsBot/feed` 或通过 `harness.remote.stream.open` 打开 `dsBot/call` 均以 `METHOD_NOT_ALLOWED`
+拒绝）。Host 必须启用 `ds-bot` 插件，原生 Gateway 的不可用或插件自身边界拒绝结果原样返回；
+`dsBot/call` 透传 `ds-bot` 当前注册的 `channel` 操作（本机专属操作的 `bot/refused` 拦截——当前
+`v0.3.10` 为 `phone-*` 配对管理与 `folder-pick` 本机弹窗，后续版本按 `ds-bot` 自身策略扩展——
+由 `ds-bot` 负责），与 `plugin.route.call` 的固定操作快照白名单相互独立；`dsBot/feed` 的
+512 条有界队列背压亦由 `ds-bot` 负责。经由 `dsBot/call` 返回的成功响应同样会只读旁路喂给
+Host `HostAttentionTracker`，保持多端收件箱与盲信号一致。
+
 ### 16.1 Request
 
 ```json

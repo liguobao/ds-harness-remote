@@ -66946,9 +66946,13 @@ var AgentAcpClient = class {
     const streamId = createRemoteId();
     let closed = false;
     let opened = false;
+    let coreClosed = false;
+    let callerClosed = false;
+    let pendingClosed;
     let unsubscribe = () => void 0;
     let unsubscribeCoreClose = () => void 0;
     const onAbort = () => {
+      callerClosed = true;
       if (!markClosed())
         return;
       void this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
@@ -66972,11 +66976,17 @@ var AgentAcpClient = class {
       if (event2.event === "agent.acp.stream.closed" && isRecord2(event2.data) && event2.data.streamId === streamId) {
         if (!markClosed())
           return;
-        onClosed?.(event2.data);
+        const closedData = event2.data;
+        if (!opened) {
+          pendingClosed = closedData;
+          return;
+        }
+        onClosed?.(closedData);
       }
     });
     unsubscribeCoreClose = this.core.onClose(() => {
       if (!opened) {
+        coreClosed = true;
         markClosed();
         return;
       }
@@ -66987,9 +66997,17 @@ var AgentAcpClient = class {
     try {
       await this.core.rpc("agent.acp.stream.open", { streamId, sessionId, ...tool ? { tool } : {} }, signal);
       if (signal?.aborted) {
+        callerClosed = true;
+        const shouldCloseRemote = !closed;
         markClosed();
-        await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
+        if (shouldCloseRemote) {
+          await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
+        }
         throw signal.reason;
+      }
+      if (coreClosed) {
+        markClosed();
+        throw new RemoteGatewayError("TRANSPORT_CLOSED", "The Remote connection closed while opening the ACP stream.");
       }
       opened = true;
       if (!closed) {
@@ -66999,9 +67017,25 @@ var AgentAcpClient = class {
       markClosed();
       throw error62;
     }
+    if (pendingClosed !== void 0) {
+      const deferredClosed = pendingClosed;
+      pendingClosed = void 0;
+      queueMicrotask(() => {
+        queueMicrotask(() => {
+          if (callerClosed || signal?.aborted)
+            return;
+          try {
+            onClosed?.(deferredClosed);
+          } catch (error62) {
+            console.error("[dsh-remote] event handler error:", error62 instanceof Error ? error62.name : "unknown");
+          }
+        });
+      });
+    }
     return {
       streamId,
       close: async () => {
+        callerClosed = true;
         if (!markClosed())
           return;
         await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
@@ -69475,8 +69509,15 @@ var RemoteClientCore = class {
       this.handleError(message);
     if (message.type === "event") {
       const event2 = message.payload;
-      for (const handler of this.eventHandlers)
-        handler(event2);
+      for (const handler of [...this.eventHandlers]) {
+        if (!this.eventHandlers.has(handler))
+          continue;
+        try {
+          handler(event2);
+        } catch (error62) {
+          console.error("[dsh-remote] event handler error:", error62 instanceof Error ? error62.name : "unknown");
+        }
+      }
     }
   }
   handleResponse(message) {
@@ -69518,8 +69559,15 @@ var RemoteClientCore = class {
     if (this.closeNotified)
       return;
     this.closeNotified = true;
-    for (const handler of this.closeHandlers)
-      handler(error62);
+    for (const handler of [...this.closeHandlers]) {
+      if (!this.closeHandlers.has(handler))
+        continue;
+      try {
+        handler(error62);
+      } catch (handlerError) {
+        console.error("[dsh-remote] close handler error:", handlerError instanceof Error ? handlerError.name : "unknown");
+      }
+    }
   }
 };
 function rpcAbortedError(method, reason) {
@@ -93010,6 +93058,7 @@ var HostAttentionTracker = class {
       onStreamOpened: () => this.onHarnessEventStreamOpened(),
       onFrame: (frame) => this.observeHarnessEventFrame(frame),
       onEventResult: (eventId, outcomeKind) => this.observeHarnessEventResult(eventId, outcomeKind),
+      onDsBotCall: (body, botResult) => this.observeBotResponse("api/bot", body, { status: 200, json: botResult }),
       onStreamClosed: () => this.onHarnessEventStreamClosed()
     };
   }
@@ -113555,6 +113604,8 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "credentials/set",
   "credentials/unset",
   "directoryPicker/list",
+  "dsBot/call",
+  "dsBot/feed",
   "fileReferences/list",
   "goals/clear",
   "goals/complete",
@@ -113740,6 +113791,7 @@ var HarnessRemoteBridge = class {
     this.assertAllowed(params.endpoint);
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
     if (params.endpoint === "speech/follow") throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this speech endpoint.");
+    if (params.endpoint === "dsBot/feed") throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this DS Bot feed endpoint.");
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
       const args = requestArgs(params.payload);
       if (args.ns === "ds-harness-remote" || args.ns === "dsh-remote") {
@@ -113805,6 +113857,18 @@ var HarnessRemoteBridge = class {
         if (eventId !== void 0) {
           try {
             this.forwardedEventsObserver.onEventResult(eventId, outcomeKind);
+          } catch {
+          }
+        }
+      }
+      if (params.endpoint === "dsBot/call" && nativeResult.ok && isRecord26(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== void 0) {
+        const root2 = record11(params.payload);
+        const args = isRecord26(root2.args) ? root2.args : root2;
+        const botEndpoint = typeof args.endpoint === "string" && args.endpoint.length > 0 ? args.endpoint : void 0;
+        if (botEndpoint !== void 0) {
+          const botPayload = isRecord26(args.payload) ? args.payload : null;
+          try {
+            this.forwardedEventsObserver.onDsBotCall({ endpoint: botEndpoint, payload: botPayload }, nativeResult.value);
           } catch {
           }
         }
@@ -114039,6 +114103,9 @@ var HarnessRemoteBridge = class {
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
     if (params.endpoint.startsWith("speech/") && params.endpoint !== "speech/follow") {
       throw new RpcError("METHOD_NOT_ALLOWED", "This speech endpoint is not a stream.");
+    }
+    if (params.endpoint === "dsBot/call") {
+      throw new RpcError("METHOD_NOT_ALLOWED", "This DS Bot endpoint is not a stream.");
     }
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness Remote stream is already open.");

@@ -1,6 +1,9 @@
 import * as Haptics from 'expo-haptics'
 import { friendlyError, isQueueItemNotFoundError, isRecoverableTransportError, isRpcTimeoutError } from '../lib/errors'
+import { parseHandoffMessage } from '../lib/handoff-context'
+import { firstLineSnippet, harnessDisplayName, isHandoffRawText, sanitizeHandoffDisplayTitle } from '../lib/handoff-preview'
 import { strings as zhCN } from '../locales/i18n'
+import { browseScope, recordHandoffOrigin } from '../services/browse-memory'
 import { createNativeRpcId } from '../services/rpc-id'
 import {
   codexPermissionPresetFromResponse,
@@ -84,6 +87,26 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           return 'rejected'
         }
       }
+      const parsedHandoff = parseHandoffMessage(text)
+      if (parsedHandoff !== undefined) {
+        const fallbackTitle = firstLineSnippet(parsedHandoff.instruction, 80)
+        recordHandoffOrigin(browseScope(get()), session.sessionId, {
+          sourceBackend: parsedHandoff.meta.sourceBackend,
+          targetBackend: parsedHandoff.meta.targetBackend,
+          sourceSessionId: parsedHandoff.meta.sourceSessionId,
+          ...(parsedHandoff.meta.sourceTitle !== undefined ? { sourceTitle: parsedHandoff.meta.sourceTitle } : {}),
+          ...(fallbackTitle !== undefined ? { fallbackTitle } : {}),
+          preset: parsedHandoff.meta.preset,
+          createdAt: parsedHandoff.meta.createdAt,
+        })
+      }
+      const optimisticAcpTitle = parsedHandoff !== undefined
+        ? (parsedHandoff.meta.sourceTitle?.trim()
+          || firstLineSnippet(parsedHandoff.instruction, 60)
+          || `${harnessDisplayName(parsedHandoff.meta.sourceBackend)} → ${harnessDisplayName(parsedHandoff.meta.targetBackend)}`)
+        : isHandoffRawText(text)
+          ? (sanitizeHandoffDisplayTitle(text, zhCN.handoff.title) ?? zhCN.handoff.title)
+          : (text.slice(0, 60) || zhCN.chat.unnamedImage)
       const requestRpcId = reuseRpcId ?? createNativeRpcId()
       // DSH semantics (`ui-conversation.busyEnter`): while a turn is active,
       // prompts default to `'queue'` unless the user selected `'steer'`.
@@ -204,9 +227,9 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           await runtime.ensureCursorStream(session, () => streamGeneration === runtime.sessionLoadGeneration
             && get().selectedSession?.sessionId === session.sessionId)
           set(state => ({
-            sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true, blank: false, title: item.blank ? text.slice(0, 60) || zhCN.chat.unnamedImage : item.title } : item),
+            sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true, blank: false, title: item.blank ? optimisticAcpTitle : item.title } : item),
             selectedSession: state.selectedSession?.sessionId === session.sessionId
-              ? { ...state.selectedSession, running: true, blank: false, title: state.selectedSession.blank ? text.slice(0, 60) || zhCN.chat.unnamedImage : state.selectedSession.title }
+              ? { ...state.selectedSession, running: true, blank: false, title: state.selectedSession.blank ? optimisticAcpTitle : state.selectedSession.title }
               : state.selectedSession,
           }))
           // Host may return immediately with stopReason=in_progress so frames can

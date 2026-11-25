@@ -1256,6 +1256,7 @@ const deDE = {
     continueInOrigin: (target: string) => `Zur ${target}-Ursprungssitzung zurückkehren`,
     continueInExisting: (target: string) => `Zur gewählten ${target}-Sitzung wechseln`,
     handoffExistingSuccess: 'Zielsitzung geöffnet',
+    badgeFrom: (from: string) => `Von ${from}`,
   },
 } satisfies Messages
 

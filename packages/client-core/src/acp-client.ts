@@ -347,9 +347,13 @@ export class AgentAcpClient {
     const streamId = createRemoteId()
     let closed = false
     let opened = false
+    let coreClosed = false
+    let callerClosed = false
+    let pendingClosed: AgentAcpStreamClosedData | undefined
     let unsubscribe: () => void = () => undefined
     let unsubscribeCoreClose: () => void = () => undefined
     const onAbort = () => {
+      callerClosed = true
       if (!markClosed()) return
       void this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined)
     }
@@ -369,11 +373,21 @@ export class AgentAcpClient {
       }
       if (event.event === 'agent.acp.stream.closed' && isRecord(event.data) && event.data.streamId === streamId) {
         if (!markClosed()) return
-        onClosed?.(event.data as unknown as AgentAcpStreamClosedData)
+        const closedData = event.data as unknown as AgentAcpStreamClosedData
+        // Host may emit `stream.closed` before the `stream.open` RPC response arrives
+        // (e.g. after replaying buffered frames for a downed backend). Defer `onClosed`
+        // until `openStream` resolves so callers never observe a callback before receiving
+        // the stream handle.
+        if (!opened) {
+          pendingClosed = closedData
+          return
+        }
+        onClosed?.(closedData)
       }
     })
     unsubscribeCoreClose = this.core.onClose(() => {
       if (!opened) {
+        coreClosed = true
         markClosed()
         return
       }
@@ -383,9 +397,17 @@ export class AgentAcpClient {
     try {
       await this.core.rpc('agent.acp.stream.open', { streamId, sessionId, ...(tool ? { tool } : {}) }, signal)
       if (signal?.aborted) {
+        callerClosed = true
+        const shouldCloseRemote = !closed
         markClosed()
-        await this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined)
+        if (shouldCloseRemote) {
+          await this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined)
+        }
         throw signal.reason
+      }
+      if (coreClosed) {
+        markClosed()
+        throw new RemoteGatewayError('TRANSPORT_CLOSED', 'The Remote connection closed while opening the ACP stream.')
       }
       opened = true
       if (!closed) {
@@ -395,9 +417,27 @@ export class AgentAcpClient {
       markClosed()
       throw error
     }
+    if (pendingClosed !== undefined) {
+      const deferredClosed = pendingClosed
+      pendingClosed = undefined
+      // Two microtask ticks ensure the caller's `await openStream()` continuation
+      // (and any synchronous assignment, `close()`, or `signal.abort()` right after it)
+      // runs first.
+      queueMicrotask(() => {
+        queueMicrotask(() => {
+          if (callerClosed || signal?.aborted) return
+          try {
+            onClosed?.(deferredClosed)
+          } catch (error) {
+            console.error('[dsh-remote] event handler error:', error instanceof Error ? error.name : 'unknown')
+          }
+        })
+      })
+    }
     return {
       streamId,
       close: async () => {
+        callerClosed = true
         if (!markClosed()) return
         await this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined)
       },

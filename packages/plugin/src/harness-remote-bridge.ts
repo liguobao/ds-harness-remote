@@ -137,6 +137,8 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'credentials/set',
   'credentials/unset',
   'directoryPicker/list',
+  'dsBot/call',
+  'dsBot/feed',
   'fileReferences/list',
   'goals/clear',
   'goals/complete',
@@ -325,6 +327,7 @@ export interface HarnessForwardedEventsObserver {
   onStreamOpened?(): void
   onFrame(frame: unknown): void
   onEventResult?(eventId: string, outcomeKind?: string): void
+  onDsBotCall?(body: { endpoint: string; payload?: Record<string, unknown> | null }, botResult: unknown): void
   onStreamClosed?(): void
 }
 
@@ -365,6 +368,7 @@ export class HarnessRemoteBridge {
     this.assertAllowed(params.endpoint)
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
     if (params.endpoint === 'speech/follow') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this speech endpoint.')
+    if (params.endpoint === 'dsBot/feed') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this DS Bot feed endpoint.')
     if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {
       const args = requestArgs(params.payload)
       if (args.ns === 'ds-harness-remote' || args.ns === 'dsh-remote') {
@@ -437,6 +441,19 @@ export class HarnessRemoteBridge {
         if (eventId !== undefined) {
           try {
             this.forwardedEventsObserver.onEventResult(eventId, outcomeKind)
+          } catch {
+            // Read-only event observation must never disrupt RPC settlement.
+          }
+        }
+      }
+      if (params.endpoint === 'dsBot/call' && nativeResult.ok && isRecord(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== undefined) {
+        const root = record(params.payload)
+        const args = isRecord(root.args) ? root.args : root
+        const botEndpoint = typeof args.endpoint === 'string' && args.endpoint.length > 0 ? args.endpoint : undefined
+        if (botEndpoint !== undefined) {
+          const botPayload = isRecord(args.payload) ? args.payload : null
+          try {
+            this.forwardedEventsObserver.onDsBotCall({ endpoint: botEndpoint, payload: botPayload }, nativeResult.value)
           } catch {
             // Read-only event observation must never disrupt RPC settlement.
           }
@@ -695,6 +712,9 @@ export class HarnessRemoteBridge {
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'This terminal endpoint is not a stream.')
     if (params.endpoint.startsWith('speech/') && params.endpoint !== 'speech/follow') {
       throw new RpcError('METHOD_NOT_ALLOWED', 'This speech endpoint is not a stream.')
+    }
+    if (params.endpoint === 'dsBot/call') {
+      throw new RpcError('METHOD_NOT_ALLOWED', 'This DS Bot endpoint is not a stream.')
     }
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload)
     if (this.streams.has(params.streamId)) throw new RpcError('REQUEST_CONFLICT', 'The Harness Remote stream is already open.')

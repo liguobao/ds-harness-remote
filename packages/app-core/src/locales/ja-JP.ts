@@ -1256,6 +1256,7 @@ const jaJP = {
     continueInOrigin: (target: string) => `${target} の元のセッションに戻る`,
     continueInExisting: (target: string) => `選択した ${target} セッションに切り替え`,
     handoffExistingSuccess: '引き継ぎ先セッションを開きました',
+    badgeFrom: (from: string) => `${from} から`,
   },
 } satisfies Messages
 
