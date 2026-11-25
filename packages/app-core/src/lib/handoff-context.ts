@@ -2,7 +2,11 @@ import { processDetail } from '../screens/chat-process'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import type { AgentBackend, ChatItem, ToolActivity } from '../types'
 import { heartbeatMessageBody } from '../ui/heartbeat-message'
-import { HANDOFF_COMMENT_PREFIX } from './handoff-preview'
+import {
+  HANDOFF_COMMENT_PREFIX,
+  firstLineSnippet,
+  type SessionHandoffOrigin,
+} from './handoff-preview'
 
 export type HandoffPreset = 'review' | 'continue' | 'custom'
 
@@ -347,8 +351,14 @@ function formatEntryBlock(entry: HandoffEntry, maxTextChars?: number): string {
 }
 
 function safeCommentJson(meta: HandoffMeta): string {
-  // Put the human title first so short first-message previews can still recover it.
-  return JSON.stringify({ sourceTitle: meta.sourceTitle, ...meta })
+  // Keep backend direction first and sourceTitle next so short previews retain both.
+  const { sourceBackend, targetBackend, sourceTitle, ...rest } = meta
+  return JSON.stringify({
+    sourceBackend,
+    targetBackend,
+    sourceTitle,
+    ...rest,
+  })
     .replace(/--/gu, '\\u002d\\u002d')
     .replace(/</gu, '\\u003c')
     .replace(/>/gu, '\\u003e')
@@ -547,4 +557,28 @@ export function formatHandoffPayload(
   const trimmedInstruction = instruction.trim()
   if (trimmedInstruction.length === 0) return safeBlock
   return `${safeBlock}\n\n${trimmedInstruction}`
+}
+
+/** Extract normalized handoff origin metadata from loaded chat messages, preferring the latest handoff turn. */
+export function extractHandoffOriginFromItems(
+  items: readonly ChatItem[] | undefined,
+): SessionHandoffOrigin | undefined {
+  if (!items || items.length === 0) return undefined
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i]
+    if (item?.kind !== 'message' || item.role !== 'user') continue
+    const parsed = parseHandoffMessage(item.text)
+    if (parsed === undefined) continue
+    const fallbackTitle = firstLineSnippet(parsed.instruction, 80)
+    return {
+      sourceBackend: parsed.meta.sourceBackend,
+      targetBackend: parsed.meta.targetBackend,
+      sourceSessionId: parsed.meta.sourceSessionId,
+      ...(parsed.meta.sourceTitle !== undefined ? { sourceTitle: parsed.meta.sourceTitle } : {}),
+      ...(fallbackTitle !== undefined ? { fallbackTitle } : {}),
+      preset: parsed.meta.preset,
+      createdAt: parsed.meta.createdAt,
+    }
+  }
+  return undefined
 }

@@ -1263,6 +1263,7 @@ const zhTW = {
     continueInOrigin: (target: string) => `回到 ${target} 原會話`,
     continueInExisting: (target: string) => `切回 ${target} 所選會話`,
     handoffExistingSuccess: '已開啟目標會話',
+    badgeFrom: (from: string) => `來自 ${from}`,
   },
 } as const
 

@@ -1,6 +1,7 @@
 import { isSubagentSession } from '../../lib/session-kind'
+import type { SessionHandoffOrigin } from '../../lib/handoff-preview'
 import { strings as zhCN } from '../../locales/i18n'
-import type { RemoteSession } from '../../types'
+import type { ChatItem, RemoteSession } from '../../types'
 import { resolveSessionDisplayTitle } from '../session-title'
 
 export function relativeTime(timestamp: number): string {
@@ -11,8 +12,12 @@ export function relativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(zhCN.time.locale)
 }
 
-export function sessionTitle(session: RemoteSession): string {
-  const title = resolveSessionDisplayTitle(session)
+export function sessionTitle(
+  session: RemoteSession,
+  storedOrigin?: SessionHandoffOrigin,
+  messages?: readonly ChatItem[],
+): string {
+  const title = resolveSessionDisplayTitle(session, storedOrigin, messages)
   if (title !== undefined) return title
   return isSubagentSession(session) ? zhCN.sessions.child : zhCN.sessions.untitled
 }

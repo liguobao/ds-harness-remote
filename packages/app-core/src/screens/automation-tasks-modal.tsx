@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native'
 import { Alert } from '../ui/alert'
+import { sanitizeHandoffDisplayTitle } from '../lib/handoff-preview'
 import {
   AlertCircle,
   ArrowLeft,
@@ -41,6 +42,7 @@ import type {
   ScheduleRecord,
   ScheduleTimingChange,
 } from '../types'
+import { resolveSessionDisplayTitle } from './session-title'
 import { strings } from '../locales/i18n'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { androidRipple, continuousRadius } from '../ui/platform-style'
@@ -270,8 +272,9 @@ export function AutomationTasksModal({
       )
       if (room) return `DS-Bot · ${room.name}`
     }
-    return title !== undefined && title !== null && title.trim() !== '' && title !== sessionId
-      ? title
+    const cleanTitle = sanitizeHandoffDisplayTitle(title ?? undefined, strings.handoff.title)
+    return cleanTitle !== undefined && cleanTitle !== sessionId
+      ? cleanTitle
       : sessionId.slice(-8)
   }
 
@@ -1029,7 +1032,7 @@ export function AutomationTasksModal({
                             style={[styles.optionChipText, active && styles.optionChipTextActive]}
                             numberOfLines={1}
                           >
-                            {sessionLabel(session.sessionId, session.title)}
+                            {sessionLabel(session.sessionId, resolveSessionDisplayTitle(session) ?? session.title)}
                           </Text>
                         </Pressable>
                       )
@@ -1386,7 +1389,7 @@ export function AutomationTasksModal({
                     <View style={styles.linkedSessionRow}>
                       <MessageSquare size={16} color={colors.muted} />
                       <Text style={styles.linkedSessionTitle} numberOfLines={1}>
-                        {sessionLabel(selectedTask.sessionId, linkedSession?.title)}
+                        {sessionLabel(selectedTask.sessionId, linkedSession ? (resolveSessionDisplayTitle(linkedSession) ?? linkedSession.title) : undefined)}
                       </Text>
                     </View>
                     <Pressable
@@ -1427,7 +1430,7 @@ export function AutomationTasksModal({
                         </Text>
                       </Text>
                       <Text style={styles.fieldValueMuted}>
-                        {sessionLabel(selectedTask.sessionId, linkedSession?.title)}
+                        {sessionLabel(selectedTask.sessionId, linkedSession ? (resolveSessionDisplayTitle(linkedSession) ?? linkedSession.title) : undefined)}
                       </Text>
                     </View>
                   ) : (

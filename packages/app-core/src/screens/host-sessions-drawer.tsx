@@ -69,12 +69,13 @@ import {
   useResponsiveLayout,
 } from '../ui/responsive'
 import { useReduceMotion } from '../ui/use-reduce-motion'
-import { resolveSessionDisplayTitle } from './session-title'
+import { resolveSessionDisplayTitle, resolveSessionHandoffBadge } from './session-title'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { isVisibleSession } from '../lib/session-visibility'
 import { isSubagentSession } from '../lib/session-kind'
 import { isAcpManagedBackend } from '../lib/workspace-key'
-import { harnessDisplayName } from './chat/handoff-modal'
+import { harnessDisplayName, type SessionHandoffOrigin } from '../lib/handoff-preview'
+import { HandoffOriginBadge } from './chat/handoff-badge'
 import { browseStatus } from '../lib/backend-groups'
 import { browseScope, saveHostMode, useBrowseMemory } from '../services/browse-memory'
 import {
@@ -248,6 +249,8 @@ const BotModalsGate = memo(function BotModalsGate({ visible, gate }: { visible: 
 
 interface SessionListRowProps {
   item: RemoteSession
+  displayTitle: string
+  handoffSourceLabel?: string
   sectionId: string
   accountKey: string
   index: number
@@ -277,6 +280,8 @@ interface SessionListRowProps {
 
 const SessionListRow = memo(function SessionListRow({
   item,
+  displayTitle,
+  handoffSourceLabel,
   sectionId,
   accountKey,
   index,
@@ -303,9 +308,11 @@ const SessionListRow = memo(function SessionListRow({
   onTouchCancel,
   onMorePress,
 }: SessionListRowProps) {
-  const displayTitle = resolveSessionDisplayTitle(item) ?? strings.sessions.untitled
   const status = attentionStatus && attentionStatusVisual(attentionStatus, colors, scheme)
-  const accessibilityLabel = [displayTitle, status?.label, isPinned ? strings.sessions.pinned : undefined].filter(Boolean).join(', ')
+  const handoffLabel = handoffSourceLabel !== undefined
+    ? (handoffSourceLabel.length > 0 ? strings.handoff.badgeFrom(handoffSourceLabel) : strings.handoff.title)
+    : undefined
+  const accessibilityLabel = [displayTitle, handoffLabel, status?.label, isPinned ? strings.sessions.pinned : undefined].filter(Boolean).join(', ')
 
   return (
     <Pressable
@@ -344,6 +351,11 @@ const SessionListRow = memo(function SessionListRow({
       >
         {displayTitle}
       </Text>
+      {handoffSourceLabel !== undefined && (
+        <View style={styles.handoffBadgeSlot}>
+          <HandoffOriginBadge sourceLabel={handoffSourceLabel} selected={isSelected} compact />
+        </View>
+      )}
       {timeStr ? <Text style={styles.timeText}>{timeStr}</Text> : null}
       {isPinned && (
         <View style={styles.pinIndicator} accessibilityLabel={strings.sessions.pinned}>
@@ -659,6 +671,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   const unarchiveSession = useStoreGateSelector(useAppStore, state => state.unarchiveSession, gate)
 
   const hostScope = useStoreGateSelector(useAppStore, browseScope, gate)
+  const handoffOrigins = useStoreGateSelector(useBrowseMemory, state => state.handoffOrigins[hostScope], gate)
   const persistedBotMode = useStoreGateSelector(useBrowseMemory, state => state.hostModes[hostScope] === 'bot', gate)
   const activeBotMode = botMode ?? persistedBotMode
   const [drawerMode, setDrawerMode] = useState<'agent' | 'bot'>(activeBotMode ? 'bot' : 'agent')
@@ -1145,13 +1158,18 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim()
-      list = list.filter(s => (resolveSessionDisplayTitle(s) ?? '').toLowerCase().includes(q))
+      list = list.filter(s => {
+        const badge = resolveSessionHandoffBadge(s, handoffOrigins?.[s.sessionId])
+        const title = resolveSessionDisplayTitle(s, badge?.origin) ?? ''
+        const sourceName = badge?.sourceBackend ? harnessDisplayName(badge.sourceBackend) : ''
+        return title.toLowerCase().includes(q) || sourceName.toLowerCase().includes(q)
+      })
     }
     if (orderBy === 'updated') {
       list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
     }
     return list
-  }, [sessions, selected, backend, archivedSet, filterMode, searchQuery, orderBy, botTeamState, hostScope])
+  }, [sessions, selected, backend, archivedSet, filterMode, searchQuery, orderBy, botTeamState, hostScope, handoffOrigins])
 
   const sections = useMemo<DrawerSection[]>(() => {
     const isRowPinned = (s: RemoteSession) => {
@@ -1725,10 +1743,19 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
       const isDragTarget = dragState !== null && dragState.sectionId === section.id && dragState.overIndex === index && !isDragging && isPinned === dragState.isPinned
       const dropAbove = isDragTarget && dragState.fromIndex > index
       const dropBelow = isDragTarget && dragState.fromIndex < index
+      const handoffBadge = resolveSessionHandoffBadge(item, handoffOrigins?.[item.sessionId])
+      const displayTitle = resolveSessionDisplayTitle(item, handoffBadge?.origin) ?? strings.sessions.untitled
+      const handoffSourceLabel = handoffBadge === undefined
+        ? undefined
+        : handoffBadge.sourceBackend !== undefined
+          ? harnessDisplayName(handoffBadge.sourceBackend)
+          : ''
 
       return (
         <SessionListRow
           item={item}
+          displayTitle={displayTitle}
+          handoffSourceLabel={handoffSourceLabel}
           sectionId={section.id}
           accountKey={accountKey}
           index={index}
@@ -1766,6 +1793,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
       pinnedSet,
       archivedSet,
       backend,
+      handoffOrigins,
       dragState,
       language,
       styles,
@@ -2172,7 +2200,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
             <View style={styles.contextMenuCard} onStartShouldSetResponder={() => true}>
               <View style={styles.menuHeader}>
                 <Text style={styles.menuTitle} numberOfLines={1}>
-                  {resolveSessionDisplayTitle(menuSession) ?? strings.sessions.untitled}
+                  {resolveSessionDisplayTitle(menuSession, handoffOrigins?.[menuSession.sessionId]) ?? strings.sessions.untitled}
                 </Text>
               </View>
 
@@ -2213,7 +2241,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                   onPress={() => {
                     const target = {
                       sessionId: menuSession.sessionId,
-                      currentTitle: resolveSessionDisplayTitle(menuSession) ?? '',
+                      currentTitle: resolveSessionDisplayTitle(menuSession, handoffOrigins?.[menuSession.sessionId]) ?? '',
                       backend: menuSession.backend,
                     }
                     setMenuSession(null)
@@ -3340,6 +3368,7 @@ const createStyles = (colors: ThemeColors) =>
     runningDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
     sessionText: { ...type.body, fontSize: 15, color: colors.ink, flex: 1, marginRight: spacing.xs },
     sessionTextSelected: { fontWeight: '600', color: colors.primary },
+    handoffBadgeSlot: { marginRight: spacing.xs, flexShrink: 0 },
     timeText: { ...type.caption, color: colors.muted, ...tabularNumsStyle },
 
     showMoreRow: {

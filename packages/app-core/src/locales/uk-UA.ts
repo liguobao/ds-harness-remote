@@ -1277,6 +1277,7 @@ const ukUA = {
     continueInOrigin: (target: string) => `Повернутися до вихідної сесії ${target}`,
     continueInExisting: (target: string) => `Перемкнутися на вибрану сесію ${target}`,
     handoffExistingSuccess: 'Цільову сесію відкрито',
+    badgeFrom: (from: string) => `Від ${from}`,
   },
 } satisfies Messages
 

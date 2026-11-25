@@ -1256,6 +1256,7 @@ const esES = {
     continueInOrigin: (target: string) => `Volver a la sesión de origen en ${target}`,
     continueInExisting: (target: string) => `Cambiar a la sesión seleccionada en ${target}`,
     handoffExistingSuccess: 'Sesión de destino abierta',
+    badgeFrom: (from: string) => `De ${from}`,
   },
 } satisfies Messages
 

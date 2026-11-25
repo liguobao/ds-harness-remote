@@ -143,7 +143,8 @@ import {
   resolveHandoffTargetSessions,
 } from '../src/lib/handoff-workspace'
 import { strings as zhCN } from '../src/locales/i18n'
-import { browseKey, browseScope, saveSessionMessagesSnapshot, useBrowseMemory } from '../src/services/browse-memory'
+import { browseKey, browseScope, flushBrowseMemory, getHandoffOrigin, hydrateBrowseMemory, recordHandoffOrigin, saveSessionMessagesSnapshot, useBrowseMemory } from '../src/services/browse-memory'
+import { deriveLegacyAttentionItems, useAttentionStore } from '../src/state/attention-store'
 import { storeAcpPagedMessages } from '../src/state/session-actions'
 import { useAppStore } from '../src/state/store'
 
@@ -813,6 +814,7 @@ describe('session-actions handoff integration', () => {
       catalogs: {},
       deletedWorkspaces: {},
       hostModes: {},
+      handoffOrigins: {},
       resume: false,
       notifications: true,
       autoConnectHost: true,
@@ -2158,6 +2160,280 @@ describe('session-actions handoff integration', () => {
           },
         },
       ])
+    })
+
+    it('records handoffOrigins in browse-memory across handoffSession, ACP sendMessage, openSession backfill, and sanitizes legacy attention', async () => {
+      files.clear()
+      keys.clear()
+      useBrowseMemory.setState({ ready: false, handoffOrigins: {} })
+      await hydrateBrowseMemory()
+
+      const ws: WorkspaceView = {
+        workspaceId: 'ws-claude',
+        title: 'proj',
+        path: '/tmp/proj',
+        backend: 'claude',
+        sessionIds: ['claude:blank-1'],
+        createdAt: '2026-11-23T00:00:00Z',
+        updatedAt: '2026-11-23T00:00:00Z',
+      }
+      const blankTarget: RemoteSession = {
+        sessionId: 'claude:blank-1',
+        nativeId: 'blank-1',
+        backend: 'claude',
+        cwd: '/tmp/proj',
+        updatedAt: 50,
+        running: false,
+        blank: true,
+      }
+      useAppStore.setState({ workspaces: [ws], sessions: [blankTarget] })
+      acp.loadSessionDetails = vi.fn(async () => ({ events: [] }))
+      acp.prompt.mockResolvedValueOnce({ accepted: true, stopReason: 'end_turn' })
+
+      const packet = buildHandoffPacket({
+        items: [msg('s1', 'user', 'Investigate handoff title')],
+        sourceBackend: 'harness',
+        targetBackend: 'claude',
+        sourceSessionId: 'h-src-99',
+        sourceTitle: '排查构建',
+        cwd: '/tmp/proj',
+        preset: 'continue',
+        now: 123456,
+      })
+      const res = await useAppStore.getState().handoffSession({
+        targetBackend: 'claude',
+        targetWorkspaceId: ws.workspaceId,
+        instruction: '继续分析原因',
+        packet,
+        mode: 'send',
+      })
+      expect(res.ok).toBe(true)
+      expect(res.session?.sessionId).toBe(blankTarget.sessionId)
+      const scope = browseScope({ config: useAppStore.getState().config, selectedDevice: useAppStore.getState().selectedDevice })
+      const stored = getHandoffOrigin(scope, blankTarget.sessionId)
+      expect(stored).toMatchObject({
+        sourceBackend: 'harness',
+        targetBackend: 'claude',
+        sourceSessionId: 'h-src-99',
+        sourceTitle: '排查构建',
+        fallbackTitle: '继续分析原因',
+      })
+      // Never persist raw contextBlock in handoffOrigins
+      expect('contextBlock' in (stored as unknown as Record<string, unknown>)).toBe(false)
+
+      // ACP optimistic title must never leak raw `<!-- dsh-handoff:` prefix
+      const updatedTarget = useAppStore.getState().sessions.find(s => s.sessionId === blankTarget.sessionId)
+      expect(updatedTarget?.title).toBe('排查构建')
+
+      // Persist & rehydrate round-trip
+      await flushBrowseMemory()
+      useBrowseMemory.setState({ ready: false, handoffOrigins: {} })
+      await hydrateBrowseMemory()
+      expect(getHandoffOrigin(scope, blankTarget.sessionId)?.sourceSessionId).toBe('h-src-99')
+
+      // openSession backfills origin from loaded messages for sessions created elsewhere
+      const otherSess: RemoteSession = {
+        sessionId: 'h-other',
+        backend: 'harness',
+        title: '<!-- dsh-handoff:v1 {"version":1',
+        updatedAt: 99,
+        running: false,
+        blank: false,
+      }
+      const otherPayload = formatHandoffPayload(packet, 'Check logs')
+      proxy.sessionHistory.mockResolvedValueOnce({
+        events: [{
+          event: {
+            type: 'user/message',
+            seq: 1,
+            time: 1001,
+            data: { message: { id: 'm-other-1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: otherPayload }] } },
+          },
+        }],
+        hasMore: false,
+        throughSeq: 1,
+      })
+      proxy.messageFeedbackList.mockResolvedValueOnce([])
+      expect(await useAppStore.getState().openSession(otherSess)).toBe(true)
+      expect(getHandoffOrigin(scope, otherSess.sessionId)).toMatchObject({
+        sourceBackend: 'harness',
+        targetBackend: 'claude',
+        sourceSessionId: 'h-src-99',
+        sourceTitle: '排查构建',
+      })
+
+      // Legacy attention items never expose raw handoff envelope
+      const attention = deriveLegacyAttentionItems({
+        sessions: [{ ...otherSess, running: true }],
+        messages: { [otherSess.sessionId]: [msg('m-att', 'user', otherPayload, { sessionId: otherSess.sessionId })] },
+      })
+      expect(attention[0]?.sessionTitle).toBe('排查构建')
+    })
+
+    it('does not record permanent handoffOrigins for cancelled drafts or draft fallbacks, enforces per-scope 500 cap, and sanitizes attention pushes', async () => {
+      files.clear()
+      keys.clear()
+      useBrowseMemory.setState({ ready: false, handoffOrigins: {}, entries: {} })
+      await hydrateBrowseMemory()
+
+      const ws: WorkspaceView = {
+        workspaceId: 'ws-draft',
+        title: 'proj',
+        path: '/tmp/proj',
+        backend: 'claude',
+        sessionIds: ['claude:existing-1', 'claude:running-1'],
+        createdAt: '2026-11-23T00:00:00Z',
+        updatedAt: '2026-11-23T00:00:00Z',
+      }
+      const existingTarget: RemoteSession = {
+        sessionId: 'claude:existing-1',
+        nativeId: 'existing-1',
+        backend: 'claude',
+        title: '普通已有会话',
+        cwd: '/tmp/proj',
+        updatedAt: 50,
+        running: false,
+        blank: false,
+      }
+      const runningTarget: RemoteSession = {
+        sessionId: 'claude:running-1',
+        nativeId: 'running-1',
+        backend: 'claude',
+        title: '运行中会话',
+        cwd: '/tmp/proj',
+        updatedAt: 51,
+        running: true,
+        blank: false,
+      }
+      useAppStore.setState({ workspaces: [ws], sessions: [existingTarget, runningTarget] })
+      acp.loadSessionDetails = vi.fn(async () => ({ events: [] }))
+
+      const packet = buildHandoffPacket({
+        items: [msg('s1', 'user', 'Draft test')],
+        sourceBackend: 'harness',
+        targetBackend: 'claude',
+        sourceSessionId: 'h-src-draft',
+        sourceTitle: '草稿源会话',
+        cwd: '/tmp/proj',
+        preset: 'continue',
+        now: 123456,
+      })
+
+      const draftRes = await useAppStore.getState().handoffSession({
+        targetBackend: 'claude',
+        targetWorkspaceId: ws.workspaceId,
+        targetSessionId: existingTarget.sessionId,
+        instruction: '先存为草稿',
+        packet,
+        mode: 'draft',
+      })
+      expect(draftRes.ok).toBe(true)
+      expect(draftRes.delivered).toBe('draft')
+
+      const runningRes = await useAppStore.getState().handoffSession({
+        targetBackend: 'claude',
+        targetWorkspaceId: ws.workspaceId,
+        targetSessionId: runningTarget.sessionId,
+        instruction: '运行中退回草稿',
+        packet,
+        mode: 'send',
+      })
+      expect(runningRes.ok).toBe(true)
+      expect(runningRes.delivered).toBe('draft-fallback')
+
+      const scope = browseScope({ config: useAppStore.getState().config, selectedDevice: useAppStore.getState().selectedDevice })
+      expect(getHandoffOrigin(scope, existingTarget.sessionId)).toBeUndefined()
+      expect(getHandoffOrigin(scope, runningTarget.sessionId)).toBeUndefined()
+
+      // Per-scope cap (500) and cross-scope isolation
+      const scopeA = 'scope-a'
+      const scopeB = 'scope-b'
+      for (let i = 0; i < 505; i += 1) {
+        recordHandoffOrigin(scopeA, `sess-${i}`, {
+          sourceBackend: 'harness',
+          targetBackend: 'codex',
+          sourceSessionId: `src-${i}`,
+          sourceTitle: `Title ${i}`,
+          createdAt: 1000 + i,
+        })
+      }
+      recordHandoffOrigin(scopeB, 'sess-0', {
+        sourceBackend: 'claude',
+        targetBackend: 'codex',
+        sourceSessionId: 'src-b',
+        sourceTitle: 'Scope B',
+        createdAt: 9999,
+      })
+      const originsA = useBrowseMemory.getState().handoffOrigins[scopeA] ?? {}
+      expect(Object.keys(originsA)).toHaveLength(500)
+      expect(originsA['sess-0']).toBeUndefined()
+      expect(originsA['sess-504']?.sourceTitle).toBe('Title 504')
+      expect(getHandoffOrigin(scopeB, 'sess-0')?.sourceTitle).toBe('Scope B')
+
+      // Attention store follow initial snapshot + incremental upsert sanitize raw handoff headers
+      let onEventHandler: ((event: any) => void) | undefined
+      await useAttentionStore.getState().attachConnection({
+        hostId: 'host-att-sanitize',
+        generation: 99,
+        advertisedSupported: true,
+        client: {
+          follow: async (handlers: any) => {
+            onEventHandler = handlers.onEvent
+            return {
+              initial: {
+                revision: 1,
+                digest: {
+                  revision: 1,
+                  waitingApproval: 0,
+                  waitingQuestion: 0,
+                  running: 1,
+                  completedUnread: 0,
+                  failedUnread: 0,
+                  urgentCount: 0,
+                  urgentKinds: [],
+                },
+                items: [{
+                  id: 'att-1',
+                  backend: 'codex',
+                  mode: 'agent',
+                  sessionId: 'codex:t-att-1',
+                  sessionTitle: '<!-- dsh-handoff:v1 {"sourceBackend":"harness","targetBackend":"codex","sourceTitle":"初始移交标题"} -->',
+                  status: 'running',
+                  updatedAt: 2000,
+                }],
+              },
+              stop: async () => {},
+            }
+          },
+        } as any,
+      })
+      expect(useAttentionStore.getState().items[0]?.sessionTitle).toBe('初始移交标题')
+      onEventHandler?.({
+        type: 'upsert',
+        revision: 2,
+        digest: {
+          revision: 2,
+          waitingApproval: 0,
+          waitingQuestion: 0,
+          running: 1,
+          completedUnread: 0,
+          failedUnread: 0,
+          urgentCount: 0,
+          urgentKinds: [],
+        },
+        item: {
+          id: 'att-2',
+          backend: 'claude',
+          mode: 'agent',
+          sessionId: 'claude:t-att-2',
+          sessionTitle: '<!-- dsh-handoff:v1 {"sourceBackend":"codex","targetBackend":"claude","sourceSessionId":"s1"',
+          status: 'running',
+          updatedAt: 2001,
+        },
+      })
+      const att2 = useAttentionStore.getState().items.find(item => item.id === 'att-2')
+      expect(att2?.sessionTitle).toBe('Codex → Claude')
+      await useAttentionStore.getState().detachConnection(99)
     })
   })
 })

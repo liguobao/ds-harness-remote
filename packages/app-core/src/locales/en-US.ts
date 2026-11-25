@@ -1265,6 +1265,7 @@ const enUS = {
     continueInOrigin: (target: string) => `Return to ${target} origin session`,
     continueInExisting: (target: string) => `Switch to selected ${target} session`,
     handoffExistingSuccess: 'Target session opened',
+    badgeFrom: (from: string) => `From ${from}`,
   },
 } satisfies Messages
 

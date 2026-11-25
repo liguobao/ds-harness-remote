@@ -79,7 +79,7 @@ export function useChatMentions({ session, sessions, workspaces, connectionPhase
     return sessions.filter(item => item.sessionId !== session?.sessionId && item.backend !== 'codex')
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map(item => {
-        const title = resolveSessionDisplayTitle(item) ?? item.title ?? item.sessionId
+        const title = resolveSessionDisplayTitle(item) ?? item.sessionId
         const owner = workspaces.find(workspace => workspace.sessionIds.includes(item.sessionId))
         return {
           id: item.sessionId,
