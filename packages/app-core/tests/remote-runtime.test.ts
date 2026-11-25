@@ -26,7 +26,7 @@ vi.mock('../src/services/foreground-service', () => ({ foregroundService: servic
 import { AndroidRemoteRuntime } from '../src/services/remote-runtime'
 
 const connect = (runtime: AndroidRemoteRuntime, options: AndroidConnectionOptions = {}) => runtime.connect(
-  'https://example.invalid', {} as DeviceIdentity, {} as RemoteDevice, 'synthetic', () => undefined, options,
+  'https://example.invalid', {} as DeviceIdentity, { name: 'Test Host', deviceId: 'test-host' } as RemoteDevice, 'synthetic', () => undefined, options,
 )
 const deferred = () => {
   let resolve!: () => void
@@ -50,7 +50,7 @@ describe('Android carrier foreground service ownership', () => {
       const runtime = new AndroidRemoteRuntime()
       const closed = vi.fn()
       await connect(runtime, { onClose: closed })
-      expect(service.setStatus).toHaveBeenLastCalledWith('connected')
+      expect(service.setStatus).toHaveBeenLastCalledWith('connected', 'Test Host', 'test-host')
       const options = client.connect.mock.calls[0]![5] as AndroidConnectionOptions
       options.onClose?.({ retryable: outcome !== 'refused' })
       await Promise.resolve()
@@ -60,7 +60,7 @@ describe('Android carrier foreground service ownership', () => {
       } else {
         expect(service.stop).not.toHaveBeenCalled()
         await runtime.prepareConnection(true)
-        expect(service.setStatus).toHaveBeenLastCalledWith('reconnecting')
+        expect(service.setStatus).toHaveBeenLastCalledWith('reconnecting', '', '')
         client.connect.mockRejectedValueOnce(new Error('network still down'))
         await expect(connect(runtime)).rejects.toThrow('network still down')
         await runtime.close({ preserveRecovery: true })
@@ -69,7 +69,7 @@ describe('Android carrier foreground service ownership', () => {
         if (outcome === 'recovered') {
           await connect(runtime)
           await runtime.stopRecovery()
-          expect(service.setStatus).toHaveBeenLastCalledWith('connected')
+          expect(service.setStatus).toHaveBeenLastCalledWith('connected', 'Test Host', 'test-host')
           expect(service.stop).not.toHaveBeenCalled()
         } else if (outcome === 'exhausted') {
           await runtime.stopRecovery()
