@@ -314,4 +314,170 @@ describe('AgentAcpClient.openStream', () => {
     await client.call('session/new', { cwd: '/repo', backend: 'opencode' })
     expect(rpc).toHaveBeenCalledWith('agent.acp.call', { method: 'session/new', params: { cwd: '/repo', backend: 'opencode' } }, undefined, undefined)
   })
+
+  it('defers premature stream.closed arriving before openStream resolves and guards core close before open', async () => {
+    await runScenarios([
+      {
+        name: 'delivers replayed frames immediately and defers early stream.closed until after openStream resolves',
+        run: async () => {
+          let resolveOpen!: (value: unknown) => void
+          let openedStreamId = ''
+          const core = createStreamCore((method, params) => {
+            if (method === 'agent.acp.stream.open') {
+              openedStreamId = (params as { streamId: string }).streamId
+              return new Promise(resolve => { resolveOpen = resolve })
+            }
+            return Promise.resolve({})
+          })
+          const client = new AgentAcpClient(core as never)
+          const events: string[] = []
+          const closed: unknown[] = []
+          const pending = client.openStream(
+            'ses-1',
+            frame => events.push(`frame:${String((frame.frame.params as { delta?: unknown }).delta)}`),
+            data => {
+              events.push(`closed:${data.reason}:${streamHandle.streamId}`)
+              closed.push(data)
+            },
+          )
+          // Host replays frames then emits stream.closed before the open RPC response settles.
+          core.emit('agent.acp.frame', {
+            streamId: openedStreamId,
+            frame: { method: 'session/update', params: { sessionId: 'ses-1', delta: 'prompt_failed' } },
+          })
+          core.emit('agent.acp.stream.closed', { streamId: openedStreamId, reason: 'failed' })
+          expect(events).toEqual(['frame:prompt_failed'])
+          expect(closed).toEqual([])
+
+          resolveOpen({ opened: true })
+          const streamHandle = await pending
+          expect(closed).toEqual([])
+          await Promise.resolve()
+          expect(events).toEqual(['frame:prompt_failed', `closed:failed:${streamHandle.streamId}`])
+          expect(closed).toEqual([{ streamId: streamHandle.streamId, reason: 'failed' }])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+        },
+      },
+      {
+        name: 'suppresses deferred early stream.closed when caller closes stream immediately after open resolves',
+        run: async () => {
+          let resolveOpen!: (value: unknown) => void
+          let openedStreamId = ''
+          const core = createStreamCore((method, params) => {
+            if (method === 'agent.acp.stream.open') {
+              openedStreamId = (params as { streamId: string }).streamId
+              return new Promise(resolve => { resolveOpen = resolve })
+            }
+            return Promise.resolve({})
+          })
+          const client = new AgentAcpClient(core as never)
+          const closed: unknown[] = []
+          const pending = client.openStream('ses-1', () => undefined, data => closed.push(data))
+          core.emit('agent.acp.stream.closed', { streamId: openedStreamId, reason: 'failed' })
+          resolveOpen({ opened: true })
+          const stream = await pending
+          await stream.close()
+          await Promise.resolve()
+          expect(closed).toEqual([])
+          expect(core.rpc.mock.calls.filter(([method]) => method === 'agent.acp.stream.close')).toHaveLength(0)
+        },
+      },
+      {
+        name: 'suppresses deferred early stream.closed when signal aborts immediately after open resolves',
+        run: async () => {
+          let resolveOpen!: (value: unknown) => void
+          let openedStreamId = ''
+          const controller = new AbortController()
+          const core = createStreamCore((method, params) => {
+            if (method === 'agent.acp.stream.open') {
+              openedStreamId = (params as { streamId: string }).streamId
+              return new Promise(resolve => { resolveOpen = resolve })
+            }
+            return Promise.resolve({})
+          })
+          const client = new AgentAcpClient(core as never)
+          const closed: unknown[] = []
+          const pending = client.openStream('ses-1', () => undefined, data => closed.push(data), controller.signal)
+          core.emit('agent.acp.stream.closed', { streamId: openedStreamId, reason: 'failed' })
+          resolveOpen({ opened: true })
+          await pending
+          controller.abort()
+          await Promise.resolve()
+          await Promise.resolve()
+          expect(closed).toEqual([])
+        },
+      },
+      {
+        name: 'isolates a throwing deferred onClosed callback without causing an unhandled error',
+        run: async () => {
+          const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+          try {
+            let resolveOpen!: (value: unknown) => void
+            let openedStreamId = ''
+            const core = createStreamCore((method, params) => {
+              if (method === 'agent.acp.stream.open') {
+                openedStreamId = (params as { streamId: string }).streamId
+                return new Promise(resolve => { resolveOpen = resolve })
+              }
+              return Promise.resolve({})
+            })
+            const client = new AgentAcpClient(core as never)
+            const pending = client.openStream('ses-1', () => undefined, () => {
+              throw new TypeError('callback crashed')
+            })
+            core.emit('agent.acp.stream.closed', { streamId: openedStreamId, reason: 'failed' })
+            resolveOpen({ opened: true })
+            await pending
+            await Promise.resolve()
+            await Promise.resolve()
+            expect(errorSpy).toHaveBeenCalledWith('[dsh-remote] event handler error:', 'TypeError')
+          } finally {
+            errorSpy.mockRestore()
+          }
+        },
+      },
+      {
+        name: 'does not invoke deferred onClosed when stream.open RPC rejects',
+        run: async () => {
+          let rejectOpen!: (error: Error) => void
+          let openedStreamId = ''
+          const core = createStreamCore((method, params) => {
+            if (method === 'agent.acp.stream.open') {
+              openedStreamId = (params as { streamId: string }).streamId
+              return new Promise((_, reject) => { rejectOpen = reject })
+            }
+            return Promise.resolve({})
+          })
+          const client = new AgentAcpClient(core as never)
+          const closed: unknown[] = []
+          const pending = client.openStream('ses-1', () => undefined, data => closed.push(data))
+          core.emit('agent.acp.stream.closed', { streamId: openedStreamId, reason: 'failed' })
+          rejectOpen(new Error('OPEN_FAILED'))
+          await expect(pending).rejects.toThrow('OPEN_FAILED')
+          await Promise.resolve()
+          expect(closed).toEqual([])
+        },
+      },
+      {
+        name: 'rejects with TRANSPORT_CLOSED if core closed before openStream RPC resolved',
+        run: async () => {
+          let resolveOpen!: (value: unknown) => void
+          const core = createStreamCore(method => (
+            method === 'agent.acp.stream.open'
+              ? new Promise(resolve => { resolveOpen = resolve })
+              : Promise.resolve({})
+          ))
+          const client = new AgentAcpClient(core as never)
+          const closed: unknown[] = []
+          const pending = client.openStream('ses-1', () => undefined, data => closed.push(data))
+          core.drop(new Error('socket dropped'))
+          resolveOpen({ opened: true })
+          await expect(pending).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+          await Promise.resolve()
+          expect(closed).toEqual([])
+        },
+      },
+    ])
+  })
 })

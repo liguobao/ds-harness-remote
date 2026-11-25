@@ -2879,4 +2879,174 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
       },
     })), prepareScenario1)
   })
+
+  it('handles premature ACP stream.closed without TDZ crash and bounds reopen retries with backoff', async () => {
+    await runScenarios([
+      {
+        name: 'synchronous stream.closed during openStream settles cleanly and stops after bounded backoff retries',
+        run: async () => {
+          vi.useFakeTimers()
+          try {
+            transport.hasClaude.mockReturnValue(true)
+            const claudeSession: RemoteSession = {
+              sessionId: 'claude:ses-1',
+              nativeId: 'ses-1',
+              backend: 'claude',
+              updatedAt: 1,
+              running: true,
+              blank: false,
+            }
+            useAppStore.setState({
+              selectedSession: claudeSession,
+              sessions: [claudeSession],
+              messages: {},
+            })
+            let seq = 0
+            acp.openStream.mockImplementation(async (_sid: string, _onFrame: unknown, onClosed?: (c: { streamId: string; reason: string }) => void) => {
+              const streamId = `claude-stream-${++seq}`
+              // Simulate premature stream.closed delivered synchronously before openStream resolves.
+              onClosed?.({ streamId, reason: 'failed' })
+              return { streamId, close: async () => undefined }
+            })
+
+            expect(await useAppStore.getState().openSession(claudeSession)).toBe(true)
+            expect(acp.openStream).toHaveBeenCalledTimes(1)
+            expect(useAppStore.getState().selectedSession?.running).toBe(false)
+            expect(useAppStore.getState().error).toBeDefined()
+
+            // No immediate tight reopen loop before the first 1.5s backoff step.
+            await vi.advanceTimersByTimeAsync(1_400)
+            expect(acp.openStream).toHaveBeenCalledTimes(1)
+
+            // Backoff ladder: 1.5s, 3s, 6s, 12s -> 4 retries (5 opens total), then stops.
+            await vi.advanceTimersByTimeAsync(100)
+            expect(acp.openStream).toHaveBeenCalledTimes(2)
+            await vi.advanceTimersByTimeAsync(3_000)
+            expect(acp.openStream).toHaveBeenCalledTimes(3)
+            await vi.advanceTimersByTimeAsync(6_000)
+            expect(acp.openStream).toHaveBeenCalledTimes(4)
+            await vi.advanceTimersByTimeAsync(12_000)
+            expect(acp.openStream).toHaveBeenCalledTimes(5)
+
+            // Further time must not trigger unbounded retries.
+            await vi.advanceTimersByTimeAsync(60_000)
+            expect(acp.openStream).toHaveBeenCalledTimes(5)
+          } finally {
+            await useAppStore.getState().setOffline()
+            vi.useRealTimers()
+          }
+        },
+      },
+      {
+        name: 'stops ACP stream recovery on non-retryable CURSOR_SESSION_OWNED and cancels timer on setOffline',
+        run: async () => {
+          vi.useFakeTimers()
+          try {
+            transport.hasClaude.mockReturnValue(true)
+            const claudeSession: RemoteSession = {
+              sessionId: 'claude:ses-2',
+              nativeId: 'ses-2',
+              backend: 'claude',
+              updatedAt: 1,
+              running: true,
+              blank: false,
+            }
+            useAppStore.setState({
+              selectedSession: claudeSession,
+              sessions: [claudeSession],
+              messages: {},
+            })
+            let firstOnClosed: ((c: { streamId: string; reason: string }) => void) | undefined
+            acp.openStream
+              .mockImplementationOnce(async (_sid: string, _onFrame: unknown, onClosed?: (c: { streamId: string; reason: string }) => void) => {
+                firstOnClosed = onClosed
+                return { streamId: 'claude-owned-1', close: async () => undefined }
+              })
+              .mockRejectedValueOnce(Object.assign(new Error('owned'), { code: 'CURSOR_SESSION_OWNED' }))
+
+            expect(await useAppStore.getState().openSession(claudeSession)).toBe(true)
+            expect(acp.openStream).toHaveBeenCalledTimes(1)
+
+            firstOnClosed?.({ streamId: 'claude-owned-1', reason: 'failed' })
+            await vi.advanceTimersByTimeAsync(1_500)
+            expect(acp.openStream).toHaveBeenCalledTimes(2)
+
+            // Non-retryable error must stop the backoff ladder immediately.
+            await vi.advanceTimersByTimeAsync(60_000)
+            expect(acp.openStream).toHaveBeenCalledTimes(2)
+
+            // Reopen and verify setOffline cancels a pending recovery timer.
+            let secondOnClosed: ((c: { streamId: string; reason: string }) => void) | undefined
+            acp.openStream.mockImplementationOnce(async (_sid: string, _onFrame: unknown, onClosed?: (c: { streamId: string; reason: string }) => void) => {
+              secondOnClosed = onClosed
+              return { streamId: 'claude-offline-1', close: async () => undefined }
+            })
+            expect(await useAppStore.getState().openSession(claudeSession)).toBe(true)
+            expect(acp.openStream).toHaveBeenCalledTimes(3)
+            secondOnClosed?.({ streamId: 'claude-offline-1', reason: 'failed' })
+            await useAppStore.getState().setOffline()
+            await vi.advanceTimersByTimeAsync(10_000)
+            expect(acp.openStream).toHaveBeenCalledTimes(3)
+          } finally {
+            await useAppStore.getState().setOffline()
+            vi.useRealTimers()
+          }
+        },
+      },
+      {
+        name: 'retries through retryable openStream errors and cancels pending timer when switching sessions',
+        run: async () => {
+          vi.useFakeTimers()
+          try {
+            transport.hasClaude.mockReturnValue(true)
+            const claudeSession: RemoteSession = {
+              sessionId: 'claude:ses-3',
+              nativeId: 'ses-3',
+              backend: 'claude',
+              updatedAt: 1,
+              running: false,
+              blank: false,
+            }
+            useAppStore.setState({
+              selectedSession: claudeSession,
+              sessions: [claudeSession, session],
+              messages: {},
+            })
+            let firstOnClosed: ((c: { streamId: string; reason: string }) => void) | undefined
+            let thirdOnClosed: ((c: { streamId: string; reason: string }) => void) | undefined
+            acp.openStream
+              .mockImplementationOnce(async (_sid: string, _onFrame: unknown, onClosed?: (c: { streamId: string; reason: string }) => void) => {
+                firstOnClosed = onClosed
+                return { streamId: 'claude-retry-1', close: async () => undefined }
+              })
+              .mockRejectedValueOnce(Object.assign(new Error('timeout'), { code: 'RPC_TIMEOUT' }))
+              .mockImplementationOnce(async (_sid: string, _onFrame: unknown, onClosed?: (c: { streamId: string; reason: string }) => void) => {
+                thirdOnClosed = onClosed
+                return { streamId: 'claude-retry-3', close: async () => undefined }
+              })
+
+            expect(await useAppStore.getState().openSession(claudeSession)).toBe(true)
+            firstOnClosed?.({ streamId: 'claude-retry-1', reason: 'failed' })
+
+            // Retry 1 at 1.5s fails with retryable RPC_TIMEOUT -> schedules Retry 2 at +3s.
+            await vi.advanceTimersByTimeAsync(1_500)
+            expect(acp.openStream).toHaveBeenCalledTimes(2)
+
+            // Retry 2 actually fires at +3s and reopens the stream.
+            await vi.advanceTimersByTimeAsync(3_000)
+            expect(acp.openStream).toHaveBeenCalledTimes(3)
+
+            // If that stream fails too, switching to Harness before +6s cancels the scheduled retry.
+            thirdOnClosed?.({ streamId: 'claude-retry-3', reason: 'failed' })
+            expect(await useAppStore.getState().openSession(session)).toBe(true)
+            await vi.advanceTimersByTimeAsync(15_000)
+            expect(acp.openStream).toHaveBeenCalledTimes(3)
+          } finally {
+            await useAppStore.getState().setOffline()
+            vi.useRealTimers()
+          }
+        },
+      },
+    ], prepareScenario1)
+  })
 })

@@ -314,6 +314,49 @@ describe('RemoteClientCore', () => {
     transport.push(encodeMessage(createRpcResponse(request.id, { late: true })))
   })
 
+  it('isolates throwing event and close handlers without breaking other subscribers or the transport', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport)
+    await client.connect()
+
+    const received: string[] = []
+    let unsubscribeSecond!: () => void
+    client.onEvent(() => {
+      unsubscribeSecond()
+      throw new ReferenceError('subscriber failure')
+    })
+    unsubscribeSecond = client.onEvent(() => {
+      received.push('unsubscribed-mid-dispatch')
+    })
+    client.onEvent(event => {
+      received.push(event.event)
+    })
+
+    expect(() => {
+      transport.push(encodeMessage(createEvent('agent.acp.stream.closed', { streamId: 's1', reason: 'failed' })))
+    }).not.toThrow()
+    expect(received).toEqual(['agent.acp.stream.closed'])
+
+    const closeCalls: string[] = []
+    let unsubscribeSecondClose!: () => void
+    client.onClose(() => {
+      unsubscribeSecondClose()
+      throw new Error('close subscriber failure')
+    })
+    unsubscribeSecondClose = client.onClose(() => {
+      closeCalls.push('unsubscribed-close')
+    })
+    client.onClose(() => {
+      closeCalls.push('second')
+    })
+
+    expect(() => transport.drop()).not.toThrow()
+    expect(closeCalls).toEqual(['second'])
+    expect(errorSpy).toHaveBeenCalledWith('[dsh-remote] event handler error:', 'ReferenceError')
+    expect(errorSpy).toHaveBeenCalledWith('[dsh-remote] close handler error:', 'Error')
+  })
+
 })
 
 describe('Remote Host feature probing', () => {
