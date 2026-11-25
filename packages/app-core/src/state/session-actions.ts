@@ -30,6 +30,7 @@ import {
   foldAcpHistory,
   mergeAcpHistoryAndLive,
   readAcpHistory,
+  reconcileAcpCachedPrompts,
 } from '../services/cursor'
 import { forkMessage } from '../services/message-actions'
 import { readOpencodeHistory, selectOpencodeModel } from '../services/opencode'
@@ -820,9 +821,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           set(state => {
             const prevList = state.messages[session.sessionId]
             const currentMessages = prevList ?? []
-            const liveDeltas = currentMessages.filter(item => !initialAcpIds.has(item.id) || item.id.startsWith('local:') || item.kind === 'approval' || item.kind === 'question')
-            const merged = details.events.length > 0 || acpBackend !== 'cursor'
-              ? mergeAcpHistoryAndLive(items, liveDeltas)
+            const hasAcpHistory = details.events.length > 0 || acpBackend !== 'cursor'
+            const { history, confirmedIds, retainedIds } = reconcileAcpCachedPrompts(items, hasAcpHistory ? cleanExisting : [])
+            const historyWithCachedTail = retainedIds.size === 0 ? history
+              : [...history, ...currentMessages.filter(item => retainedIds.has(item.id))]
+            const liveDeltas = currentMessages.filter(item => !retainedIds.has(item.id) && (!initialAcpIds.has(item.id)
+              || (item.id.startsWith('local:') && !confirmedIds.has(item.id))
+              || item.kind === 'approval' || item.kind === 'question'))
+            const merged = hasAcpHistory
+              ? mergeAcpHistoryAndLive(historyWithCachedTail, liveDeltas)
               : mergeHistoryAndLive(items, liveDeltas)
             const paged = storeAcpPagedMessages(session.sessionId, merged)
             const nextList = reuseUnchangedChatItems(prevList, paged.tail)

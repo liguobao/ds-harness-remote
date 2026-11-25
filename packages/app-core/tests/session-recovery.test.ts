@@ -1181,6 +1181,67 @@ describe('session restore state machine', () => {
     expect(mergeAcpHistoryAndLive([message('prior'), tool], [liveTool, message('tail')])).toEqual([message('prior'), liveTool, message('tail')])
   })
 
+  it('reconciles cached ACP prompts against their completed turns when reopening', async () => {
+    const scenarios = ['complete history', 'stale history', 'history ends at user message', 'history ends mid-reply',
+      'assistant-only history', 'live user echoes', 'tool-only turns']
+    await runScenarios(scenarios.map(name => ({ name, run: async () => {
+      const backend = name === 'live user echoes' ? 'antigravity' : 'pi'
+      const selected = { ...session, backend, sessionId: `${backend}:reopen`, nativeId: 'reopen' }
+      const toolOnly = name === 'tool-only turns'
+      const answerId = (turn: number) => `host-answer-${turn}`
+      const history = [1, 2].flatMap(turn => [
+        entry('user/message', turn * 10, { id: `host-user-${turn}`, source: { kind: 'user' }, content: [{ type: 'text', text: 'repeat' }] }),
+        toolOnly ? call(turn * 10 + 1, turn, answerId(turn))
+          : entry('assistant/message', turn * 10 + 1, { turn, message: { id: answerId(turn), content: [{ type: 'text', text: 'same reply' }] } }),
+        entry('turn/end', turn * 10 + 2, { turn, reason: { kind: 'completed' } }),
+      ])
+      const partial = name === 'history ends at user message' || name === 'history ends mid-reply'
+      const assistantOnly = name === 'assistant-only history'
+      const stale = name === 'stale history' || partial
+      if (stale) acp.transferCall.mockResolvedValueOnce({ events: history.slice(0, 3) })
+      expect(await useAppStore.getState().openSession(selected)).toBe(true)
+      const receive = acp.openStream.mock.calls[0]![1]
+      const update = (value: Record<string, unknown>) => receive({ streamId: 'acp-test',
+        frame: { method: 'session/update', params: { sessionId: 'reopen', update: value } } })
+
+      for (let turn = stale ? 2 : 1; turn <= 2; turn++) {
+        expect(await useAppStore.getState().sendMessage('repeat')).toBe('sent')
+        if (name === 'live user echoes') update({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'repeat' } })
+        if (toolOnly) update({ sessionUpdate: 'tool_call', toolCallId: answerId(turn), title: 'bash', status: 'completed' })
+        else update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'same reply' } })
+        update({ sessionUpdate: 'prompt_completed', stopReason: 'end_turn' })
+      }
+      const expectedIds = ['host-user-1', answerId(1), 'host-user-2', answerId(2)]
+      const cached = useAppStore.getState().messages[selected.sessionId]!
+      const pending = { kind: 'message', id: 'local:pending', sessionId: selected.sessionId, role: 'user', text: 'repeat', createdAt: 3000 } as const
+      const failed = { ...pending, id: 'local:failed', text: 'failed', sendState: 'failed' } as const
+      useAppStore.setState(state => ({ messages: { ...state.messages,
+        [selected.sessionId]: [...state.messages[selected.sessionId]!, pending, failed],
+      } }))
+
+      let reopenedHistory = stale ? history.slice(0, partial ? 4 : 3) : assistantOnly ? history.slice(-2) : history
+      if (name === 'history ends mid-reply') reopenedHistory = [...reopenedHistory, entry('assistant/message', 21, {
+        turn: 2, message: { id: answerId(2), content: [{ type: 'text', text: 'same' }] },
+      })]
+      acp.transferCall.mockResolvedValueOnce({ events: reopenedHistory })
+      expect(await useAppStore.getState().openSession(selected)).toBe(true)
+      const messages = useAppStore.getState().messages[selected.sessionId]!
+      const turnIds = (items: ChatItem[]) => items.filter(item => item.id !== pending.id && item.id !== failed.id).map(item => item.id)
+      expect(turnIds(messages)).toEqual(partial ? [...expectedIds.slice(0, 3), cached[3]!.id]
+        : stale ? cached.map(item => item.id)
+          : assistantOnly ? [answerId(2), ...cached.filter(item => item.id.startsWith('local:')).map(item => item.id)] : expectedIds)
+      expect(messages).toContainEqual(pending)
+      expect(messages).toContainEqual(failed)
+      if (stale) {
+        acp.transferCall.mockResolvedValueOnce({ events: history })
+        expect(await useAppStore.getState().openSession(selected)).toBe(true)
+        expect(turnIds(useAppStore.getState().messages[selected.sessionId]!)).toEqual(expectedIds)
+        expect(useAppStore.getState().messages[selected.sessionId]).toHaveLength(6)
+      }
+      expect(acp.prompt).toHaveBeenCalledTimes(stale ? 1 : 2)
+    } })), prepareScenario1)
+  })
+
   it('keeps only new ACP subscription deltas while history is loading', async () => {
     await runScenarios((['pi', 'antigravity'] as const).flatMap(backend =>
       ['live', 'completed', 'switch', 'reject'].map(mode => ({ name: `${backend}: ${mode}`, run: async () => {
