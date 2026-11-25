@@ -343,7 +343,7 @@ class RemoteForegroundService : Service() {
           .setCategory(NotificationCompat.CATEGORY_SERVICE)
           .setOngoing(true)
           .setOnlyAlertOnce(true)
-          .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+          .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
           .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         if (Build.VERSION.SDK_INT >= 36) {
@@ -396,10 +396,12 @@ class RemoteForegroundService : Service() {
         val focusVersion = runCatching {
           Settings.System.getInt(contentResolver, "notification_focus_protocol", 0)
         }.getOrDefault(0)
+        // Vendor lock-screen surfaces can render extras independently of publicVersion.
+        val publicDetail = task.countText.ifBlank { getString(R.string.app_name) }
         if (focusVersion >= 2) {
-          addXiaomiFocus(notification, focusVersion, status, titleWithCount)
+          addXiaomiFocus(notification, focusVersion, status, publicDetail)
         }
-        extendLiveTask(notification, status, titleWithCount)
+        extendLiveTask(notification, status, publicDetail)
         return notification
       } catch (e: Exception) {
         Log.w("RemoteForegroundService", "Failed to build custom live task notification, falling back", e)
@@ -456,7 +458,7 @@ class RemoteForegroundService : Service() {
       "Live tasks",
       NotificationManager.IMPORTANCE_DEFAULT,
     ).apply {
-      lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+      lockscreenVisibility = Notification.VISIBILITY_PRIVATE
     })
   }
 

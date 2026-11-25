@@ -108279,12 +108279,17 @@ var SessionTransferPeer = class {
         inheritedEventCount,
         meta: { createdAt: source.createdAt, cwd: cwd2, isSeeded: inheritedEventCount > 0 }
       }).header;
-      if (header.version !== source.version) throw new Error();
+      if (header.id !== sessionId || header.version !== source.version) throw new Error();
     } catch {
       return fail6("SESSION_TRANSFER_INVALID_HISTORY", "Harness rejected the imported history.");
     }
+    let handle;
     try {
-      const handle = await persistence.create(header, { inheritedEventCount });
+      handle = await persistence.create(header, { inheritedEventCount });
+    } catch {
+      return fail6("SESSION_TRANSFER_WRITE_FAILED", "The target could not create the session.");
+    }
+    try {
       try {
         await handle.append(events);
         await handle.flush();
@@ -108292,7 +108297,7 @@ var SessionTransferPeer = class {
         await handle.close();
       }
     } catch {
-      return fail6("SESSION_TRANSFER_WRITE_FAILED", "The target could not persist the session.");
+      throw new RpcError("SESSION_TRANSFER_WRITE_FAILED", "The target could not confirm the session write.", { sessionId });
     }
     try {
       const workspace2 = this.workspace(workspaceId);

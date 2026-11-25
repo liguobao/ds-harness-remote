@@ -1076,7 +1076,7 @@ carrier 或 Session 代际不一致时，Desktop Client 必须在选择目标、
 | `session.transfer.import.open` | `{workspaceId, batchId, sourceSessionId, formatVersion: 1}` | `{handle, chunkBytes, maxBytes}` |
 | `session.transfer.import.chunk` | `{handle, offset, data}` | `{receivedBytes}` |
 | `session.transfer.import.commit` | `{handle, requestId, totalBytes, sha256}` | `{sessionId, workspaceAttached}` |
-| `session.transfer.import.status` | `{batchId, requestId}` | `{status: "unknown"}` 或 `{status: "completed", sessionId, workspaceAttached}`。失败的提交返回原 RPC 错误。 |
+| `session.transfer.import.status` | `{batchId, requestId}` | `{status: "unknown"}` 或 `{status: "completed", sessionId, workspaceAttached}`。失败的提交返回原 RPC 错误。取得新会话写句柄后若写入失败，SESSION_TRANSFER_WRITE_FAILED 的 details.sessionId 标识可能未完整写入的目标记录。 |
 | `session.transfer.import.abort` | `{handle}` | `{}` |
 
 源 Host 固定清单与包含边界 `throughSeq`，按会话将

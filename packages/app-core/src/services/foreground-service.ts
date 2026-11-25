@@ -156,41 +156,37 @@ export const foregroundService = {
   ): Promise<void> {
     const rn = reactNative()
     if (rn?.Platform.OS !== 'android') return
-    try {
-      const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
-      if (native === undefined) return
-      if (details && typeof native.updateLiveTaskV3 === 'function') {
-        await native.updateLiveTaskV3(hostId, deepLinkUrl, badge, title, statusText, isWaitingInput,
-          updatedAtMs, summary, extraCount, details.phase, details.startedAtMs, details.countText)
-        return
-      }
-      if (typeof native.updateLiveTaskV2 === 'function') {
-        await native.updateLiveTaskV2(
-          hostId,
-          deepLinkUrl,
-          badge,
-          title,
-          statusText,
-          isWaitingInput,
-          updatedAtMs,
-          summary,
-          Math.max(0, Math.floor(extraCount)),
-        )
-        return
-      }
-      await native.updateLiveTask?.(
+    const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
+    if (native === undefined) return
+    if (details && typeof native.updateLiveTaskV3 === 'function') {
+      await native.updateLiveTaskV3(hostId, deepLinkUrl, badge, title, statusText, isWaitingInput,
+        updatedAtMs, summary, extraCount, details.phase, details.startedAtMs, details.countText)
+      return
+    }
+    if (typeof native.updateLiveTaskV2 === 'function') {
+      await native.updateLiveTaskV2(
         hostId,
-        legacySessionIdFromDeepLink(deepLinkUrl),
+        deepLinkUrl,
         badge,
         title,
         statusText,
         isWaitingInput,
         updatedAtMs,
         summary,
+        Math.max(0, Math.floor(extraCount)),
       )
-    } catch {
-      // Best-effort live task update.
+      return
     }
+    await native.updateLiveTask?.(
+      hostId,
+      legacySessionIdFromDeepLink(deepLinkUrl),
+      badge,
+      title,
+      statusText,
+      isWaitingInput,
+      updatedAtMs,
+      summary,
+    )
   },
   async clearLiveTask(): Promise<void> {
     const rn = reactNative()

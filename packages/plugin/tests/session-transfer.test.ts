@@ -209,3 +209,32 @@ it('preserves the staged upload when the recent commit cache hits its 1024-entry
     await rm(root, { recursive: true, force: true })
   }
 })
+
+it.each(['append', 'flush', 'close'] as const)('recovers the target ID after a failed %s', async operation => {
+  const { host, peer, create, prepare, attachSession } = await createTestTransferPeer(tmpdir())
+  const reconnect = host.peer('client')
+  const handle = { append: vi.fn(async () => {}), flush: vi.fn(async () => {}), close: vi.fn(async () => {}) }
+  handle[operation].mockRejectedValueOnce(new Error('write failed'))
+  create.mockResolvedValueOnce(handle)
+  try {
+    const payload = createMinimalPayload()
+    const opened = await peer.call('session.transfer.import.open', {
+      workspaceId: 'target', batchId: 'batch', sourceSessionId: 'source', formatVersion: 1,
+    }) as { handle: string }
+    await peer.call('session.transfer.import.chunk', { handle: opened.handle, offset: 0, data: payload.base64 })
+    const commit = peer.call('session.transfer.import.commit', {
+      handle: opened.handle, requestId: 'commit', totalBytes: payload.data.length, sha256: payload.sha256,
+    })
+    await expect(commit).rejects.toMatchObject({ code: 'SESSION_TRANSFER_WRITE_FAILED' })
+    const sessionId = prepare.mock.calls[0]![0]
+    await expect(reconnect.call('session.transfer.import.status', {
+      batchId: 'batch', requestId: 'commit',
+    })).rejects.toMatchObject({ code: 'SESSION_TRANSFER_WRITE_FAILED', details: { sessionId } })
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(handle.close).toHaveBeenCalledTimes(1)
+    expect(attachSession).not.toHaveBeenCalled()
+  } finally {
+    peer.close()
+    reconnect.close()
+  }
+})
