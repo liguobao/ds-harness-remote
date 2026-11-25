@@ -8,6 +8,9 @@ private struct AttentionUpdate: Record {
   @Field var pendingQuestions = 0
   @Field var runningSessions = 0
   @Field var completedUnread = 0
+  @Field var phase: String?
+  @Field var startedAtMs: Double?
+  @Field var paused: String?
   @Field var attentionToken: String?
 }
 
@@ -23,8 +26,8 @@ public final class RemoteLiveActivityModule: Module {
       let state = HostAttentionAttributes.ContentState(
         pendingApprovals: input.pendingApprovals, pendingQuestions: input.pendingQuestions,
         runningSessions: input.runningSessions, completedUnread: input.completedUnread,
-        attentionToken: input.attentionToken)
-      let content = ActivityContent(state: state, staleDate: nil)
+        phase: input.phase, startedAtMs: input.startedAtMs, paused: input.paused, attentionToken: input.attentionToken)
+      let content = ActivityContent(state: state, staleDate: input.phase == nil ? nil : Date().addingTimeInterval(180))
       var current: HostActivity?
       for activity in HostActivity.activities {
         if activity.attributes.hostId == attributes.hostId,

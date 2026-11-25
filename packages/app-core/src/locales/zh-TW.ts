@@ -552,6 +552,13 @@ const zhTW = {
     taskInput: "需要你確認，點此開啟對話",
     liveTaskRunning: '運行中',
     liveTaskWaiting: '待確認',
+    liveTaskPaused: '暫停更新',
+    liveTaskQuestion: '待回答',
+    liveTaskThinking: '思考中',
+    liveTaskTool: '執行工具',
+    liveTaskCollaboration: '協作中',
+    liveTaskCompaction: '整理上下文',
+    liveTaskCount: (count: number) => `${count} 個對話執行中`,
     liveTaskDefaultTitle: 'Remote 對話',
   },
   tools: {

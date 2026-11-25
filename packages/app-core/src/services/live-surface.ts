@@ -26,6 +26,9 @@ export interface IosLiveActivityPayload {
   hostId: string
   hostName: string
   attentionToken?: string
+  phase?: string
+  startedAtMs?: number
+  paused?: string
   pendingApprovals: number
   pendingQuestions: number
   runningSessions: number
@@ -53,6 +56,7 @@ export interface LiveSurfaceSnapshot {
   items: readonly AttentionItem[]
   digest: AttentionDigest | null
   /** Optional filter for legacy fallback hosts (e.g. watched-session gating). */
+  taskDetail?: (item: AttentionItem) => { statusText: string; startedAtMs: number; isWaitingInput: boolean } | undefined
   shouldNotifyItem?: (item: AttentionItem) => boolean
 }
 
@@ -80,6 +84,7 @@ export interface LiveSurfaceForegroundBridge {
     updatedAtMs: number,
     summary: string,
     extraCount: number,
+    details?: { phase: string; startedAtMs: number; countText: string },
   ): Promise<void>
   clearLiveTask(): Promise<void>
 }
@@ -323,6 +328,13 @@ export function createLiveSurfaceController(
         }
       }
 
+      const activeItems = sorted.filter(item => ACTIVE_LIVE_STATUSES.has(item.status))
+      const topActive = activeItems[0]
+      const detail = topActive?.status === 'running' ? snapshot.taskDetail?.(topActive) : undefined
+      const phase = detail && !detail.isWaitingInput ? detail.statusText
+        : topActive ? statusTextForLiveItem(topActive.status) : undefined
+      const startedAtMs = detail && !detail.isWaitingInput ? detail.startedAtMs : 0
+
       if (ios) {
         const summary = digest ?? { ...counts, completedUnread: counts.completedUnread + counts.failedUnread }
         if (!notificationsEnabled || !(summary.pendingApprovals || summary.pendingQuestions || summary.runningSessions || summary.completedUnread)) {
@@ -336,8 +348,9 @@ export function createLiveSurfaceController(
           runningSessions: Math.min(99, summary.runningSessions),
           completedUnread: Math.min(99, summary.completedUnread),
           attentionToken: digest?.attentionToken,
+          ...(phase ? { phase, startedAtMs, paused: strings.comfort.liveTaskPaused } : {}),
         }
-        const key = JSON.stringify(payload)
+        const key = JSON.stringify([payload, appState, Math.floor(Date.now() / 60_000)])
         if (lastLiveKey === key && iosAlert === null) return tail
         lastLiveKey = key
         return enqueue(async () => {
@@ -349,9 +362,7 @@ export function createLiveSurfaceController(
         })
       }
 
-      // Android Live Task shows the highest-priority active session.
-      const activeItems = sorted.filter(item => ACTIVE_LIVE_STATUSES.has(item.status))
-      const topActive = activeItems[0]
+      // Android displays the same attention item selected above.
 
       if (topActive === undefined) {
         const clearPromise = clearSurfaces(hostId)
@@ -364,7 +375,7 @@ export function createLiveSurfaceController(
       const title = topActive.sessionTitle.trim().length > 0
         ? topActive.sessionTitle.trim()
         : strings.comfort.liveTaskDefaultTitle
-      const statusText = `${resolveAttentionBackendIdentity(topActive).label} · ${statusTextForLiveItem(topActive.status)}`
+      const statusText = `${resolveAttentionBackendIdentity(topActive).label} · ${phase}`
       const summary = topActive.summary ?? ''
       const updatedAtMs = topActive.updatedAt > 0 ? topActive.updatedAt : 0
       const deepLinkUrl = selectAttentionDeepLink(hostId, topActive, digest)
@@ -379,6 +390,7 @@ export function createLiveSurfaceController(
         updatedAtMs,
         summary,
         extraCount,
+        details: { phase: phase!, startedAtMs, countText: counts.runningSessions > 1 ? strings.comfort.liveTaskCount(counts.runningSessions) : '' },
         pendingApprovals: counts.pendingApprovals,
         pendingQuestions: counts.pendingQuestions,
         runningSessions: counts.runningSessions,
@@ -404,6 +416,7 @@ export function createLiveSurfaceController(
               payload.updatedAtMs,
               payload.summary,
               payload.extraCount,
+              payload.details,
             )
           } else {
             await fgs.updateLiveTask(

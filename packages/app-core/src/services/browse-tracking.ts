@@ -1,6 +1,6 @@
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings } from '../locales/i18n'
-import { AppState } from 'react-native'
+import { AppState, Platform } from 'react-native'
 import { useAttentionStore } from '../state/attention-store'
 import { useBotTeamStore } from '../state/bot-store'
 import { useAppStore } from '../state/store'
@@ -45,6 +45,8 @@ export interface LiveTaskSummary {
   isWaitingInput: boolean
   updatedAtMs: number
   summary: string
+  startedAtMs: number
+  countText: string
 }
 
 interface LiveTaskEvaluationState {
@@ -54,6 +56,26 @@ interface LiveTaskEvaluationState {
   sessionLifecycles?: Record<string, any>
   messages?: Record<string, any[]>
   selectedSession?: { sessionId: string }
+}
+
+function taskPhase(state: LiveTaskEvaluationState, session: { sessionId: string; backend?: AgentBackend }) {
+  const lifecycle = state.sessionLifecycles?.[session.sessionId]
+  const sessionMessages = state.messages?.[session.sessionId] ?? []
+  const pending = sessionMessages.find((item: any) => isItemWaitingInput(session, item))
+  const current = sessionMessages.filter((item: any) => !item.turnEnd
+    && (lifecycle?.turn === undefined || item.turn === lifecycle.turn))
+  const tool = current.reverse().find((item: any) => item.kind === 'tool' && item.state === 'running')
+  const thinking = current.some((item: any) => item.kind === 'message' && item.streaming && item.streamingPhase === 'reasoning')
+  const collaborating = state.sessions.some(child => child.parentSessionId === session.sessionId
+    && (state.sessionLifecycles?.[child.sessionId]?.running ?? child.running))
+  const labels = strings.comfort
+  let statusText = labels.liveTaskRunning
+  if (pending) statusText = pending.kind === 'question' ? labels.liveTaskQuestion : labels.liveTaskWaiting
+  else if (tool?.toolKey === 'codex.compaction') statusText = labels.liveTaskCompaction
+  else if (collaborating || tool?.toolKey === 'codex.subagent') statusText = labels.liveTaskCollaboration
+  else if (tool) statusText = labels.liveTaskTool
+  else if (thinking) statusText = labels.liveTaskThinking
+  return { statusText, isWaitingInput: Boolean(pending), startedAtMs: lifecycle?.running && lifecycle.startedAt > 0 ? lifecycle.startedAt : 0 }
 }
 
 export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSummary | undefined {
@@ -127,27 +149,21 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
   const title = (typeof top.session.title === 'string' && top.session.title.trim().length > 0)
     ? top.session.title.trim()
     : strings.comfort.liveTaskDefaultTitle
-  const statusText = top.isWaitingInput
-    ? strings.comfort.liveTaskWaiting
-    : strings.comfort.liveTaskRunning
+  const detail = taskPhase(state, top.session)
+  const count = candidates.filter(item => item.active && !item.session.parentSessionId && item.session.origin !== 'subagent').length
 
   return {
     hostId: device.deviceId,
     sessionId: top.session.sessionId,
     badge,
+    ...detail,
+    countText: count > 1 ? strings.comfort.liveTaskCount(count) : '',
     title,
-    statusText,
-    isWaitingInput: top.isWaitingInput,
     updatedAtMs: typeof top.updatedAt === 'number' && top.updatedAt > 0 ? top.updatedAt : 0,
     summary,
   }
 }
 
-/**
- * Observes display state for browse memory and drives the single-owner
- * `LiveSurfaceController` from `useAttentionStore` (with automatic legacy Host
- * fallback projection). Never submits, resumes, or interrupts a turn.
- */
 export function startBrowseTracking(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined
   let previousCatalog: unknown, previousSessions: unknown, previousMessages: unknown, previousSelected: string | undefined
@@ -263,6 +279,11 @@ export function startBrowseTracking(): () => void {
       notificationsEnabled: memory.notifications,
       activeSessionId,
       activeMode,
+      taskDetail: item => {
+        if (item.mode !== 'agent') return undefined
+        const session = state.sessions.find(row => row.sessionId === item.sessionId)
+        return session ? taskPhase(state, session) : undefined
+      },
       items: latestAttention.items,
       digest: latestAttention.digest,
       shouldNotifyItem: latestAttention.supported
@@ -286,6 +307,9 @@ export function startBrowseTracking(): () => void {
     observe()
   }
 
+  const heartbeat = Platform.OS === 'ios' ? setInterval(() => {
+    if (AppState.currentState === 'active' && useAppStore.getState().connection.phase === 'connected') scheduleObserve()
+  }, 60_000) : undefined
   const unsubscribeApp = useAppStore.subscribe(scheduleObserve)
   const unsubscribePreferences = useBrowseMemory.subscribe((next, prev) => {
     if (next.notifications !== prev.notifications) observe()
@@ -309,6 +333,7 @@ export function startBrowseTracking(): () => void {
   observe()
 
   return () => {
+    if (heartbeat !== undefined) clearInterval(heartbeat)
     disposed = true
     unsubscribeApp()
     unsubscribeBot()

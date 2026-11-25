@@ -574,6 +574,7 @@ describe('live-surface unified bridge', () => {
       2000,
       'Run git push',
       1,
+      expect.objectContaining({ phase: expect.any(String), startedAtMs: 0 }),
     )
     expect(foreground.notifyAttention).toHaveBeenCalledTimes(1)
     expect(foreground.notifyAttention).toHaveBeenCalledWith(
@@ -622,6 +623,7 @@ describe('live-surface unified bridge', () => {
       1500,
       '',
       0,
+      expect.objectContaining({ phase: expect.any(String), startedAtMs: 0 }),
     )
 
     // 4. Foregrounded on exact session -> suppresses new alert
@@ -690,6 +692,7 @@ describe('live-surface unified bridge', () => {
       connected: true,
       appState: 'active',
       notificationsEnabled: true,
+      taskDetail: () => ({ statusText: 'Thinking', startedAtMs: 42, isWaitingInput: false }),
       items: [makeItem({ id: 'r1', sessionId: 's1', status: 'running', updatedAt: 100 })],
       digest: makeDigest({ runningSessions: 1 }),
     })
@@ -702,6 +705,7 @@ describe('live-surface unified bridge', () => {
       runningSessions: 1,
       completedUnread: 0,
       attentionToken: undefined,
+      phase: 'Thinking', startedAtMs: 42, paused: expect.any(String),
     }, null)
     await linkedController.sync({
       hostId: 'host-1',
@@ -822,6 +826,7 @@ describe('attention platform differentiation and cross-host switching state', ()
       expect.any(Number),
       'Run build',
       0,
+      expect.objectContaining({ phase: expect.any(String), startedAtMs: 0 }),
     )
     await controller.dispose()
   })

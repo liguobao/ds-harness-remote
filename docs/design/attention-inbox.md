@@ -75,4 +75,6 @@ struct DshHostAttentionAttributes: ActivityAttributes {
 
 iOS 客户端通过 `DshRemoteLiveActivity` 与随 App 嵌入的 `HostAttentionWidget` 展示当前连接的 Host。开启任务提醒且有待处理、运行中或未读项目时，用加密通道收到的摘要更新锁屏与灵动岛。点击后按 Host 和可选的不透明 token 打开收件箱。关闭提醒、断开连接或清空计数会结束活动。
 
+本地 ActivityKit 更新还可附带通用阶段、已确认的本轮开始时间和暂停提示。这些可选展示字段由客户端生成；线上摘要协议保持原有字段。前台每分钟续期，运行中的活动超过三分钟未更新时显示暂停提示。
+
 当前原生模块使用本地 ActivityKit 更新。上文的 APNs token 注册、后台远程更新与签名真机投递仍待接入。打包时，扩展的 Bundle ID 使用主 App 的 Bundle ID 加 `.attention`，版本和构建号随主 App 同步。

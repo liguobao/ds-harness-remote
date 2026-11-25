@@ -14,6 +14,7 @@ export function latestHistoryLifecycle(events: HistoryEntry[]): AppState['sessio
     if (latest !== undefined && event.seq < latest.seq) continue
     latest = {
       seq: event.seq, running: event.type === 'turn/start',
+      ...(event.type === 'turn/start' && event.time > 0 ? { startedAt: event.time } : {}),
       ...(event.data.turn === undefined ? {} : { turn: String(event.data.turn) })
     }
   }

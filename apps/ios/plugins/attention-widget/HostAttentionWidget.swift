@@ -8,6 +8,7 @@ struct HostAttentionWidget: Widget {
     ActivityConfiguration(for: HostAttentionAttributes.self) { context in
       VStack(alignment: .leading, spacing: 8) {
         Text(verbatim: context.attributes.hostName).font(.headline).lineLimit(1)
+        phaseRow(context)
         counts(context.state)
       }
       .padding()
@@ -17,15 +18,38 @@ struct HostAttentionWidget: Widget {
         DynamicIslandExpandedRegion(.center) {
           Text(verbatim: context.attributes.hostName).lineLimit(1)
         }
-        DynamicIslandExpandedRegion(.bottom) { counts(context.state) }
+        DynamicIslandExpandedRegion(.bottom) {
+          VStack { phaseRow(context); counts(context.state) }
+        }
       } compactLeading: {
-        Image(systemName: "tray")
+        if context.isStale { Image(systemName: "pause.circle") } else { badge(context.state) }
       } compactTrailing: {
-        badge(context.state)
+        if context.isStale { Image(systemName: "pause") }
+        else if let start = startDate(context.state) { Text(start, style: .timer).monospacedDigit().frame(maxWidth: 56) }
+        else if let phase = context.state.phase { Text(verbatim: phase).font(.caption).lineLimit(1) }
+        else { Image(systemName: "tray") }
       } minimal: {
         badge(context.state)
       }
       .widgetURL(context.attributes.inboxURL(token: context.state.attentionToken))
+    }
+  }
+
+  private func startDate(_ state: HostAttentionAttributes.ContentState) -> Date? {
+    guard state.pendingApprovals + state.pendingQuestions == 0, state.runningSessions > 0,
+          let ms = state.startedAtMs, ms > 0 else { return nil }
+    let date = Date(timeIntervalSince1970: ms / 1000)
+    return date <= Date() ? date : nil
+  }
+
+  @ViewBuilder private func phaseRow(_ context: ActivityViewContext<HostAttentionAttributes>) -> some View {
+    if context.isStale, let paused = context.state.paused {
+      Text(verbatim: paused).font(.caption)
+    } else if let phase = context.state.phase {
+      HStack {
+        Text(verbatim: phase)
+        if let start = startDate(context.state) { Text(start, style: .timer).monospacedDigit() }
+      }.font(.subheadline)
     }
   }
 

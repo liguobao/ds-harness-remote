@@ -154,6 +154,7 @@ describe('pickActiveLiveTask', () => {
     })
     expect(task).toBeDefined()
     expect(task?.sessionId).toBe('s2')
+    expect(task?.statusText).toBe(strings.comfort.liveTaskQuestion)
     expect(task?.badge).toBe('O')
     expect(task?.isWaitingInput).toBe(true)
   })
@@ -171,6 +172,8 @@ describe('pickActiveLiveTask', () => {
     expect(task).toBeDefined()
     expect(task?.sessionId).toBe('s2')
     expect(task?.badge).toBe('C')
+    expect(task?.countText).toBe(strings.comfort.liveTaskCount(2))
+    expect(task?.startedAtMs).toBe(0)
   })
 
   it('prioritizes most recently updated session when none is selected', () => {

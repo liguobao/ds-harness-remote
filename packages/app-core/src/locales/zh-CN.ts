@@ -552,6 +552,13 @@ const zhCN = {
     taskInput: "需要你确认，点此打开对话",
     liveTaskRunning: '运行中',
     liveTaskWaiting: '待确认',
+    liveTaskPaused: '暂停更新',
+    liveTaskQuestion: '待回答',
+    liveTaskThinking: '思考中',
+    liveTaskTool: '执行工具',
+    liveTaskCollaboration: '协作中',
+    liveTaskCompaction: '整理上下文',
+    liveTaskCount: (count: number) => `${count} 个对话在运行`,
     liveTaskDefaultTitle: 'Remote 对话',
   },
   tools: {

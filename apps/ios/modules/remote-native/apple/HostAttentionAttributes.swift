@@ -7,6 +7,9 @@ struct HostAttentionAttributes: ActivityAttributes {
     var pendingQuestions: Int
     var runningSessions: Int
     var completedUnread: Int
+    var phase: String?
+    var startedAtMs: Double?
+    var paused: String?
     var attentionToken: String?
   }
 

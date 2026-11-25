@@ -110,6 +110,26 @@ class RemoteForegroundServiceModule(
     extraCount: Int,
     promise: Promise,
   ) {
+    updateLiveTaskV3(hostId, deepLinkUrl, badge, title, statusText, isWaitingInput, updatedAtMs, summary,
+      extraCount, "", 0.0, "", promise)
+  }
+
+  @ReactMethod
+  fun updateLiveTaskV3(
+    hostId: String,
+    deepLinkUrl: String,
+    badge: String,
+    title: String,
+    statusText: String,
+    isWaitingInput: Boolean,
+    updatedAtMs: Double,
+    summary: String,
+    extraCount: Int,
+    phase: String,
+    startedAtMs: Double,
+    countText: String,
+    promise: Promise,
+  ) {
     val settled = AtomicBoolean(false)
     fun resolveOnce() {
       if (settled.compareAndSet(false, true)) promise.resolve(null)
@@ -135,7 +155,7 @@ class RemoteForegroundServiceModule(
             isWaitingInput,
             safeTime,
             boundedSummary,
-            safeExtraCount,
+            safeExtraCount, phase.take(50), startedAtMs.toLong().coerceAtLeast(0), countText.take(100),
           )
           resolveOnce()
         } catch (e: Throwable) {

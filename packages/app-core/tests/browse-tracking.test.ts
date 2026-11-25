@@ -9,7 +9,7 @@ const f=vi.hoisted(() => ({
   notify:vi.fn(),
   flush:vi.fn(),
 }))
-vi.mock('react-native', () => ({AppState:{
+vi.mock('react-native', () => ({Platform:{OS:'android'},AppState:{
   get currentState(){return f.phase},
   addEventListener:(_ev: string, fn: (p: string) => void)=>{f.appStateChanged=fn; return{remove(){f.appStateChanged=undefined}}},
 }}))

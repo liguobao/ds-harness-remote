@@ -11,6 +11,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.drawable.Icon
+import android.provider.Settings
+import org.json.JSONObject
 import android.graphics.Color
 import android.net.Uri
 import android.net.wifi.WifiManager
@@ -49,6 +52,9 @@ data class LiveTaskData(
   val summary: String = "",
   val deepLinkUrl: String? = null,
   val extraCount: Int = 0,
+  val phase: String = "",
+  val startedAtMs: Long = 0,
+  val countText: String = "",
 )
 
 /** Owns CPU and RN timer eligibility for the lifetime of the remote carrier. */
@@ -61,6 +67,19 @@ class RemoteForegroundService : Service() {
   private val stopWaiters = mutableListOf<Promise>()
   private var connectionStatus = "connecting"
   private var liveTask: LiveTaskData? = null
+
+  private val samsungOngoing = Build.VERSION.SDK_INT >= 35 && Build.MANUFACTURER.equals("samsung", true)
+  private fun configuredScene(key: String) = packageManager
+    .getApplicationInfo(packageName, PackageManager.GET_META_DATA).metaData?.getString("$packageName.$key")
+  private val huaweiEvent by lazy {
+    if (Build.MANUFACTURER.equals("huawei", true)) configuredScene("HUAWEI_LIVE_EVENT") else null
+  }
+  private val vivoScene by lazy {
+    if (listOf(Build.MANUFACTURER, Build.BRAND).any { it.equals("vivo", true) || it.equals("iQOO", true) }) {
+      configuredScene("VIVO_ATOMIC_SCENE")
+    } else null
+  }
+  private var vendorTaskActive = false
 
   @Suppress("DEPRECATION")
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -194,6 +213,70 @@ class RemoteForegroundService : Service() {
     }
   }
 
+  private fun addXiaomiFocus(notification: Notification, version: Int, status: String, title: String) {
+    val params = JSONObject()
+      .put("protocol", 1)
+      .put("business", "remote_task")
+      .put("updatable", true)
+      .put("reopen", "reopen")
+      .put("islandFirstFloat", false)
+      .put("ticker", status)
+      .put("baseInfo", JSONObject().put("type", 2).put("title", status).put("content", title))
+    if (version >= 3) {
+      val iconKey = "miui.focus.pic_task"
+      notification.extras.putBundle("miui.focus.pics", Bundle().apply {
+        putParcelable(iconKey, Icon.createWithResource(this@RemoteForegroundService, R.mipmap.ic_launcher_foreground))
+      })
+      val pic = JSONObject().put("type", 1).put("pic", iconKey)
+      val label = JSONObject().put("type", 1).put("picInfo", pic)
+        .put("textInfo", JSONObject().put("title", status))
+      params.put("param_island", JSONObject()
+        .put("bigIslandArea", JSONObject().put("imageTextInfoLeft", label).put("picInfo", pic))
+        .put("smallIslandArea", JSONObject().put("picInfo", pic)))
+    }
+    notification.extras.putString("miui.focus.param", JSONObject().put("param_v2", params).toString())
+  }
+
+  private fun extendLiveTask(notification: Notification, status: String, title: String) {
+    val extras = notification.extras
+    if (samsungOngoing) {
+      extras.putInt("android.ongoingActivityNoti.style", 1)
+      extras.putParcelable("android.ongoingActivityNoti.secondIcon", notification.smallIcon)
+      extras.putString("android.ongoingActivityNoti.chipExpandedText", status)
+      extras.putString("android.ongoingActivityNoti.nowbarPrimaryInfo", status)
+      extras.putString("android.ongoingActivityNoti.nowbarSecondaryInfo", title)
+      extras.putString("android.ongoingActivityNoti.primaryInfo", status)
+      extras.putString("android.ongoingActivityNoti.secondaryInfo", title)
+    }
+    huaweiEvent?.let { event ->
+      extras.putString("notification.live.event", event)
+      extras.putInt("notification.live.operation", if (vendorTaskActive) 1 else 0)
+      extras.putInt("notification.live.type", 1)
+      extras.putBundle("notification.live.capsule", Bundle().apply {
+        putInt("notification.live.capsuleStatus", 1)
+        putInt("notification.live.capsuleType", 1)
+        putParcelable("notification.live.capsuleIcon", notification.smallIcon)
+        putInt("notification.live.capsuleBgColor", Color.rgb(32, 58, 77))
+        putString("notification.live.capsuleTitle", status)
+        putString("notification.live.capsuleContent", title)
+      })
+      vendorTaskActive = true
+    }
+    vivoScene?.let { scene ->
+      extras.putString("notification.superx.scene", scene)
+      extras.putInt("notification.superx.operation", if (vendorTaskActive) 1 else 0)
+      extras.putBoolean("notification.superx.showNotify", true)
+      extras.putInt("notification.superx.template", 1)
+      extras.putParcelable("notification.superx.clickResp", notification.contentIntent)
+      extras.putBundle("notification.superx.baseInfos", Bundle().apply {
+        putParcelable("notification.superx.baseInfos.icon", notification.smallIcon)
+        putCharSequence("notification.superx.baseInfos.title", status)
+        putCharSequence("notification.superx.baseInfos.content", title)
+      })
+      vendorTaskActive = true
+    }
+  }
+
   private fun notification(): Notification {
     val task = liveTask
     if (connectionStatus == "connected" && task != null) {
@@ -227,6 +310,9 @@ class RemoteForegroundService : Service() {
       val safeExtraCount = task.extraCount.coerceAtLeast(0)
       val displayStatus = if (safeExtraCount > 0) "$baseStatus · +$safeExtraCount" else baseStatus
       val safeTitle = task.title.ifBlank { getString(R.string.app_name) }
+      val titleWithCount = listOf(safeTitle, task.countText).filter { it.isNotBlank() }.joinToString(" · ")
+      val timed = !task.isWaitingInput && task.startedAtMs in 1..System.currentTimeMillis()
+      val status = task.phase.ifBlank { baseStatus }
       val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
       val statusColor = if (task.isWaitingInput) {
         Color.parseColor(if (night) "#F5C45E" else "#B45309")
@@ -239,33 +325,6 @@ class RemoteForegroundService : Service() {
       val timeColor = if (night) Color.parseColor("#99FFFFFF") else Color.parseColor("#99000000")
 
       try {
-        val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
-          setImageViewResource(R.id.live_task_status_dot, dotRes)
-          setTextViewText(R.id.live_task_status_text, displayStatus)
-          setTextColor(R.id.live_task_status_text, statusColor)
-          setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
-          setTextColor(R.id.live_task_time, timeColor)
-          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
-          setTextColor(R.id.live_task_badge, badgeColor)
-          setTextViewText(R.id.live_task_title, safeTitle)
-          setTextColor(R.id.live_task_title, titleColor)
-          setTextViewText(R.id.live_task_summary, task.summary)
-          setTextColor(R.id.live_task_summary, timeColor)
-          setViewVisibility(R.id.live_task_summary, if (task.summary.isBlank()) View.GONE else View.VISIBLE)
-          setOnClickPendingIntent(R.id.live_task_card, pendingIntent)
-        }
-
-        val collapsedViews = RemoteViews(packageName, R.layout.notification_live_task_collapsed).apply {
-          setImageViewResource(R.id.live_task_status_dot, dotRes)
-          setTextViewText(R.id.live_task_status_text, displayStatus)
-          setTextColor(R.id.live_task_status_text, statusColor)
-          setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
-          setTextColor(R.id.live_task_badge, badgeColor)
-          setTextViewText(R.id.live_task_title, safeTitle)
-          setTextColor(R.id.live_task_title, titleColor)
-          setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
-        }
-
         val publicNotification = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
           .setSmallIcon(R.mipmap.ic_launcher_foreground)
           .setContentTitle(displayStatus)
@@ -278,25 +337,70 @@ class RemoteForegroundService : Service() {
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
           .setSmallIcon(R.mipmap.ic_launcher_foreground)
           .setContentTitle(displayStatus)
-          .setContentText(safeTitle)
-          .setCustomContentView(collapsedViews)
-          .setCustomBigContentView(expandedViews)
-          .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+          .setContentText(titleWithCount)
           .setPublicVersion(publicNotification)
           .setContentIntent(pendingIntent)
           .setCategory(NotificationCompat.CATEGORY_SERVICE)
           .setOngoing(true)
           .setOnlyAlertOnce(true)
           .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-          .setGroup(LIVE_GROUP)
-          .setGroupSummary(false)
           .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
-        if (task.updatedAtMs > 0) {
+        if (Build.VERSION.SDK_INT >= 36) {
+          builder.setRequestPromotedOngoing(true)
+          if (!timed) builder.setShortCriticalText(status)
+          if (task.summary.isNotBlank()) {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(titleWithCount, task.summary)
+              .filter { it.isNotBlank() }.joinToString("\n")))
+          }
+        } else if (!samsungOngoing && vivoScene == null && huaweiEvent == null) {
+          val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
+            setImageViewResource(R.id.live_task_status_dot, dotRes)
+            setTextViewText(R.id.live_task_status_text, displayStatus)
+            setTextColor(R.id.live_task_status_text, statusColor)
+            setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
+            setTextColor(R.id.live_task_time, timeColor)
+            setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+            setTextColor(R.id.live_task_badge, badgeColor)
+            setTextViewText(R.id.live_task_title, titleWithCount)
+            setTextColor(R.id.live_task_title, titleColor)
+            setTextViewText(R.id.live_task_summary, task.summary)
+            setTextColor(R.id.live_task_summary, timeColor)
+            setViewVisibility(R.id.live_task_summary, if (task.summary.isBlank()) View.GONE else View.VISIBLE)
+            setOnClickPendingIntent(R.id.live_task_card, pendingIntent)
+          }
+
+          val collapsedViews = RemoteViews(packageName, R.layout.notification_live_task_collapsed).apply {
+            setImageViewResource(R.id.live_task_status_dot, dotRes)
+            setTextViewText(R.id.live_task_status_text, displayStatus)
+            setTextColor(R.id.live_task_status_text, statusColor)
+            setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+            setTextColor(R.id.live_task_badge, badgeColor)
+            setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+            setTextColor(R.id.live_task_title, titleColor)
+            setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
+          }
+
+          builder.setCustomContentView(collapsedViews)
+            .setCustomBigContentView(expandedViews)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+        }
+
+        if (timed) {
+          builder.setWhen(task.startedAtMs).setShowWhen(true).setUsesChronometer(true)
+        } else if (task.updatedAtMs > 0) {
           builder.setWhen(task.updatedAtMs).setShowWhen(true)
         }
 
-        return builder.build()
+        val notification = builder.build()
+        val focusVersion = runCatching {
+          Settings.System.getInt(contentResolver, "notification_focus_protocol", 0)
+        }.getOrDefault(0)
+        if (focusVersion >= 2) {
+          addXiaomiFocus(notification, focusVersion, status, titleWithCount)
+        }
+        extendLiveTask(notification, status, titleWithCount)
+        return notification
       } catch (e: Exception) {
         Log.w("RemoteForegroundService", "Failed to build custom live task notification, falling back", e)
       }
@@ -323,7 +427,20 @@ class RemoteForegroundService : Service() {
           ))
         }
       }
-      .build()
+      .build().also { notification ->
+        if (vendorTaskActive) {
+          huaweiEvent?.let {
+            notification.extras.putString("notification.live.event", it)
+            notification.extras.putInt("notification.live.operation", 2)
+            notification.extras.putInt("notification.live.type", 1)
+          }
+          vivoScene?.let {
+            notification.extras.putString("notification.superx.scene", it)
+            notification.extras.putInt("notification.superx.operation", 2)
+          }
+          vendorTaskActive = false
+        }
+      }
   }
 
   private fun createChannel() {
@@ -349,7 +466,6 @@ class RemoteForegroundService : Service() {
     private const val CHANNEL_ID = "remote_connection"
     private const val LIVE_CHANNEL_ID = "live_tasks"
     private const val TASK_CHANNEL_ID = "remote_tasks"
-    private const val LIVE_GROUP = "dsh_remote_live_task"
     private const val TASK_GROUP = "dsh_remote_task_alerts"
     private const val ATTENTION_GROUP = "dsh_remote_attention_alerts"
     private const val NOTIFICATION_ID = 7401
@@ -460,8 +576,10 @@ class RemoteForegroundService : Service() {
       isWaitingInput: Boolean,
       updatedAtMs: Long,
       summary: String = "",
+      startedAtMs: Long = 0,
+      countText: String = "",
     ) {
-      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary)
+      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary, startedAtMs = startedAtMs, countText = countText)
       currentLiveTask = data
       val service = running ?: return
       service.liveTask = data
@@ -479,6 +597,9 @@ class RemoteForegroundService : Service() {
       updatedAtMs: Long,
       summary: String = "",
       extraCount: Int = 0,
+      phase: String = "",
+      startedAtMs: Long = 0,
+      countText: String = "",
     ) {
       val safeExtraCount = extraCount.coerceAtLeast(0)
       val data = LiveTaskData(
@@ -492,10 +613,14 @@ class RemoteForegroundService : Service() {
         summary = summary,
         deepLinkUrl = deepLinkUrl,
         extraCount = safeExtraCount,
+        phase = phase,
+        startedAtMs = startedAtMs,
+        countText = countText,
       )
       currentLiveTask = data
       val service = running ?: return
       val previousTask = service.liveTask
+      val previousVendorTaskActive = service.vendorTaskActive
       service.liveTask = data
       try {
         val manager = service.getSystemService(NotificationManager::class.java)
@@ -504,6 +629,7 @@ class RemoteForegroundService : Service() {
       } catch (e: Throwable) {
         // Never remove ongoing FGS notification 7401 on update failure.
         service.liveTask = previousTask
+        service.vendorTaskActive = previousVendorTaskActive
         currentLiveTask = previousTask
         throw e
       }

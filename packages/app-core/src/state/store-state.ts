@@ -109,7 +109,7 @@ export interface AppState {
   /** Successfully opened in this remote-use lifecycle; retained across transport recovery. */
   currentWorkSessionIds: string[]
   messages: Record<string, ChatItem[]>
-  sessionLifecycles: Record<string, { seq: number; running: boolean; turn?: string; finished?: 'completed' | 'failed' }>
+  sessionLifecycles: Record<string, { seq: number; running: boolean; startedAt?: number; turn?: string; finished?: 'completed' | 'failed' }>
   sessionProjectionSeqs: Record<string, Record<string, number>>
   feedbackBySession: Record<string, Map<string, ChatMessage['feedback']>>
   sessionModels?: SessionModels

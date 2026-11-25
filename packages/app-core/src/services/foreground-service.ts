@@ -9,6 +9,7 @@ interface ForegroundServiceModule {
   isIgnoringBatteryOptimizations?(): Promise<boolean>
   requestIgnoreBatteryOptimizations?(): Promise<boolean>
   updateLiveTask?(hostId: string, sessionId: string, badge: string, title: string, statusText: string, isWaitingInput: boolean, updatedAtMs: number, summary: string): Promise<void>
+  updateLiveTaskV3?(hostId: string, url: string, badge: string, title: string, status: string, waiting: boolean, updatedAt: number, summary: string, extra: number, phase: string, startedAt: number, count: string): Promise<void>
   updateLiveTaskV2?(
     hostId: string,
     deepLinkUrl: string,
@@ -151,12 +152,18 @@ export const foregroundService = {
     updatedAtMs: number,
     summary: string,
     extraCount: number,
+    details?: { phase: string; startedAtMs: number; countText: string },
   ): Promise<void> {
     const rn = reactNative()
     if (rn?.Platform.OS !== 'android') return
     try {
       const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
       if (native === undefined) return
+      if (details && typeof native.updateLiveTaskV3 === 'function') {
+        await native.updateLiveTaskV3(hostId, deepLinkUrl, badge, title, statusText, isWaitingInput,
+          updatedAtMs, summary, extraCount, details.phase, details.startedAtMs, details.countText)
+        return
+      }
       if (typeof native.updateLiveTaskV2 === 'function') {
         await native.updateLiveTaskV2(
           hostId,

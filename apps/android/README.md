@@ -270,3 +270,16 @@ New Bots ask only for a name and optional model; omitted model/avatar settings u
 ### Saving workspace files
 
 The file preview header offers Save to phone. On Android 10 and newer it writes to the system Downloads folder using MediaStore, without directory access permission. Android 8–9 use the system directory picker. Saves are limited to 100 MiB and use a temporary app-cache file, deleted after completion or cancellation; normal preview does not create this download cache. Incomplete MediaStore entries are not published. A short toast confirms successful saves.
+
+## Live task notifications
+
+Android 16 and later can promote an active task notification to a system Live Update.
+The notification also supplies Xiaomi Focus and Samsung Now Bar presentation data on
+compatible devices. Tapping the task opens its conversation.
+
+For vendor-approved builds, set `DSH_VIVO_ATOMIC_SCENE` (vivo or iQOO) or
+`DSH_HUAWEI_LIVE_EVENT` (Huawei Android APK) to the identifier approved for this
+app's remote task notifications before running Expo prebuild. Each option enables
+local create, update and end notifications for that vendor. Builds without a scene
+identifier use the Android notification path. Display depends on the device software,
+app eligibility and the user's notification settings.
