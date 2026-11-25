@@ -803,8 +803,16 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             }),
           ])
           if (!current()) return
-          if (acpBackend === 'antigravity' && details.running === false && details.events.length === 0) {
+          // Every native-catalog ACP backend serves `dsh/sessionHistory`: a read
+          // that reports an idle turn with no events means the session has no
+          // history yet, so its first prompt has no predecessor to reconcile
+          // against. Cursor is excluded: its history reader is optional on the
+          // Host, which answers with an empty list even for a session that does
+          // have history, so emptiness proves nothing there.
+          if (acpBackend !== 'cursor' && details.running === false && details.events.length === 0) {
             runtime.emptyAcpHistory = { sessionId: session.sessionId, loadGeneration, connectionGeneration }
+          } else if (runtime.emptyAcpHistory?.sessionId === session.sessionId) {
+            runtime.emptyAcpHistory = undefined
           }
           const items = foldAcpHistory(details.events, session.sessionId)
           let enrichedSession: RemoteSession = {

@@ -1303,6 +1303,45 @@ describe('session restore state machine', () => {
     } })), prepareScenario1).finally(() => { delete historyClient.loadSessionDetails })
   })
 
+  it('marks empty Host history for every non-Cursor ACP backend so the first prompt is confirmed instead of duplicated', async () => {
+    await runScenarios((['claude', 'opencode', 'pi', 'hermes'] as const).map(backend => ({
+      name: `${backend}: empty history marks the first prompt as having no predecessor`,
+      run: async () => {
+        const client = acp as typeof acp & Partial<Pick<AgentAcpClient, 'loadSessionDetails'>>
+        client.loadSessionDetails = AgentAcpClient.prototype.loadSessionDetails
+        try {
+          const selected: RemoteSession = { ...session, backend, sessionId: `${backend}:empty`, nativeId: 'empty' }
+          // The Host answers with an idle, empty transcript for a brand-new session
+          // exactly like it does for antigravity; every native catalog backend does.
+          acp.transferCall.mockResolvedValueOnce({ events: [], running: false })
+          expect(await useAppStore.getState().openSession(selected)).toBe(true)
+          expect(await useAppStore.getState().sendMessage('hello')).toBe('sent')
+          const pending = useAppStore.getState().messages[selected.sessionId]!
+            .filter(item => item.kind === 'message' && item.role === 'user')
+          expect(pending).toHaveLength(1)
+          expect(pending[0]!.id).toMatch(/^local:/)
+
+          // The Host persisted the first turn: restoring must adopt that history row
+          // instead of keeping the optimistic local row (otherwise A -> B -> A).
+          acp.transferCall.mockResolvedValueOnce({
+            events: [
+              entry('user/message', 10, { id: 'user-1', source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] }),
+              entry('assistant/message', 11, { turn: 1, message: { id: 'answer-1', content: [{ type: 'text', text: 'hi' }] } }),
+              entry('turn/end', 12, { turn: 1, reason: { kind: 'completed' } }),
+            ],
+            running: false,
+          })
+          expect(await useAppStore.getState().openSession(selected)).toBe(true)
+          const restored = useAppStore.getState().messages[selected.sessionId]!
+            .filter(item => item.kind === 'message' && item.role === 'user')
+          expect(restored.map(item => item.id)).toEqual(['user-1'])
+        } finally {
+          delete client.loadSessionDetails
+        }
+      },
+    })), prepareScenario1)
+  })
+
   it('keeps only new ACP subscription deltas while history is loading', async () => {
     await runScenarios((['pi', 'antigravity'] as const).flatMap(backend =>
       ['live', 'completed', 'switch', 'reject'].map(mode => ({ name: `${backend}: ${mode}`, run: async () => {
