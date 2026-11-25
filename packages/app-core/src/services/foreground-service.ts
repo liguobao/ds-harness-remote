@@ -1,3 +1,5 @@
+import { strings } from '../locales/i18n'
+
 interface ForegroundServiceModule {
   notifyTask(hostId: string, sessionId: string, title: string, body: string): void
   start(): Promise<void>
@@ -92,6 +94,13 @@ export const foregroundService = {
     countText = '',
   ): Promise<void> {
     const rn = reactNative()
+    if (rn?.Platform.OS === 'ios') {
+      await rn.NativeModules.DshRemoteLiveTask?.update({
+        host: hostId, session: sessionId, title, badge, phase: statusText, waiting: isWaitingInput,
+        started: startedAtMs, count: countText, paused: strings.comfort.liveTaskPaused,
+      })
+      return
+    }
     if (rn?.Platform.OS !== 'android') return
     try {
       const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
@@ -106,6 +115,10 @@ export const foregroundService = {
   },
   async clearLiveTask(): Promise<void> {
     const rn = reactNative()
+    if (rn?.Platform.OS === 'ios') {
+      await rn.NativeModules.DshRemoteLiveTask?.clear()
+      return
+    }
     if (rn?.Platform.OS !== 'android') return
     try {
       const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined

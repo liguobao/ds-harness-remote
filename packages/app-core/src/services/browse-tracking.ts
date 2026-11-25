@@ -1,6 +1,6 @@
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings } from '../locales/i18n'
-import { AppState } from 'react-native'
+import { AppState, Platform } from 'react-native'
 import { useAppStore } from '../state/store'
 import type { AgentBackend } from '../types'
 import { browseKey, browseScope, useBrowseMemory, updateBrowseEntry, saveBrowseCatalog, browsePreference, flushBrowseMemory } from './browse-memory'
@@ -156,25 +156,40 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
   }
 }
 
+// Serialize teardown from a previous observer with updates from its replacement.
+let liveTaskSyncTail = Promise.resolve()
+
 /** Observe display state only; this never submits, resumes or interrupts a turn. */
 export function startBrowseTracking(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined
   let previousCatalog: unknown, previousSessions: unknown, previousMessages: unknown, previousSelected: string | undefined
   let previousUpdated = 0
   let lastLiveTaskKey: string | undefined = undefined
-  let liveTaskSyncTail: Promise<void> = Promise.resolve()
+  const ios = Platform.OS === 'ios'
   let disposed = false
   const running = new Map<string, boolean>()
   const questions = new Set<string>()
+
+  function syncLiveTask(task?: LiveTaskSummary, force = false) {
+    const key = task ? JSON.stringify(ios ? [task.hostId, task.sessionId, task.badge, task.title, task.statusText,
+      task.isWaitingInput, task.startedAtMs, task.countText, strings.comfort.liveTaskPaused] : task) : ''
+    if (!force && key === lastLiveTaskKey) return
+    lastLiveTaskKey = key
+    liveTaskSyncTail = liveTaskSyncTail.then(async () => {
+      if (disposed || key !== lastLiveTaskKey) return
+      if (!task) return foregroundService.clearLiveTask()
+      await foregroundService.updateLiveTask(task.hostId, task.sessionId, task.badge, task.title,
+        task.statusText, task.isWaitingInput, task.updatedAtMs, task.summary, task.startedAtMs, task.countText)
+    }).catch(() => {
+      if (key === lastLiveTaskKey) lastLiveTaskKey = undefined
+    })
+  }
 
   const observe = () => {
     const state = useAppStore.getState(), memory = useBrowseMemory.getState()
     const device = state.selectedDevice
     if (device === undefined || state.connection.phase !== 'connected' || !memory.ready) {
-      if (lastLiveTaskKey !== undefined) {
-        lastLiveTaskKey = undefined
-        void foregroundService.clearLiveTask()
-      }
+      syncLiveTask()
       return
     }
     const scope = browseScope(state)
@@ -215,45 +230,7 @@ export function startBrowseTracking(): () => void {
 
     if (disposed) return
 
-    // Sync active live task lock screen notification
-    const liveTask = pickActiveLiveTask(state)
-    const taskKey = liveTask === undefined ? '' : JSON.stringify({
-      h: liveTask.hostId,
-      s: liveTask.sessionId,
-      b: liveTask.badge,
-      t: liveTask.title,
-      st: liveTask.statusText,
-      w: liveTask.isWaitingInput,
-      u: liveTask.updatedAtMs,
-      m: liveTask.summary,
-      since: liveTask.startedAtMs,
-      count: liveTask.countText,
-    })
-
-    if (taskKey !== lastLiveTaskKey) {
-      const targetKey = taskKey
-      liveTaskSyncTail = liveTaskSyncTail.then(async () => {
-        if (targetKey !== '') {
-          await foregroundService.updateLiveTask(
-            liveTask!.hostId,
-            liveTask!.sessionId,
-            liveTask!.badge,
-            liveTask!.title,
-            liveTask!.statusText,
-            liveTask!.isWaitingInput,
-            liveTask!.updatedAtMs,
-            liveTask!.summary,
-            liveTask!.startedAtMs,
-            liveTask!.countText,
-          )
-        } else {
-          await foregroundService.clearLiveTask()
-        }
-        lastLiveTaskKey = targetKey
-      }).catch(() => {
-        // Allow retry on next observation if native bridge failed
-      })
-    }
+    syncLiveTask(pickActiveLiveTask(state))
   }
 
   const flushPendingObserve = () => {
@@ -267,13 +244,24 @@ export function startBrowseTracking(): () => void {
     timer = setTimeout(() => {timer = undefined; observe()}, 800)
   })
   const background = AppState.addEventListener('change', phase => {
-    if (phase !== 'active') {
+    if (phase === 'active' && ios) {
+      lastLiveTaskKey = undefined
+      observe()
+    } else if (phase !== 'active') {
       flushPendingObserve()
       void flushBrowseMemory()
     }
   })
+  // ActivityKit marks an unchanged snapshot stale if iOS suspends the process.
+  const heartbeat = ios ? setInterval(() => {
+    const state = useAppStore.getState()
+    if (AppState.currentState === 'active' && lastLiveTaskKey && state.connection.phase === 'connected') {
+      syncLiveTask(pickActiveLiveTask(state), true)
+    }
+  }, 60_000) : undefined
   observe()
   return () => {
+    if (heartbeat !== undefined) clearInterval(heartbeat)
     disposed = true
     unsubscribe()
     background.remove()

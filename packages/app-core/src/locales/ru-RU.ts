@@ -562,6 +562,7 @@ const ruRU = {
     taskInput: "Требуется ваше подтверждение. Нажмите, чтобы открыть диалог.",
     liveTaskRunning: 'Выполняется',
     liveTaskWaiting: 'Ждёт одобрения',
+    liveTaskPaused: 'Обновления приостановлены',
     liveTaskQuestion: 'Ждёт ответа',
     liveTaskThinking: 'Думает',
     liveTaskTool: 'Вызов инструмента',

@@ -554,6 +554,7 @@ const esES = {
     taskInput: "Se necesita su confirmación. Toque para abrir la conversación.",
     liveTaskRunning: 'En ejecución',
     liveTaskWaiting: 'Por aprobar',
+    liveTaskPaused: 'Actualización en pausa',
     liveTaskQuestion: 'Por responder',
     liveTaskThinking: 'Pensando',
     liveTaskTool: 'Usando herramientas',

@@ -554,6 +554,7 @@ const frFR = {
     taskInput: "Votre confirmation est nécessaire. Appuyez pour ouvrir la conversation.",
     liveTaskRunning: 'En cours',
     liveTaskWaiting: 'À approuver',
+    liveTaskPaused: 'Mises à jour en pause',
     liveTaskQuestion: 'À répondre',
     liveTaskThinking: 'Réflexion',
     liveTaskTool: 'Outil en cours',

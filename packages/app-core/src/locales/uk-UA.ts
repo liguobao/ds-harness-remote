@@ -565,6 +565,7 @@ const ukUA = {
     taskInput: "Потрібне ваше підтвердження. Торкніться, щоб відкрити діалог.",
     liveTaskRunning: 'Виконується',
     liveTaskWaiting: 'Очікує схвалення',
+    liveTaskPaused: 'Оновлення призупинено',
     liveTaskQuestion: 'Очікує відповіді',
     liveTaskThinking: 'Обмірковує',
     liveTaskTool: 'Виклик інструмента',

@@ -67,6 +67,8 @@
 	<string>DSH Remote does not capture or transmit audio. Microphone access is declared because the WebRTC peer-to-peer framework links the system microphone APIs.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Allow DSH Remote to select images that you choose to send in a conversation.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>RCTMetroPort</key>
 	<string>$(RCT_METRO_PORT)</string>
 	<key>RCTNewArchEnabled</key>

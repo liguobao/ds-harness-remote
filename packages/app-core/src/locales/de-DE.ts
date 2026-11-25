@@ -554,6 +554,7 @@ const deDE = {
     taskInput: "Ihre Bestätigung ist erforderlich. Tippen Sie, um die Konversation zu öffnen.",
     liveTaskRunning: 'Wird ausgeführt',
     liveTaskWaiting: 'Freigabe nötig',
+    liveTaskPaused: 'Updates pausiert',
     liveTaskQuestion: 'Antwort nötig',
     liveTaskThinking: 'Denkt nach',
     liveTaskTool: 'Werkzeug aktiv',

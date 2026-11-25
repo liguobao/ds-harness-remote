@@ -4,24 +4,27 @@ const f=vi.hoisted(() => ({
   state:{} as any,
   memory:{ready:true,notifications:true,entries:{}} as any,
   phase:'active',
+  platform:'android',
+  updateLive:vi.fn(),
+  clearLive:vi.fn(),
   changed:()=>{},
   appStateChanged:undefined as ((p: string) => void) | undefined,
   notify:vi.fn(),
   flush:vi.fn(),
 }))
-vi.mock('react-native', () => ({AppState:{
+vi.mock('react-native', () => ({Platform: { get OS(){return f.platform} }, AppState:{
   get currentState(){return f.phase},
   addEventListener:(_ev: string, fn: (p: string) => void)=>{f.appStateChanged=fn; return{remove(){f.appStateChanged=undefined}}},
 }}))
 vi.mock('../src/state/store', () => ({useAppStore:{getState:()=>f.state,subscribe:(fn:()=>void)=>{f.changed=fn;return()=>{}}}}))
-vi.mock('../src/services/foreground-service', () => ({foregroundService:{notifyTask:f.notify,updateLiveTask:vi.fn(),clearLiveTask:vi.fn()}}))
+vi.mock('../src/services/foreground-service', () => ({foregroundService:{notifyTask:f.notify,updateLiveTask:f.updateLive,clearLiveTask:f.clearLive}}))
 vi.mock('../src/services/browse-memory', () => ({
   browseScope:()=> 'scope',browseKey:(s:string,id:string)=>s+id,useBrowseMemory:{getState:()=>f.memory},
   updateBrowseEntry:(s:string,id:string,p:unknown)=>{f.memory.entries[s+id]={...f.memory.entries[s+id],...p as object}},
   saveBrowseCatalog(){},browsePreference(){},flushBrowseMemory:()=>f.flush(),
 }))
 import {pickActiveLiveTask, startBrowseTracking} from '../src/services/browse-tracking'
-afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.clearAllMocks()})
+afterEach(()=>{f.platform='android';vi.clearAllTimers();vi.useRealTimers();vi.clearAllMocks()})
 
 it('notifies once for confirmed completion and live questions, respecting foreground and preference', () => {
   vi.useFakeTimers();f.phase='active';f.memory={ready:true,notifications:true,entries:{}}
@@ -102,4 +105,34 @@ it('triggers background notification and lock-screen live task for ACP approvals
   expect(f.notify).toHaveBeenCalledTimes(2)
   expect(pickActiveLiveTask({ ...f.state, selectedSession: hermes })).toMatchObject({ sessionId: hermes.sessionId, isWaitingInput: true })
   stop()
+})
+
+it('renews an unchanged iOS activity, ignores streamed reply text and ends it on disconnect', async () => {
+  vi.useFakeTimers()
+  f.platform = 'ios'
+  f.phase = 'active'
+  f.memory = { ready: true, notifications: false, entries: {} }
+  const session = { sessionId: 's', running: true, title: 'Task', updatedAt: 1 }
+  f.state = { selectedDevice: { deviceId: 'host' }, connection: { phase: 'connected' },
+    sessions: [session], messages: { s: [] }, workspaces: [] }
+  const stop = startBrowseTracking()
+  try {
+    await vi.advanceTimersByTimeAsync(0)
+    expect(f.updateLive).toHaveBeenCalledTimes(1)
+    f.state.messages.s = [{ kind: 'message', role: 'assistant', text: 'streamed reply' }]
+    f.changed()
+    await vi.advanceTimersByTimeAsync(800)
+    expect(f.updateLive).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(f.updateLive).toHaveBeenCalledTimes(2)
+    f.state.connection.phase = 'disconnected'
+    f.changed()
+    await vi.advanceTimersByTimeAsync(800)
+    expect(f.clearLive).toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(f.updateLive).toHaveBeenCalledTimes(2)
+  } finally {
+    stop()
+    await vi.advanceTimersByTimeAsync(0)
+  }
 })

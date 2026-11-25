@@ -554,6 +554,7 @@ const jaJP = {
     taskInput: "あなたの確認が必要です。タップして会話を開きます。",
     liveTaskRunning: '実行中',
     liveTaskWaiting: '承認待ち',
+    liveTaskPaused: '更新を一時停止中',
     liveTaskQuestion: '回答待ち',
     liveTaskThinking: '思考中',
     liveTaskTool: 'ツール実行中',
