@@ -176,6 +176,13 @@ function statusTextForLiveItem(status: AttentionStatus): string {
   }
 }
 
+/** Never surface a bare session id as a human-facing title. */
+function attentionDisplayTitle(item: AttentionItem): string {
+  const raw = item.sessionTitle.trim()
+  if (raw.length === 0 || raw === item.sessionId) return strings.comfort.liveTaskDefaultTitle
+  return raw
+}
+
 function notificationBodyForItem(item: AttentionItem): string {
   const platform = resolveAttentionBackendIdentity(item).label
   let action: string
@@ -309,9 +316,7 @@ export function createLiveSurfaceController(
         const deepLink = useDigestToken
           ? buildAttentionDeepLinkUrl(hostId, digest!.attentionToken)
           : buildConversationDeepLinkUrl(hostId, item.sessionId, item.mode)
-        const title = item.sessionTitle.trim().length > 0
-          ? item.sessionTitle.trim()
-          : strings.comfort.liveTaskDefaultTitle
+        const title = attentionDisplayTitle(item)
         const body = notificationBodyForItem(item)
         const tag = `attention:${hostId}:${item.sessionId}`
 
@@ -373,9 +378,7 @@ export function createLiveSurfaceController(
       const extraCount = Math.max(0, activeItems.length - 1)
       const isWaitingInput = topActive.status === 'waiting_approval' || topActive.status === 'waiting_question'
       const badge = attentionItemBadge(topActive)
-      const title = topActive.sessionTitle.trim().length > 0
-        ? topActive.sessionTitle.trim()
-        : strings.comfort.liveTaskDefaultTitle
+      const title = attentionDisplayTitle(topActive)
       const statusText = `${resolveAttentionBackendIdentity(topActive).label} · ${phase}`
       const summary = topActive.summary ?? ''
       const updatedAtMs = topActive.updatedAt > 0 ? topActive.updatedAt : 0

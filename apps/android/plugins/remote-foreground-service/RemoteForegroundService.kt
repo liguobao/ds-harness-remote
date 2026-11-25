@@ -426,9 +426,11 @@ class RemoteForegroundService : Service() {
         else -> R.string.remote_status_connecting
       })
     val showHost = connectionStatus == "connected" && connectedHostName.isNotEmpty()
+    // A blank workspace label must not degrade the title to a bare host name.
+    val connectionTitle = if (showHost && workspaceLabel.isNotBlank()) islandLabel(workspaceLabel) else title
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.mipmap.ic_launcher_foreground)
-      .setContentTitle(if (showHost) islandLabel(workspaceLabel) else title)
+      .setContentTitle(connectionTitle)
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setOngoing(true)
       .setOnlyAlertOnce(true)

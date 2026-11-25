@@ -36,6 +36,7 @@ import {
   useAttentionStore,
 } from '../src/state/attention-store'
 import type { BotState } from '../src/services/bot-catalog'
+import { strings } from '../src/locales/i18n'
 import type { RemoteDevice } from '../src/types'
 
 const VALID_TOKEN = '0123456789abcdef0123456789abcdef'
@@ -478,7 +479,61 @@ describe('attentionStore', () => {
   })
 })
 
+describe('legacy attention display titles', () => {
+  it('never surfaces a bare session id for a DS-Bot session', () => {
+    for (const title of ['', 'session-bb1328c8']) {
+      const derived = deriveLegacyAttentionItems({
+        sessions: [{ sessionId: 'session-bb1328c8', backend: 'ds-bot', title, running: true, blank: false, updatedAt: 100 }],
+        botState: undefined,
+        now: 1000,
+      })
+      const running = derived.find(item => item.status === 'running')
+      expect(running?.backend).toBe('ds-bot')
+      expect(running?.sessionTitle).toBe('DS-Bot')
+    }
+  })
+
+  it('uses the bot preview as the summary of a running DS-Bot bot entry', () => {
+    const botState = {
+      bots: [{ id: 'bot-1', sessionId: 'bot-sess-1', name: 'Research Bot', preview: '最后一次回复摘要', role: 'Analyst', instructions: '', model: 'ds', effort: 'medium', main: true }],
+      rooms: [],
+      agents: [],
+      exchangeTurns: {}, btwCards: {}, btwSupported: false, sideChats: {}, activity: {},
+      work: { bots: { 'bot-1': { running: true, updatedAt: 500 } }, rooms: {}, waiting: {}, turns: {}, steered: {} },
+      questions: {}, views: {}, closedCards: {}, imVia: {}, connectorRequests: {}, mailRequests: {},
+    } as unknown as BotState
+    const derived = deriveLegacyAttentionItems({
+      sessions: [{ sessionId: 'bot-sess-1', backend: 'ds-bot', title: '', running: true, blank: false, updatedAt: 100 }],
+      botState,
+      now: 1000,
+    })
+    const running = derived.find(item => item.sessionId === 'bot-sess-1' && item.status === 'running')
+    expect(running?.sessionTitle).toBe('Research Bot')
+    expect(running?.summary).toBe('最后一次回复摘要')
+  })
+})
+
 describe('live-surface unified bridge', () => {
+  it('replaces a bare session id title with the local default before posting the Android task', async () => {
+    for (const useV2 of [false, true]) {
+      const updates: unknown[][] = []
+      const foreground: LiveSurfaceForegroundBridge = {
+        notifyTask: vi.fn(),
+        async updateLiveTask(...args: unknown[]) { updates.push(args) },
+        ...(useV2 ? { async updateLiveTaskV2(...args: unknown[]) { updates.push(args) } } : {}),
+        async clearLiveTask() {},
+      }
+      const controller = createLiveSurfaceController({ foreground, getReactNative: () => ({ Platform: { OS: 'android' } }) })
+      await controller.sync({
+        hostId: 'host', connected: true, notificationsEnabled: true, appState: 'active',
+        items: [makeItem({ id: 'run', sessionId: 'session-bb1328c8', sessionTitle: 'session-bb1328c8', status: 'running' })],
+        digest: null,
+      })
+      expect(updates).toHaveLength(1)
+      expect(updates[0]?.[3]).toBe(strings.comfort.liveTaskDefaultTitle)
+    }
+  })
+
   it('clears a queued Android task when the Host disconnects before the first update settles', async () => {
     const calls: string[] = []
     const foreground: LiveSurfaceForegroundBridge = {

@@ -143,8 +143,22 @@ let activeSubscription: AttentionFollowSubscription | undefined
 let activeAbort: AbortController | undefined
 let activeAttachPromise: Promise<void> | undefined
 
+/** A raw session id is never a title: DS-Bot sessions get their platform label, others the local default. */
+function attentionFallbackTitle(item: Pick<AttentionItem, 'backend' | 'mode'>): string {
+  return item.mode === 'bot' || item.backend === 'ds-bot'
+    ? 'DS-Bot'
+    : strings.comfort.liveTaskDefaultTitle
+}
+
+function isBareSessionId(title: string | undefined, sessionId: string): boolean {
+  return title !== undefined && title.trim() === sessionId
+}
+
 function normalizeAttentionTitle(item: AttentionItem): string {
   const raw = item.sessionTitle
+  if (raw.trim().length === 0 || isBareSessionId(raw, item.sessionId)) {
+    return attentionFallbackTitle(item).slice(0, MAX_ATTENTION_TITLE_CHARS)
+  }
   const preview = parseHandoffPreview(raw)
   const fallback = preview?.sourceBackend && preview?.targetBackend
     ? `${harnessDisplayName(preview.sourceBackend)} → ${harnessDisplayName(preview.targetBackend)}`
@@ -485,6 +499,16 @@ function botSessionTitle(botState: BotState, sessionId: string, botId?: string, 
   return 'DS-Bot'
 }
 
+function botSessionPreview(botState: BotState, sessionId: string): string | undefined {
+  const matchedRoom = botState.rooms.find(
+    r => r.sessionId === sessionId || r.parts?.includes(sessionId) || r.ownParts?.includes(sessionId),
+  )
+  const matchedBot = botState.bots.find(
+    b => b.sessionId === sessionId || b.parts?.includes(sessionId),
+  )
+  return trimSnippet(matchedRoom?.preview || matchedBot?.preview, MAX_ATTENTION_SUMMARY_CHARS)
+}
+
 function collectBotSessionIds(botState: BotState | undefined): Set<string> {
   const ids = new Set<string>()
   if (!botState) return ids
@@ -625,6 +649,7 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
           const sessionId = bot?.sessionId
           if (!sessionId || coveredBotSessions.has(sessionId)) continue
           const id = `legacy:bot:running:${sessionId}`
+          const preview = trimSnippet(bot?.preview, MAX_ATTENTION_SUMMARY_CHARS)
           itemsById.set(id, {
             id,
             backend: 'ds-bot',
@@ -632,6 +657,7 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
             sessionId,
             sessionTitle: (bot?.name ?? 'DS-Bot').slice(0, MAX_ATTENTION_TITLE_CHARS),
             status: 'running',
+            ...(preview !== undefined ? { summary: preview } : {}),
             updatedAt: isRecord(entry) ? extractBotTimestamp(entry, now) : now,
           })
           coveredBotSessions.add(sessionId)
@@ -644,6 +670,7 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
           const sessionId = room?.sessionId
           if (!sessionId || coveredBotSessions.has(sessionId)) continue
           const id = `legacy:bot:running:${sessionId}`
+          const preview = trimSnippet(room?.preview, MAX_ATTENTION_SUMMARY_CHARS)
           itemsById.set(id, {
             id,
             backend: 'ds-bot',
@@ -651,6 +678,7 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
             sessionId,
             sessionTitle: (room?.name ?? 'DS-Bot').slice(0, MAX_ATTENTION_TITLE_CHARS),
             status: 'running',
+            ...(preview !== undefined ? { summary: preview } : {}),
             updatedAt: isRecord(entry) ? extractBotTimestamp(entry, now) : now,
           })
           coveredBotSessions.add(sessionId)
@@ -666,7 +694,7 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
 
     const lifecycle = lifecycles[session.sessionId]
     const sessionMessages = messagesMap[session.sessionId] ?? []
-    const isBotSession = botSessionIds.has(session.sessionId)
+    const isBotSession = botSessionIds.has(session.sessionId) || session.backend === 'ds-bot'
     const workspace = workspaceBySession.get(session.sessionId)
     const mapped = isBotSession
       ? { backend: 'ds-bot' as AttentionBackend }
@@ -677,10 +705,11 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
       sources.handoffOrigins?.[session.sessionId],
       sessionMessages,
     )
-    const title = (resolvedTitle !== undefined
+    const title = (resolvedTitle !== undefined && !isBareSessionId(resolvedTitle, session.sessionId)
       ? resolvedTitle
-      : (isBotSession && botState ? botSessionTitle(botState, session.sessionId) : session.sessionId)
+      : (isBotSession && botState ? botSessionTitle(botState, session.sessionId) : attentionFallbackTitle({ backend: mapped.backend, mode }))
     ).slice(0, MAX_ATTENTION_TITLE_CHARS)
+    const botSummary = isBotSession && botState ? botSessionPreview(botState, session.sessionId) : undefined
     const updatedAt = typeof session.updatedAt === 'number' && Number.isSafeInteger(session.updatedAt) && session.updatedAt > 0
       ? session.updatedAt
       : now
@@ -704,18 +733,18 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
     } else if (active) {
       status = 'running'
       itemId = `legacy:running:${session.sessionId}`
-      summary = latestAssistantSnippet(sessionMessages)
+      summary = latestAssistantSnippet(sessionMessages) ?? botSummary
     } else if (lifecycle?.finished === 'failed') {
       itemId = `legacy:failed:${session.sessionId}`
       if (!acked.has(itemId)) {
         status = 'failed_unread'
-        summary = latestAssistantSnippet(sessionMessages)
+        summary = latestAssistantSnippet(sessionMessages) ?? botSummary
       }
     } else if (lifecycle?.finished === 'completed' || completedSessionIds.has(session.sessionId)) {
       itemId = `legacy:completed:${session.sessionId}`
       if (!acked.has(itemId)) {
         status = 'completed_unread'
-        summary = latestAssistantSnippet(sessionMessages)
+        summary = latestAssistantSnippet(sessionMessages) ?? botSummary
       }
     }
 
