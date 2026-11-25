@@ -102564,6 +102564,78 @@ async function transcriptPath(baseDir, conversationId) {
   }
 }
 
+// packages/plugin/src/acp/catalog-cwd.ts
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+function catalogCwdCandidates(rawCwd, platform3 = process.platform) {
+  if (typeof rawCwd !== "string" || rawCwd.length === 0 || rawCwd.includes("\0")) return [];
+  if (/^file:\/\//i.test(rawCwd)) {
+    return fileUriCandidates(rawCwd, platform3);
+  }
+  if (platform3 !== "win32") {
+    return [rawCwd];
+  }
+  const encodedDrive = /^\/([A-Za-z])%3[Aa](?:\/(.*))?$/.exec(rawCwd);
+  if (encodedDrive) {
+    if (rawCwd.includes("\\")) return [];
+    const converted = buildWindowsDrivePath(encodedDrive[1], encodedDrive[2], true);
+    return converted === void 0 ? [] : [converted];
+  }
+  const slashDrive = /^\/([A-Za-z]):(?:\/(.*))?$/.exec(rawCwd);
+  if (slashDrive) {
+    if (rawCwd.includes("\\")) return [];
+    const drive = slashDrive[1];
+    const rest = slashDrive[2];
+    const candidates = [];
+    const literal2 = buildWindowsDrivePath(drive, rest, false);
+    if (literal2 !== void 0) candidates.push(literal2);
+    if (rest !== void 0 && rest.includes("%")) {
+      const decoded = buildWindowsDrivePath(drive, rest, true);
+      if (decoded !== void 0 && decoded !== literal2) candidates.push(decoded);
+    }
+    return candidates;
+  }
+  return [rawCwd];
+}
+function fileUriCandidates(rawCwd, platform3) {
+  let url2;
+  try {
+    url2 = new URL(rawCwd);
+  } catch {
+    return [];
+  }
+  if (url2.protocol !== "file:" || url2.search !== "" || url2.hash !== "") return [];
+  if (url2.hostname !== "" && url2.hostname.toLowerCase() !== "localhost") return [];
+  try {
+    const converted = fileURLToPath3(url2, { windows: platform3 === "win32" });
+    if (converted.includes("\0")) return [];
+    if (platform3 === "win32" && /^[A-Za-z]:$/.test(converted)) {
+      return [`${converted}\\`];
+    }
+    return [converted];
+  } catch {
+    return [];
+  }
+}
+function buildWindowsDrivePath(drive, rest, decodeSegments) {
+  if (rest === void 0 || rest.length === 0) return `${drive}:\\`;
+  const segments = rest.split("/");
+  const normalized = [];
+  for (const segment of segments) {
+    if (segment.length === 0) continue;
+    let value = segment;
+    if (decodeSegments) {
+      try {
+        value = decodeURIComponent(segment);
+      } catch {
+        return void 0;
+      }
+      if (value.includes("/") || value.includes("\\") || value.includes("\0")) return void 0;
+    }
+    normalized.push(value);
+  }
+  return `${drive}:\\${normalized.join("\\")}`;
+}
+
 // packages/plugin/src/acp/peer-bridge.ts
 import { Buffer as Buffer9 } from "node:buffer";
 var streamOpenSchema2 = external_exports.object({
@@ -103540,10 +103612,14 @@ var AcpRemoteGateway = class {
             merged.set(item.cwd, { path: item.cwd, title: basename7(item.cwd) || "workspace" });
           }
         }
-        if (merged.size === 0 && deletedPaths.size === 0 && (requestedBackend === "opencode" || requestedBackend === "cursor")) {
+        if (merged.size === 0 && deletedPaths.size === 0 && (requestedBackend === "opencode" || requestedBackend === "cursor" || requestedBackend === "antigravity")) {
           const defaultCandidates = /* @__PURE__ */ new Set();
           const cwd2 = process.cwd();
-          if (cwd2) defaultCandidates.add(cwd2);
+          if (cwd2) {
+            const canonical = await this.requireExistingDirectory(cwd2).catch(() => void 0);
+            assertCurrent();
+            if (canonical) defaultCandidates.add(canonical);
+          }
           for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/srv/dsh-workspace", "/var/lib/dsh/local"]) {
             try {
               const s = await stat5(candidate);
@@ -104947,15 +105023,24 @@ var AcpRemoteGateway = class {
       }
     } };
   }
+  async resolveCatalogCwd(rawCwd, assertCurrent) {
+    for (const candidate of catalogCwdCandidates(rawCwd)) {
+      const canonical = await this.requireExistingDirectory(candidate).catch(() => void 0);
+      assertCurrent();
+      if (canonical) return canonical;
+    }
+    return void 0;
+  }
   async listCatalogSessions(backend, cwd2) {
     const { client, assertCurrent } = this.captureCatalogClient(backend);
     const items = [];
+    let queryCwd = cwd2;
     let cursor3;
     const seen = /* @__PURE__ */ new Set();
     for (let page = 0; page < 100; page++) {
       let result;
       try {
-        result = await client.call("session/list", { ...cwd2 ? { cwd: cwd2 } : {}, ...cursor3 ? { cursor: cursor3 } : {} });
+        result = await client.call("session/list", { ...queryCwd ? { cwd: queryCwd } : {}, ...cursor3 ? { cursor: cursor3 } : {} });
       } catch (error62) {
         if (backend === "cursor" && !(error62 instanceof CursorAcpError && (error62.code === "ACP_AUTH_REQUIRED" || error62.authDiagnostic?.authStatus === "auth_required"))) {
           return items;
@@ -104969,10 +105054,14 @@ var AcpRemoteGateway = class {
       if (!isRecord23(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session catalog response is invalid.");
       }
+      if (process.platform === "win32" && backend === "antigravity" && queryCwd !== void 0 && page === 0 && result.sessions.length === 0 && result.nextCursor == null) {
+        queryCwd = void 0;
+        page = -1;
+        continue;
+      }
       for (const item of result.sessions) {
         if (!isRecord23(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
-        const canonical = await this.requireExistingDirectory(item.cwd).catch(() => void 0);
-        assertCurrent();
+        const canonical = await this.resolveCatalogCwd(item.cwd, assertCurrent);
         if (!canonical || cwd2 && canonical !== cwd2) continue;
         if (this.sessionBackends.has(item.sessionId) && this.sessionBackends.get(item.sessionId) !== backend) continue;
         const trusted = this.sessionCwds.get(item.sessionId);
