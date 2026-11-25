@@ -23,6 +23,17 @@ const MUX_FLUSH_MS = 100
 const MUX_FLUSH_MAX = 250
 const RECENT_WORKSPACE_LIMIT = 3
 const CATALOG_SYNC_DEBOUNCE_MS = 300
+const ACP_STREAM_RECOVERY_DELAYS_MS = [1_500, 3_000, 6_000, 12_000] as const
+const ACP_NON_RETRYABLE_RECOVERY_CODES = new Set([
+  'ACP_BACKEND_DISABLED',
+  'ACP_CLOSED',
+  'ACP_PROCESS_LIMIT',
+  'CLIENT_CLOSED',
+  'CURSOR_CLOSED',
+  'CURSOR_SESSION_OWNED',
+  'FEATURE_NOT_SUPPORTED',
+  'TRANSPORT_CLOSED',
+])
 
 /** Owns mutable connection generations, active streams and event-coalescing state. */
 export class SessionRuntime {
@@ -44,6 +55,8 @@ export class SessionRuntime {
   private pendingCodexFrames: { generation: number; frame: { method: string; params: unknown } }[] = []
   private codexFlushTimer: ReturnType<typeof setTimeout> | undefined
   private codexRecoveryTimer: ReturnType<typeof setTimeout> | undefined
+  private cursorRecoveryTimer: ReturnType<typeof setTimeout> | undefined
+  private cursorStreamGeneration = 0
   private readonly completedCodexTurns = new Set<string>()
   historyCompactMode?: boolean
   readonly browsePages = new Map<string, {oldestLoadedSeq?: number; historyHasMore: boolean}>()
@@ -318,15 +331,39 @@ export class SessionRuntime {
     if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
   }
 
+  clearCursorRecoveryTimer(): void {
+    if (this.cursorRecoveryTimer !== undefined) clearTimeout(this.cursorRecoveryTimer)
+    this.cursorRecoveryTimer = undefined
+  }
+
+  private scheduleCursorRecovery(delayMs: number, task: () => void): void {
+    this.clearCursorRecoveryTimer()
+    this.cursorRecoveryTimer = setTimeout(() => {
+      this.cursorRecoveryTimer = undefined
+      task()
+    }, delayMs)
+    this.cursorRecoveryTimer.unref?.()
+  }
+
   async closeActiveCursorStream(notifyRemote = true): Promise<void> {
+    this.cursorStreamGeneration++
+    this.clearCursorRecoveryTimer()
     const stream = this.activeCursorStream
     this.activeCursorStream = undefined
     if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
   }
 
-  async ensureCursorStream(session: RemoteSession, current: () => boolean = () => true): Promise<void> {
-    await this.closeActiveCursorStream()
-    if (!current()) return
+  async ensureCursorStream(
+    session: RemoteSession,
+    current: () => boolean = () => true,
+    recoveryAttempt = 0,
+  ): Promise<void> {
+    const streamGeneration = ++this.cursorStreamGeneration
+    this.clearCursorRecoveryTimer()
+    const previous = this.activeCursorStream
+    this.activeCursorStream = undefined
+    if (previous !== undefined) await previous.close().catch(() => undefined)
+    if (!current() || streamGeneration !== this.cursorStreamGeneration) return
     const client = session.backend === 'claude' ? this.connection.requireClaude()
       : session.backend === 'hermes' ? this.connection.requireHermes()
       : session.backend === 'opencode'
@@ -337,33 +374,88 @@ export class SessionRuntime {
         : session.backend === 'cursor' ? this.connection.requireCursor()
         : this.connection.requireAcpBackend(session.backend ?? 'cursor')
     const nativeId = cursorNativeId(session)
-    const stream = await client.openStream(
-      nativeId,
-      frame => { if (current()) this.store.get().handleCursorFrame(frame) },
-      closed => {
-        if (!current()) return
-        if (this.store.get().selectedSession?.sessionId !== session.sessionId) return
-        if (this.activeCursorStream?.streamId !== stream.streamId) return
-        this.activeCursorStream = undefined
-        this.store.set(state => ({
-          sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
-          selectedSession: state.selectedSession?.sessionId === session.sessionId
-            ? { ...state.selectedSession, running: false }
-            : state.selectedSession,
-          ...(closed.reason === 'failed' ? { error: session.backend === 'claude' ? zhCN.runtime.claudeUnavailable : session.backend === 'hermes' ? zhCN.runtime.hermesUnavailable : session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
-        }))
-        // Transport flaps can close the ACP stream while the secure channel is
-        // still up. Re-open so the next prompt does not miss live frames.
-        if (closed.reason === 'peer-disconnected') return
-        const phase = this.store.get().connection.phase
-        if (phase !== 'connected') return
+    let openedStream: AcpStream | undefined
+    let closedBeforeAssign: { streamId: string; reason: string } | undefined
+    let nextAttempt = recoveryAttempt
+
+    const canRecover = () => {
+      if (!current() || streamGeneration !== this.cursorStreamGeneration) return false
+      if (this.activeCursorStream !== undefined) return false
+      const state = this.store.get()
+      if (state.connection.phase !== 'connected') return false
+      return state.selectedSession?.sessionId === session.sessionId
+        && isAcpManagedBackend(state.selectedSession.backend)
+    }
+
+    const scheduleRecoveryAttempt = (attempt: number) => {
+      const delayMs = ACP_STREAM_RECOVERY_DELAYS_MS[attempt]
+      if (delayMs === undefined || !canRecover()) return
+      this.scheduleCursorRecovery(delayMs, () => {
+        if (!canRecover()) return
         const selected = this.store.get().selectedSession
-        if (selected?.sessionId !== session.sessionId || !isAcpManagedBackend(selected.backend)) return
-        void this.ensureCursorStream(selected, current).catch(() => undefined)
-      },
-    )
-    if (!current()) { await stream.close().catch(() => undefined); return }
+        if (selected === undefined || selected.sessionId !== session.sessionId || !isAcpManagedBackend(selected.backend)) return
+        void this.ensureCursorStream(selected, current, attempt + 1).catch(() => undefined)
+      })
+    }
+
+    const handleClosed = (closed: { streamId: string; reason: string }) => {
+      if (!current() || streamGeneration !== this.cursorStreamGeneration) return
+      if (this.store.get().selectedSession?.sessionId !== session.sessionId) return
+      if (this.activeCursorStream?.streamId !== closed.streamId) return
+      this.activeCursorStream = undefined
+      this.store.set(state => ({
+        sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+        selectedSession: state.selectedSession?.sessionId === session.sessionId
+          ? { ...state.selectedSession, running: false }
+          : state.selectedSession,
+        ...(closed.reason === 'failed' ? { error: session.backend === 'claude' ? zhCN.runtime.claudeUnavailable : session.backend === 'hermes' ? zhCN.runtime.hermesUnavailable : session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
+      }))
+      // Transport flaps can close the ACP stream while the secure channel is
+      // still up. Re-open with bounded backoff so a downed backend cannot loop.
+      if (closed.reason === 'peer-disconnected') return
+      scheduleRecoveryAttempt(nextAttempt)
+    }
+
+    let stream: AcpStream
+    try {
+      stream = await client.openStream(
+        nativeId,
+        frame => {
+          if (!current() || (openedStream === undefined && streamGeneration !== this.cursorStreamGeneration)) return
+          if (openedStream !== undefined) nextAttempt = 0
+          this.store.get().handleCursorFrame(frame)
+        },
+        closed => {
+          if (openedStream === undefined) {
+            closedBeforeAssign = closed
+            return
+          }
+          handleClosed(closed)
+        },
+      )
+    } catch (error) {
+      if (recoveryAttempt > 0) {
+        if (!current() || streamGeneration !== this.cursorStreamGeneration) return
+        const code = typeof (error as { code?: unknown })?.code === 'string'
+          ? (error as { code: string }).code
+          : undefined
+        if (code !== undefined && ACP_NON_RETRYABLE_RECOVERY_CODES.has(code)) return
+        scheduleRecoveryAttempt(recoveryAttempt)
+        return
+      }
+      throw error
+    }
+    if (!current() || streamGeneration !== this.cursorStreamGeneration) {
+      await stream.close().catch(() => undefined)
+      return
+    }
+    openedStream = stream
     this.activeCursorStream = stream
+    if (closedBeforeAssign !== undefined) {
+      const pending = closedBeforeAssign
+      closedBeforeAssign = undefined
+      handleClosed(pending)
+    }
   }
 
   async refreshCustomAcpModels(session: RemoteSession, current: () => boolean): Promise<void> {

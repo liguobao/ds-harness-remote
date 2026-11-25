@@ -512,6 +512,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         return contiguousCache ? existing : existing.filter(item => !cachedIds.has(item.id) || item.id.startsWith('local:') || item.kind === 'approval' || item.kind === 'question')
       }
       runtime.clearCodexRecoveryTimer()
+      runtime.clearCursorRecoveryTimer()
       runtime.sessionReadAbort?.abort()
       const readAbort = new AbortController()
       runtime.sessionReadAbort = readAbort
