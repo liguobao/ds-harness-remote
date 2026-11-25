@@ -43,6 +43,7 @@ import {
   type AllowedAcpMethod,
 } from './method-policy.js'
 import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
+import { catalogCwdCandidates } from './catalog-cwd.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 import { AcpWorkspaceStore } from './workspace-store.js'
 
@@ -548,10 +549,15 @@ export class AcpRemoteGateway {
             merged.set(item.cwd, { path: item.cwd, title: basename(item.cwd) || 'workspace' })
           }
         }
-        if (merged.size === 0 && deletedPaths.size === 0 && (requestedBackend === 'opencode' || requestedBackend === 'cursor')) {
+        if (merged.size === 0 && deletedPaths.size === 0
+          && (requestedBackend === 'opencode' || requestedBackend === 'cursor' || requestedBackend === 'antigravity')) {
           const defaultCandidates = new Set<string>()
           const cwd = process.cwd()
-          if (cwd) defaultCandidates.add(cwd)
+          if (cwd) {
+            const canonical = await this.requireExistingDirectory(cwd).catch(() => undefined)
+            assertCurrent()
+            if (canonical) defaultCandidates.add(canonical)
+          }
           for (const candidate of ['/var/lib/dsh/workspace/ds-harness-remote', '/srv/dsh-workspace', '/var/lib/dsh/local']) {
             try {
               const s = await stat(candidate)
@@ -2130,15 +2136,27 @@ export class AcpRemoteGateway {
     } }
   }
 
+  private async resolveCatalogCwd(rawCwd: string, assertCurrent: () => void): Promise<string | undefined> {
+    for (const candidate of catalogCwdCandidates(rawCwd)) {
+      // Directory I/O can outlive a backend restart/reconfiguration. Only the
+      // directory failure is skippable; a stale generation must reject the RPC.
+      const canonical = await this.requireExistingDirectory(candidate).catch(() => undefined)
+      assertCurrent()
+      if (canonical) return canonical
+    }
+    return undefined
+  }
+
   private async listCatalogSessions(backend: string, cwd?: string): Promise<Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }>> {
     const { client, assertCurrent } = this.captureCatalogClient(backend)
     const items: Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }> = []
+    let queryCwd: string | undefined = cwd
     let cursor: string | undefined
     const seen = new Set<string>()
     for (let page = 0; page < 100; page++) {
       let result: unknown
       try {
-        result = await client.call('session/list', { ...(cwd ? { cwd } : {}), ...(cursor ? { cursor } : {}) })
+        result = await client.call('session/list', { ...(queryCwd ? { cwd: queryCwd } : {}), ...(cursor ? { cursor } : {}) })
       } catch (error) {
         // Older Cursor CLI releases or minimal mock adapters may not implement session/list.
         if (backend === 'cursor' && !(error instanceof CursorAcpError && (error.code === 'ACP_AUTH_REQUIRED' || error.authDiagnostic?.authStatus === 'auth_required'))) {
@@ -2154,12 +2172,17 @@ export class AcpRemoteGateway {
         || (result.nextCursor != null && (typeof result.nextCursor !== 'string' || result.nextCursor.length === 0))) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session catalog response is invalid.')
       }
+      // On Windows, native `agy acp` may store cwds as `/d%3A/...` and return an empty page when
+      // queried with a native `D:\...` cwd; fall back once to an unfiltered catalog scan.
+      if (process.platform === 'win32' && backend === 'antigravity' && queryCwd !== undefined
+        && page === 0 && result.sessions.length === 0 && result.nextCursor == null) {
+        queryCwd = undefined
+        page = -1
+        continue
+      }
       for (const item of result.sessions) {
         if (!isRecord(item) || typeof item.sessionId !== 'string' || typeof item.cwd !== 'string') continue
-        // Directory I/O can outlive a backend restart/reconfiguration. Only the
-        // directory failure is skippable; a stale generation must reject the RPC.
-        const canonical = await this.requireExistingDirectory(item.cwd).catch(() => undefined)
-        assertCurrent()
+        const canonical = await this.resolveCatalogCwd(item.cwd, assertCurrent)
         if (!canonical || (cwd && canonical !== cwd)) continue
         if (this.sessionBackends.has(item.sessionId) && this.sessionBackends.get(item.sessionId) !== backend) continue
         const trusted = this.sessionCwds.get(item.sessionId)
