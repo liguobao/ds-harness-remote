@@ -48,6 +48,8 @@ data class LiveTaskData(
   val isWaitingInput: Boolean,
   val updatedAtMs: Long,
   val summary: String = "",
+  val startedAtMs: Long = 0,
+  val countText: String = "",
 )
 
 /** Owns CPU and RN timer eligibility for the lifetime of the remote carrier. */
@@ -288,6 +290,9 @@ class RemoteForegroundService : Service() {
           if (task.isWaitingInput) "Waiting" else "Running"
         }
       }
+      val title = task.title.ifBlank { getString(R.string.app_name) }
+      val titleWithCount = listOf(title, task.countText).filter { it.isNotBlank() }.joinToString(" · ")
+      val timed = !task.isWaitingInput && task.startedAtMs in 1..System.currentTimeMillis()
       val statusColor = if (task.isWaitingInput) Color.parseColor("#FFAA00") else Color.parseColor("#00C2FF")
       val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running
       val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
@@ -299,7 +304,7 @@ class RemoteForegroundService : Service() {
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
           .setSmallIcon(R.mipmap.ic_launcher_foreground)
           .setContentTitle(status)
-          .setContentText(task.title.ifBlank { getString(R.string.app_name) })
+          .setContentText(titleWithCount)
           .setContentIntent(pendingIntent)
           .setCategory(NotificationCompat.CATEGORY_SERVICE)
           .setOngoing(true)
@@ -308,9 +313,10 @@ class RemoteForegroundService : Service() {
           .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         if (Build.VERSION.SDK_INT >= 36) {
-          builder.setRequestPromotedOngoing(true).setShortCriticalText(status)
+          builder.setRequestPromotedOngoing(true)
+          if (!timed) builder.setShortCriticalText(status)
           if (task.summary.isNotBlank()) {
-            builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(task.title, task.summary)
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(titleWithCount, task.summary)
               .filter { it.isNotBlank() }.joinToString("\n")))
           }
         } else if (!samsungOngoing && vivoScene == null && huaweiEvent == null) {
@@ -321,7 +327,7 @@ class RemoteForegroundService : Service() {
             setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
             setTextColor(R.id.live_task_time, timeColor)
             setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
-            setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+            setTextViewText(R.id.live_task_title, titleWithCount)
             setTextColor(R.id.live_task_title, titleColor)
             setTextViewText(R.id.live_task_summary, task.summary)
             setTextColor(R.id.live_task_summary, timeColor)
@@ -344,7 +350,9 @@ class RemoteForegroundService : Service() {
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
         }
 
-        if (task.updatedAtMs > 0) {
+        if (timed) {
+          builder.setWhen(task.startedAtMs).setShowWhen(true).setUsesChronometer(true)
+        } else if (task.updatedAtMs > 0) {
           builder.setWhen(task.updatedAtMs).setShowWhen(true)
         }
 
@@ -353,9 +361,9 @@ class RemoteForegroundService : Service() {
           Settings.System.getInt(contentResolver, "notification_focus_protocol", 0)
         }.getOrDefault(0)
         if (focusVersion >= 2) {
-          addXiaomiFocus(notification, focusVersion, status, task.title.ifBlank { getString(R.string.app_name) })
+          addXiaomiFocus(notification, focusVersion, status, titleWithCount)
         }
-        extendLiveTask(notification, status, task.title.ifBlank { getString(R.string.app_name) })
+        extendLiveTask(notification, status, titleWithCount)
         return notification
       } catch (e: Exception) {
         Log.w("RemoteForegroundService", "Failed to build custom live task notification, falling back", e)
@@ -435,8 +443,10 @@ class RemoteForegroundService : Service() {
       isWaitingInput: Boolean,
       updatedAtMs: Long,
       summary: String = "",
+      startedAtMs: Long = 0,
+      countText: String = "",
     ) {
-      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary)
+      val data = LiveTaskData(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary, startedAtMs, countText)
       currentLiveTask = data
       val service = running ?: return
       service.liveTask = data

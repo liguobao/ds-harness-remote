@@ -42,6 +42,8 @@ export interface LiveTaskSummary {
   isWaitingInput: boolean
   updatedAtMs: number
   summary: string
+  startedAtMs: number
+  countText: string
 }
 
 interface LiveTaskEvaluationState {
@@ -124,14 +126,28 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
   const title = (typeof top.session.title === 'string' && top.session.title.trim().length > 0)
     ? top.session.title.trim()
     : strings.comfort.liveTaskDefaultTitle
-  const statusText = top.isWaitingInput
-    ? strings.comfort.liveTaskWaiting
-    : strings.comfort.liveTaskRunning
+  const lifecycle = lifecycles[top.session.sessionId]
+  const pending = sessionMessages.find((item: any) => isItemWaitingInput(top.session, item))
+  const current = sessionMessages.filter((item: any) => !item.turnEnd
+    && (lifecycle?.turn === undefined || item.turn === lifecycle.turn))
+  const tool = current.reverse().find((item: any) => item.kind === 'tool' && item.state === 'running')
+  const thinking = current.some((item: any) => item.kind === 'message' && item.streaming && item.streamingPhase === 'reasoning')
+  const collaborating = candidates.some(item => item.active && item.session.parentSessionId === top.session.sessionId)
+  const labels = strings.comfort
+  let statusText = labels.liveTaskRunning
+  if (pending) statusText = pending.kind === 'question' ? labels.liveTaskQuestion : labels.liveTaskWaiting
+  else if (tool?.toolKey === 'codex.compaction') statusText = labels.liveTaskCompaction
+  else if (collaborating || tool?.toolKey === 'codex.subagent') statusText = labels.liveTaskCollaboration
+  else if (tool) statusText = labels.liveTaskTool
+  else if (thinking) statusText = labels.liveTaskThinking
+  const count = candidates.filter(item => item.active && !item.session.parentSessionId && item.session.origin !== 'subagent').length
 
   return {
     hostId: device.deviceId,
     sessionId: top.session.sessionId,
     badge,
+    startedAtMs: lifecycle?.running && lifecycle.startedAt > 0 ? lifecycle.startedAt : 0,
+    countText: count > 1 ? labels.liveTaskCount(count) : '',
     title,
     statusText,
     isWaitingInput: top.isWaitingInput,
@@ -210,6 +226,8 @@ export function startBrowseTracking(): () => void {
       w: liveTask.isWaitingInput,
       u: liveTask.updatedAtMs,
       m: liveTask.summary,
+      since: liveTask.startedAtMs,
+      count: liveTask.countText,
     })
 
     if (taskKey !== lastLiveTaskKey) {
@@ -225,6 +243,8 @@ export function startBrowseTracking(): () => void {
             liveTask!.isWaitingInput,
             liveTask!.updatedAtMs,
             liveTask!.summary,
+            liveTask!.startedAtMs,
+            liveTask!.countText,
           )
         } else {
           await foregroundService.clearLiveTask()

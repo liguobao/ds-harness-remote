@@ -37,6 +37,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
           const nextLifecycle = {
             seq: entry?.seq ?? -1,
             turn: entry?.turn,
+            startedAt: running && entry?.running ? entry.startedAt : undefined,
             running,
             ...(running
               ? { finished: undefined }
@@ -253,6 +254,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
                 [sessionId]: {
                   seq,
                   running,
+                  ...(running && frame.payload.event?.time ? { startedAt: frame.payload.event.time } : {}),
                   ...(frame.payload.event?.data.turn === undefined ? {} : { turn: String(frame.payload.event.data.turn) }),
                   ...(finishedMark === undefined ? {} : { finished: finishedMark }),
                 },
