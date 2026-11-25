@@ -1274,6 +1274,7 @@ const ruRU = {
     continueInOrigin: (target: string) => `Вернуться в исходную сессию ${target}`,
     continueInExisting: (target: string) => `Переключиться на выбранную сессию ${target}`,
     handoffExistingSuccess: 'Целевая сессия открыта',
+    badgeFrom: (from: string) => `От ${from}`,
   },
 } satisfies Messages
 

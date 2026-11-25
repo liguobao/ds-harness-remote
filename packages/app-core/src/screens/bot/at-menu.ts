@@ -162,7 +162,7 @@ export function buildReferenceChatGroups({
     .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
     .slice(0, OTHER_CHATS_MAX)
     .map(row => {
-      const title = resolveSessionDisplayTitle(row) ?? row.title ?? row.sessionId
+      const title = resolveSessionDisplayTitle(row) ?? row.sessionId
       const owner = workspaces.find(w => w.sessionIds.includes(row.sessionId))
       const description = owner ? `${owner.title} · ${maskPersonalPath(owner.path)}` : undefined
       return {

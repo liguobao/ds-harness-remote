@@ -1256,6 +1256,7 @@ const frFR = {
     continueInOrigin: (target: string) => `Revenir à la session d’origine dans ${target}`,
     continueInExisting: (target: string) => `Basculer vers la session choisie dans ${target}`,
     handoffExistingSuccess: "Session cible ouverte",
+    badgeFrom: (from: string) => `De ${from}`,
   },
 } satisfies Messages
 

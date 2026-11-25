@@ -37,6 +37,7 @@ import {
   matchTargetWorkspace,
   resolveHandoffTargetSessions,
 } from '../../lib/handoff-workspace'
+import { harnessDisplayName } from '../../lib/handoff-preview'
 import { strings } from '../../locales/i18n'
 import { useAppStore } from '../../state/store'
 import { selectCustomAcpBackends, type HandoffSessionResult } from '../../state/store-state'
@@ -52,19 +53,7 @@ import { resolveSessionDisplayTitle } from '../session-title'
 import { usePickerListMaxHeight } from './modal'
 import { sessionTitle } from './presentation'
 
-export function harnessDisplayName(value: AgentBackend): string {
-  switch (value) {
-    case 'harness': return 'DeepSeek'
-    case 'codex': return 'Codex'
-    case 'claude': return 'Claude'
-    case 'hermes': return 'Hermes'
-    case 'cursor': return 'Cursor'
-    case 'antigravity': return 'Antigravity'
-    case 'opencode': return 'OpenCode'
-    case 'pi': return 'Pi'
-    default: return value
-  }
-}
+export { harnessDisplayName }
 
 export function formatHandoffContextPreview(contextBlock: string): string {
   const parsed = parseHandoffMessage(contextBlock)

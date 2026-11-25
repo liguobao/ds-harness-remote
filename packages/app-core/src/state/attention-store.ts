@@ -20,7 +20,10 @@ import {
   type AttentionFollowSubscription,
   type RemoteAttentionClient,
 } from '@dsh-remote/client-core'
+import { harnessDisplayName, parseHandoffPreview, sanitizeHandoffDisplayTitle, type SessionHandoffOrigin } from '../lib/handoff-preview'
 import { isAcpManagedBackend } from '../lib/workspace-key'
+import { strings } from '../locales/i18n'
+import { resolveSessionDisplayTitle } from '../screens/session-title'
 import type { BotObject, BotState } from '../services/bot-catalog'
 import type { ChatItem, RemoteDevice, RemoteSession, WorkspaceView } from '../types'
 
@@ -52,6 +55,7 @@ export interface LegacyAttentionSources {
   ackedIds?: ReadonlySet<string> | readonly string[]
   /** Optional locally observed `completed_unread` session IDs from running -> idle transitions. */
   completedSessionIds?: ReadonlySet<string>
+  handoffOrigins?: Readonly<Record<string, SessionHandoffOrigin>>
   now?: number
 }
 
@@ -138,6 +142,30 @@ let activeClient: RemoteAttentionClient | undefined
 let activeSubscription: AttentionFollowSubscription | undefined
 let activeAbort: AbortController | undefined
 let activeAttachPromise: Promise<void> | undefined
+
+function normalizeAttentionTitle(item: AttentionItem): string {
+  const raw = item.sessionTitle
+  const preview = parseHandoffPreview(raw)
+  const fallback = preview?.sourceBackend && preview?.targetBackend
+    ? `${harnessDisplayName(preview.sourceBackend)} → ${harnessDisplayName(preview.targetBackend)}`
+    : strings.handoff.title
+  return (sanitizeHandoffDisplayTitle(raw, fallback) ?? raw).slice(0, MAX_ATTENTION_TITLE_CHARS)
+}
+
+function sanitizeAttentionItem(item: AttentionItem): AttentionItem {
+  const nextTitle = normalizeAttentionTitle(item)
+  return nextTitle === item.sessionTitle ? item : { ...item, sessionTitle: nextTitle }
+}
+
+function sanitizeAttentionItems(items: readonly AttentionItem[]): AttentionItem[] {
+  let changed = false
+  const next = items.map(item => {
+    const clean = sanitizeAttentionItem(item)
+    if (clean !== item) changed = true
+    return clean
+  })
+  return changed ? next : (items as AttentionItem[])
+}
 
 function capCount(value: number): number {
   return Math.max(0, Math.min(MAX_ATTENTION_COUNT, Math.floor(value)))
@@ -644,8 +672,13 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
       ? { backend: 'ds-bot' as AttentionBackend }
       : mapSessionBackend(session.backend)
     const mode = isBotSession ? 'bot' as const : 'agent' as const
-    const title = (typeof session.title === 'string' && session.title.trim().length > 0
-      ? session.title.trim()
+    const resolvedTitle = resolveSessionDisplayTitle(
+      session,
+      sources.handoffOrigins?.[session.sessionId],
+      sessionMessages,
+    )
+    const title = (resolvedTitle !== undefined
+      ? resolvedTitle
       : (isBotSession && botState ? botSessionTitle(botState, session.sessionId) : session.sessionId)
     ).slice(0, MAX_ATTENTION_TITLE_CHARS)
     const updatedAt = typeof session.updatedAt === 'number' && Number.isSafeInteger(session.updatedAt) && session.updatedAt > 0
@@ -818,15 +851,16 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
                   },
                   event,
                 )
+                const cleanItems = sanitizeAttentionItems(next.items)
                 return {
                   revision: next.revision,
                   digest: next.digest,
-                  items: next.items,
+                  items: cleanItems,
                   supported: true,
                   loading: false,
                   cachedByHost: withHostCache(current.cachedByHost, {
                     hostId,
-                    items: next.items,
+                    items: cleanItems,
                     digest: next.digest,
                     revision: next.revision,
                     supported: true,
@@ -857,18 +891,19 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
           digest: subscription.initial.digest,
           items: subscription.initial.items,
         })
+        const cleanInitialItems = sanitizeAttentionItems(initialState.items)
 
         set(current => ({
           hostId,
           connectionGeneration: generation,
           revision: initialState.revision,
           digest: initialState.digest,
-          items: initialState.items,
+          items: cleanInitialItems,
           supported: true,
           loading: false,
           cachedByHost: withHostCache(current.cachedByHost, {
             hostId,
-            items: initialState.items,
+            items: cleanInitialItems,
             digest: initialState.digest,
             revision: initialState.revision,
             supported: true,

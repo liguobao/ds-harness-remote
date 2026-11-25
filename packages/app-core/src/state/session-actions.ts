@@ -1,4 +1,5 @@
-import { formatHandoffPayload, type PendingHandoffDraft } from '../lib/handoff-context'
+import { extractHandoffOriginFromItems, formatHandoffPayload, type PendingHandoffDraft } from '../lib/handoff-context'
+import { firstLineSnippet } from '../lib/handoff-preview'
 import { isSessionInTargetWorkspace } from '../lib/handoff-workspace'
 import { isSubagentSession } from '../lib/session-kind'
 import { isAbsoluteHostPath, isAcpManagedBackend } from '../lib/workspace-key'
@@ -38,7 +39,7 @@ import { readClaudeHistory, selectClaudeModel } from '../services/claude'
 import { loadHermesCatalog, mergeHermesCatalog, readHermesHistory, selectHermesModel } from '../services/hermes'
 import { readPiHistory, selectPiModel } from '../services/pi'
 import { saveCodexPermissionPreset } from '../services/storage'
-import { browseKey, browseScope, getCachedSessionMessages, saveSessionMessagesSnapshot, updateBrowseEntry, useBrowseMemory } from '../services/browse-memory'
+import { browseKey, browseScope, getCachedSessionMessages, recordHandoffOrigin, saveSessionMessagesSnapshot, updateBrowseEntry, useBrowseMemory } from '../services/browse-memory'
 import type { AgentBackend, ChatItem, RemoteSession, WorkspaceView } from '../types'
 import { loadSavedCodexPermissions, withBestCodexPermission, withCodexPermissionState } from './codex-session-state'
 import { foldHistory, settleTurnItems } from './event-reducer'
@@ -457,9 +458,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const preservedMessages = (inMemoryMessages && inMemoryMessages.length > 0)
         ? inMemoryMessages
         : (cachedSnapshot && cachedSnapshot.length > 0 ? cachedSnapshot : undefined)
+      const syncHandoffOrigin = (items: readonly ChatItem[] | undefined) => {
+        if (!canPersistSnapshot() || items === undefined || items.length === 0) return
+        const detected = extractHandoffOriginFromItems(items)
+        if (detected !== undefined) recordHandoffOrigin(memoryScope, session.sessionId, detected)
+      }
 
       if (get().connection.phase !== 'connected') {
         offlineOnlySessionIds.add(session.sessionId)
+        syncHandoffOrigin(preservedMessages)
         set(state => ({
           busyAction: undefined,
           selectedSession: session,
@@ -598,6 +605,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               const codexMerged = mergeHistoryAndLive(items, browseLive(items, prevList ?? []))
               const nextList = reuseUnchangedChatItems(prevList, codexMerged)
               if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
+              syncHandoffOrigin(nextList)
               return {
                 selectedSession: state.selectedSession?.sessionId === session.sessionId ? nextSession : state.selectedSession,
                 sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
@@ -626,6 +634,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               const codexMerged = mergeHistoryAndLive(items, browseLive(items, prevList ?? []))
               const nextList = reuseUnchangedChatItems(prevList, codexMerged)
               if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
+              syncHandoffOrigin(nextList)
               const activeTurnKnown = activeTurnId !== undefined || runtime.activeCodexTimeline?.activeTurnId !== undefined
               const syncRunning = (item: RemoteSession): RemoteSession => item.sessionId === session.sessionId
                 ? { ...item, running: activeTurnKnown }
@@ -834,6 +843,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             const paged = storeAcpPagedMessages(session.sessionId, merged)
             const nextList = reuseUnchangedChatItems(prevList, paged.tail)
             if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
+            syncHandoffOrigin(merged)
             const currentSession = state.selectedSession?.sessionId === session.sessionId
               ? state.selectedSession
               : state.sessions.find(item => item.sessionId === session.sessionId)
@@ -957,6 +967,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             : activeTurn === undefined ? withQuestions : settleTurnItems(withQuestions, undefined, activeTurn)
           const nextList = reuseUnchangedChatItems(prevList, restored)
           if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
+          syncHandoffOrigin(nextList)
           return {
             selectedSession: nextSession,
             sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
@@ -1238,6 +1249,18 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             meta: params.packet.meta,
             contextBlock: params.packet.contextBlock,
           }
+          const fallbackTitle = firstLineSnippet(params.instruction, 80)
+          const persistConfirmedOrigin = () => {
+            recordHandoffOrigin(initialScope, created.sessionId, {
+              sourceBackend: params.packet.meta.sourceBackend,
+              targetBackend: params.packet.meta.targetBackend,
+              sourceSessionId: params.packet.meta.sourceSessionId,
+              ...(params.packet.meta.sourceTitle !== undefined ? { sourceTitle: params.packet.meta.sourceTitle } : {}),
+              ...(fallbackTitle !== undefined ? { fallbackTitle } : {}),
+              preset: params.packet.meta.preset,
+              createdAt: params.packet.meta.createdAt,
+            })
+          }
           const saveDraftFallback = () => {
             const existingEntry = isExistingTarget
               ? useBrowseMemory.getState().entries[browseKey(initialScope, created.sessionId)]
@@ -1303,6 +1326,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             }
           }
           if (sendResult === 'kept') {
+            persistConfirmedOrigin()
             // Never auto-retry or overwrite draft on 'kept'; timeline retains the row.
             return {
               ok: true,
@@ -1311,6 +1335,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               delivered: 'kept',
             }
           }
+          persistConfirmedOrigin()
           return {
             ok: true,
             session: created,

@@ -1,11 +1,12 @@
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings } from '../locales/i18n'
+import { resolveSessionDisplayTitle } from '../screens/session-title'
 import { AppState, Platform } from 'react-native'
 import { deriveLegacyAttentionItems, useAttentionStore } from '../state/attention-store'
 import { useBotTeamStore } from '../state/bot-store'
 import { useAppStore } from '../state/store'
 import type { AgentBackend } from '../types'
-import { browseKey, browseScope, useBrowseMemory, updateBrowseEntry, saveBrowseCatalog, browsePreference, flushBrowseMemory } from './browse-memory'
+import { browseKey, browseScope, getHandoffOrigin, useBrowseMemory, updateBrowseEntry, saveBrowseCatalog, browsePreference, flushBrowseMemory } from './browse-memory'
 import { foregroundService } from './foreground-service'
 import { createLiveSurfaceController } from './live-surface'
 
@@ -147,8 +148,19 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
     .slice(0, 240)
 
   const badge = backendBadge(top.session.backend)
-  const title = (typeof top.session.title === 'string' && top.session.title.trim().length > 0)
-    ? top.session.title.trim()
+  const storeState = useAppStore.getState()
+  const scopeDevice = storeState.selectedDevice?.deviceId === device.deviceId ? storeState.selectedDevice : undefined
+  const originScope = storeState.config === undefined || scopeDevice === undefined
+    ? undefined
+    : browseScope({ config: storeState.config, selectedDevice: scopeDevice })
+  const storedOrigin = originScope === undefined ? undefined : getHandoffOrigin(originScope, top.session.sessionId)
+  const resolvedTitle = resolveSessionDisplayTitle(
+    top.session,
+    storedOrigin,
+    sessionMessages,
+  )
+  const title = resolvedTitle && resolvedTitle.length > 0
+    ? resolvedTitle
     : strings.comfort.liveTaskDefaultTitle
   const detail = taskPhase(state, top.session)
   const count = candidates.filter(item => item.active && !item.session.parentSessionId && item.session.origin !== 'subagent').length
@@ -279,6 +291,7 @@ export function startBrowseTracking(): () => void {
         workspaces: state.workspaces,
         botState: useBotTeamStore.getState().state,
         completedSessionIds,
+        handoffOrigins: memory.handoffOrigins?.[scope],
       })
     }
 
