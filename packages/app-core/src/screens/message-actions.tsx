@@ -151,17 +151,16 @@ export const MessageActions = memo(function MessageActions({ item, hideTime }: {
   const { colors } = useTheme()
   const user = item.role === 'user'
   const botConversation = useContext(BotMessageActionsContext)
-  // Only delivered Harness assistant messages need store subscriptions for branch state.
   const pending = item.sendState !== undefined
-  const mayBranch = !user && !botConversation && !pending && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
-  const isHarnessSession = useAppStore(state => {
-    if (!mayBranch) return false
+  const supportsBranch = useAppStore(state => {
+    if (user || botConversation || pending) return false
     const row = state.selectedSession?.sessionId === item.sessionId
       ? state.selectedSession
       : state.sessions.find(candidate => candidate.sessionId === item.sessionId)
+    if (row?.backend === 'codex') return typeof item.turn === 'string' && item.turn.length > 0
     return row !== undefined && (row.backend === undefined || row.backend === 'harness')
+      && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
   })
-  const supportsBranch = mayBranch && isHarnessSession
   const branchDisabled = useAppStore(state => (
     !supportsBranch ? false : (state.connection.phase !== 'connected' || state.busyAction !== undefined)
   ))
@@ -261,7 +260,7 @@ export const MessageActions = memo(function MessageActions({ item, hideTime }: {
             )}
           </Pressable>
         </Animated.View>
-        {!pending && supportsBranch && (
+        {supportsBranch && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.messageActions.branch}

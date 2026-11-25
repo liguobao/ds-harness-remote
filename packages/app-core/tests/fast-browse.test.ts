@@ -439,6 +439,28 @@ describe('session pin, unpin, rename, unarchive, and fork actions', () => {
     expect(state.pinnedSessionIds).toEqual(['s1'])
   })
 
+  it('routes a Codex fork to the native thread and opens the child in the source workspace', async () => {
+    const parent = session('parent')
+    state.sessions = [parent]
+    state.workspaces = [{ workspaceId: 'project', path: '/fixture', title: 'Project', backend: 'codex',
+      sessionIds: [parent.sessionId], createdAt: '', updatedAt: '' }]
+    client.request.mockResolvedValueOnce({ thread: thread('child') })
+    state.openSession = vi.fn(async () => true)
+
+    const child = await state.forkSession(parent.sessionId)
+    expect(client.request.mock.calls).toEqual([['thread/fork', { threadId: 'parent' }]])
+    expect(proxy.sessionFork).not.toHaveBeenCalled()
+    expect(child?.sessionId).toBe('codex:child')
+    expect(state.workspaces[0]?.sessionIds).toEqual(['codex:child', parent.sessionId])
+    expect(state.openSession).toHaveBeenCalledWith(child)
+
+    state.selectedSession = parent
+    client.request.mockResolvedValueOnce({ thread: thread('earlier-child') })
+    expect(await state.forkChatMessage({ kind: 'message', id: 'reply', sessionId: parent.sessionId,
+      role: 'assistant', turn: 'turn-2', text: 'Done', createdAt: 1 })).toBe(true)
+    expect(client.request).toHaveBeenLastCalledWith('thread/fork', { threadId: 'parent', lastTurnId: 'turn-2' })
+  })
+
   it('preserves non-harness sessions and workspaces when forking a harness session', async () => {
     const codexSession = { ...session('codex-1', false), backend: 'codex' as const }
     const harnessSession = { ...session('harness-1', false), backend: 'harness' as const }

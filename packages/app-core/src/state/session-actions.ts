@@ -1005,7 +1005,14 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     },
 
     async forkChatMessage(message) {
-      if (get().connection.phase !== 'connected' || get().busyAction !== undefined || get().selectedSession?.backend === 'codex') return false
+      if (get().connection.phase !== 'connected' || get().busyAction !== undefined || message.streaming) return false
+      const source = get().selectedSession
+      if (source?.sessionId !== message.sessionId) return false
+      if (source.backend === 'codex') {
+        if (typeof message.turn !== 'string' || !message.turn) return false
+        return !!await get().forkSession(source.sessionId, source.backend, message.turn)
+      }
+      if (!isHarnessBackend(source.backend)) return false
       set({ busyAction: `fork:${message.id}`, error: undefined })
       try {
         const result = await forkMessage(message, runtime.connection.requireProxy())
@@ -1322,28 +1329,41 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       return flight
     },
 
-    async forkSession(sessionId, backend) {
+    async forkSession(sessionId, backend, lastTurnId) {
       if (get().connection.phase !== 'connected') return undefined
       const targetSession = get().sessions.find(item => item.sessionId === sessionId)
       const effectiveBackend = backend ?? targetSession?.backend
-      if (isAcpManagedBackend(effectiveBackend) && targetSession !== undefined) {
+      if (lastTurnId !== undefined && (effectiveBackend !== 'codex' || !lastTurnId)) return undefined
+      if (targetSession !== undefined && (effectiveBackend === 'codex' || isAcpManagedBackend(effectiveBackend))) {
         const generation = runtime.connectionGeneration
         set({ busyAction: `fork:${sessionId}`, error: undefined })
         try {
-          const client = acpClientForBackend(runtime.connection, effectiveBackend)
-          const result = await client.forkSession(cursorNativeId(targetSession), effectiveBackend)
-          if (generation !== runtime.connectionGeneration) return undefined
-          const forked = effectiveBackend === 'claude' ? createClaudeSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-            : effectiveBackend === 'hermes' ? createHermesSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-            : effectiveBackend === 'opencode' ? createOpencodeSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-            : effectiveBackend === 'pi' ? createPiSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-            : effectiveBackend === 'antigravity' ? createAntigravitySession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-            : effectiveBackend === 'cursor' ? createCursorSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-            : createAcpSession({ backend: effectiveBackend, acpSessionId: result.sessionId, cwd: targetSession.cwd })
+          let forked: RemoteSession
+          if (effectiveBackend === 'codex') {
+            const result = record(await runtime.connection.requireCodex().request('thread/fork', {
+              threadId: codexThreadId(targetSession),
+              ...(lastTurnId === undefined ? {} : { lastTurnId }),
+            }))
+            if (generation !== runtime.connectionGeneration) return undefined
+            const display = projectCodexThread(result.thread)
+            if (display === undefined || display.id === sessionId) throw new Error(zhCN.runtime.codexInvalidResponse)
+            forked = codexSession(display, codexPermissionPresetFromResponse(result))
+          } else {
+            const client = acpClientForBackend(runtime.connection, effectiveBackend)
+            const result = await client.forkSession(cursorNativeId(targetSession), effectiveBackend)
+            if (generation !== runtime.connectionGeneration) return undefined
+            forked = effectiveBackend === 'claude' ? createClaudeSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
+              : effectiveBackend === 'hermes' ? createHermesSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
+              : effectiveBackend === 'opencode' ? createOpencodeSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
+              : effectiveBackend === 'pi' ? createPiSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
+              : effectiveBackend === 'antigravity' ? createAntigravitySession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
+              : effectiveBackend === 'cursor' ? createCursorSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
+              : createAcpSession({ backend: effectiveBackend, acpSessionId: result.sessionId, cwd: targetSession.cwd })
+          }
           set(state => ({
             sessions: [forked, ...state.sessions.filter(item => item.sessionId !== forked.sessionId)],
             workspaces: state.workspaces.map(w => w.sessionIds.includes(sessionId)
-              ? { ...w, sessionIds: [forked.sessionId, ...w.sessionIds] }
+              ? { ...w, sessionIds: [forked.sessionId, ...w.sessionIds.filter(id => id !== forked.sessionId)] }
               : w),
             busyAction: undefined,
           }))

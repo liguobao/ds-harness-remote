@@ -735,7 +735,6 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   const menuBackend = menuSession?.backend ?? 'harness'
   const canUseHarnessActions = !!menuSession && menuBackend === 'harness'
   const canPinSession = !!menuSession && (menuBackend === 'harness' || isAcpManagedBackend(menuBackend))
-  const canForkSession = !!menuSession && (menuBackend === 'harness' || isAcpManagedBackend(menuBackend))
   const menuIsPinned = !!menuSession && canPinSession && pinnedSet.has(menuSession.sessionId)
   const menuIsArchived = !!menuSession && canUseHarnessActions && archivedSet.has(menuSession.sessionId)
 
@@ -2227,7 +2226,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                 </Pressable>
               )}
 
-              {canForkSession && (
+              {menuSession && (
                 <Pressable
                   accessibilityRole="menuitem"
                   accessibilityLabel={strings.sessions.forkSession}
