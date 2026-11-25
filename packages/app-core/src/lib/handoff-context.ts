@@ -2,6 +2,7 @@ import { processDetail } from '../screens/chat-process'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import type { AgentBackend, ChatItem, ToolActivity } from '../types'
 import { heartbeatMessageBody } from '../ui/heartbeat-message'
+import { HANDOFF_COMMENT_PREFIX } from './handoff-preview'
 
 export type HandoffPreset = 'review' | 'continue' | 'custom'
 
@@ -44,7 +45,6 @@ const MAX_ATTACHED_FILES_IN_TURN = 10
 const DEFAULT_MAX_CONTEXT_CHARS = 24_000
 const FIRST_USER_MAX_CHARS = 4_000
 const TOOL_SUMMARY_MAX_CHARS = 200
-const HANDOFF_COMMENT_PREFIX = '<!-- dsh-handoff:v1 '
 
 const HARNESS_EDIT_TOOL_KEYS = new Set([
   'write',
@@ -347,7 +347,8 @@ function formatEntryBlock(entry: HandoffEntry, maxTextChars?: number): string {
 }
 
 function safeCommentJson(meta: HandoffMeta): string {
-  return JSON.stringify(meta)
+  // Put the human title first so short first-message previews can still recover it.
+  return JSON.stringify({ sourceTitle: meta.sourceTitle, ...meta })
     .replace(/--/gu, '\\u002d\\u002d')
     .replace(/</gu, '\\u003c')
     .replace(/>/gu, '\\u003e')

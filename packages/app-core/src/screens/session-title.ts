@@ -1,3 +1,5 @@
+import { HANDOFF_COMMENT_PREFIX, handoffPreviewTitle } from '../lib/handoff-preview'
+import { strings } from '../locales/i18n'
 import type { RemoteSession } from '../types'
 
 type SessionMetadataRecord = Record<string, unknown>
@@ -57,7 +59,7 @@ function pickProjectTitleFromProjections(values: ProjectionRecord): string | und
   return undefined
 }
 
-export function resolveSessionDisplayTitle(session: RemoteSession): string | undefined {
+function sessionTitleCandidate(session: RemoteSession): string | undefined {
   const metadata = getMetadata(session)
   const projectedTitle = trimString(metadata?.title)
   if (projectedTitle !== undefined) return projectedTitle
@@ -79,4 +81,15 @@ export function resolveSessionDisplayTitle(session: RemoteSession): string | und
 
   return trimString(projectionValues?.summary)
     ?? trimString((session as { summary?: unknown }).summary)
+}
+
+export function resolveSessionDisplayTitle(session: RemoteSession): string | undefined {
+  const title = sessionTitleCandidate(session)
+  if (!title?.startsWith(HANDOFF_COMMENT_PREFIX)) return title
+
+  // A shortened title and a longer first-message preview can coexist on the same thread.
+  const summary = trimString(session.projections?.values?.summary)
+  return handoffPreviewTitle(title)
+    ?? (summary && summary !== title ? handoffPreviewTitle(summary) : undefined)
+    ?? strings.handoff.title
 }
