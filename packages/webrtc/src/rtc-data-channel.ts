@@ -582,7 +582,13 @@ export class RtcDataChannelTransport {
 
   private requireOpenChannel(): RtcDataChannel {
     const channel = this.channel
-    if (channel === undefined || channel.readyState !== 'open' || this.closed || !this.opened) {
+    // Mirror the inbound gate in `onmessage`: once the channel reports `open`,
+    // frames are delivered while the selected-path getStats() probe is still
+    // running (`opening`), so replies to them must be sendable too. The
+    // responder binds a peer's `transport.selected` before its own connect()
+    // resolves; gating sends on `opened` tore down that tunnel whenever the
+    // probe outlasted one handshake round trip.
+    if (channel === undefined || channel.readyState !== 'open' || this.closed || (!this.opened && !this.opening)) {
       throw new Error('WebRTC data channel is not open.')
     }
     return channel
