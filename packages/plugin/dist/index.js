@@ -68038,7 +68038,7 @@ var RtcDataChannelTransport = class {
   }
   requireOpenChannel() {
     const channel = this.channel;
-    if (channel === void 0 || channel.readyState !== "open" || this.closed || !this.opened) {
+    if (channel === void 0 || channel.readyState !== "open" || this.closed || !this.opened && !this.opening) {
       throw new Error("WebRTC data channel is not open.");
     }
     return channel;

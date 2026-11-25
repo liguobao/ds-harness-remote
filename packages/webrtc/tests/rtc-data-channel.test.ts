@@ -628,6 +628,70 @@ describe('RtcDataChannelTransport responder', () => {
     await transport.close()
   })
 
+  it('answers over an open channel while the selected-path probe is still pending', async () => {
+    // A peer that already sees the channel open sends immediately; its frames are
+    // delivered during the getStats() probe, so the reply must not be refused.
+    await runScenarios(([
+      { name: 'replies while getStats() is pending, before connect() resolves', step: 'probe' },
+      { name: 'still refuses before the channel reports open', step: 'unopened' },
+      { name: 'refuses after the channel closes during the probe', step: 'closed' },
+    ] as const).map(row => ({
+      name: row.name,
+      run: async () => {
+        const pc = new FakePeerConnection()
+        let resolveStats: ((stats: RtcStats) => void) | undefined
+        vi.spyOn(pc, 'getStats').mockImplementation(() => new Promise<RtcStats>(resolve => { resolveStats = resolve }))
+        const transport = new RtcDataChannelTransport({
+          role: 'responder',
+          factory: factoryFor(pc),
+          onSignal: () => undefined,
+        })
+        let connected = false
+        const connecting = transport.connect().then(() => { connected = true }, error => error as Error)
+        transport.handleSignal({ type: 'offer', sdp: 'v=0 offer' })
+        await flush()
+        const channel = new FakeChannel()
+        pc.emitDataChannel(channel)
+        const reply = new Uint8Array([1, 2, 3])
+
+        if (row.step === 'unopened') {
+          await expect(transport.send(reply)).rejects.toThrow('WebRTC data channel is not open.')
+          expect(channel.sent).toHaveLength(0)
+          await transport.close()
+          await connecting
+          return
+        }
+
+        channel.open()
+        await vi.waitFor(() => expect(resolveStats).toBeTypeOf('function'))
+        const received: Uint8Array[] = []
+        transport.onMessage(data => received.push(data))
+        channel.receive(new Uint8Array([4, 5, 6]).buffer)
+        expect(received).toHaveLength(1)
+
+        if (row.step === 'closed') {
+          channel.close()
+          expect(await connecting).toMatchObject({ code: 'RTC_CLOSED' })
+          await expect(transport.send(reply)).rejects.toThrow('WebRTC data channel is not open.')
+          return
+        }
+
+        await transport.send(reply)
+        expect(connected).toBe(false)
+        expect(channel.sent.length).toBeGreaterThan(0)
+
+        resolveStats!(asStats(lanStats()))
+        await connecting
+        expect(connected).toBe(true)
+        expect(transport.selectedTransport()).toBe('lan')
+        const sentBeforeOpen = channel.sent.length
+        await transport.send(reply)
+        expect(channel.sent.length).toBeGreaterThan(sentBeforeOpen)
+        await transport.close()
+      },
+    })))
+  })
+
   it('buffers trickle ICE until the offer is processed', async () => {
     const pc = new FakePeerConnection()
     const diagnostics: RtcDiagnosticEvent[] = []
