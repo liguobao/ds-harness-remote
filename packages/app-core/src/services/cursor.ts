@@ -566,7 +566,7 @@ export function applyCursorFrame(messages: ChatItem[], sessionId: string, frame:
   return messages
 }
 
-/** Align pre-open prompts with complete turns in the fresh transcript. */
+/** Align pre-open prompts with their turns in the fresh transcript. */
 export function reconcileAcpCachedPrompts(history: ChatItem[], cached: ChatItem[]): {
   history: ChatItem[]
   confirmedIds: Set<string>
@@ -612,7 +612,10 @@ export function reconcileAcpCachedPrompts(history: ChatItem[], cached: ChatItem[
   }
 
   const historyTurns = turns(history)
+  const cachedTurns = turns(cached)
   const historyTurnsById = new Map(historyTurns.map(turn => [turn.prompt.id, turn]))
+  const cachedTurnsById = new Map(cachedTurns.map(turn => [turn.prompt.id, turn]))
+  const historyTail = historyTurns.at(-1)
   const candidates = new Map<string, typeof historyTurns>()
   for (const turn of historyTurns) {
     const key = signature(turn)
@@ -623,9 +626,10 @@ export function reconcileAcpCachedPrompts(history: ChatItem[], cached: ChatItem[
   }
 
   let lastMatchedIndex = -1
+  const claimedHistoryPrompts = new Set<string>()
   const unmatchedTail: typeof historyTurns = []
   const nextCandidate = new Map<string, number>()
-  for (const turn of turns(cached)) {
+  for (const turn of cachedTurns) {
     const prompt = turn.prompt
     const key = signature(turn)
     if (!prompt.id.startsWith('local:')) {
@@ -638,7 +642,32 @@ export function reconcileAcpCachedPrompts(history: ChatItem[], cached: ChatItem[
       }
       continue
     }
-    if (prompt.sendState !== undefined || !turn.completed || key === undefined) continue
+    if (prompt.sendState !== undefined || !turn.completed || key === undefined) {
+      // A later saved prompt marks the boundary even if the earlier reply has
+      // not been flushed. Use the predecessor recorded when the Host accepted
+      // the prompt, since a restore may already have inserted more history.
+      const after = prompt.acpPromptAfter
+      if (after !== undefined && prompt.sendState === undefined && turn.replyIds.length === 0
+        && !prompt.files?.length && !prompt.images?.length) {
+        const cachedAnchor = after === null ? undefined : cachedTurnsById.get(after)
+        const anchor = after === null ? undefined : historyTurnsById.get(after)
+        const anchored = anchor && cachedAnchor && anchor.prompt.nativeSeq !== undefined
+          && anchor.prompt.nativeTime === cachedAnchor.prompt.nativeTime
+          && anchor.prompt.text === cachedAnchor.prompt.text && signature(anchor) === signature(cachedAnchor)
+        const next = anchored ? historyTurns.find(candidate => candidate.index > anchor.index)
+          : after === null && historyTurns[0]?.index === 0 ? historyTurns[0] : undefined
+        if (next && (next !== historyTail || next.completed) && !claimedHistoryPrompts.has(next.prompt.id) && samePrompt(prompt, next.prompt)
+          && !historyTurns.some(candidate => candidate.index > next.index && samePrompt(prompt, candidate.prompt))) {
+          lastMatchedIndex = Math.max(lastMatchedIndex, next.index)
+          claimedHistoryPrompts.add(next.prompt.id)
+          // A confirmed successor proves the snapshot already reached past the
+          // locals buffered so far, so they are not a stale tail to retain.
+          unmatchedTail.length = 0
+          confirmedIds.add(prompt.id)
+        }
+      }
+      continue
+    }
     const matches = candidates.get(key) ?? []
     let offset = nextCandidate.get(key) ?? 0
     while (offset < matches.length) {
@@ -653,10 +682,10 @@ export function reconcileAcpCachedPrompts(history: ChatItem[], cached: ChatItem[
     }
     nextCandidate.set(key, offset + 1)
     lastMatchedIndex = match.index
+    claimedHistoryPrompts.add(match.prompt.id)
     unmatchedTail.length = 0
     confirmedIds.add(prompt.id)
   }
-  const historyTail = historyTurns.at(-1)
   const firstCachedTail = unmatchedTail[0]
   if (historyTail && firstCachedTail && historyTail.toolId === undefined
     && lastMatchedIndex === (historyTurns.at(-2)?.index ?? -1)

@@ -63,6 +63,7 @@ export class SessionRuntime {
   sessionReadAbort: AbortController | undefined
   sessionReadRetry = false
   sessionLoadGeneration = 0
+  emptyAcpHistory: { sessionId: string; loadGeneration: number; connectionGeneration: number } | undefined
   reconnectFlight: Promise<boolean> | undefined
   createSessionFlight: Promise<boolean> | undefined
   private catalogSyncTimer: ReturnType<typeof setTimeout> | undefined

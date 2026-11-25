@@ -788,6 +788,7 @@ export function isSameChatItem(a: ChatItem, b: ChatItem): boolean {
         && a.streaming === b.streaming
         && a.streamingPhase === b.streamingPhase
         && a.requestRpcId === b.requestRpcId
+        && a.acpPromptAfter === b.acpPromptAfter
         && a.sendState === b.sendState
         && a.sendError === b.sendError
         && a.queuedAdopted === b.queuedAdopted

@@ -116,6 +116,16 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         preferredMode: get().busySendMode,
       })
       const expectQueued = runningAtSend && harnessSendMode === 'queue'
+      const previousMessages = get().messages[session.sessionId] ?? []
+      const previousAcpUser = isAcpManagedBackend(session.backend)
+        ? previousMessages.findLast(item => item.kind === 'message' && item.role === 'user')
+        : undefined
+      const emptyAcpHistory = runtime.emptyAcpHistory
+      const startedWithoutHistory = previousMessages.length === 0 && emptyAcpHistory?.sessionId === session.sessionId
+        && emptyAcpHistory.loadGeneration === runtime.sessionLoadGeneration
+        && emptyAcpHistory.connectionGeneration === runtime.connectionGeneration
+      const acpPromptAfter = previousAcpUser?.nativeSeq !== undefined ? previousAcpUser.id
+        : startedWithoutHistory ? null : undefined
       const optimistic: ChatItem = {
         kind: 'message',
         // `local:` prefix is load-bearing for mergeCodexLive's optimistic matching;
@@ -247,7 +257,15 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           const inProgress = isRecord(promptResult)
             && promptResult.accepted === true
             && promptResult.stopReason === 'in_progress'
-          if (!inProgress) {
+          if (inProgress && acpPromptAfter !== undefined) {
+            set(state => ({
+              messages: {
+                ...state.messages,
+                [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+                  item.kind === 'message' && item.id === optimistic.id ? { ...item, acpPromptAfter } : item),
+              },
+            }))
+          } else if (!inProgress) {
             set(state => ({
               sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
               selectedSession: state.selectedSession?.sessionId === session.sessionId
