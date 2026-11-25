@@ -1,7 +1,8 @@
-import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X, type LucideIcon } from 'lucide-react-native'
+import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, Users, X, type LucideIcon } from 'lucide-react-native'
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import { GroupCard, IconButton } from '../../ui/components'
+import { Toggle } from '../../ui/toggle'
 import { androidRipple } from '../../ui/platform-style'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -37,12 +38,17 @@ type Props = {
   onOpenMode: () => void
   onOpenTools: () => void
   onOpenPermissions: () => void
+  agentTeamAvailable?: boolean
+  agentTeamEnabled?: boolean
+  agentTeamToggling?: boolean
+  onToggleAgentTeam?: (enabled: boolean) => void
 }
 
 export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   takePhoto, pickImages, pickFiles, workspaceLabel, modeLabel, supportsModeSelection,
   agentPresetSelecting, toolsAvailable, permissionsAvailable, permissionSelecting,
   permissionDisabled, permissionLabel, onReferenceChat, onOpenWorkspace, onOpenMode, onOpenTools, onOpenPermissions,
+  agentTeamAvailable, agentTeamEnabled, agentTeamToggling, onToggleAgentTeam,
   onDismiss, runAfterClose }: Props) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -197,6 +203,42 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
               </Pressable>
             )
           })}
+          {agentTeamAvailable && onToggleAgentTeam !== undefined && (
+            <Pressable
+              key="agent-team"
+              accessibilityRole="switch"
+              accessibilityLabel={strings.chat.agentTeam}
+              accessibilityState={{
+                checked: agentTeamEnabled === true,
+                disabled: agentTeamToggling === true,
+                busy: agentTeamToggling === true,
+              }}
+              disabled={agentTeamToggling === true}
+              android_ripple={ripple}
+              onPress={() => onToggleAgentTeam(!agentTeamEnabled)}
+              style={({ pressed }) => [
+                styles.plusMenuOption,
+                pressed && styles.plusMenuOptionPressed,
+                agentTeamToggling && styles.plusMenuOptionDisabled,
+              ]}
+            >
+              <View style={styles.plusMenuOptionIcon}>
+                <Users size={19} color={colors.ink} strokeWidth={1.8} />
+              </View>
+              <View style={[styles.plusMenuOptionBody, menuRows.length > 0 && styles.plusMenuOptionDivider]}>
+                <Text style={styles.plusMenuOptionText}>{strings.chat.agentTeam}</Text>
+                <View style={styles.plusMenuOptionValue}>
+                  {agentTeamToggling && <ActivityIndicator size="small" color={colors.muted} />}
+                  <Toggle
+                    value={agentTeamEnabled === true}
+                    disabled={agentTeamToggling === true}
+                    accessibilityLabel={strings.chat.agentTeam}
+                    onValueChange={onToggleAgentTeam}
+                  />
+                </View>
+              </View>
+            </Pressable>
+          )}
         </GroupCard>
       </ScrollView>
     </SheetModal>

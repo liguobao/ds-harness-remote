@@ -118,6 +118,7 @@ export interface AppState {
   agentPresetOptions?: AgentPresetOption[]
   agentPresetLoading: boolean
   agentPresetSelecting: boolean
+  agentTeamToggling: boolean
   historyHasMore: boolean
   historyLoadingOlder: boolean
   oldestLoadedSeq?: number
@@ -220,6 +221,7 @@ export interface AppState {
   selectPermission(preset: string): Promise<boolean>
   loadAgentPresets(): Promise<boolean>
   selectAgentPreset(preset: string): Promise<boolean>
+  setAgentTeamEnabled(enabled: boolean): Promise<boolean>
   loadOlderHistory(): Promise<void>
   workspaceCreate(path: string, backend?: AgentBackend): Promise<WorkspaceView | undefined>
   workspaceRename(workspaceId: string, title: string): Promise<boolean>
@@ -267,7 +269,7 @@ export function selectCustomAcpBackends(state: Pick<AppState, 'customAcpBackends
 
 export function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'hostWorkspaceGit' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'customAcpBackends' | 'workspaceCatalog' | 'workspaces' |
-  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' | 'agentPresetOptions' | 'agentPresetLoading' | 'agentPresetSelecting' |
+  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' | 'agentPresetOptions' | 'agentPresetLoading' | 'agentPresetSelecting' | 'agentTeamToggling' |
   'acpReadOnlySessionId' | 'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
@@ -311,6 +313,7 @@ export function initialData(): Pick<AppState,
     agentPresetOptions: undefined,
     agentPresetLoading: false,
     agentPresetSelecting: false,
+    agentTeamToggling: false,
     historyHasMore: false,
     historyLoadingOlder: false,
     oldestLoadedSeq: undefined,

@@ -8,6 +8,7 @@ import {
   RemoteClientCore,
   RemoteClientError,
   RemoteTypertGateway,
+  canReplayOversizedResponse,
   probeRemoteHostFeatures,
 } from '../src/index.js'
 
@@ -2369,5 +2370,77 @@ describe('HarnessAlphaClient live session events and control changes', () => {
     })
 
     await client.close()
+  })
+
+  it('toggles agent team collaboration fail-closed and emits agentTeam projection updates', async () => {
+    await runScenarios([
+      {
+        name: 'sends agentTeams/setEnabled for valid arguments and rejects oversized replay',
+        run: async () => {
+          const core = new ScriptedCore()
+          const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+          await expect(client.agentTeamSetEnabled('s1', true)).resolves.toBeUndefined()
+          await expect(client.agentTeamSetEnabled('s1', false)).resolves.toBeUndefined()
+          expect(core.rpcCalls).toEqual([
+            {
+              method: 'harness.remote.call',
+              params: { endpoint: 'agentTeams/setEnabled', payload: { args: { agentId: 's1', enabled: true } } },
+            },
+            {
+              method: 'harness.remote.call',
+              params: { endpoint: 'agentTeams/setEnabled', payload: { args: { agentId: 's1', enabled: false } } },
+            },
+          ])
+          expect(canReplayOversizedResponse('agentTeams/setEnabled')).toBe(false)
+        },
+      },
+      {
+        name: 'fails closed on invalid agentTeamSetEnabled arguments without dispatching RPC',
+        run: async () => {
+          const core = new ScriptedCore()
+          const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+          await expect(client.agentTeamSetEnabled('', true)).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+          await expect(client.agentTeamSetEnabled('   ', false)).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+          await expect(client.agentTeamSetEnabled('s1', 'yes' as unknown as boolean)).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+          expect(core.rpcCalls).toHaveLength(0)
+        },
+      },
+      {
+        name: 'forwards agentTeam projection updates from session/control',
+        run: async () => {
+          const core = new ScriptedCore()
+          const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+          const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, {}, frame => frames.push(frame))
+          client.start()
+          await vi.waitFor(() => expect(core.streamIdFor('session/control')).toBeTruthy())
+          core.emit({
+            event: 'harness.remote.frame',
+            data: {
+              streamId: core.streamIdFor('session/control'),
+              hasValue: true,
+              value: {
+                type: 'projection',
+                sessionId: 's1',
+                seq: 3,
+                changes: [{ key: 'agentTeam', val: { enabled: true, tasks: [] } }],
+              },
+            },
+          })
+          await vi.waitFor(() => {
+            expect(frames).toContainEqual({
+              rpcId: '',
+              payload: {
+                type: 'session/projection',
+                sessionId: 's1',
+                key: 'agentTeam',
+                value: { enabled: true, tasks: [] },
+                seq: 3,
+              },
+            })
+          })
+          await client.close()
+        },
+      },
+    ], cleanupContract1)
   })
 })

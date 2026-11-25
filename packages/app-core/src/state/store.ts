@@ -82,6 +82,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   agentPresetOptions: undefined,
   agentPresetLoading: false,
   agentPresetSelecting: false,
+  agentTeamToggling: false,
   historyHasMore: false,
   historyLoadingOlder: false,
   previewImageUri: undefined,

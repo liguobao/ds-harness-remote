@@ -1170,7 +1170,7 @@ Session Reference、只读 `directoryPicker/list` 与布尔能力探测 `session
 endpoints、只读 `remoteAccess/follow`，以及 Gateway 内部的 `$events` 和
 `$events/result`。明确禁止 `directoryPicker/pick`、`directoryPicker/createDirectory`、
 `session/openWorkspacePath`、Settings/native open、动态 Cordis package/source/runtime 操作、
-Agent Preset copy/delete 和任何未列出的 endpoint。endpoint 必须命中代码内固定集合，不能
+Agent Preset copy/delete 和任何未列出的 endpoint。对于智能体协作（Agent Team），固定 allowlist 仅包含 `agentTeams/setEnabled` 一个 unary 端点，不按 `agentTeams/*` 命名空间开放其他方法，且禁止经 `harness.remote.stream.open` 打开。endpoint 必须命中代码内固定集合，不能
 根据 Typert registry 动态扩张。`directoryPicker/list` 遇到只支持 Browser capability 的 Host
 picker 时，可以退回 Plugin Host 本地只读目录枚举；`session/canOpenWorkspacePath` 可基于该
 受限枚举返回 `true`，且仍只允许单层目录元数据。Client 的 Gateway target switch 必须让

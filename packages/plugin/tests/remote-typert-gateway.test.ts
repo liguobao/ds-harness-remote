@@ -857,4 +857,52 @@ describe('RemoteTypertGateway', () => {
       },
     ])
   })
+
+  it('invalidates cached session projections by args.agentId when agentTeams/setEnabled runs', async () => {
+    let teamEnabledA = false
+    const projectionReads = { 'session-a': 0, 'session-b': 0 }
+    const rpc = vi.fn(async (_method: string, params: unknown) => {
+      const { endpoint, payload } = params as {
+        endpoint: string
+        payload: { args?: { agentId?: string; enabled?: boolean; request?: { sessionId?: string } } }
+      }
+      if (endpoint === 'session/projections') {
+        const sid = payload.args?.request?.sessionId as 'session-a' | 'session-b'
+        projectionReads[sid] += 1
+        return {
+          ok: true,
+          value: {
+            kind: 'sequenced',
+            asOfSeq: projectionReads[sid],
+            values: { agentTeam: { enabled: sid === 'session-a' ? teamEnabledA : false, tasks: [] } },
+          },
+        }
+      }
+      if (endpoint === 'agentTeams/setEnabled' && payload.args?.agentId === 'session-a') {
+        teamEnabledA = payload.args.enabled === true
+        return { ok: true, value: undefined }
+      }
+      return { ok: true, value: undefined }
+    })
+    const gateway = new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore, undefined, undefined, false, new RemoteSessionHistoryCache())
+    const signal = new AbortController().signal
+
+    await expect(gateway.dispatch('session/projections', { args: { request: { sessionId: 'session-a' } } }, signal))
+      .resolves.toMatchObject({ ok: true, value: { values: { agentTeam: { enabled: false, tasks: [] } } } })
+    await expect(gateway.dispatch('session/projections', { args: { request: { sessionId: 'session-b' } } }, signal))
+      .resolves.toMatchObject({ ok: true, value: { values: { agentTeam: { enabled: false, tasks: [] } } } })
+    // Cached hit for session-a before mutation.
+    await gateway.dispatch('session/projections', { args: { request: { sessionId: 'session-a' } } }, signal)
+    expect(projectionReads['session-a']).toBe(1)
+
+    await expect(gateway.dispatch('agentTeams/setEnabled', { args: { agentId: 'session-a', enabled: true } }, signal))
+      .resolves.toEqual({ ok: true, value: undefined })
+
+    // Only session-a is invalidated; session-b remains cached.
+    await expect(gateway.dispatch('session/projections', { args: { request: { sessionId: 'session-a' } } }, signal))
+      .resolves.toMatchObject({ ok: true, value: { values: { agentTeam: { enabled: true, tasks: [] } } } })
+    await gateway.dispatch('session/projections', { args: { request: { sessionId: 'session-b' } } }, signal)
+    expect(projectionReads['session-a']).toBe(2)
+    expect(projectionReads['session-b']).toBe(1)
+  })
 })
