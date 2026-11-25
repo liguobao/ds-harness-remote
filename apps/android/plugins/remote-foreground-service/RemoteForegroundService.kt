@@ -358,7 +358,8 @@ class RemoteForegroundService : Service() {
 
         if (Build.VERSION.SDK_INT >= 36) {
           builder.setRequestPromotedOngoing(true)
-          if (!timed) builder.setShortCriticalText(islandLabel(status))
+          // The promoted chip is what Fluid Cloud shows: the conversation, not the host name.
+          if (!timed) builder.setShortCriticalText(safeTitle)
           if (task.summary.isNotBlank()) {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(displayStatus, task.summary)
               .filter { it.isNotBlank() }.joinToString("\n")))
