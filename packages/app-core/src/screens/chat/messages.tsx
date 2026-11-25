@@ -37,7 +37,7 @@ import type {
 } from '../../types'
 import { Button, IconButton } from '../../ui/components'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
-import { NativeMarkdown, useWorkspaceFilePress } from '../../ui/markdown'
+import { NativeMarkdown, parseMarkdownBlocks, useWorkspaceFilePress } from '../../ui/markdown'
 import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-preview'
 import { PresentedFileGroup } from '../../ui/file-card'
 import { extractUserSubmittedFiles } from './submitted-files'
@@ -55,6 +55,47 @@ import { IntelligentUiCard } from '../intelligent-ui-card'
 import { harnessDisplayName, handoffPresetLabel } from './handoff-modal'
 import { createStyles } from './styles'
 import type { MarkdownChunkSection } from './transcript-chunks'
+import {
+  countChatMessageMatches,
+  pagedUserBoundary,
+  resolvePagedUserMatchLocation,
+  splitHighlightRuns,
+  USER_MESSAGE_INLINE_LIMIT,
+  USER_MESSAGE_PAGE_SIZE,
+  type SearchHighlightState,
+} from './chat-search'
+
+function sameSearchHighlight(a: SearchHighlightState | undefined, b: SearchHighlightState | undefined): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.query === b.query && a.activeLocalIndex === b.activeLocalIndex
+}
+
+function renderPlainSearchRuns(
+  text: string,
+  highlight: SearchHighlightState | undefined,
+  keyPrefix: string,
+) {
+  if (highlight === undefined || text.length === 0) return text
+  const runs = splitHighlightRuns(text, highlight.query)
+  if (runs.length === 1 && runs[0]!.matchOffset === null) return text
+  return runs.map((run, idx) => {
+    if (run.matchOffset === null) return run.text
+    const isActive = highlight.activeLocalIndex === run.matchOffset
+    return (
+      <Text
+        key={`${keyPrefix}:hl:${run.matchOffset}:${idx}`}
+        style={{
+          backgroundColor: isActive ? '#F59E0B' : '#FEF08A',
+          color: '#0F0F0F',
+          fontWeight: isActive ? '700' : undefined,
+        }}
+      >
+        {run.text}
+      </Text>
+    )
+  })
+}
 
 function collectEditedFiles(items: readonly ChatItem[]): { path: string; name?: string; action?: 'created' | 'edited' }[] {
   const files: { path: string; name?: string; action?: 'created' | 'edited' }[] = []
@@ -97,7 +138,7 @@ function collectUnavailableUi(items: readonly ChatItem[], availableUiIds: Readon
 }
 
 /** Only activity ranges fold; completing a turn must never hide spoken replies. */
-export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, isTurnRunning = false, turnUsage, hiddenResponseItemId, onApproval, onQuestion }: {
+export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, isTurnRunning = false, turnUsage, hiddenResponseItemId, searchHighlight, onApproval, onQuestion }: {
   items: ChatItem[]
   artifacts: UiArtifact[]
   updatedArtifacts: UiArtifact[]
@@ -107,6 +148,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   turnUsage?: ChatMessage['usage']
   /** When the final assistant response is split into markdown-chunk FlatList rows, hide it here. */
   hiddenResponseItemId?: string
+  searchHighlight?: SearchHighlightState
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
@@ -157,6 +199,29 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     [hiddenResponseItemId, items],
   )
   const lastResponseIndex = segments.map(s => s.kind).lastIndexOf('response')
+  const responseHighlights = useMemo(() => {
+    if (searchHighlight === undefined) return undefined
+    const map = new Map<number, SearchHighlightState>()
+    let offset = 0
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index]!
+      if (segment.kind !== 'response') continue
+      if (hiddenResponseItemId !== undefined && segment.item.id === hiddenResponseItemId && index === lastResponseIndex) {
+        continue
+      }
+      const count = countChatMessageMatches(segment.item, searchHighlight.query, parseMarkdownBlocks)
+      if (count > 0) {
+        const activeLocalIndex = searchHighlight.activeLocalIndex !== null
+          && searchHighlight.activeLocalIndex >= offset
+          && searchHighlight.activeLocalIndex < offset + count
+          ? searchHighlight.activeLocalIndex - offset
+          : null
+        map.set(index, { query: searchHighlight.query, activeLocalIndex })
+      }
+      offset += count
+    }
+    return map
+  }, [searchHighlight, segments, hiddenResponseItemId, lastResponseIndex])
   return <View style={styles.processGroup}>
     {end !== undefined && !(end.reason === 'completed' && (hasGroupRelayReplies || hasToolSummary)) && <View style={styles.turnProcessHeader}>
       <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
@@ -183,6 +248,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
             artifacts={index === lastResponseIndex ? artifacts : undefined}
             editedFiles={index === lastResponseIndex ? editedFiles : undefined}
             onFilePress={onFilePress}
+            searchHighlight={responseHighlights?.get(index)}
           />
         )
       }
@@ -207,6 +273,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   // Every field below is a reference that streaming rebuilds, so compare their
   // contents: a group whose text did not change keeps its rendered subtree.
   if (prev.hiddenResponseItemId !== next.hiddenResponseItemId) return false
+  if (!sameSearchHighlight(prev.searchHighlight, next.searchHighlight)) return false
   if (prev.busyAction !== next.busyAction) {
     const needsBusy = next.items.some(
       item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined,
@@ -241,12 +308,14 @@ export const MarkdownChunkRow = memo(function MarkdownChunkRow({
   updatedArtifacts,
   availableUiIds,
   turnUsage,
+  searchHighlight,
 }: {
   section: MarkdownChunkSection
   artifacts: UiArtifact[]
   updatedArtifacts: UiArtifact[]
   availableUiIds: ReadonlySet<string>
   turnUsage?: ChatMessage['usage']
+  searchHighlight?: SearchHighlightState
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -289,6 +358,7 @@ export const MarkdownChunkRow = memo(function MarkdownChunkRow({
           preparsedNodes={nodes}
           suppressReferencedFiles={!isLast}
           referencedFilesOverride={isLast ? referencedFiles : undefined}
+          searchHighlight={searchHighlight}
         />
       </View>
       {isLast && artifacts.map(ui => (
@@ -310,6 +380,7 @@ export const MarkdownChunkRow = memo(function MarkdownChunkRow({
   )
 }, (prev, next) => {
   if (prev.section !== next.section) return false
+  if (!sameSearchHighlight(prev.searchHighlight, next.searchHighlight)) return false
   if (prev.section.chunkIndex !== prev.section.chunkCount - 1) return true
   if (!sameUsage(prev.turnUsage, next.turnUsage)) return false
   if (prev.artifacts !== next.artifacts) return false
@@ -386,7 +457,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   </View>
 })
 
-export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, showActions, turnUsage, onApproval, onQuestion, artifacts, onSendPrompt, userBubble }: {
+export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, showActions, turnUsage, onApproval, onQuestion, artifacts, onSendPrompt, userBubble, searchHighlight }: {
   item: ChatItem
   busyAction?: string
   compact: boolean
@@ -398,6 +469,7 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
   artifacts?: UiArtifact[]
   onSendPrompt?: (text: string) => Promise<boolean>
+  searchHighlight?: SearchHighlightState
 }) {
   if (item.kind === 'approval') {
     return (
@@ -423,7 +495,7 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
     && !hasArtifacts
     && !hasVisibleMessageText(item.text) && !item.images?.length
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
-  return <MessageBubble item={item} compact={compact} showActions={showActions} turnUsage={turnUsage} artifacts={artifacts} onSendPrompt={onSendPrompt} userBubble={userBubble} />
+  return <MessageBubble item={item} compact={compact} showActions={showActions} turnUsage={turnUsage} artifacts={artifacts} onSendPrompt={onSendPrompt} userBubble={userBubble} searchHighlight={searchHighlight} />
 })
 
 /** Retry affordance for a kept failed/unconfirmed row, with guarded resend. */
@@ -462,12 +534,12 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
     </Pressable>
   )
 }
-function HeartbeatMessage({ text, body }: { text: string; body: string }) {
+function HeartbeatMessage({ text, body, searchHighlight }: { text: string; body: string; searchHighlight?: SearchHighlightState }) {
   const [expanded, setExpanded] = useState(false)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return <View>
-    <NativeMarkdown text={body} />
+    <NativeMarkdown text={body} searchHighlight={searchHighlight} />
     <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
       onPress={() => setExpanded(value => !value)} style={styles.reasoningHeader}>
       <Code2 size={16} color={colors.muted} />
@@ -484,12 +556,14 @@ function HeartbeatMessage({ text, body }: { text: string; body: string }) {
  * When text is selected, floating callout menu [询问智能体] [拷贝] appears
  * right above the selection.
  */
-function AssistantMessageCallout({ item }: { item: ChatMessage }) {
+function AssistantMessageCallout({ item, searchHighlight }: { item: ChatMessage; searchHighlight?: SearchHighlightState }) {
   const styles = useThemedStyles(createStyles)
   const body = heartbeatMessageBody(item.text, 'assistant')
   return (
     <View style={styles.assistantProseWrap}>
-      {body === undefined ? <NativeMarkdown text={item.text} /> : <HeartbeatMessage text={item.text} body={body} />}
+      {body === undefined
+        ? <NativeMarkdown text={item.text} searchHighlight={searchHighlight} />
+        : <HeartbeatMessage text={item.text} body={body} searchHighlight={searchHighlight} />}
     </View>
   )
 }
@@ -617,24 +691,40 @@ function HandoffContextCard({
   )
 }
 
-// A single unbroken paste can otherwise become a multi-megabyte native text layout.
-const USER_MESSAGE_INLINE_LIMIT = 8192
-const USER_MESSAGE_PAGE_SIZE = 1024
-
-function PagedUserText({ text, tint }: { text: string; tint: string }) {
+function PagedUserText({
+  text,
+  tint,
+  searchHighlight,
+}: {
+  text: string
+  tint: string
+  searchHighlight?: SearchHighlightState
+}) {
   const styles = useThemedStyles(createStyles)
   const [selectedPage, setSelectedPage] = useState(0)
   const count = Math.ceil(text.length / USER_MESSAGE_PAGE_SIZE)
+  const matchLoc = useMemo(
+    () => (searchHighlight !== undefined && searchHighlight.activeLocalIndex !== null
+      ? resolvePagedUserMatchLocation(text, searchHighlight.query, searchHighlight.activeLocalIndex)
+      : undefined),
+    [text, searchHighlight],
+  )
+  useEffect(() => {
+    if (matchLoc !== undefined && matchLoc.pageLocalActiveIndex !== null) {
+      setSelectedPage(matchLoc.page)
+    }
+  }, [matchLoc])
   const page = Math.min(selectedPage, count - 1)
-  function boundary(index: number) {
-    const offset = index * USER_MESSAGE_PAGE_SIZE
-    const before = text.charCodeAt(offset - 1)
-    const after = text.charCodeAt(offset)
-    return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff ? offset - 1 : offset
-  }
+  const slice = text.slice(pagedUserBoundary(text, page), pagedUserBoundary(text, page + 1))
+  const pageHighlight: SearchHighlightState | undefined = searchHighlight === undefined
+    ? undefined
+    : {
+        query: searchHighlight.query,
+        activeLocalIndex: matchLoc !== undefined && matchLoc.page === page ? matchLoc.pageLocalActiveIndex : null,
+      }
   return <View>
     <Text selectable style={[styles.userMessageInlineText, { color: tint }]}>
-      {text.slice(boundary(page), boundary(page + 1))}
+      {renderPlainSearchRuns(slice, pageHighlight, `paged:${page}`)}
     </Text>
     <View style={styles.userTextPagination}>
       <IconButton dense label={zhCN.tools.previous} icon={ChevronLeft} tint={tint} disabled={page === 0} onPress={() => setSelectedPage(page - 1)} />
@@ -644,7 +734,7 @@ function PagedUserText({ text, tint }: { text: string; tint: string }) {
   </View>
 }
 
-function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
+function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble, searchHighlight }: {
   item: ChatMessage
   compact: boolean
   showActions?: boolean
@@ -654,6 +744,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
   editedFiles?: { path: string; name?: string; action?: 'created' | 'edited' }[]
   onFilePress?: (path: string) => void
   onSendPrompt?: (text: string) => Promise<boolean>
+  searchHighlight?: SearchHighlightState
 }) {
   const { colors, appearance } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -686,7 +777,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
         {showReasoning && <ReasoningDisclosure item={item} />}
         {showImages && <ChatImages images={item.images!} />}
         {showText && (
-          <AssistantMessageCallout item={item} />
+          <AssistantMessageCallout item={item} searchHighlight={searchHighlight} />
         )}
         {showStreaming && (
           <View style={styles.assistantText}>
@@ -715,7 +806,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
     const userPalettes = getUserBubblePalettes(colors)
     const activePalette = userBubble ? userPalettes.bubble : isSolid ? userPalettes.solid : userPalettes.soft
     const pagedBody = displayBody.length > USER_MESSAGE_INLINE_LIMIT
-      ? <PagedUserText key={item.id} text={displayBody} tint={activePalette.ink} />
+      ? <PagedUserText key={item.id} text={displayBody} tint={activePalette.ink} searchHighlight={searchHighlight} />
       : undefined
     const userBubbleStyle = userBubble
       ? styles.userBubble
@@ -747,7 +838,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
               hasTrailingBody={hasTrailingInstruction}
             />
           )}
-          {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
+          {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} searchHighlight={searchHighlight} /> : quotes.length > 0 ? (
             <View style={styles.userMessageInlineWrap}>
               {quotes.map((quoteText, index) => (
                 <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
@@ -758,13 +849,17 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
                 </View>
               ))}
               {hasVisibleMessageText(displayBody) && (
-                pagedBody ?? <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{displayBody}</Text>
+                pagedBody ?? (
+                  <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>
+                    {renderPlainSearchRuns(displayBody, searchHighlight, `uquotes:${item.id}`)}
+                  </Text>
+                )
               )}
             </View>
           ) : (
             hasVisibleMessageText(displayBody) && (
               <View style={styles.userMarkdownWrap}>
-                {pagedBody ?? <NativeMarkdown text={displayBody} colors={activePalette} />}
+                {pagedBody ?? <NativeMarkdown text={displayBody} colors={activePalette} searchHighlight={searchHighlight} />}
               </View>
             )
           )}
@@ -792,7 +887,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
       <View style={[styles.messageBody, user && styles.messageBodyUser]}>
         <Text style={styles.messageLabel}>{user ? zhCN.chat.you : zhCN.chat.system}</Text>
         {showImages && <ChatImages images={item.images!} alignEnd={user} />}
-        {showText && <NativeMarkdown text={item.text} />}
+        {showText && <NativeMarkdown text={item.text} searchHighlight={searchHighlight} />}
         {showStreaming && <StreamingCursor />}
       </View>
     </View>

@@ -12,10 +12,20 @@ import { MermaidBlock } from './mermaid/mermaid-block'
 import { useTheme } from './theme-context'
 import type { ThemeColors } from './theme-context'
 import { getCachedThemedStyles } from './use-themed-styles'
-import { CodeBlockView } from './code-block'
+import { CodeBlockView, type CodeBlockSearchHighlight } from './code-block'
 import { PresentedFileGroup } from './file-card'
 import { QuotePreview } from './quote-preview'
 import { DshLinkIcon, classifyDshLinkPath } from './dsh-icons'
+import {
+  allocateBlockSearchHighlight,
+  countInlineChildrenMatches,
+  countMarkdownNodesMatches,
+  countTextMatches,
+  normalizeSearchQuery,
+  splitHighlightRuns,
+  type BlockSearchHighlight,
+  type SearchHighlightState,
+} from '../screens/chat/chat-search'
 
 import {
   createMarkdownParser,
@@ -151,6 +161,7 @@ export const NativeMarkdown = memo(function NativeMarkdown({
   preparsedNodes,
   suppressReferencedFiles = false,
   referencedFilesOverride,
+  searchHighlight,
 }: {
   text: string
   colors?: ThemeColors
@@ -158,6 +169,7 @@ export const NativeMarkdown = memo(function NativeMarkdown({
   preparsedNodes?: readonly MarkdownNode[]
   suppressReferencedFiles?: boolean
   referencedFilesOverride?: readonly { path: string; name?: string }[]
+  searchHighlight?: SearchHighlightState
 }) {
   const theme = useTheme()
   // A caller can paint one block on a dark surface (a user bubble) without touching the theme.
@@ -182,10 +194,21 @@ export const NativeMarkdown = memo(function NativeMarkdown({
     return extractReferencedFiles(nodes as MarkdownNode[])
   }, [suppressReferencedFiles, referencedFilesOverride, nodes])
 
+  const normalizedQuery = searchHighlight === undefined ? '' : normalizeSearchQuery(searchHighlight.query)
+  const activeSearch: ActiveMarkdownSearch | undefined = normalizedQuery.length > 0
+    ? {
+        query: normalizedQuery,
+        activeLocalIndex: searchHighlight!.activeLocalIndex,
+        counter: { current: 0 },
+      }
+    : undefined
+
   return (
     <markdownFileContext.Provider value={sourceFile}>
       <View style={styles.container}>
-        {nodes.map(node => renderBlockCached(node, styles, colors, onLinkPress))}
+        {activeSearch === undefined
+          ? nodes.map(node => renderBlockCached(node, styles, colors, onLinkPress))
+          : nodes.map(node => renderBlock(node, styles, colors, onLinkPress, activeSearch))}
         {!suppressReferencedFiles && <PresentedFileGroup files={referencedFiles} onFilePress={onLinkPress} />}
       </View>
     </markdownFileContext.Provider>
@@ -304,24 +327,69 @@ export function parseMarkdownBlocks(
  * the incremental parse return their previous element, so React bails out of
  * the whole closed-block subtree instead of re-rendering it per chunk.
  */
+interface ActiveMarkdownSearch {
+  query: string
+  activeLocalIndex: number | null
+  counter: { current: number }
+}
+
+function renderSearchHighlightedRuns(
+  text: string,
+  search: ActiveMarkdownSearch | undefined,
+  keyPrefix: string,
+): ReactNode {
+  if (search === undefined || text.length === 0) return text
+  const runs = splitHighlightRuns(text, search.query)
+  if (runs.length === 1 && runs[0]!.matchOffset === null) return text
+  return runs.map((run, idx) => {
+    if (run.matchOffset === null) return run.text
+    const localIndex = search.counter.current++
+    const isActive = search.activeLocalIndex === localIndex
+    return (
+      <Text
+        key={`${keyPrefix}:hl:${localIndex}:${idx}`}
+        style={{
+          backgroundColor: isActive ? '#F59E0B' : '#FEF08A',
+          color: '#0F0F0F',
+          fontWeight: isActive ? '700' : undefined,
+        }}
+      >
+        {run.text}
+      </Text>
+    )
+  })
+}
+
 function CalloutCard({
   callout,
   children,
   styles,
   colors,
   onLinkPress,
+  searchHighlight,
+  keyPrefix,
 }: {
   callout: { type: CalloutInfo['type']; title: string }
   children: MarkdownNode[]
   styles: MarkdownStyles
   colors: ThemeColors
   onLinkPress?: MarkdownLinkHandler
+  searchHighlight?: BlockSearchHighlight
+  keyPrefix?: string
 }) {
   const isWarning = callout.type === 'WARNING' || callout.type === 'CAUTION'
   const isTip = callout.type === 'TIP'
   const accentColor = isWarning ? colors.warning : isTip ? colors.success : colors.primary
   const bgColor = isWarning ? colors.warningSoft : colors.surfaceStrong
   const borderColor = isWarning ? colors.warning : colors.border
+  const localSearch: ActiveMarkdownSearch | undefined = searchHighlight
+    ? {
+      query: searchHighlight.query,
+      activeLocalIndex: searchHighlight.activeLocalIndex,
+      counter: { current: searchHighlight.baseIndex },
+    }
+    : undefined
+  const renderedTitle = renderSearchHighlightedRuns(callout.title, localSearch, `${keyPrefix ?? 'callout'}:title`)
 
   return (
     <View style={[styles.calloutCard, { backgroundColor: bgColor, borderColor }]}>
@@ -335,11 +403,11 @@ function CalloutCard({
             )}
           </Svg>
         </View>
-        <Text style={[styles.calloutTitle, { color: colors.ink }]}>{callout.title}</Text>
+        <Text style={[styles.calloutTitle, { color: colors.ink }]}>{renderedTitle}</Text>
       </View>
       {children.length > 0 && (
         <View style={styles.calloutBodyContainer}>
-          {children.map(child => renderBlock(child, styles, colors, onLinkPress))}
+          {children.map(child => renderBlock(child, styles, colors, onLinkPress, localSearch))}
         </View>
       )}
     </View>
@@ -402,7 +470,13 @@ function isFullwidthCodeUnit(code: number): boolean {
  */
 const MaxColumnWidth = 260
 
-function renderTable(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeColors, onLinkPress?: MarkdownLinkHandler): ReactNode {
+function renderTable(
+  node: MarkdownNode,
+  styles: MarkdownStyles,
+  colors: ThemeColors,
+  onLinkPress?: MarkdownLinkHandler,
+  search?: ActiveMarkdownSearch,
+): ReactNode {
   const rows: MarkdownNode[][] = []
   const collectRows = (list: MarkdownNode[]) => {
     for (const child of list) {
@@ -436,6 +510,25 @@ function renderTable(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeCo
     columnWidths.push(Math.min(MaxColumnWidth, Math.max(minCellWidth, widest)))
   }
 
+  let cellBases: number[][] | undefined
+  let tableSearchQuery: string | undefined
+  let tableActiveLocalIndex: number | null | undefined
+  if (search !== undefined) {
+    const startCount = search.counter.current
+    const bases: number[][] = rows.map(row =>
+      row.map(cell => {
+        const base = search.counter.current
+        search.counter.current += countInlineChildrenMatches(cell.children, search.query)
+        return base
+      }),
+    )
+    if (search.counter.current > startCount) {
+      cellBases = bases
+      tableSearchQuery = search.query
+      tableActiveLocalIndex = search.activeLocalIndex
+    }
+  }
+
   return (
     <MarkdownTable
       key={node.key}
@@ -445,17 +538,33 @@ function renderTable(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeCo
       styles={styles}
       colors={colors}
       onLinkPress={onLinkPress}
+      searchQuery={tableSearchQuery}
+      activeLocalIndex={tableActiveLocalIndex}
+      cellBases={cellBases}
     />
   )
 }
 
-const MarkdownTable = memo(function MarkdownTable({ plan, minCellWidth, rows, styles, colors, onLinkPress }: {
+const MarkdownTable = memo(function MarkdownTable({
+  plan,
+  minCellWidth,
+  rows,
+  styles,
+  colors,
+  onLinkPress,
+  searchQuery,
+  activeLocalIndex,
+  cellBases,
+}: {
   plan: number[]
   minCellWidth: number
   rows: MarkdownNode[][]
   styles: MarkdownStyles
   colors: ThemeColors
   onLinkPress?: MarkdownLinkHandler
+  searchQuery?: string
+  activeLocalIndex?: number | null
+  cellBases?: number[][]
 }) {
   // Fill the viewport when the plan is narrower; overflow keeps plan widths and scrolls.
   const [viewportWidth, setViewportWidth] = useState(0)
@@ -483,12 +592,22 @@ const MarkdownTable = memo(function MarkdownTable({ plan, minCellWidth, rows, st
           <View key={`md-table-row-${row[0]?.key ?? rowIndex}`} style={styles.tableRow}>
             {row.map((cell, column) => {
               const isHeader = cell.token.type === 'th_open'
+              const cellSearch: ActiveMarkdownSearch | undefined =
+                searchQuery !== undefined && cellBases !== undefined
+                  ? {
+                      query: searchQuery,
+                      activeLocalIndex: activeLocalIndex ?? null,
+                      counter: { current: cellBases[rowIndex]?.[column] ?? 0 },
+                    }
+                  : undefined
               return (
                 <View
                   key={cell.key}
                   style={[styles.tableCell, { width: (plan[column] ?? minCellWidth) * fillScale }, isHeader && styles.tableHeader]}
                 >
-                  <Text style={isHeader ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(cell.children, styles, colors, onLinkPress)}</Text>
+                  <Text style={isHeader ? styles.tableHeaderText : styles.tableText}>
+                    {renderInlineChildren(cell.children, styles, colors, onLinkPress, cellSearch)}
+                  </Text>
                 </View>
               )
             })}
@@ -499,23 +618,39 @@ const MarkdownTable = memo(function MarkdownTable({ plan, minCellWidth, rows, st
   )
 })
 
-function renderBlock(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeColors, onLinkPress?: MarkdownLinkHandler): ReactNode {
+function renderBlock(
+  node: MarkdownNode,
+  styles: MarkdownStyles,
+  colors: ThemeColors,
+  onLinkPress?: MarkdownLinkHandler,
+  search?: ActiveMarkdownSearch,
+): ReactNode {
   const { token, key, children } = node
   if (token.type === 'math_block') return <MathFormula key={key} source={token.content} display />
   if (token.type === 'paragraph_open') {
-    return <Text key={key} selectable style={styles.paragraph}>{renderInlineChildren(children, styles, colors, onLinkPress)}</Text>
+    return <Text key={key} selectable style={styles.paragraph}>{renderInlineChildren(children, styles, colors, onLinkPress, search)}</Text>
   }
   if (token.type === 'heading_open') {
-    return <Text key={key} selectable style={[styles.heading, headingStyle(token.tag, styles)]}>{renderInlineChildren(children, styles, colors, onLinkPress)}</Text>
+    return <Text key={key} selectable style={[styles.heading, headingStyle(token.tag, styles)]}>{renderInlineChildren(children, styles, colors, onLinkPress, search)}</Text>
   }
   if (token.type === 'fence' || token.type === 'code_block') {
     const lang = token.type === 'fence' ? token.info.trim().split(/\s+/u)[0] : undefined
     if (lang?.toLowerCase() === 'mermaid') return <MermaidBlock key={key} code={token.content} />
-    return <CodeBlockView key={key} code={token.content} language={lang} />
+    const cleanCode = (token.content || '').replace(/\n+$/u, '')
+    const codeHighlight: CodeBlockSearchHighlight | undefined = search !== undefined
+      ? allocateBlockSearchHighlight(countTextMatches(cleanCode, search.query), search)
+      : undefined
+    return <CodeBlockView key={key} code={token.content} language={lang} searchHighlight={codeHighlight} />
   }
   if (token.type === 'blockquote_open') {
     const callout = parseCalloutNode(node)
     if (callout) {
+      const calloutHighlight = search !== undefined
+        ? allocateBlockSearchHighlight(
+          countTextMatches(callout.title, search.query) + countMarkdownNodesMatches(callout.children, search.query),
+          search,
+        )
+        : undefined
       return (
         <CalloutCard
           key={key}
@@ -524,6 +659,8 @@ function renderBlock(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeCo
           styles={styles}
           colors={colors}
           onLinkPress={onLinkPress}
+          searchHighlight={calloutHighlight}
+          keyPrefix={`callout:${key}`}
         />
       )
     }
@@ -539,7 +676,7 @@ function renderBlock(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeCo
     }
     return (
       <View key={key} style={styles.blockquote}>
-        {children.map(child => renderBlock(child, styles, colors, onLinkPress))}
+        {children.map(child => renderBlock(child, styles, colors, onLinkPress, search))}
       </View>
     )
   }
@@ -548,20 +685,27 @@ function renderBlock(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeCo
     const start = Number(token.attrGet('start') ?? '1')
     return (
       <View key={key} style={styles.list}>
-        {children.map((child, index) => renderListItem(child, styles, colors, ordered ? start + index : undefined, onLinkPress))}
+        {children.map((child, index) => renderListItem(child, styles, colors, ordered ? start + index : undefined, onLinkPress, search))}
       </View>
     )
   }
   if (token.type === 'hr') return <View key={key} style={styles.rule} />
-  if (token.type === 'table_open') return renderTable(node, styles, colors, onLinkPress)
-  if (token.type === 'inline') return <Text key={key} selectable style={styles.paragraph}>{renderInline(token.children ?? [], styles, `block:${key}`, onLinkPress)}</Text>
-  if (children.length > 0) return <View key={key}>{children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
-  if (token.content.length > 0) return <Text key={key} selectable style={styles.paragraph}>{token.content}</Text>
+  if (token.type === 'table_open') return renderTable(node, styles, colors, onLinkPress, search)
+  if (token.type === 'inline') return <Text key={key} selectable style={styles.paragraph}>{renderInline(token.children ?? [], styles, `block:${key}`, onLinkPress, search)}</Text>
+  if (children.length > 0) return <View key={key}>{children.map(child => renderBlock(child, styles, colors, onLinkPress, search))}</View>
+  if (token.content.length > 0) return <Text key={key} selectable style={styles.paragraph}>{renderSearchHighlightedRuns(token.content, search, `block:${key}`)}</Text>
   return null
 }
 
-function renderListItem(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeColors, number?: number, onLinkPress?: MarkdownLinkHandler): ReactNode {
-  if (node.token.type !== 'list_item_open') return renderBlock(node, styles, colors, onLinkPress)
+function renderListItem(
+  node: MarkdownNode,
+  styles: MarkdownStyles,
+  colors: ThemeColors,
+  number?: number,
+  onLinkPress?: MarkdownLinkHandler,
+  search?: ActiveMarkdownSearch,
+): ReactNode {
+  if (node.token.type !== 'list_item_open') return renderBlock(node, styles, colors, onLinkPress, search)
   const task = getTaskInfo(node)
   return (
     <View key={node.key} style={styles.listItem}>
@@ -588,28 +732,40 @@ function renderListItem(node: MarkdownNode, styles: MarkdownStyles, colors: Them
       ) : (
         <Text style={styles.listMarker}>{number === undefined ? '•' : `${number}.`}</Text>
       )}
-      <View style={styles.listContent}>{task.children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
+      <View style={styles.listContent}>{task.children.map(child => renderBlock(child, styles, colors, onLinkPress, search))}</View>
     </View>
   )
 }
 
-function renderInlineChildren(nodes: MarkdownNode[], styles: MarkdownStyles, colors: ThemeColors, onLinkPress?: MarkdownLinkHandler): ReactNode[] {
+function renderInlineChildren(
+  nodes: MarkdownNode[],
+  styles: MarkdownStyles,
+  colors: ThemeColors,
+  onLinkPress?: MarkdownLinkHandler,
+  search?: ActiveMarkdownSearch,
+): ReactNode[] {
   return nodes.flatMap(node => node.token.type === 'inline'
-    ? renderInline(node.token.children ?? [], styles, `inline:${node.key}`, onLinkPress)
-    : [renderBlock(node, styles, colors, onLinkPress)])
+    ? renderInline(node.token.children ?? [], styles, `inline:${node.key}`, onLinkPress, search)
+    : [renderBlock(node, styles, colors, onLinkPress, search)])
 }
 
-function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, onLinkPress?: MarkdownLinkHandler): ReactNode[] {
+function renderInline(
+  tokens: Token[],
+  styles: MarkdownStyles,
+  prefix: string,
+  onLinkPress?: MarkdownLinkHandler,
+  search?: ActiveMarkdownSearch,
+): ReactNode[] {
   const output: ReactNode[] = []
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!
     const key = `${prefix}:${index}`
     if (token.type === 'math_inline') output.push(<MathFormula key={key} source={token.content} />)
-    else if (token.type === 'text') output.push(token.content)
+    else if (token.type === 'text') output.push(renderSearchHighlightedRuns(token.content, search, key))
     else if (token.type === 'softbreak' || token.type === 'hardbreak') output.push('\n')
     else if (token.type === 'code_inline') {
       const isMention = token.content.startsWith('/') || token.content.startsWith('@')
-      output.push(<Text key={key} style={[styles.inlineCode, isMention && styles.mentionCode]}>{token.content}</Text>)
+      output.push(<Text key={key} style={[styles.inlineCode, isMention && styles.mentionCode]}>{renderSearchHighlightedRuns(token.content, search, key)}</Text>)
     }
     else if (token.type === 'image') {
       const alt = token.content || token.children?.map(child => child.content).join('') || '图片'
@@ -620,13 +776,13 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
     } else if (token.nesting === 1) {
       const closing = findClosingToken(tokens, index)
       if (closing < 0) continue
-      const content = renderInline(tokens.slice(index + 1, closing), styles, key, onLinkPress)
-      if (token.type === 'strong_open') output.push(<Text key={key} style={styles.strong}>{content}</Text>)
-      else if (token.type === 'em_open') output.push(<Text key={key} style={styles.emphasis}>{content}</Text>)
-      else if (token.type === 's_open') output.push(<Text key={key} style={styles.strike}>{content}</Text>)
+      const innerTokens = tokens.slice(index + 1, closing)
+      if (token.type === 'strong_open') output.push(<Text key={key} style={styles.strong}>{renderInline(innerTokens, styles, key, onLinkPress, search)}</Text>)
+      else if (token.type === 'em_open') output.push(<Text key={key} style={styles.emphasis}>{renderInline(innerTokens, styles, key, onLinkPress, search)}</Text>)
+      else if (token.type === 's_open') output.push(<Text key={key} style={styles.strike}>{renderInline(innerTokens, styles, key, onLinkPress, search)}</Text>)
       else if (token.type === 'link_open') {
         const href = token.attrGet('href') ?? ''
-        const rawText = tokens.slice(index + 1, closing).map(t => t.content).join('')
+        const rawText = innerTokens.map(t => t.content).join('')
         const linkInfo = classifyMarkdownLink(href, rawText)
         const iconKind = linkInfo.iconKind
         const handlePress = !linkInfo.isBlocked && linkInfo.safeHref !== null
@@ -647,7 +803,7 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
               accessibilityRole="none"
               accessibilityLabel={`${rawText || href} (链接已被安全阻断)`}
             >
-              {content}
+              {renderInline(innerTokens, styles, key, onLinkPress, search)}
             </Text>
           )
         } else if (linkInfo.kind === 'citation') {
@@ -660,7 +816,9 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
               onPress={handlePress}
             >
               <Text style={styles.citationText}>
-                {linkInfo.citationIndex ? `[${linkInfo.citationIndex}]` : content}
+                {linkInfo.citationIndex
+                  ? renderSearchHighlightedRuns(`[${linkInfo.citationIndex}]`, search, `${key}:cite`)
+                  : renderInline(innerTokens, styles, key, onLinkPress, search)}
               </Text>
             </Text>
           )
@@ -684,15 +842,15 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
               )}
               {iconKind ? ' ' : ''}
               {linkInfo.kind === 'external' && linkInfo.displayText !== rawText && linkInfo.displayText.length > 0
-                ? linkInfo.displayText
-                : content}
+                ? renderSearchHighlightedRuns(linkInfo.displayText, search, `${key}:disp`)
+                : renderInline(innerTokens, styles, key, onLinkPress, search)}
             </Text>
           )
         }
       }
-      else output.push(...content)
+      else output.push(...renderInline(innerTokens, styles, key, onLinkPress, search))
       index = closing
-    } else if (token.content.length > 0) output.push(token.content)
+    } else if (token.content.length > 0) output.push(renderSearchHighlightedRuns(token.content, search, key))
   }
   return output
 }

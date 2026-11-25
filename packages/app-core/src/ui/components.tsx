@@ -69,6 +69,32 @@ const HeaderInsetContext = createContext(0)
 /** Set inside the TopBar's floating chips so icon buttons size themselves to the chip. */
 const FloatingChipContext = createContext(false)
 
+/** Frosted backdrop shared by overlaid headers inside `BlurHeaderFrame`. */
+export function HeaderBlurBackdrop() {
+  const { scheme } = useTheme()
+  const blurTarget = useContext(HeaderBlurTargetContext)
+  if (blurTarget === undefined) return null
+  return (
+    <>
+      <BlurView
+        blurTarget={blurTarget}
+        blurMethod="dimezisBlurViewSdk31Plus"
+        intensity={50}
+        tint={scheme === 'dark' ? 'dark' : 'light'}
+        style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]}
+        pointerEvents="none"
+      />
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          { backgroundColor: scheme === 'dark' ? 'rgba(11, 13, 17, 0.72)' : 'rgba(248, 248, 248, 0.85)' },
+        ]}
+        pointerEvents="none"
+      />
+    </>
+  )
+}
+
 /** Height of the overlaid header that scrollable content must pad its top by; 0 outside a `BlurHeaderFrame`. */
 export function useHeaderInset(): number {
   return useContext(HeaderInsetContext)

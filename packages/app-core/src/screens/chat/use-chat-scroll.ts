@@ -13,6 +13,7 @@ type Options = {
   memoryScope: string
   memoryKey: string
   panelOpen: boolean
+  searchActive?: boolean
   historyLoadingOlder: boolean
   busy: string | undefined
   setTrajectory: (value: boolean) => void
@@ -65,6 +66,7 @@ export function useChatScroll({
   memoryScope,
   memoryKey,
   panelOpen,
+  searchActive = false,
   historyLoadingOlder,
   busy,
   setTrajectory,
@@ -83,6 +85,9 @@ export function useChatScroll({
   const scrollFrameRef = useRef<number | null>(null)
   const tailTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tailFrameRef = useRef<number | null>(null)
+  const searchRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingSearchTargetRef = useRef<{ key: string; generation: number; retries: number; dispatched: boolean } | undefined>(undefined)
   const listViewportRef = useRef({ width: 0, height: 0 })
   const listContentRef = useRef({ width: 0, height: 0 })
   const userScrollingRef = useRef(false)
@@ -138,6 +143,8 @@ export function useChatScroll({
   tailLimitRef.current = effectiveTailLimit
   const visibleSectionsRef = useRef(visibleSections)
   visibleSectionsRef.current = visibleSections
+  const displaySectionsRef = useRef(displaySections)
+  displaySectionsRef.current = displaySections
   const displaySectionsLengthRef = useRef(displaySections.length)
   displaySectionsLengthRef.current = displaySections.length
   const isTailSlicedRef = useRef(displaySections.length < visibleSections.length)
@@ -160,13 +167,24 @@ export function useChatScroll({
   /** Only re-pin on drawer close if content or session actually changed while the drawer covered the list. */
   const dirtyWhileDrawerOpenRef = useRef(false)
   const baseAutoScrollAllowedRef = useRef(false)
-  baseAutoScrollAllowedRef.current = !panelOpen && !historyLoadingOlder && sessionId !== undefined && visibleMessages.length > 0
+  baseAutoScrollAllowedRef.current = !panelOpen && !searchActive && !historyLoadingOlder && sessionId !== undefined && visibleMessages.length > 0
   const autoScrollAllowedRef = useRef(false)
   autoScrollAllowedRef.current = baseAutoScrollAllowedRef.current && !drawerOpenRef?.current
   const isAutoScrollAllowed = useCallback(
     () => baseAutoScrollAllowedRef.current && !drawerOpenRef?.current,
     [drawerOpenRef],
   )
+
+  const clearSearchTimers = useCallback(() => {
+    if (searchRetryTimerRef.current !== null) {
+      clearTimeout(searchRetryTimerRef.current)
+      searchRetryTimerRef.current = null
+    }
+    if (searchSettleTimerRef.current !== null) {
+      clearTimeout(searchSettleTimerRef.current)
+      searchSettleTimerRef.current = null
+    }
+  }, [])
 
   const cancelPendingScroll = useCallback(() => {
     hasTrailingScrollRef.current = false
@@ -175,7 +193,8 @@ export function useChatScroll({
     if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
     scrollTimerRef.current = null
     scrollFrameRef.current = null
-  }, [])
+    clearSearchTimers()
+  }, [clearSearchTimers])
 
   const clearTailTimer = useCallback(() => {
     if (tailTimerRef.current !== null) {
@@ -304,6 +323,7 @@ export function useChatScroll({
   // scroll command cannot guarantee on a virtualized list.
   const jumpToLatest = useCallback(() => {
     scrollIntentGenerationRef.current++
+    pendingSearchTargetRef.current = undefined
     cancelPendingScroll()
     userScrollingRef.current = false
     pinToBottomRef.current = true
@@ -329,6 +349,7 @@ export function useChatScroll({
   // to `useEffect` to avoid a redundant synchronous pre-paint double-commit.
   useLayoutEffect(() => {
     scrollIntentGenerationRef.current++
+    pendingSearchTargetRef.current = undefined
     cancelPendingScroll()
     cancelTailExpansion()
     setTrajectory(false)
@@ -392,20 +413,20 @@ export function useChatScroll({
   // as soon as it opens so a streaming update cannot move the responder under
   // the panel.
   useEffect(() => {
-    if (panelOpen) cancelPendingScroll()
-  }, [panelOpen, cancelPendingScroll])
+    if (panelOpen || searchActive) cancelPendingScroll()
+  }, [panelOpen, searchActive, cancelPendingScroll])
 
   // Let the first layout frame finish before jumping to the end. This keeps
   // the top bar and Android back dispatch responsive while a large history
   // page is being mounted, without relying on the deprecated InteractionManager.
   useEffect(() => {
-    if (panelOpen || drawerOpenRef?.current || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
+    if (panelOpen || searchActive || drawerOpenRef?.current || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
     const timer = setTimeout(() => {
       if (!drawerOpenRef?.current && (pinToBottomRef.current || initialPinRef.current)) scheduleScrollToBottom()
     }, 32)
     return () => clearTimeout(timer)
-  }, [drawerOpenRef, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length])
+  }, [drawerOpenRef, historyLoadingOlder, panelOpen, searchActive, scheduleScrollToBottom, sessionId, visibleMessages.length])
 
   // Loading older history prepends above the viewport — do not yank to the end,
   // and keep position anchoring enabled until the next session switch.
@@ -438,10 +459,10 @@ export function useChatScroll({
       dirtyWhileDrawerOpenRef.current = true
       return
     }
-    if (panelOpen) return
+    if (panelOpen || searchActive) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
     scheduleScrollToBottom()
-  }, [drawerOpenRef, streamingSignature, visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId])
+  }, [drawerOpenRef, streamingSignature, visibleMessages.length, historyLoadingOlder, panelOpen, searchActive, scheduleScrollToBottom, sessionId])
 
   const scheduleShortTailFill = useCallback(() => {
     // If the initial tail slice settles shorter than one screen plus scroll
@@ -645,8 +666,96 @@ export function useChatScroll({
     finishListScroll(event)
   }, [onListScroll, finishListScroll])
 
+  const executeSearchScroll = useCallback((index: number, generation: number) => {
+    if (scrollIntentGenerationRef.current !== generation || drawerOpenRef?.current) return
+    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.35 })
+    if (searchSettleTimerRef.current !== null) clearTimeout(searchSettleTimerRef.current)
+    searchSettleTimerRef.current = setTimeout(() => {
+      searchSettleTimerRef.current = null
+      if (scrollIntentGenerationRef.current !== generation) return
+      restoringPosition.current = false
+      syncLatestTurnIndicator(listContentRef.current.height - listViewportRef.current.height - listOffsetRef.current)
+    }, 220)
+  }, [drawerOpenRef, syncLatestTurnIndicator])
+
+  useEffect(() => {
+    const target = pendingSearchTargetRef.current
+    if (target === undefined || target.dispatched) return
+    if (target.generation !== scrollIntentGenerationRef.current) {
+      pendingSearchTargetRef.current = undefined
+      return
+    }
+    const index = displaySections.findIndex(section => section.key === target.key)
+    if (index < 0) return
+    const generation = target.generation
+    const frame = requestAnimationFrame(() => {
+      if (scrollIntentGenerationRef.current !== generation || sessionIdRef.current !== sessionId) return
+      const currentTarget = pendingSearchTargetRef.current
+      if (currentTarget === undefined || currentTarget.generation !== generation) return
+      const currentIndex = displaySectionsRef.current.findIndex(section => section.key === currentTarget.key)
+      if (currentIndex < 0) return
+      currentTarget.dispatched = true
+      executeSearchScroll(currentIndex, generation)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [displaySections, executeSearchScroll, sessionId])
+
+  const scrollToSectionKey = useCallback((sectionKey: string) => {
+    const generation = ++scrollIntentGenerationRef.current
+    cancelPendingScroll()
+    cancelTailExpansion()
+    pinToBottomRef.current = false
+    initialPinRef.current = false
+    restoringPosition.current = true
+    const mountedIndex = displaySectionsRef.current.findIndex(section => section.key === sectionKey)
+    if (mountedIndex >= 0) {
+      pendingSearchTargetRef.current = { key: sectionKey, generation, retries: 0, dispatched: true }
+      executeSearchScroll(mountedIndex, generation)
+      return
+    }
+    const fullSections = visibleSectionsRef.current
+    const fullIndex = fullSections.findIndex(section => section.key === sectionKey)
+    if (fullIndex < 0) {
+      pendingSearchTargetRef.current = undefined
+      restoringPosition.current = false
+      return
+    }
+    const total = fullSections.length
+    const needed = total - fullIndex + 2
+    const nextLimit = needed >= total ? undefined : needed
+    const nextFirstKey = nextLimit !== undefined ? fullSections[total - nextLimit]?.key : undefined
+    pendingSearchTargetRef.current = { key: sectionKey, generation, retries: 0, dispatched: false }
+    setWindowState({
+      key: memoryKeyRef.current,
+      tailLimit: nextLimit,
+      firstKey: nextFirstKey,
+      anchorEnabled: false,
+    })
+  }, [cancelPendingScroll, cancelTailExpansion, executeSearchScroll])
+
+  const onScrollToIndexFailed = useCallback((info: { index: number; averageItemLength: number }) => {
+    listRef.current?.scrollToOffset({
+      offset: Math.max(0, info.averageItemLength * info.index),
+      animated: false,
+    })
+    const target = pendingSearchTargetRef.current
+    if (target === undefined || target.generation !== scrollIntentGenerationRef.current || target.retries >= 3) {
+      return
+    }
+    target.retries += 1
+    if (searchRetryTimerRef.current !== null) clearTimeout(searchRetryTimerRef.current)
+    const generation = target.generation
+    searchRetryTimerRef.current = setTimeout(() => {
+      searchRetryTimerRef.current = null
+      if (scrollIntentGenerationRef.current !== generation) return
+      const idx = displaySectionsRef.current.findIndex(section => section.key === target.key)
+      if (idx >= 0) executeSearchScroll(idx, generation)
+    }, 60)
+  }, [executeSearchScroll])
+
   const beginSendScroll = () => {
     const generation = ++scrollIntentGenerationRef.current
+    pendingSearchTargetRef.current = undefined
     const previousPin = pinToBottomRef.current
     const previousInitialPin = initialPinRef.current
     const previousAway = awayFromLatestRef.current
@@ -670,6 +779,7 @@ export function useChatScroll({
 
   const onScrollBeginDrag = useCallback(() => {
     scrollIntentGenerationRef.current++
+    pendingSearchTargetRef.current = undefined
     cancelPendingScroll()
     restoringPosition.current = false
     userScrollingRef.current = true
@@ -687,7 +797,7 @@ export function useChatScroll({
   }, [cancelPendingScroll])
   return {
     listRef, displaySections, maintainVisibleContentPosition, viewability, awayFromLatest, newContent,
-    jumpToLatest, beginSendScroll, onListLayout, onListContentSizeChange, onListScroll,
+    jumpToLatest, scrollToSectionKey, onScrollToIndexFailed, beginSendScroll, onListLayout, onListContentSizeChange, onListScroll,
     onListDragEnd, onListMomentumEnd, onScrollBeginDrag, onMomentumScrollBegin,
   }
 }
