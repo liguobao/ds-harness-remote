@@ -56,6 +56,7 @@ export interface LiveSurfaceSnapshot {
   items: readonly AttentionItem[]
   digest: AttentionDigest | null
   /** Optional filter for legacy fallback hosts (e.g. watched-session gating). */
+  localRunningItem?: () => AttentionItem | undefined
   taskDetail?: (item: AttentionItem) => { statusText: string; startedAtMs: number; isWaitingInput: boolean } | undefined
   shouldNotifyItem?: (item: AttentionItem) => boolean
 }
@@ -329,7 +330,7 @@ export function createLiveSurfaceController(
       }
 
       const activeItems = sorted.filter(item => ACTIVE_LIVE_STATUSES.has(item.status))
-      const topActive = activeItems[0]
+      const topActive = activeItems[0] ?? (!ios ? snapshot.localRunningItem?.() : undefined)
       const detail = topActive?.status === 'running' ? snapshot.taskDetail?.(topActive) : undefined
       const phase = detail && !detail.isWaitingInput ? detail.statusText
         : topActive ? statusTextForLiveItem(topActive.status) : undefined

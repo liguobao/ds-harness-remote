@@ -1,11 +1,12 @@
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings } from '../locales/i18n'
 import { AppState, Platform } from 'react-native'
-import { useAttentionStore } from '../state/attention-store'
+import { deriveLegacyAttentionItems, useAttentionStore } from '../state/attention-store'
 import { useBotTeamStore } from '../state/bot-store'
 import { useAppStore } from '../state/store'
 import type { AgentBackend } from '../types'
 import { browseKey, browseScope, useBrowseMemory, updateBrowseEntry, saveBrowseCatalog, browsePreference, flushBrowseMemory } from './browse-memory'
+import { foregroundService } from './foreground-service'
 import { createLiveSurfaceController } from './live-surface'
 
 function isItemWaitingInput(session: { backend?: AgentBackend }, item: any): boolean {
@@ -172,6 +173,7 @@ export function startBrowseTracking(): () => void {
   let observing = false
   const running = new Map<string, boolean>()
   const completedSessionIds = new Set<string>()
+  let previousWorkspaceKey: string | undefined
   const liveSurface = createLiveSurfaceController()
 
   const observe = () => {
@@ -189,6 +191,21 @@ export function startBrowseTracking(): () => void {
     const memory = useBrowseMemory.getState()
     const device = state.selectedDevice
     const connected = device !== undefined && state.connection.phase === 'connected'
+
+    if (Platform.OS === 'android' && connected) {
+      const sessionId = state.selectedSession?.sessionId
+      const workspace = sessionId ? state.workspaces.find(item => item.sessionIds.includes(sessionId)) : undefined
+      const label = workspace?.title?.trim() || workspace?.path?.split(/[/\\]/).filter(Boolean).pop() || ''
+      const key = JSON.stringify([device.deviceId, label])
+      if (key !== previousWorkspaceKey) {
+        previousWorkspaceKey = key
+        void foregroundService.setWorkspace(device.deviceId, label).catch(() => {
+          if (previousWorkspaceKey === key) previousWorkspaceKey = undefined
+        })
+      }
+    } else {
+      previousWorkspaceKey = undefined
+    }
 
     if (!connected || !memory.ready) {
       completedSessionIds.clear()
@@ -279,6 +296,14 @@ export function startBrowseTracking(): () => void {
       notificationsEnabled: memory.notifications,
       activeSessionId,
       activeMode,
+      localRunningItem: () => {
+        const sessions = state.sessions.filter(session =>
+          state.sessionLifecycles?.[session.sessionId]?.running === true
+          && !latestAttention.items.some(item => item.sessionId === session.sessionId))
+        if (!sessions.length) return undefined
+        const runningItems = deriveLegacyAttentionItems({ sessions, sessionLifecycles: state.sessionLifecycles })
+        return runningItems.find(item => item.sessionId === activeSessionId) ?? runningItems[0]
+      },
       taskDetail: item => {
         if (item.mode !== 'agent') return undefined
         const session = state.sessions.find(row => row.sessionId === item.sessionId)

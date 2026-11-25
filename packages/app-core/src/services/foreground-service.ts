@@ -4,7 +4,8 @@ interface ForegroundServiceModule {
   clearAttentionAlerts?(hostId: string): Promise<void> | void
   start(): Promise<void>
   stop(): Promise<void>
-  setStatus(status: string): Promise<void>
+  setStatus(status: string, hostName: string, hostId: string): Promise<void>
+  setWorkspace(hostId: string, label: string): Promise<void>
   waitUntilStopped(lifetimeId: string): Promise<void>
   isIgnoringBatteryOptimizations?(): Promise<boolean>
   requestIgnoreBatteryOptimizations?(): Promise<boolean>
@@ -95,10 +96,14 @@ export const foregroundService = {
     if (rn?.Platform.OS !== 'android') return
     await nativeModule(rn).stop()
   },
-  async setStatus(status: 'connecting' | 'connected' | 'reconnecting'): Promise<void> {
+  async setStatus(status: 'connecting' | 'connected' | 'reconnecting', hostName = '', hostId = ''): Promise<void> {
     const rn = reactNative()
     if (rn?.Platform.OS !== 'android') return
-    await nativeModule(rn).setStatus(status)
+    await nativeModule(rn).setStatus(status, hostName, hostId)
+  },
+  async setWorkspace(hostId: string, label: string): Promise<void> {
+    const rn = reactNative()
+    if (rn?.Platform.OS === 'android') await nativeModule(rn).setWorkspace(hostId, label)
   },
   async waitUntilStopped(lifetimeId: string): Promise<void> {
     const rn = reactNative()

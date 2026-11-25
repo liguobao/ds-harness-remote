@@ -47,7 +47,7 @@ export class AndroidRemoteRuntime {
       if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
       this.connected = true
       this.recovering = false
-      await this.updateForeground(generation, true, 'connected')
+      await this.updateForeground(generation, true, 'connected', host.name, host.deviceId)
     } catch (error) {
       if (generation === this.generation && !this.recovering) {
         await this.updateForeground(generation, false).catch(() => undefined)
@@ -129,7 +129,7 @@ export class AndroidRemoteRuntime {
     await this.updateForeground(this.generation, false)
   }
 
-  private updateForeground(generation: number, active: boolean, status: 'connecting' | 'connected' | 'reconnecting' = 'connecting'): Promise<void> {
+  private updateForeground(generation: number, active: boolean, status: 'connecting' | 'connected' | 'reconnecting' = 'connecting', hostName = '', hostId = ''): Promise<void> {
     // A native start/permission prompt is asynchronous. Serialize it with stop
     // and fence retired connection callbacks before touching the shared service.
     const task = this.foregroundTail.then(async () => {
@@ -139,7 +139,7 @@ export class AndroidRemoteRuntime {
         else await foregroundService.stop()
         this.foreground = active
       }
-      if (active) await foregroundService.setStatus(status)
+      if (active) await foregroundService.setStatus(status, hostName, hostId)
     })
     this.foregroundTail = task.catch(() => undefined)
     return task

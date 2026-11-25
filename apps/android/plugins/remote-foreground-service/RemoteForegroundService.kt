@@ -65,6 +65,10 @@ class RemoteForegroundService : Service() {
   private var taskContext: ReactContext? = null
   private var lifetimeId: String? = null
   private val stopWaiters = mutableListOf<Promise>()
+  private var connectedHostId = ""
+  private var workspaceLabel = ""
+  private fun islandLabel(detail: String) = listOf(connectedHostName, detail).filter { it.isNotBlank() }.joinToString(" - ")
+  private var connectedHostName = ""
   private var connectionStatus = "connecting"
   private var liveTask: LiveTaskData? = null
 
@@ -213,7 +217,8 @@ class RemoteForegroundService : Service() {
     }
   }
 
-  private fun addXiaomiFocus(notification: Notification, version: Int, status: String, title: String) {
+  private fun addXiaomiFocus(notification: Notification, version: Int, detail: String, title: String) {
+    val status = islandLabel(detail)
     val params = JSONObject()
       .put("protocol", 1)
       .put("business", "remote_task")
@@ -229,9 +234,14 @@ class RemoteForegroundService : Service() {
       })
       val pic = JSONObject().put("type", 1).put("pic", iconKey)
       val label = JSONObject().put("type", 1).put("picInfo", pic)
-        .put("textInfo", JSONObject().put("title", status))
+        .put("textInfo", JSONObject().put("title", connectedHostName.ifBlank { detail }))
+      val area = JSONObject().put("imageTextInfoLeft", label)
+      if (connectedHostName.isNotBlank() && detail.isNotBlank()) {
+        area.put("imageTextInfoRight", JSONObject().put("type", 2)
+          .put("textInfo", JSONObject().put("title", detail)))
+      }
       params.put("param_island", JSONObject()
-        .put("bigIslandArea", JSONObject().put("imageTextInfoLeft", label).put("picInfo", pic))
+        .put("bigIslandArea", area)
         .put("smallIslandArea", JSONObject().put("picInfo", pic)))
     }
     notification.extras.putString("miui.focus.param", JSONObject().put("param_v2", params).toString())
@@ -309,7 +319,7 @@ class RemoteForegroundService : Service() {
       }
       val safeExtraCount = task.extraCount.coerceAtLeast(0)
       val displayStatus = if (safeExtraCount > 0) "$baseStatus · +$safeExtraCount" else baseStatus
-      val safeTitle = task.title.ifBlank { getString(R.string.app_name) }
+      val safeTitle = task.title.ifBlank { baseStatus }
       val titleWithCount = listOf(safeTitle, task.countText).filter { it.isNotBlank() }.joinToString(" · ")
       val timed = !task.isWaitingInput && task.startedAtMs in 1..System.currentTimeMillis()
       val status = task.phase.ifBlank { baseStatus }
@@ -336,8 +346,8 @@ class RemoteForegroundService : Service() {
         val builder = NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
           .setSmallIcon(R.mipmap.ic_launcher_foreground)
-          .setContentTitle(displayStatus)
-          .setContentText(titleWithCount)
+          .setContentTitle("$status · $safeTitle")
+          .setContentText(task.summary.ifBlank { displayStatus })
           .setPublicVersion(publicNotification)
           .setContentIntent(pendingIntent)
           .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -348,9 +358,9 @@ class RemoteForegroundService : Service() {
 
         if (Build.VERSION.SDK_INT >= 36) {
           builder.setRequestPromotedOngoing(true)
-          if (!timed) builder.setShortCriticalText(status)
+          if (!timed) builder.setShortCriticalText(islandLabel(status))
           if (task.summary.isNotBlank()) {
-            builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(titleWithCount, task.summary)
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(displayStatus, task.summary)
               .filter { it.isNotBlank() }.joinToString("\n")))
           }
         } else if (!samsungOngoing && vivoScene == null && huaweiEvent == null) {
@@ -376,7 +386,7 @@ class RemoteForegroundService : Service() {
             setTextColor(R.id.live_task_status_text, statusColor)
             setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
             setTextColor(R.id.live_task_badge, badgeColor)
-            setTextViewText(R.id.live_task_title, task.title.ifBlank { getString(R.string.app_name) })
+            setTextViewText(R.id.live_task_title, safeTitle)
             setTextColor(R.id.live_task_title, titleColor)
             setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)
           }
@@ -408,14 +418,17 @@ class RemoteForegroundService : Service() {
       }
     }
 
+    val title = if (connectionStatus == "connected" && connectedHostName.isNotEmpty()) {
+        getString(R.string.remote_status_connected_named, connectedHostName)
+      } else getString(when (connectionStatus) {
+        "connected" -> R.string.remote_status_connected
+        "reconnecting" -> R.string.remote_status_reconnecting
+        else -> R.string.remote_status_connecting
+      })
+    val showHost = connectionStatus == "connected" && connectedHostName.isNotEmpty()
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.mipmap.ic_launcher_foreground)
-      .setContentTitle(getString(R.string.app_name))
-      .setContentText(when (connectionStatus) {
-        "connected" -> "Remote connected"
-        "reconnecting" -> "Remote disconnected · reconnecting"
-        else -> "Connecting to remote Host"
-      })
+      .setContentTitle(if (showHost) islandLabel(workspaceLabel) else title)
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setOngoing(true)
       .setOnlyAlertOnce(true)
@@ -826,9 +839,19 @@ class RemoteForegroundService : Service() {
       context.stopService(Intent(context, RemoteForegroundService::class.java))
     }
 
-    fun setStatus(status: String) {
+    fun setWorkspace(hostId: String, label: String) {
+      val service = running ?: return
+      if (hostId != service.connectedHostId) return
+      service.workspaceLabel = label.lineSequence().firstOrNull()?.trim()?.take(100).orEmpty()
+      service.getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, service.notification())
+    }
+
+    fun setStatus(status: String, hostName: String, hostId: String) {
       if (status !in setOf("connecting", "connected", "reconnecting")) return
       val service = running ?: return
+      if (hostId != service.connectedHostId) service.workspaceLabel = ""
+      service.connectedHostId = hostId
+      service.connectedHostName = hostName.lineSequence().firstOrNull()?.trim()?.take(100).orEmpty()
       service.connectionStatus = status
       service.getSystemService(NotificationManager::class.java)
         .notify(NOTIFICATION_ID, service.notification())

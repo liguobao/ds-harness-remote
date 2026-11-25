@@ -61,9 +61,17 @@ class RemoteForegroundServiceModule(
   }
 
   @ReactMethod
-  fun setStatus(status: String, promise: Promise) {
+  fun setStatus(status: String, hostName: String, hostId: String, promise: Promise) {
     context.runOnUiQueueThread {
-      RemoteForegroundService.setStatus(status)
+      RemoteForegroundService.setStatus(status, hostName, hostId)
+      promise.resolve(null)
+    }
+  }
+
+  @ReactMethod
+  fun setWorkspace(hostId: String, label: String, promise: Promise) {
+    context.runOnUiQueueThread {
+      RemoteForegroundService.setWorkspace(hostId, label)
       promise.resolve(null)
     }
   }
