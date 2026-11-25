@@ -290,6 +290,8 @@ export interface ChatMessage extends ChatItemBase {
   streamingPhase?: 'reasoning' | 'text'
   /** Native session.prompt rpcId used to reconcile an optimistic user message. */
   requestRpcId?: string
+  /** History user row preceding an acknowledged ACP prompt, or null for a known empty history. */
+  acpPromptAfter?: string | null
   /**
    * Delivery state of a local optimistic user message.
    * `queued`: the Host accepted the prompt into its queue (authoritative via

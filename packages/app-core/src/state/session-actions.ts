@@ -803,6 +803,9 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             }),
           ])
           if (!current()) return
+          if (acpBackend === 'antigravity' && details.running === false && details.events.length === 0) {
+            runtime.emptyAcpHistory = { sessionId: session.sessionId, loadGeneration, connectionGeneration }
+          }
           const items = foldAcpHistory(details.events, session.sessionId)
           let enrichedSession: RemoteSession = {
             ...session,
@@ -822,7 +825,9 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             const prevList = state.messages[session.sessionId]
             const currentMessages = prevList ?? []
             const hasAcpHistory = details.events.length > 0 || acpBackend !== 'cursor'
-            const { history, confirmedIds, retainedIds } = reconcileAcpCachedPrompts(items, hasAcpHistory ? cleanExisting : [])
+            const currentLocals = new Map(currentMessages.filter(item => item.id.startsWith('local:')).map(item => [item.id, item]))
+            const cached = hasAcpHistory ? cleanExisting.map(item => currentLocals.get(item.id) ?? item) : []
+            const { history, confirmedIds, retainedIds } = reconcileAcpCachedPrompts(items, cached)
             const historyWithCachedTail = retainedIds.size === 0 ? history
               : [...history, ...currentMessages.filter(item => retainedIds.has(item.id))]
             const liveDeltas = currentMessages.filter(item => !retainedIds.has(item.id) && (!initialAcpIds.has(item.id)
