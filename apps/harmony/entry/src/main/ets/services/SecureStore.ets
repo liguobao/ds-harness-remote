@@ -3,7 +3,8 @@ import { common } from '@kit.AbilityKit';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
 import { DeviceIdentity, TokenPair } from '../model/Types';
-import { randomBytes, uuidV7, randomId, toBase64Url } from '../crypto/Bytes';
+import { randomBytes, uuidV7, randomId, toBase64Url, bytesToHex, utf8Encode } from '../crypto/Bytes';
+import { sha256 } from '../crypto/Sha256';
 import { x25519Public } from '../crypto/X25519';
 import { jsonStr, jsonNum, asArray, asRecord } from '../protocol/Types';
 import { logWarn, logError } from '../util/Log';
@@ -16,6 +17,8 @@ const KEY_THEME_MODE = 'dshremote.themeMode.v1';
 const KEY_LANGUAGE_MODE = 'dshremote.languageMode.v1';
 const KEY_TEXT_SCALE = 'dshremote.textScale.v1';
 const KEY_HOST_PINS = 'dshremote.hostPins.v1';
+const LEGACY_PROFILES = 'dshremote.hostPins.v1.profiles';
+const LEGACY_PROFILE_OWNERS = 'dshremote.legacyProfileOwners';
 /** 会话输入草稿：{ sessionId: 文本 }，切会话/重开 App 都能接着写。 */
 const KEY_DRAFTS = 'dshremote.drafts.v1';
 /** 本地提示词库（纯本地，不上报任何东西）。 */
@@ -91,6 +94,57 @@ export class StoredServerConfig {
   email: string = '';
 }
 
+function credentialScope(config: StoredServerConfig): string {
+  return bytesToHex(sha256(utf8Encode(JSON.stringify([config.baseUrl, config.email]))));
+}
+
+function tokenFingerprint(record: Record<string, Object>): string {
+  const tokens: string[] = [jsonStr(record, 'accessToken', ''), jsonStr(record, 'refreshToken', '')];
+  return bytesToHex(sha256(utf8Encode(JSON.stringify(tokens))));
+}
+
+// Keep only fingerprints while Asset Store is locked or migration is interrupted.
+function legacyProfileOwners(text: string): string {
+  try {
+    const profiles = asArray(JSON.parse(text) as Object);
+    if (profiles === undefined) return 'null';
+    const owners: Record<string, string>[] = [];
+    for (const item of profiles) {
+      const profile = asRecord(item);
+      if (profile === undefined) return 'null';
+      const config = new StoredServerConfig();
+      config.baseUrl = jsonStr(profile, 'baseUrl', '');
+      config.email = jsonStr(profile, 'email', '');
+      owners.push({ 'scope': credentialScope(config), 'pair': tokenFingerprint(profile) });
+    }
+    return JSON.stringify(owners);
+  } catch (error) {
+    // A malformed profile list cannot establish ownership.
+  }
+  return 'null';
+}
+
+function legacyProfileMatches(text: string, scope: string, active: Record<string, Object>): boolean {
+  if (!text) return true;
+  const owners = asArray(JSON.parse(text) as Object);
+  if (owners === undefined) return false;
+  if (owners.length === 0) return true;
+  const pair = tokenFingerprint(active);
+  let matched = false;
+  let singleScope = true;
+  for (const item of owners) {
+    const owner = asRecord(item);
+    if (owner === undefined) return false;
+    if (owner['scope'] !== scope) singleScope = false;
+    if (owner['pair'] === pair) {
+      if (owner['scope'] !== scope) return false;
+      matched = true;
+    }
+  }
+  // The token may have rotated since the last snapshot. Only a single possible owner is unambiguous.
+  return matched || singleScope;
+}
+
 /**
  * 系统安全存储（Asset Store）写不进去时抛这个：调用方必须显式提示并保留可恢复状态。
  * 绝不能悄悄把私钥 / token 降级成明文写进 preferences —— 那等于把密钥留在应用沙箱里。
@@ -148,7 +202,7 @@ export class SecureStore {
       'baseUrl': config.baseUrl,
       'email': config.email
     };
-    this.putSync(KEY_CONFIG, JSON.stringify(body));
+    await this.putSync(KEY_CONFIG, JSON.stringify(body));
   }
 
   async loadIdentity(): Promise<DeviceIdentity | undefined> {
@@ -214,21 +268,13 @@ export class SecureStore {
     this.putSync(KEY_IDENTITY, JSON.stringify(body));
   }
 
-  async loadCredentials(): Promise<TokenPair | undefined> {
-    let text: string | undefined = await this.readSecret(ASSET_ALIAS_CREDENTIALS);
-    if (text === undefined || text.length === 0) {
-      // Legacy plaintext value (or asset store unavailable): read and migrate.
-      const legacy: string = this.getSync(KEY_CREDENTIALS, '');
-      if (legacy.length === 0) {
-        return undefined;
-      }
-      if (await this.writeSecret(ASSET_ALIAS_CREDENTIALS, legacy)) {
-        this.deleteSyncKey(KEY_CREDENTIALS);
-      }
-      text = legacy;
-    }
+  async loadCredentials(config: StoredServerConfig | undefined): Promise<TokenPair | undefined> {
+    if (!config || !config.baseUrl || !config.email) return undefined;
+    const text = await this.readSecret(ASSET_ALIAS_CREDENTIALS);
+    if (!text) return undefined;
     try {
       const root: Record<string, Object> = JSON.parse(text) as Record<string, Object>;
+      if (root['scope'] !== credentialScope(config)) return undefined;
       const pair: TokenPair = new TokenPair();
       pair.accessToken = jsonStr(root, 'accessToken', '');
       pair.accessTokenExpiresAt = jsonNum(root, 'accessTokenExpiresAt', 0);
@@ -243,8 +289,10 @@ export class SecureStore {
     }
   }
 
-  async saveCredentials(pair: TokenPair): Promise<void> {
+  async saveCredentials(pair: TokenPair, config: StoredServerConfig): Promise<void> {
+    if (!config.baseUrl || !config.email) throw new Error('Missing credential scope.');
     const body: Record<string, Object> = {
+      'scope': credentialScope(config),
       'accessToken': pair.accessToken,
       'accessTokenExpiresAt': pair.accessTokenExpiresAt,
       'refreshToken': pair.refreshToken,
@@ -258,12 +306,13 @@ export class SecureStore {
       throw new SecureStorageUnavailableError(
         '登录凭据无法写入系统安全存储，已中止保存（未写入明文）。请解锁设备后重试。');
     }
-    this.deleteSyncKey(KEY_CREDENTIALS);
+    await this.removeCredentialPreferences();
   }
 
   async clearCredentials(): Promise<void> {
+    await this.scrubLegacyProfiles();
     await this.deleteSecret(ASSET_ALIAS_CREDENTIALS);
-    this.deleteSyncKey(KEY_CREDENTIALS);
+    await this.removeCredentialPreferences();
   }
 
   /** Load the persisted device identity or create + persist a fresh one. */
@@ -310,6 +359,8 @@ export class SecureStore {
    * 清掉 KV 里的身份/凭据/主机固定，下次 loadOrCreateIdentity 会生成全新身份。
    */
   async resetIdentity(): Promise<void> {
+    await this.clearCredentials();
+    await this.clearHostPins();
     try {
       const raw: string = this.getSync(KEY_IDENTITY, '');
       if (raw.length > 0) {
@@ -322,12 +373,7 @@ export class SecureStore {
     } catch (error) {
       logWarn('resetIdentity: 旧 asset 清理失败，继续');
     }
-    await this.deleteSecret(ASSET_ALIAS_CREDENTIALS);
-    await this.deleteSecret(ASSET_ALIAS_HOST_PINS);
     this.deleteSyncKey(KEY_IDENTITY);
-    this.deleteSyncKey(KEY_CREDENTIALS);
-    this.deleteSyncKey(KEY_HOST_PINS);
-    this.hostPins = {};
     logWarn('device identity reset by user');
   }
 
@@ -476,8 +522,11 @@ export class SecureStore {
 
   /** Remove all pinned Host identities when changing Server/account. */
   async clearHostPins(): Promise<void> {
+    await this.deleteSecret(ASSET_ALIAS_HOST_PINS);
+    const prefs = this.prefs!;
+    prefs.deleteSync(KEY_HOST_PINS);
+    await prefs.flush();
     this.hostPins = {};
-    await this.saveHostPins({});
   }
 
   private async reloadHostPins(): Promise<void> {
@@ -506,14 +555,70 @@ export class SecureStore {
     this.hostPins = result;
   }
 
-  /** Move any value written by an older build out of the plaintext KV. */
-  private async migratePlaintextSecrets(): Promise<void> {
-    const legacyCredentials: string = this.getSync(KEY_CREDENTIALS, '');
-    if (legacyCredentials.length > 0) {
-      if (await this.writeSecretVerified(ASSET_ALIAS_CREDENTIALS, legacyCredentials)) {
-        this.deleteSyncKey(KEY_CREDENTIALS);
+  private async removeCredentialPreferences(): Promise<void> {
+    const prefs = this.prefs!;
+    prefs.deleteSync(LEGACY_PROFILES);
+    prefs.deleteSync(LEGACY_PROFILE_OWNERS);
+    prefs.deleteSync(KEY_CREDENTIALS);
+    await prefs.flush();
+  }
+
+  private async scrubLegacyProfiles(): Promise<string> {
+    const profiles = this.getSync(LEGACY_PROFILES, '');
+    if (!profiles) return this.getSync(LEGACY_PROFILE_OWNERS, '');
+    const owners = legacyProfileOwners(profiles);
+    const prefs = this.prefs!;
+    prefs.putSync(LEGACY_PROFILE_OWNERS, owners);
+    prefs.deleteSync(LEGACY_PROFILES);
+    await prefs.flush();
+    return owners;
+  }
+
+  /** Upgrade the active login before accepting any config changes. */
+  private async migrateCredentials(): Promise<void> {
+    const owners = await this.scrubLegacyProfiles();
+    const plaintext = this.getSync(KEY_CREDENTIALS, '');
+    const config = await this.loadConfig();
+    if (!config || !config.email) {
+      await this.removeCredentialPreferences();
+      await this.deleteSecret(ASSET_ALIAS_CREDENTIALS);
+      return;
+    }
+
+    const stored = await this.readSecret(ASSET_ALIAS_CREDENTIALS, true);
+    const text = stored ?? plaintext;
+    if (text) {
+      let record: Record<string, Object> | undefined = undefined;
+      try {
+        record = asRecord(JSON.parse(text) as Object);
+      } catch (error) {
+        // A corrupt token record requires a fresh login.
+      }
+      if (record === undefined) {
+        await this.clearCredentials();
+        return;
+      }
+      const unscoped = record['scope'] === undefined;
+      if (unscoped) {
+        // v0.6.7 wrote config before tokens. An interrupted switch can leave different owners.
+        const scope = credentialScope(config);
+        if (!legacyProfileMatches(owners, scope, record)) {
+          await this.clearCredentials();
+          return;
+        }
+        record['scope'] = scope;
+      }
+      if ((unscoped || stored === undefined)
+        && !await this.writeSecretVerified(ASSET_ALIAS_CREDENTIALS, JSON.stringify(record))) {
+        throw new SecureStorageUnavailableError('登录凭据迁移失败，请解锁设备后重试。');
       }
     }
+    if (owners || plaintext) await this.removeCredentialPreferences();
+  }
+
+  /** Move any value written by an older build out of the plaintext KV. */
+  private async migratePlaintextSecrets(): Promise<void> {
+    await this.migrateCredentials();
     const legacyPins: string = this.getSync(KEY_HOST_PINS, '');
     if (legacyPins.length > 2) {
       if (await this.writeSecret(ASSET_ALIAS_HOST_PINS, legacyPins)) {
@@ -547,25 +652,19 @@ export class SecureStore {
   // which is the HarmonyOS equivalent of Android's WHEN_UNLOCKED_THIS_DEVICE_ONLY.
 
   private async writeSecret(alias: string, secret: string): Promise<boolean> {
-    // add 之前必须 delete 同别名；万一 add 失败，旧值已经被删掉了。
-    // 先把旧值读出来，失败时尽力写回去，避免「写新失败 = 旧凭据也没了」。
-    const previous: string | undefined = await this.readSecretQuiet(alias);
     try {
-      await this.deleteSecret(alias);
       const attrs: asset.AssetMap = new Map<asset.Tag, asset.Value>();
       attrs.set(asset.Tag.ALIAS, encodeUtf8(alias));
       attrs.set(asset.Tag.SECRET, encodeUtf8(secret));
       attrs.set(asset.Tag.ACCESSIBILITY, asset.Accessibility.DEVICE_UNLOCKED);
       attrs.set(asset.Tag.SYNC_TYPE, asset.SyncType.NEVER);
+      attrs.set(asset.Tag.CONFLICT_RESOLUTION, asset.ConflictResolution.OVERWRITE);
       await asset.add(attrs);
       this.assetOk = true;
       return true;
     } catch (error) {
       this.assetOk = false;
       logError('asset add failed for');
-      if (previous !== undefined && previous.length > 0) {
-        await this.restoreSecretQuiet(alias, previous);
-      }
       return false;
     }
   }
@@ -586,21 +685,6 @@ export class SecureStore {
     return false;
   }
 
-  /** 尽力把旧值写回去；失败只记日志，别再往上抛。 */
-  private async restoreSecretQuiet(alias: string, secret: string): Promise<void> {
-    try {
-      const attrs: asset.AssetMap = new Map<asset.Tag, asset.Value>();
-      attrs.set(asset.Tag.ALIAS, encodeUtf8(alias));
-      attrs.set(asset.Tag.SECRET, encodeUtf8(secret));
-      attrs.set(asset.Tag.ACCESSIBILITY, asset.Accessibility.DEVICE_UNLOCKED);
-      attrs.set(asset.Tag.SYNC_TYPE, asset.SyncType.NEVER);
-      await asset.add(attrs);
-    } catch (error) {
-      logError('asset restore failed for');
-    }
-  }
-
-  /** 只读一次，不改 assetOk / 错误码（写前预读、写完校验都用它）。 */
   private async readSecretQuiet(alias: string): Promise<string | undefined> {
     try {
       const query: asset.AssetMap = new Map<asset.Tag, asset.Value>();
@@ -627,7 +711,7 @@ export class SecureStore {
     return this.lastAssetErrorCode;
   }
 
-  private async readSecret(alias: string): Promise<string | undefined> {
+  private async readSecret(alias: string, requireAvailable: boolean = false): Promise<string | undefined> {
     try {
       const query: asset.AssetMap = new Map<asset.Tag, asset.Value>();
       query.set(asset.Tag.ALIAS, encodeUtf8(alias));
@@ -642,10 +726,14 @@ export class SecureStore {
       }
       return undefined;
     } catch (error) {
-      this.assetOk = false;
       const code: number = (error as Record<string, Object>)['code'] as number;
       if (typeof code === 'number') {
         this.lastAssetErrorCode = code;
+      }
+      if (code === 24000002) return undefined;
+      this.assetOk = false;
+      if (requireAvailable) {
+        throw new SecureStorageUnavailableError('无法读取系统安全存储，请解锁设备后重试。');
       }
       logError('asset query failed for');
       return undefined;
@@ -661,7 +749,7 @@ export class SecureStore {
       // 24000002 = not found, which is the desired end state anyway.
       const code: number = (error as Record<string, Object>)['code'] as number;
       if (code !== 24000002) {
-        logWarn('asset remove failed for');
+        throw new SecureStorageUnavailableError('无法清理系统安全存储，请解锁设备后重试。');
       }
     }
   }

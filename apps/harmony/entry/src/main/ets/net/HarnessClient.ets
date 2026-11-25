@@ -170,6 +170,7 @@ export class HarnessAlphaClient {
   private gateway: RemoteGateway;
   private onFrame: (frame: HarnessClientFrame) => void;
   private hostSessionFormat: number;
+  readonly supportsWorkspaceGit: boolean;
   private sessionsCache: Map<string, HarnessRemoteSession> = new Map();
   private followCursors: Map<string, number> = new Map();
   private pendingEvents: Map<string, PendingRemoteEvent> = new Map();
@@ -180,9 +181,10 @@ export class HarnessAlphaClient {
   private eventClientId: string = '';
 
   constructor(core: RemoteClientCore, hostSessionFormat: number,
-    onFrame: (frame: HarnessClientFrame) => void, transferFrames: boolean = false) {
+    onFrame: (frame: HarnessClientFrame) => void, capabilities: string[]) {
     this.core = core;
-    this.gateway = new RemoteGateway(core, transferFrames);
+    this.gateway = new RemoteGateway(core, capabilities.includes('harness.remote.stream.transfer.v1'));
+    this.supportsWorkspaceGit = capabilities.includes('workspace.git.read.v1');
     this.onFrame = onFrame;
     this.hostSessionFormat = hostSessionFormat;
   }
@@ -518,11 +520,19 @@ export class HarnessAlphaClient {
     return snapshot;
   }
 
+  private async workspaceGitCall(method: string, args: Record<string, Object>): Promise<Record<string, Object>> {
+    if (!this.supportsWorkspaceGit) {
+      throw new RemoteGatewayError('FEATURE_NOT_SUPPORTED', 'The Host does not support workspace Git review.');
+    }
+    const result = asRecord(await this.core.rpc(method, args));
+    if (result === undefined) throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid workspace Git response.');
+    return result;
+  }
+
   async workspaceGitStatus(sessionId: string, scope: string = 'all'): Promise<WorkspaceGitStatus> {
     const args: Record<string, Object> = { 'sessionId': sessionId, 'scope': scope };
-    const root: Record<string, Object> | undefined = asRecord(await this.callValue('workspace.git.status', args));
+    const root = await this.workspaceGitCall('workspace.git.status', args);
     const result = new WorkspaceGitStatus();
-    if (root === undefined) return result;
     result.isGitRepo = root['isGitRepo'] === true;
     result.branch = jsonStr(root, 'branch', '');
     result.headShortSha = jsonStr(root, 'headShortSha', '');
@@ -555,9 +565,8 @@ export class HarnessAlphaClient {
 
   async workspaceGitDiff(sessionId: string, path: string, scope: string = 'all'): Promise<WorkspaceGitDiff> {
     const args: Record<string, Object> = { 'sessionId': sessionId, 'path': path, 'scope': scope, 'contextLines': 3 };
-    const root: Record<string, Object> | undefined = asRecord(await this.callValue('workspace.git.diff', args));
+    const root = await this.workspaceGitCall('workspace.git.diff', args);
     const result = new WorkspaceGitDiff();
-    if (root === undefined) return result;
     result.diff = jsonStr(root, 'diff', '');
     result.isBinary = root['isBinary'] === true;
     result.additions = numberValue(root['additions']);

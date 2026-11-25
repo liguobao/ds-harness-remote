@@ -20,9 +20,13 @@ const appVersion = /"versionName":\s*"([^"]+)"/.exec(app)?.[1] ?? '';
 const appCode = /"versionCode":\s*(\d+)/.exec(app)?.[1] ?? '';
 const fallback = /CLIENT_VERSION_FALLBACK: string = '([^']*)'/.exec(api)?.[1] ?? '';
 
+function validCode(value) {
+  return /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) <= 2147483647;
+}
+
 const checkOnly = process.argv[2] === '--check';
 if (checkOnly) {
-  const ok = appVersion === fallback && appVersion !== '';
+  const ok = appVersion === fallback && appVersion !== '' && validCode(appCode);
   console.log(`app.json5  versionName=${appVersion} versionCode=${appCode}`);
   console.log(`ServerApi   CLIENT_VERSION_FALLBACK=${fallback}`);
   console.log(ok ? '✅ 两处一致' : '✖ 两处不一致（跑一次 bump-version <name> <code> 修）');
@@ -32,6 +36,11 @@ if (checkOnly) {
 const [versionName, versionCode] = process.argv.slice(2);
 if (!versionName || !versionCode) {
   console.error('用法：node apps/harmony/scripts/bump-version.mjs <versionName> <versionCode> ｜ --check');
+  process.exit(2);
+}
+if (!validCode(versionCode) || Number(versionCode) < Number(appCode)
+  || (versionName !== appVersion && Number(versionCode) === Number(appCode))) {
+  console.error(`versionCode 必须是正整数，新版本的构建号必须高于当前的 ${appCode}。`);
   process.exit(2);
 }
 writeFileSync(appJson, app.replace(/"versionName":\s*"[^"]+"/, `"versionName": "${versionName}"`)

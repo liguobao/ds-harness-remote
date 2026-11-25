@@ -172,6 +172,7 @@ export class AppRuntime {
   /** 一次连接（含握手、能力探测、订阅）的总预算：卡住就判超时，别让界面永远停在「正在连接」。 */
   private static readonly CONNECT_DEADLINE_MS: number = 30000;
   private refreshTimer: number = -1;
+  private authWrite: Promise<void> = Promise.resolve();
   /** In-flight credential renewal. The Server rotates the refresh token on every call and
    *  invalidates every token of this device when a spent one is presented again, so two
    *  concurrent refreshes would log the user out for good. */
@@ -183,6 +184,7 @@ export class AppRuntime {
   providers: OAuthProvider[] = [];
   private providersRequest: number = 0;
   providerId: string = 'google';
+  private loginAttempt: number = 0;
   private qrId: string = '';
   private qrBaseUrl: string = '';
   private qrDeadline: number = 0;
@@ -196,9 +198,7 @@ export class AppRuntime {
   private sessionsSnapshotHost: string = '';
   /** 在会话页里重连时记下当前会话，连上后直接回到它，不从列表重新挑。 */
   private pendingResumeSessionId: string = '';
-  /** 主机能力探测结果缓存：同一版本的主机能力是固定的，重连不必再问一遍（上游 #326 同一思路）。 */
-  private featuresCacheKey: string = '';
-  private featuresCacheValue: RemoteHostFeatures | undefined = undefined;
+  private hostFeatures: RemoteHostFeatures | undefined = undefined;
   private reconnectAttempt: number = 0;
   private reconnectTimer: number = -1;
   /** 退避耗尽后仍允许「网络恢复/回前台」再试一轮，否则用户只能手点或杀进程。 */
@@ -572,7 +572,7 @@ export class AppRuntime {
       await this.store.init(context);
       this.config = await this.store.loadConfig();
       this.identity = await this.store.loadOrCreateIdentity();
-      this.credentials = await this.store.loadCredentials();
+      this.credentials = await this.store.loadCredentials(this.config);
       this.deviceAliases = this.store.loadDeviceAliases();
       this.themeMode = this.store.loadThemeMode();
       this.autoConnectLastHost = this.store.loadAutoConnectLastHost();
@@ -640,13 +640,34 @@ export class AppRuntime {
     this.notify();
   }
 
+  // Serialize the disk commit with its in-memory owner change. Network requests stay outside the queue.
+  private commitAuth(write: () => Promise<void>): Promise<void> {
+    const next = this.authWrite.then(write);
+    this.authWrite = next.catch(() => undefined);
+    return next;
+  }
+
+  private async finishLogin(config: StoredServerConfig, identity: DeviceIdentity, tokens: TokenPair): Promise<void> {
+    // A crash between writes can only leave a scoped record that the old config rejects.
+    await this.store.saveCredentials(tokens, config);
+    await this.store.saveConfig(config);
+    this.config = config;
+    this.identity = identity;
+    this.credentials = tokens;
+    this.authPromise = undefined;
+    this.serverUrl = config.baseUrl;
+    this.email = config.email;
+    this.phase = PHASE_DEVICES;
+  }
+
   async login(baseUrl: string, email: string, password: string, challenge: string = '', code: string = ''): Promise<string | undefined> {
     if (this.busy) {
       return;
     }
     this.setBusy(true);
     this.errorMsg = '';
-    this.notify();
+    this.cancelQrLogin();
+    const attempt = this.loginAttempt;
     try {
       const normalized: string = normalizeServerUrl(baseUrl);
       const api: RemoteServerApi = new RemoteServerApi(normalized);
@@ -654,6 +675,7 @@ export class AppRuntime {
       const account: AccountLoginResult = challenge.length > 0
         ? await api.verifyAccountLogin(challenge, code)
         : await api.loginAccount(email, password);
+      if (attempt !== this.loginAttempt) return;
       if (account.challenge.length > 0) {
         this.setBusy(false);
         this.notify();
@@ -664,19 +686,16 @@ export class AppRuntime {
       const config: StoredServerConfig = new StoredServerConfig();
       config.baseUrl = normalized;
       config.email = email.trim();
-      await this.store.saveConfig(config);
-      await this.store.saveCredentials(tokens);
-      this.config = config;
-      this.identity = identity;
-      this.credentials = tokens;
-      this.serverUrl = config.baseUrl;
-      this.email = config.email;
-      this.phase = PHASE_DEVICES;
+      await this.commitAuth(async () => {
+        if (attempt === this.loginAttempt) await this.finishLogin(config, identity, tokens);
+      });
+      if (attempt !== this.loginAttempt) return;
       this.setBusy(false);
       this.notify();
       await this.refreshDevices();
       return;
     } catch (error) {
+      if (attempt !== this.loginAttempt) return;
       this.errorMsg = errorMessage(error);
       this.setBusy(false);
       this.notify();
@@ -690,9 +709,12 @@ export class AppRuntime {
     if (this.busy) return undefined;
     this.setBusy(true);
     this.errorMsg = '';
+    this.cancelQrLogin();
+    const attempt = this.loginAttempt;
     try {
       const normalized: string = normalizeServerUrl(input);
       await new RemoteServerApi(normalized).health();
+      if (attempt !== this.loginAttempt) return undefined;
       if (normalized === this.serverUrl) {
         this.setBusy(false);
         this.notify();
@@ -700,25 +722,31 @@ export class AppRuntime {
       }
       this.teardownConnection();
       this.clearReconnectTimer();
-      await this.store.clearCredentials();
-      await this.store.clearHostPins();
-      this.store.saveLastHost('');
-      this.store.clearHostInfo();
-      const config: StoredServerConfig = new StoredServerConfig();
-      config.baseUrl = normalized;
-      await this.store.saveConfig(config);
-      this.config = config;
-      this.credentials = undefined;
-      this.serverUrl = normalized;
+      await this.commitAuth(async () => {
+        if (attempt !== this.loginAttempt) return;
+        await this.store.clearCredentials();
+        this.credentials = undefined;
+        this.authPromise = undefined;
+        await this.store.clearHostPins();
+        this.store.saveLastHost('');
+        this.store.clearHostInfo();
+        const config: StoredServerConfig = new StoredServerConfig();
+        config.baseUrl = normalized;
+        await this.store.saveConfig(config);
+        this.config = config;
+        this.serverUrl = normalized;
+      });
+      if (attempt !== this.loginAttempt) return undefined;
       this.email = '';
       this.devices = [];
       this.providers = [];
       this.phase = PHASE_SETUP;
       this.setBusy(false);
       this.notify();
-      await this.loadProviders(normalized);
+      this.loadProviders(normalized);
       return normalized;
     } catch (error) {
+      if (attempt !== this.loginAttempt) return undefined;
       this.errorMsg = errorMessage(error);
       this.setBusy(false);
       this.notify();
@@ -930,15 +958,16 @@ export class AppRuntime {
       const pinnedHostKey: string = await this.enforceHostPin(host);
       // ensureApi() may have renewed the credentials above: the relay handshake must use
       // the current access token, not the one captured before the renewal.
-      const current: TokenPair | undefined = this.credentials;
       const warmed: boolean = await relayWarm;
-      const rotated: boolean = current !== undefined && current.accessToken !== credentials.accessToken;
+      if (config !== this.config || this.credentials === undefined) throw new Error('Account changed');
+      const current: TokenPair = this.credentials;
+      const rotated: boolean = current.accessToken !== credentials.accessToken;
       if (!warmed || rotated) {
         // 预热失败，或凭证在 REST 期间轮换过（旧 token 的 socket 不能拿去握手）就重建一条
         if (warmed) {
           relay.close();
         }
-        relayOptions.accessToken = current !== undefined ? current.accessToken : credentials.accessToken;
+        relayOptions.accessToken = current.accessToken;
         relay = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
         this.pendingRelay = relay;
       }
@@ -964,22 +993,11 @@ export class AppRuntime {
       this.probeIceConfig(relay).catch(() => undefined);
       this.setConnectStage(2, '读取主机能力…');
       const gateway: RemoteGateway = new RemoteGateway(core);
-      // 能力探测是每次连接一个 RPC 往返；主机版本不变就没有重新探测的必要
-      const featureKey: string = host.deviceId + '|' + host.clientVersion + '|' + host.harnessVersion;
-      let features: RemoteHostFeatures | undefined = this.featuresCacheKey === featureKey
-        ? this.featuresCacheValue : undefined;
-      if (features === undefined) {
-        features = await gateway.probeHostFeatures();
-        this.featuresCacheKey = featureKey;
-        this.featuresCacheValue = features;
-      } else {
-        logInfo('host features cached');
-      }
+      const features: RemoteHostFeatures = await gateway.probeHostFeatures();
+      if (this.connectCancelled || this.core !== core) return;
+      this.hostFeatures = features;
       logInfo('host features: sessionFormat=' + features.sessionFormat + ' apiProxy=' + features.apiProxy
         + ' remoteGateway=' + features.remoteGateway + ' caps=' + features.capabilities.join(','));
-      if (this.connectCancelled) {
-        return;
-      }
       // In-band 传输升级（remote.transport.upgrade.v1）：relay-first 认证完成后，
       // 与主机并行协商 WebRTC 直连；切腿不重建 Noise、不重置订阅，失败就留在中继。
       const upgradeBridge: RtcBridge | undefined = this.rtcBridge;
@@ -1044,7 +1062,7 @@ export class AppRuntime {
       const harness: HarnessAlphaClient =
         new HarnessAlphaClient(core, features.sessionFormat, (frame: HarnessClientFrame) => {
           this.handleFrame(frame);
-        }, features.capabilities.includes('harness.remote.stream.transfer.v1'));
+        }, features.capabilities);
       this.harness = harness;
       this.setConnectStage(3, '订阅会话事件…');
       await harness.start();
@@ -1294,10 +1312,20 @@ export class AppRuntime {
 
   /** 私钥已丢失时重置身份：清本地身份/凭据，重新生成，然后回到登录页。 */
   async resetIdentityAndRestart(context: common.Context): Promise<void> {
-    await this.store.resetIdentity();
-    this.identity = undefined;
-    this.credentials = undefined;
-    this.config = await this.store.loadConfig();
+    this.cancelQrLogin();
+    try {
+      await this.commitAuth(async () => {
+        await this.store.resetIdentity();
+        this.identity = undefined;
+        this.credentials = undefined;
+        this.authPromise = undefined;
+        this.config = await this.store.loadConfig();
+      });
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+      return;
+    }
     this.identityBlocked = false;
     this.errorMsg = '';
     this.phase = PHASE_BOOT;
@@ -1318,6 +1346,18 @@ export class AppRuntime {
   }
 
   async logout(): Promise<void> {
+    this.cancelQrLogin();
+    try {
+      await this.commitAuth(async () => {
+        await this.store.clearCredentials();
+        this.credentials = undefined;
+        this.authPromise = undefined;
+      });
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+      return;
+    }
     this.teardownConnection();
     this.autoConnectSuppressed = true;
     this.store.saveLastHost('');
@@ -1329,8 +1369,6 @@ export class AppRuntime {
     this.setBusy(false);
     this.errorMsg = '';
     this.devices = [];
-    this.credentials = undefined;
-    await this.store.clearCredentials();
     this.notify();
   }
 
@@ -1906,7 +1944,7 @@ export class AppRuntime {
     if (core === undefined || this.phase !== PHASE_CHAT || this.reconnecting) {
       throw new Error('BOT_DISCONNECTED');
     }
-    if (this.featuresCacheValue?.capabilities.includes('plugin.route.v1') !== true) {
+    if (this.hostFeatures?.capabilities.includes('plugin.route.v1') !== true) {
       throw new Error('BOT_UNSUPPORTED');
     }
     const body: Record<string, Object | null> = { 'endpoint': 'state', 'payload': null };
@@ -1923,19 +1961,23 @@ export class AppRuntime {
       || sessionId.length === 0 || sessionId !== this.currentSessionId) {
       return undefined;
     }
-    const transferFrames = this.featuresCacheValue?.capabilities.includes('harness.remote.stream.transfer.v1') === true;
+    const transferFrames = this.hostFeatures?.capabilities.includes('harness.remote.stream.transfer.v1') === true;
     return new TerminalSession(new RemoteGateway(this.core, transferFrames), sessionId);
+  }
+
+  supportsWorkspaceGit(): boolean {
+    return this.harness?.supportsWorkspaceGit === true && !this.reconnecting;
   }
 
   supportsDshWeb(): boolean {
     return (this.phase === PHASE_CHAT || this.phase === PHASE_DEVICES) && this.harness !== undefined
       && this.connectedDeviceId.length > 0 && !this.reconnecting
-      && (this.featuresCacheValue?.capabilities.includes('dsh.web.v1') === true || this.canOpenLanWeb());
+      && (this.hostFeatures?.capabilities.includes('dsh.web.v1') === true || this.canOpenLanWeb());
   }
 
   private canOpenLanWeb(): boolean {
     return this.activeRelay !== undefined && this.transportLabelFor(this.activeRelay) === 'lan'
-      && this.featuresCacheValue?.capabilities.includes('dsh.web.lan.direct.v1') === true;
+      && this.hostFeatures?.capabilities.includes('dsh.web.lan.direct.v1') === true;
   }
 
   async openDshWeb(deviceId: string): Promise<DshWebGrant> {
@@ -1958,7 +2000,7 @@ export class AppRuntime {
         }
       }
       if (core !== this.core || deviceId !== this.connectedDeviceId || this.reconnecting
-        || this.featuresCacheValue?.capabilities.includes('dsh.web.v1') !== true) {
+        || this.hostFeatures?.capabilities.includes('dsh.web.v1') !== true) {
         throw new Error('DSH_WEB_UNAVAILABLE');
       }
       this.webLeaseCore = core;
@@ -3258,13 +3300,16 @@ export class AppRuntime {
   }
 
   async startQrLogin(baseUrl: string): Promise<void> {
+    if (this.busy) return;
     this.errorMsg = '';
-    this.stopQrPolling();
+    this.cancelQrLogin();
+    const request = this.loginAttempt;
     try {
       const raw: string = baseUrl.trim().length > 0 ? baseUrl.trim() : DEFAULT_SERVER_URL;
       const normalized: string = normalizeServerUrl(raw);
       const api: RemoteServerApi = new RemoteServerApi(normalized);
       const session: QrLoginSession = await api.startQrLogin(this.providerId);
+      if (request !== this.loginAttempt) return;
       this.qrBaseUrl = normalized;
       this.qrId = session.qrId;
       this.qrUrl = session.scanUrl;
@@ -3273,6 +3318,7 @@ export class AppRuntime {
       this.scheduleQrPoll();
       return;
     } catch (error) {
+      if (request !== this.loginAttempt) return;
       this.errorMsg = errorMessage(error);
     }
     this.qrUrl = '';
@@ -3281,6 +3327,7 @@ export class AppRuntime {
   }
 
   cancelQrLogin(): void {
+    this.loginAttempt++;
     this.stopQrPolling();
     this.qrId = '';
     this.qrUrl = '';
@@ -3315,8 +3362,10 @@ export class AppRuntime {
       return;
     }
     try {
-      const api: RemoteServerApi = new RemoteServerApi(this.qrBaseUrl);
+      const baseUrl: string = this.qrBaseUrl;
+      const api: RemoteServerApi = new RemoteServerApi(baseUrl);
       const poll: QrLoginPoll = await api.pollQrLogin(qrId);
+      if (qrId !== this.qrId) return;
       if (poll.status === 'expired') {
         this.qrId = '';
         this.qrUrl = '';
@@ -3332,22 +3381,19 @@ export class AppRuntime {
       const identity: DeviceIdentity = await this.store.loadOrCreateIdentity();
       const tokens: TokenPair = await api.registerDevice(identity, poll.token);
       const config: StoredServerConfig = new StoredServerConfig();
-      config.baseUrl = this.qrBaseUrl;
+      config.baseUrl = baseUrl;
       config.email = account;
-      await this.store.saveConfig(config);
-      await this.store.saveCredentials(tokens);
-      this.config = config;
-      this.identity = identity;
-      this.credentials = tokens;
-      this.serverUrl = config.baseUrl;
-      this.email = config.email;
+      await this.commitAuth(async () => {
+        if (qrId === this.qrId) await this.finishLogin(config, identity, tokens);
+      });
+      if (qrId !== this.qrId) return;
       this.qrId = '';
       this.qrUrl = '';
-      this.phase = PHASE_DEVICES;
       this.notify();
       await this.refreshDevices();
       return;
     } catch (error) {
+      if (qrId !== this.qrId) return;
       this.errorMsg = errorMessage(error);
     }
     this.qrId = '';
@@ -3398,12 +3444,12 @@ export class AppRuntime {
     if (inflight !== undefined) {
       return inflight;
     }
-    const task: Promise<RemoteServerApi> = this.renewApi(config.baseUrl, credentials, identity);
+    const task: Promise<RemoteServerApi> = this.renewApi(config, credentials, identity);
     this.authPromise = task;
     try {
       return await task;
     } finally {
-      this.authPromise = undefined;
+      if (this.authPromise === task) this.authPromise = undefined;
     }
   }
 
@@ -3417,13 +3463,14 @@ export class AppRuntime {
    * re-register this device (the Server binds it by identity key, so an already
    * owned device gets fresh tokens without asking the user to log in again).
    */
-  private async renewApi(baseUrl: string, stale: TokenPair, identity: DeviceIdentity): Promise<RemoteServerApi> {
+  private async renewApi(config: StoredServerConfig, stale: TokenPair, identity: DeviceIdentity): Promise<RemoteServerApi> {
+    const baseUrl = config.baseUrl;
     const refreshSpent: boolean = stale.refreshTokenExpiresAt > 0
       && stale.refreshTokenExpiresAt <= Date.now() + 600000;
     if (!refreshSpent) {
       try {
         const tokens: TokenPair = await new RemoteServerApi(baseUrl).refreshToken(identity.deviceId, stale.refreshToken);
-        await this.adoptCredentials(tokens);
+        await this.adoptCredentials(config, stale, tokens);
         return new RemoteServerApi(baseUrl, tokens.accessToken);
       } catch (error) {
         if (!isAuthError(error)) {
@@ -3432,13 +3479,14 @@ export class AppRuntime {
         // fall through: another caller may already have rotated the token
       }
     }
-    const saved: TokenPair | undefined = await this.readStoredCredentials();
+    const saved: TokenPair | undefined = await this.readStoredCredentials(config);
     if (saved !== undefined && saved.accessToken !== stale.accessToken && this.hasFreshAccessToken(saved)) {
-      await this.adoptCredentials(saved);
+      await this.adoptCredentials(config, stale, saved);
       return new RemoteServerApi(baseUrl, saved.accessToken);
     }
+    if (this.config !== config || this.credentials !== stale) throw new Error('Account changed');
     const recovered: TokenPair = await this.recoverDevice(baseUrl, identity);
-    await this.adoptCredentials(recovered);
+    await this.adoptCredentials(config, stale, recovered);
     return new RemoteServerApi(baseUrl, recovered.accessToken);
   }
 
@@ -3453,22 +3501,24 @@ export class AppRuntime {
     }
   }
 
-  private async adoptCredentials(tokens: TokenPair): Promise<void> {
-    this.credentials = tokens;
-    try {
-      await this.store.saveCredentials(tokens);
-    } catch (error) {
-      // 安全存储暂时不可用（多见于设备刚锁上）：新 token 只留在内存里，界面明确提示。
-      // 这里不能抛 —— 旧 refresh token 服务器已经消费掉，抛出去只会让本次重连直接失败。
-      logWarn('credentials not persisted');
-      this.errorMsg = errorMessage(error);
-      this.notify();
-    }
+  private async adoptCredentials(config: StoredServerConfig, stale: TokenPair, tokens: TokenPair): Promise<void> {
+    await this.commitAuth(async () => {
+      if (this.config !== config || this.credentials !== stale) throw new Error('Account changed');
+      this.credentials = tokens;
+      try {
+        await this.store.saveCredentials(tokens, config);
+      } catch (error) {
+        // The Server may already have rotated the token. Keep it in memory for this login.
+        logWarn('credentials not persisted');
+        this.errorMsg = errorMessage(error);
+        this.notify();
+      }
+    });
   }
 
-  private async readStoredCredentials(): Promise<TokenPair | undefined> {
+  private async readStoredCredentials(config: StoredServerConfig): Promise<TokenPair | undefined> {
     try {
-      return await this.store.loadCredentials();
+      return await this.store.loadCredentials(config);
     } catch (error) {
       return undefined;
     }
@@ -3895,6 +3945,7 @@ export class AppRuntime {
     }
     const harness: HarnessAlphaClient | undefined = this.harness;
     this.harness = undefined;
+    this.hostFeatures = undefined;
     this.modelCatalogLoaded = false;
     this.modelOptions = [];
     this.modelCatalogRaw = {};

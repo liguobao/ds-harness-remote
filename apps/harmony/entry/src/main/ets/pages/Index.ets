@@ -2196,16 +2196,14 @@ struct Index {
           palette: this.pal(),
           serverInput: this.serverInput,
           onSave: (server: string) => {
-            this.passwordChallenge = '';
-            this.serverInput = server;
-            this.runtime.cancelQrLogin();
-            this.providers = [];
-            this.emailInput = '';
-            this.passwordInput = '';
-            this.passwordLoginOpen = false;
             this.loginServerEditor = false;
             this.runtime.selectServer(server).then((selected: string | undefined) => {
-              if (selected !== undefined) this.serverInput = selected;
+              if (selected === undefined) return;
+              this.serverInput = selected;
+              this.passwordChallenge = '';
+              this.emailInput = '';
+              this.passwordInput = '';
+              this.passwordLoginOpen = false;
             });
           },
           onClose: () => { this.loginServerEditor = false; }
@@ -5634,11 +5632,13 @@ struct Index {
                 this.showSessionPanel = false;
                 this.openWorkspaceFiles(this.sessionFileRoot(), this.currentSessionId);
               })
-              this.SettingsRow(this.tr('工作区改动'), '', false, () => {
-                this.showSessionPanel = false;
-                this.workspaceGitOpen = true;
-                this.runtime.loadWorkspaceGitStatus();
-              })
+              if (this.runtime.supportsWorkspaceGit()) {
+                this.SettingsRow(this.tr('工作区改动'), '', false, () => {
+                  this.showSessionPanel = false;
+                  this.workspaceGitOpen = true;
+                  this.runtime.loadWorkspaceGitStatus();
+                })
+              }
             }
 
             this.SettingsRow(this.tr('终端'), '', false, () => { this.openTerminalPage(); })

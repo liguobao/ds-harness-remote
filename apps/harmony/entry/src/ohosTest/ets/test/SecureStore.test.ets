@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { abilityDelegatorRegistry } from '@kit.TestKit';
-import { SecureStore } from '../../../main/ets/services/SecureStore';
+import { SecureStore, StoredServerConfig } from '../../../main/ets/services/SecureStore';
 import { DeviceIdentity, TokenPair } from '../../../main/ets/model/Types';
 
 async function newStore(): Promise<SecureStore> {
@@ -26,14 +26,17 @@ export default function secureStoreTest() {
       pair.accessTokenExpiresAt = 1700000000;
       pair.refreshToken = 'refresh-token-for-test';
       pair.refreshTokenExpiresAt = 1800000000;
-      await store.saveCredentials(pair);
+      const config = new StoredServerConfig();
+      config.baseUrl = 'https://example.test';
+      config.email = 'test@example.test';
+      await store.saveCredentials(pair, config);
 
-      const loaded: TokenPair | undefined = await store.loadCredentials();
+      const loaded: TokenPair | undefined = await store.loadCredentials(config);
       expect(loaded !== undefined).assertTrue();
       expect(loaded!.accessToken).assertEqual(pair.accessToken);
       expect(loaded!.refreshToken).assertEqual(pair.refreshToken);
       await store.clearCredentials();
-      expect((await store.loadCredentials()) === undefined).assertTrue();
+      expect((await store.loadCredentials(config)) === undefined).assertTrue();
     })
 
     it('round_trips_device_identity_without_storing_the_private_key_in_kv', 0, async () => {
