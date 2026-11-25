@@ -2248,3 +2248,147 @@ describe('HarnessRemoteBridge 0.2.2 attachment reference recovery', () => {
     expect(dispatch.mock.lastCall?.[1]).toEqual({ args: { request: { sessionId: 's1', attachmentId: 'a1' } } })
   })
 })
+
+describe('HarnessRemoteBridge dsBot/* allowlist', () => {
+  it('enforces unary dsBot/call and stream dsBot/feed separation and rejects other dsBot/* methods', async () => {
+    const callPayload = { args: { endpoint: 'hello', payload: { api: [1] } } }
+    const callOutcome = { ok: true as const, value: { ok: true, value: { api: 1, capabilities: ['rpc'] } } }
+    const dispatch = vi.fn(async () => callOutcome)
+    const open = vi.fn(async () => (async function* () {
+      yield { event: 'hello', data: { revision: 1, api: 1, boot: 'b1', seq: 0 } }
+    })())
+    const publish = vi.fn(async () => undefined)
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch, open }), publish)
+
+    await expect(bridge.call({ endpoint: 'dsBot/call', payload: callPayload })).resolves.toEqual(callOutcome)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(dispatch).toHaveBeenCalledWith('dsBot/call', callPayload, expect.any(AbortSignal))
+    await expect(bridge.openStream({ streamId: 'dsbot-call-stream', endpoint: 'dsBot/call', payload: callPayload }))
+      .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+    expect(open).not.toHaveBeenCalled()
+
+    const feedPayload = { args: {} }
+    await expect(bridge.openStream({ streamId: 'dsbot-feed-1', endpoint: 'dsBot/feed', payload: feedPayload }))
+      .resolves.toEqual({ opened: true, streamId: 'dsbot-feed-1' })
+    expect(open).toHaveBeenCalledWith('dsBot/feed', feedPayload, expect.any(AbortSignal))
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+      streamId: 'dsbot-feed-1',
+      reason: 'completed',
+    }))
+    expect(publish).toHaveBeenCalledWith('harness.remote.frame', {
+      streamId: 'dsbot-feed-1',
+      hasValue: true,
+      value: { event: 'hello', data: { revision: 1, api: 1, boot: 'b1', seq: 0 } },
+    })
+    await expect(bridge.call({ endpoint: 'dsBot/feed', payload: feedPayload }))
+      .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+    expect(dispatch).toHaveBeenCalledTimes(1)
+
+    for (const rejected of ['dsBot/other', 'dsBot/admin']) {
+      await expect(bridge.call({ endpoint: rejected, payload: { args: {} } }))
+        .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      await expect(bridge.openStream({ streamId: 'dsbot-rejected', endpoint: rejected, payload: { args: {} } }))
+        .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+    }
+
+    const callTransferId = '00000000-0000-4000-8000-0000000000d1'
+    const callBytes = new TextEncoder().encode(JSON.stringify({ endpoint: 'dsBot/call', payload: callPayload }))
+    expect(bridge.openTransfer({ transferId: callTransferId, totalBytes: callBytes.byteLength, totalChunks: 1 }))
+      .toEqual({ opened: true, transferId: callTransferId })
+    expect(bridge.appendTransfer({ transferId: callTransferId, index: 0, data: Buffer.from(callBytes).toString('base64') }))
+      .toEqual({ accepted: true, transferId: callTransferId, index: 0 })
+    await expect(bridge.commitTransfer({ transferId: callTransferId })).resolves.toEqual({
+      kind: 'inline',
+      response: callOutcome,
+    })
+
+    const feedTransferId = '00000000-0000-4000-8000-0000000000d2'
+    const feedBytes = new TextEncoder().encode(JSON.stringify({ endpoint: 'dsBot/feed', payload: feedPayload }))
+    bridge.openTransfer({ transferId: feedTransferId, totalBytes: feedBytes.byteLength, totalChunks: 1 })
+    bridge.appendTransfer({ transferId: feedTransferId, index: 0, data: Buffer.from(feedBytes).toString('base64') })
+    await expect(bridge.commitTransfer({ transferId: feedTransferId }))
+      .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+
+    await bridge.closeAll()
+  })
+
+  it('forwards successful dsBot/call responses to forwardedEventsObserver.onDsBotCall without disrupting RPC', async () => {
+    const observed: Array<{ body: { endpoint: string; payload?: Record<string, unknown> | null }; result: unknown }> = []
+    let shouldThrow = false
+    const observer = {
+      onFrame: vi.fn(),
+      onDsBotCall: vi.fn((body: { endpoint: string; payload?: Record<string, unknown> | null }, result: unknown) => {
+        observed.push({ body, result })
+        if (shouldThrow) throw new Error('observer boom')
+      }),
+    }
+    const dispatch = vi.fn(async (_method: string, payload: unknown) => {
+      const endpoint = (payload as { args?: { endpoint?: string } })?.args?.endpoint
+      if (endpoint === 'fail-native') {
+        return { ok: false as const, error: { code: 'gateway/invocation-unavailable', message: 'unavailable', details: {} } }
+      }
+      if (endpoint === 'non-record') {
+        return { ok: true as const, value: 'plain-string' }
+      }
+      return { ok: true as const, value: { ok: true, value: { resolved: endpoint } } }
+    })
+    const bridge = new HarnessRemoteBridge(
+      gateway({ dispatch }),
+      vi.fn(async () => undefined),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      observer,
+    )
+
+    // Direct unary call with object payload
+    await expect(bridge.call({
+      endpoint: 'dsBot/call',
+      payload: { args: { endpoint: 'approval-answer', payload: { id: 'apr-1', choice: 'allow' } } },
+    })).resolves.toEqual({ ok: true, value: { ok: true, value: { resolved: 'approval-answer' } } })
+
+    // Direct unary call with omitted payload normalizes payload to null
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'state' } } })
+
+    // Failed native result, non-record value, and missing endpoint must be skipped
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'fail-native' } } })
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'non-record' } } })
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: {} } })
+
+    // Observer exception must not disrupt RPC settlement (including chunked transfer commit)
+    shouldThrow = true
+    const transferId = '00000000-0000-4000-8000-0000000000d3'
+    const transferBytes = new TextEncoder().encode(JSON.stringify({
+      endpoint: 'dsBot/call',
+      payload: { args: { endpoint: 'notices', payload: { since: 1 } } },
+    }))
+    bridge.openTransfer({ transferId, totalBytes: transferBytes.byteLength, totalChunks: 1 })
+    bridge.appendTransfer({ transferId, index: 0, data: Buffer.from(transferBytes).toString('base64') })
+    await expect(bridge.commitTransfer({ transferId })).resolves.toEqual({
+      kind: 'inline',
+      response: { ok: true, value: { ok: true, value: { resolved: 'notices' } } },
+    })
+
+    expect(observed).toEqual([
+      {
+        body: { endpoint: 'approval-answer', payload: { id: 'apr-1', choice: 'allow' } },
+        result: { ok: true, value: { resolved: 'approval-answer' } },
+      },
+      {
+        body: { endpoint: 'state', payload: null },
+        result: { ok: true, value: { resolved: 'state' } },
+      },
+      {
+        body: { endpoint: 'notices', payload: { since: 1 } },
+        result: { ok: true, value: { resolved: 'notices' } },
+      },
+    ])
+
+    await bridge.closeAll()
+  })
+})

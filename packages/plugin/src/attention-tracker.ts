@@ -225,12 +225,14 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     onStreamOpened: () => void
     onFrame: (frame: unknown) => void
     onEventResult: (eventId: string, outcomeKind?: string) => void
+    onDsBotCall: (body: { endpoint: string; payload?: Record<string, unknown> | null }, botResult: unknown) => void
     onStreamClosed: () => void
   } {
     return {
       onStreamOpened: () => this.onHarnessEventStreamOpened(),
       onFrame: frame => this.observeHarnessEventFrame(frame),
       onEventResult: (eventId, outcomeKind) => this.observeHarnessEventResult(eventId, outcomeKind),
+      onDsBotCall: (body, botResult) => this.observeBotResponse('api/bot', body, { status: 200, json: botResult }),
       onStreamClosed: () => this.onHarnessEventStreamClosed(),
     }
   }
