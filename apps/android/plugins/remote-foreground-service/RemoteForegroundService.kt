@@ -61,6 +61,19 @@ class RemoteForegroundService : Service() {
   private var connectionStatus = "connecting"
   private var liveTask: LiveTaskData? = null
 
+  private val samsungOngoing = Build.VERSION.SDK_INT >= 35 && Build.MANUFACTURER.equals("samsung", true)
+  private fun configuredScene(key: String) = packageManager
+    .getApplicationInfo(packageName, PackageManager.GET_META_DATA).metaData?.getString("$packageName.$key")
+  private val huaweiEvent by lazy {
+    if (Build.MANUFACTURER.equals("huawei", true)) configuredScene("HUAWEI_LIVE_EVENT") else null
+  }
+  private val vivoScene by lazy {
+    if (listOf(Build.MANUFACTURER, Build.BRAND).any { it.equals("vivo", true) || it.equals("iQOO", true) }) {
+      configuredScene("VIVO_ATOMIC_SCENE")
+    } else null
+  }
+  private var vendorTaskActive = false
+
   @Suppress("DEPRECATION")
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     val receiver = intent?.getParcelableExtra<ResultReceiver>(EXTRA_RESULT)
@@ -210,6 +223,46 @@ class RemoteForegroundService : Service() {
     notification.extras.putString("miui.focus.param", JSONObject().put("param_v2", params).toString())
   }
 
+  private fun extendLiveTask(notification: Notification, status: String, title: String) {
+    val extras = notification.extras
+    if (samsungOngoing) {
+      extras.putInt("android.ongoingActivityNoti.style", 1)
+      extras.putParcelable("android.ongoingActivityNoti.secondIcon", notification.smallIcon)
+      extras.putString("android.ongoingActivityNoti.chipExpandedText", status)
+      extras.putString("android.ongoingActivityNoti.nowbarPrimaryInfo", status)
+      extras.putString("android.ongoingActivityNoti.nowbarSecondaryInfo", title)
+      extras.putString("android.ongoingActivityNoti.primaryInfo", status)
+      extras.putString("android.ongoingActivityNoti.secondaryInfo", title)
+    }
+    huaweiEvent?.let { event ->
+      extras.putString("notification.live.event", event)
+      extras.putInt("notification.live.operation", if (vendorTaskActive) 1 else 0)
+      extras.putInt("notification.live.type", 1)
+      extras.putBundle("notification.live.capsule", Bundle().apply {
+        putInt("notification.live.capsuleStatus", 1)
+        putInt("notification.live.capsuleType", 1)
+        putParcelable("notification.live.capsuleIcon", notification.smallIcon)
+        putInt("notification.live.capsuleBgColor", Color.rgb(32, 58, 77))
+        putString("notification.live.capsuleTitle", status)
+        putString("notification.live.capsuleContent", title)
+      })
+      vendorTaskActive = true
+    }
+    vivoScene?.let { scene ->
+      extras.putString("notification.superx.scene", scene)
+      extras.putInt("notification.superx.operation", if (vendorTaskActive) 1 else 0)
+      extras.putBoolean("notification.superx.showNotify", true)
+      extras.putInt("notification.superx.template", 1)
+      extras.putParcelable("notification.superx.clickResp", notification.contentIntent)
+      extras.putBundle("notification.superx.baseInfos", Bundle().apply {
+        putParcelable("notification.superx.baseInfos.icon", notification.smallIcon)
+        putCharSequence("notification.superx.baseInfos.title", status)
+        putCharSequence("notification.superx.baseInfos.content", title)
+      })
+      vendorTaskActive = true
+    }
+  }
+
   private fun notification(): Notification {
     val task = liveTask
     if (connectionStatus == "connected" && task != null) {
@@ -252,8 +305,6 @@ class RemoteForegroundService : Service() {
           .setOngoing(true)
           .setOnlyAlertOnce(true)
           .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-          .setGroup(LIVE_GROUP)
-          .setGroupSummary(false)
           .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         if (Build.VERSION.SDK_INT >= 36) {
@@ -262,7 +313,7 @@ class RemoteForegroundService : Service() {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(task.title, task.summary)
               .filter { it.isNotBlank() }.joinToString("\n")))
           }
-        } else {
+        } else if (!samsungOngoing && vivoScene == null && huaweiEvent == null) {
           val expandedViews = RemoteViews(packageName, R.layout.notification_live_task).apply {
             setImageViewResource(R.id.live_task_status_dot, dotRes)
             setTextViewText(R.id.live_task_status_text, status)
@@ -304,6 +355,7 @@ class RemoteForegroundService : Service() {
         if (focusVersion >= 2) {
           addXiaomiFocus(notification, focusVersion, status, task.title.ifBlank { getString(R.string.app_name) })
         }
+        extendLiveTask(notification, status, task.title.ifBlank { getString(R.string.app_name) })
         return notification
       } catch (e: Exception) {
         Log.w("RemoteForegroundService", "Failed to build custom live task notification, falling back", e)
@@ -331,7 +383,20 @@ class RemoteForegroundService : Service() {
           ))
         }
       }
-      .build()
+      .build().also { notification ->
+        if (vendorTaskActive) {
+          huaweiEvent?.let {
+            notification.extras.putString("notification.live.event", it)
+            notification.extras.putInt("notification.live.operation", 2)
+            notification.extras.putInt("notification.live.type", 1)
+          }
+          vivoScene?.let {
+            notification.extras.putString("notification.superx.scene", it)
+            notification.extras.putInt("notification.superx.operation", 2)
+          }
+          vendorTaskActive = false
+        }
+      }
   }
 
   private fun createChannel() {
@@ -356,7 +421,6 @@ class RemoteForegroundService : Service() {
     private const val EXTRA_RESULT = "result"
     private const val CHANNEL_ID = "remote_connection"
     private const val LIVE_CHANNEL_ID = "live_tasks"
-    private const val LIVE_GROUP = "dsh_remote_live_task"
     private const val TASK_GROUP = "dsh_remote_task_alerts"
     private const val NOTIFICATION_ID = 7401
     private var running: RemoteForegroundService? = null

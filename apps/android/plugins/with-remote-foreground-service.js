@@ -1,6 +1,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const {
+  AndroidConfig,
   withAndroidManifest,
   withDangerousMod,
   withMainActivity,
@@ -131,6 +132,17 @@ function withRemoteForegroundService(config) {
     }
     const application = manifest.application?.[0]
     if (application === undefined) throw new Error('Android application manifest entry is missing')
+    const manifestTools = AndroidConfig.Manifest
+    manifestTools.addMetaDataItemToMainApplication(application, 'com.samsung.android.support.ongoing_activity', 'true')
+    // Scene identifiers are assigned when the vendor approves this app's use case.
+    for (const [name, value] of [
+      ['VIVO_ATOMIC_SCENE', process.env.DSH_VIVO_ATOMIC_SCENE],
+      ['HUAWEI_LIVE_EVENT', process.env.DSH_HUAWEI_LIVE_EVENT],
+    ]) {
+      const key = `${PACKAGE}.${name}`
+      if (value?.trim()) manifestTools.addMetaDataItemToMainApplication(application, key, value.trim())
+      else manifestTools.removeMetaDataItemFromMainApplication(application, key)
+    }
     const services = application.service ?? []
     if (!services.some(item => item.$?.['android:name'] === `.${'RemoteForegroundService'}`)) {
       services.push({ $: {
