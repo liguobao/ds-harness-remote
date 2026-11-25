@@ -566,6 +566,125 @@ export function applyCursorFrame(messages: ChatItem[], sessionId: string, frame:
   return messages
 }
 
+/** Align pre-open prompts with complete turns in the fresh transcript. */
+export function reconcileAcpCachedPrompts(history: ChatItem[], cached: ChatItem[]): {
+  history: ChatItem[]
+  confirmedIds: Set<string>
+  retainedIds: Set<string>
+} {
+  const confirmedIds = new Set<string>()
+  const retainedIds = new Set<string>()
+  if (!cached.some(item => item.id.startsWith('local:'))) return { history, confirmedIds, retainedIds }
+
+  const turns = (items: ChatItem[]) => {
+    const result: Array<{ prompt: ChatMessage; index: number; reply: string; reasoning: string; toolId?: string; completed: boolean; replyIds: string[] }> = []
+    let turn: (typeof result)[number] | undefined
+    for (const [index, item] of items.entries()) {
+      if (item.kind === 'message' && item.role === 'user') {
+        if (turn?.prompt.id.startsWith('local:') && item.id.startsWith('cursor-user:')
+          && turn.replyIds.length === 0 && turn.prompt.text === item.text) continue
+        turn = { prompt: item, index, reply: '', reasoning: '', completed: false, replyIds: [] }
+        result.push(turn)
+      } else if (turn && (item.kind === 'tool' || (item.kind === 'message' && item.role === 'assistant'))) {
+        if (item.kind === 'tool') turn.toolId ??= item.id.replace(/^cursor-tool:acp-live:\d+:/u, '')
+        else {
+          turn.reply += item.text
+          turn.reasoning += item.reasoning ?? ''
+        }
+        turn.replyIds.push(item.id)
+        turn.completed ||= item.turnEnd?.reason === 'completed' || item.turnEnd?.reason === 'stopped'
+      }
+    }
+    return result
+  }
+  const signature = (turn: ReturnType<typeof turns>[number]) => turn.reply || turn.reasoning || turn.toolId
+    ? JSON.stringify([turn.prompt.text, turn.prompt.images?.length ?? 0, turn.reply, turn.reply ? '' : turn.reasoning,
+      turn.reply || turn.reasoning ? '' : turn.toolId])
+    : undefined
+  const samePrompt = (local: ChatMessage, saved: ChatMessage) => {
+    const images = saved.images ?? []
+    const sentImages = local.promptImages ?? []
+    return local.text === saved.text && (local.images?.length ?? 0) === images.length
+      && (images.length === 0 || (sentImages.length === images.length && images.every((image, index) => {
+        const sent = sentImages[index]!
+        return image.uri === `data:${sent.mediaType};base64,${sent.data}`
+      })))
+  }
+
+  const historyTurns = turns(history)
+  const historyTurnsById = new Map(historyTurns.map(turn => [turn.prompt.id, turn]))
+  const candidates = new Map<string, typeof historyTurns>()
+  for (const turn of historyTurns) {
+    const key = signature(turn)
+    if (key === undefined) continue
+    const matches = candidates.get(key)
+    if (matches) matches.push(turn)
+    else candidates.set(key, [turn])
+  }
+
+  let lastMatchedIndex = -1
+  const unmatchedTail: typeof historyTurns = []
+  const nextCandidate = new Map<string, number>()
+  for (const turn of turns(cached)) {
+    const prompt = turn.prompt
+    const key = signature(turn)
+    if (!prompt.id.startsWith('local:')) {
+      // Previously loaded turns reserve their places, including when a later
+      // user turn has exactly the same prompt and reply.
+      const previous = historyTurnsById.get(prompt.id)
+      if (previous && signature(previous) === key && previous.prompt.text === prompt.text) {
+        lastMatchedIndex = Math.max(lastMatchedIndex, previous.index)
+        unmatchedTail.length = 0
+      }
+      continue
+    }
+    if (prompt.sendState !== undefined || !turn.completed || key === undefined) continue
+    const matches = candidates.get(key) ?? []
+    let offset = nextCandidate.get(key) ?? 0
+    while (offset < matches.length) {
+      const candidate = matches[offset]!
+      if (candidate.index > lastMatchedIndex && samePrompt(prompt, candidate.prompt)) break
+      offset++
+    }
+    const match = matches[offset]
+    if (!match) {
+      unmatchedTail.push(turn)
+      continue
+    }
+    nextCandidate.set(key, offset + 1)
+    lastMatchedIndex = match.index
+    unmatchedTail.length = 0
+    confirmedIds.add(prompt.id)
+  }
+  const historyTail = historyTurns.at(-1)
+  const firstCachedTail = unmatchedTail[0]
+  if (historyTail && firstCachedTail && historyTail.toolId === undefined
+    && lastMatchedIndex === (historyTurns.at(-2)?.index ?? -1)
+    && samePrompt(firstCachedTail.prompt, historyTail.prompt)
+    && firstCachedTail.reply.startsWith(historyTail.reply)
+    && firstCachedTail.reasoning.startsWith(historyTail.reasoning)) {
+    // The read reached the next user message before its full reply was persisted.
+    // Keep the completed local reply in place of the unfinished history rows.
+    confirmedIds.add(firstCachedTail.prompt.id)
+    for (const id of firstCachedTail.replyIds) retainedIds.add(id)
+    if (historyTail.replyIds.length > 0) {
+      const unfinishedIds = new Set(historyTail.replyIds)
+      history = history.filter(item => !unfinishedIds.has(item.id))
+    }
+    unmatchedTail.shift()
+    lastMatchedIndex = historyTail.index
+  }
+  // A snapshot that ends at an earlier matched turn can lag the live stream.
+  // Keep the completed local suffix so the next read still has its reply anchors.
+  if (history.length === 0 || (historyTail && lastMatchedIndex === historyTail.index)) {
+    for (const turn of unmatchedTail) {
+      retainedIds.add(turn.prompt.id)
+      for (const id of turn.replyIds) retainedIds.add(id)
+    }
+  }
+  return { history, confirmedIds, retainedIds }
+}
+
 /**
  * ACP history and live have different synthetic IDs and no shared sequence cursor.
  * Only reconcile the contiguous history suffix / new-subscription prefix, never
