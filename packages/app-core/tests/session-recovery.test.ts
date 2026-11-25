@@ -1342,6 +1342,31 @@ describe('session restore state machine', () => {
     })), prepareScenario1)
   })
 
+  it('does not treat an empty Cursor Host read as a known-empty session', async () => {
+    const client = acp as typeof acp & Partial<Pick<AgentAcpClient, 'loadSessionDetails'>>
+    client.loadSessionDetails = AgentAcpClient.prototype.loadSessionDetails
+    try {
+      const selected: RemoteSession = { ...session, backend: 'cursor', sessionId: 'cursor:opaque', nativeId: 'opaque' }
+      // Cursor's history reader is optional on the Host: it answers `events: []`
+      // for a session whose transcript it simply cannot read, so an empty list
+      // proves nothing and must not mark the session as known-empty.
+      acp.transferCall.mockResolvedValueOnce({ events: [], running: false })
+      expect(await useAppStore.getState().openSession(selected)).toBe(true)
+      expect(await useAppStore.getState().sendMessage('hello')).toBe('sent')
+      const sent = useAppStore.getState().messages[selected.sessionId]!
+        .find(item => item.kind === 'message' && item.role === 'user')
+      expect(sent?.kind).toBe('message')
+      if (sent?.kind !== 'message') throw new Error('expected an optimistic user row')
+      expect(sent.id).toMatch(/^local:/)
+      // No predecessor claim: the optimistic row must not be adopted as the first
+      // turn of a session we know nothing about (claude/opencode/pi/hermes carry
+      // `acpPromptAfter: null` here; Cursor must stay untouched).
+      expect(sent.acpPromptAfter).toBeUndefined()
+    } finally {
+      delete client.loadSessionDetails
+    }
+  })
+
   it('keeps only new ACP subscription deltas while history is loading', async () => {
     await runScenarios((['pi', 'antigravity'] as const).flatMap(backend =>
       ['live', 'completed', 'switch', 'reject'].map(mode => ({ name: `${backend}: ${mode}`, run: async () => {
