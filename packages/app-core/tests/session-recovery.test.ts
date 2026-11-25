@@ -3049,4 +3049,319 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
       },
     ], prepareScenario1)
   })
+
+  it('batches ACP streaming frames per 100ms without per-token console.info while flushing critical frames immediately', async () => {
+    await runScenarios([
+      {
+        name: 'coalesces a burst of 20 streaming deltas into a single store commit after 100ms with zero per-token logs',
+        run: async () => {
+          vi.useFakeTimers()
+          const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+          try {
+            transport.hasClaude.mockReturnValue(true)
+            const claudeSession: RemoteSession = {
+              sessionId: 'claude:batch-1',
+              nativeId: 'batch-1',
+              backend: 'claude',
+              updatedAt: 1,
+              running: true,
+              blank: false,
+            }
+            useAppStore.setState({ selectedSession: claudeSession, sessions: [claudeSession], messages: {} })
+            let receive!: (frame: unknown) => void
+            acp.openStream.mockImplementationOnce(async (_sid: string, onFrame: (frame: unknown) => void) => {
+              receive = onFrame
+              return { streamId: 'batch-stream-1', close: async () => undefined }
+            })
+            expect(await useAppStore.getState().openSession(claudeSession)).toBe(true)
+            // Restore running: true so streaming chunks are batched while the turn is active.
+            useAppStore.setState(state => ({
+              selectedSession: { ...claudeSession, running: true },
+              sessions: state.sessions.map(item => item.sessionId === claudeSession.sessionId ? { ...item, running: true } : item),
+            }))
+
+            let storeCommits = 0
+            const unsubscribe = useAppStore.subscribe(() => { storeCommits++ })
+            try {
+              for (let i = 0; i < 20; i += 1) {
+                receive({
+                  streamId: 'batch-stream-1',
+                  frame: {
+                    method: 'session/update',
+                    params: { sessionId: 'batch-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `t${i}-` } } },
+                  },
+                })
+              }
+              expect(storeCommits).toBe(0)
+              expect(infoSpy).not.toHaveBeenCalled()
+
+              await vi.advanceTimersByTimeAsync(99)
+              expect(storeCommits).toBe(0)
+
+              await vi.advanceTimersByTimeAsync(1)
+              expect(storeCommits).toBe(1)
+              expect(infoSpy).not.toHaveBeenCalled()
+              const messages = useAppStore.getState().messages[claudeSession.sessionId] ?? []
+              expect(messages).toEqual([
+                expect.objectContaining({
+                  kind: 'message',
+                  role: 'assistant',
+                  text: Array.from({ length: 20 }, (_, i) => `t${i}-`).join(''),
+                }),
+              ])
+            } finally {
+              unsubscribe()
+            }
+          } finally {
+            infoSpy.mockRestore()
+            await useAppStore.getState().setOffline()
+            vi.useRealTimers()
+          }
+        },
+      },
+      {
+        name: 'flushes immediately on approval, turn completion, and idle-to-running transition',
+        run: async () => {
+          vi.useFakeTimers()
+          const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+          try {
+            transport.hasClaude.mockReturnValue(true)
+            const claudeSession: RemoteSession = {
+              sessionId: 'claude:batch-2',
+              nativeId: 'batch-2',
+              backend: 'claude',
+              updatedAt: 1,
+              running: false,
+              blank: false,
+            }
+            useAppStore.setState({ selectedSession: claudeSession, sessions: [claudeSession], messages: {} })
+            let receive!: (frame: unknown) => void
+            acp.openStream.mockImplementationOnce(async (_sid: string, onFrame: (frame: unknown) => void) => {
+              receive = onFrame
+              return { streamId: 'batch-stream-2', close: async () => undefined }
+            })
+            expect(await useAppStore.getState().openSession(claudeSession)).toBe(true)
+
+            let storeCommits = 0
+            const unsubscribe = useAppStore.subscribe(() => { storeCommits++ })
+            try {
+              // First chunk on an idle session flushes immediately to flip running: true (0ms TTFT).
+              receive({
+                streamId: 'batch-stream-2',
+                frame: { method: 'session/update', params: { sessionId: 'batch-2', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'A' } } } },
+              })
+              expect(storeCommits).toBe(1)
+              expect(useAppStore.getState().selectedSession?.running).toBe(true)
+
+              // Subsequent chunks while running are queued until approval flushes the batch immediately.
+              receive({
+                streamId: 'batch-stream-2',
+                frame: { method: 'session/update', params: { sessionId: 'batch-2', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'B' } } } },
+              })
+              receive({
+                streamId: 'batch-stream-2',
+                frame: { method: 'session/update', params: { sessionId: 'batch-2', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'C' } } } },
+              })
+              expect(storeCommits).toBe(1)
+
+              receive({
+                streamId: 'batch-stream-2',
+                frame: {
+                  method: 'session/request_permission',
+                  params: { sessionId: 'batch-2', requestHandle: 'req-1', toolCall: { title: 'Run bash' }, options: [{ optionId: 'once', kind: 'allow_once' }] },
+                },
+              })
+              expect(storeCommits).toBe(2)
+              expect(useAppStore.getState().messages[claudeSession.sessionId]).toEqual(expect.arrayContaining([
+                expect.objectContaining({ kind: 'message', text: 'ABC' }),
+                expect.objectContaining({ kind: 'approval', approvalId: 'req-1' }),
+              ]))
+
+              // Queued tail deltas + prompt_completed commit together immediately and log only the terminal frame.
+              receive({
+                streamId: 'batch-stream-2',
+                frame: { method: 'session/update', params: { sessionId: 'batch-2', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'D' } } } },
+              })
+              expect(storeCommits).toBe(2)
+              receive({
+                streamId: 'batch-stream-2',
+                frame: { method: 'session/update', params: { sessionId: 'batch-2', update: { sessionUpdate: 'prompt_completed', stopReason: 'end_turn' } } },
+              })
+              expect(storeCommits).toBe(3)
+              expect(useAppStore.getState().selectedSession?.running).toBe(false)
+              expect(useAppStore.getState().messages[claudeSession.sessionId]).toEqual(expect.arrayContaining([
+                expect.objectContaining({ kind: 'message', role: 'assistant', text: 'ABC' }),
+                expect.objectContaining({ kind: 'approval', approvalId: 'req-1' }),
+                expect.objectContaining({ kind: 'message', role: 'assistant', text: 'D' }),
+              ]))
+              expect(infoSpy).toHaveBeenCalledTimes(1)
+              expect(infoSpy).toHaveBeenCalledWith('[dsh-remote] acp frame:', 'claude', 'prompt_completed', '')
+            } finally {
+              unsubscribe()
+            }
+          } finally {
+            infoSpy.mockRestore()
+            await useAppStore.getState().setOffline()
+            vi.useRealTimers()
+          }
+        },
+      },
+      {
+        name: 'enforces the 250-frame cap and drops queued frames on setOffline without leaking timers',
+        run: async () => {
+          vi.useFakeTimers()
+          try {
+            transport.hasClaude.mockReturnValue(true)
+            const claudeSession: RemoteSession = {
+              sessionId: 'claude:batch-3',
+              nativeId: 'batch-3',
+              backend: 'claude',
+              updatedAt: 1,
+              running: true,
+              blank: false,
+            }
+            useAppStore.setState({ selectedSession: claudeSession, sessions: [claudeSession], messages: {} })
+            let receive!: (frame: unknown) => void
+            acp.openStream.mockImplementationOnce(async (_sid: string, onFrame: (frame: unknown) => void) => {
+              receive = onFrame
+              return { streamId: 'batch-stream-3', close: async () => undefined }
+            })
+            expect(await useAppStore.getState().openSession(claudeSession)).toBe(true)
+            useAppStore.setState(state => ({
+              selectedSession: { ...claudeSession, running: true },
+              sessions: state.sessions.map(item => item.sessionId === claudeSession.sessionId ? { ...item, running: true } : item),
+            }))
+
+            let storeCommits = 0
+            const unsubscribe = useAppStore.subscribe(() => { storeCommits++ })
+            try {
+              for (let i = 0; i < 250; i += 1) {
+                receive({
+                  streamId: 'batch-stream-3',
+                  frame: { method: 'session/update', params: { sessionId: 'batch-3', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'x' } } } },
+                })
+              }
+              // Hard cap flushes synchronously on the 250th frame in one commit and leaves no timer armed.
+              expect(storeCommits).toBe(1)
+              expect(vi.getTimerCount()).toBe(0)
+              const flushed = useAppStore.getState().messages[claudeSession.sessionId] ?? []
+              expect(flushed[0]?.kind === 'message' && flushed[0].text.length).toBe(250)
+
+              // Queue one more delta then go offline before 100ms: stale queued frame and timer must be cleared.
+              receive({
+                streamId: 'batch-stream-3',
+                frame: { method: 'session/update', params: { sessionId: 'batch-3', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'GHOST' } } } },
+              })
+              expect(vi.getTimerCount()).toBe(1)
+              useAppStore.getState().setOffline()
+              expect(vi.getTimerCount()).toBe(0)
+              await vi.advanceTimersByTimeAsync(200)
+              const afterOffline = useAppStore.getState().messages[claudeSession.sessionId] ?? []
+              expect(afterOffline.some(item => item.kind === 'message' && item.text.includes('GHOST'))).toBe(false)
+            } finally {
+              unsubscribe()
+            }
+          } finally {
+            await useAppStore.getState().setOffline()
+            vi.useRealTimers()
+          }
+        },
+      },
+      {
+        name: 'flushes buffered deltas before sendMessage optimistic insert, after stopSession cancel, and ignores mismatched sessionId frames',
+        run: async () => {
+          vi.useFakeTimers()
+          try {
+            transport.hasClaude.mockReturnValue(true)
+            const claudeSession: RemoteSession = {
+              sessionId: 'claude:batch-4',
+              nativeId: 'batch-4',
+              backend: 'claude',
+              updatedAt: 1,
+              running: true,
+              blank: false,
+            }
+            useAppStore.setState({
+              selectedDevice: { deviceId: 'host' } as never,
+              selectedSession: claudeSession,
+              sessions: [claudeSession],
+              messages: {},
+              config: { baseUrl: 'https://example.invalid' } as never,
+              identity: {} as never,
+            })
+            let receive!: (frame: unknown) => void
+            acp.openStream.mockImplementation(async (_sid: string, onFrame: (frame: unknown) => void) => {
+              receive = onFrame
+              return { streamId: 'batch-stream-4', close: async () => undefined }
+            })
+            const cancel = vi.fn(async () => {
+              // Simulate an in-flight chunk arriving while cancel() is awaiting RPC settlement.
+              receive({
+                streamId: 'batch-stream-4',
+                frame: { method: 'session/update', params: { sessionId: 'batch-4', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' tail-during-cancel' } } } },
+              })
+            })
+            Object.assign(acp, { cancel })
+            const loadSessionDetails = vi.fn(async () => ({ events: [] as HistoryEntry[], running: false }))
+            Object.assign(acp, { loadSessionDetails })
+            try {
+              expect(await useAppStore.getState().openSession(claudeSession)).toBe(true)
+              useAppStore.setState(state => ({
+                selectedSession: { ...claudeSession, running: true },
+                sessions: state.sessions.map(item => item.sessionId === claudeSession.sessionId ? { ...item, running: true } : item),
+              }))
+
+              // 1) Buffer Part 1 (flushed) and Part 2 (queued), then sendMessage -> Part 2 must stay before Follow-up.
+              receive({
+                streamId: 'batch-stream-4',
+                frame: { method: 'session/update', params: { sessionId: 'batch-4', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Part 1' } } } },
+              })
+              await vi.advanceTimersByTimeAsync(100)
+              receive({
+                streamId: 'batch-stream-4',
+                frame: { method: 'session/update', params: { sessionId: 'batch-4', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' Part 2' } } } },
+              })
+              expect(await useAppStore.getState().sendMessage('Follow-up')).toBe('sent')
+              const afterSend = useAppStore.getState().messages[claudeSession.sessionId] ?? []
+              expect(afterSend.map(item => item.kind === 'message' ? `${item.role}:${item.text}` : item.kind)).toEqual([
+                'assistant:Part 1 Part 2',
+                'user:Follow-up',
+              ])
+
+              // 2) stopSession flushes in-flight chunks before marking running: false so timer never flips running back to true.
+              await useAppStore.getState().stopSession()
+              expect(useAppStore.getState().selectedSession?.running).toBe(false)
+              expect(vi.getTimerCount()).toBe(0)
+              await vi.advanceTimersByTimeAsync(200)
+              expect(useAppStore.getState().selectedSession?.running).toBe(false)
+
+              // 3) Mismatched params.sessionId frame must not arm a timer or bump acpFrameRevision to abort resumeConnection settle.
+              useAppStore.setState(state => ({
+                selectedSession: { ...claudeSession, running: true },
+                sessions: state.sessions.map(item => item.sessionId === claudeSession.sessionId ? { ...item, running: true } : item),
+              }))
+              let finishReconcile!: (value: { events: HistoryEntry[]; running: boolean }) => void
+              loadSessionDetails.mockImplementationOnce(() => new Promise(resolve => { finishReconcile = resolve }))
+              await useAppStore.getState().resumeConnection()
+              receive({
+                streamId: 'batch-stream-4',
+                frame: { method: 'session/update', params: { sessionId: 'other-session', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'wrong' } } } },
+              })
+              expect(vi.getTimerCount()).toBe(0)
+              finishReconcile({ events: [], running: false })
+              await Promise.resolve()
+              await Promise.resolve()
+              expect(useAppStore.getState().selectedSession?.running).toBe(false)
+            } finally {
+              delete (acp as Record<string, unknown>).cancel
+              delete (acp as Record<string, unknown>).loadSessionDetails
+            }
+          } finally {
+            await useAppStore.getState().setOffline()
+            vi.useRealTimers()
+          }
+        },
+      },
+    ], prepareScenario1)
+  })
 })

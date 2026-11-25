@@ -27,6 +27,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
     async sendMessage(input, images = [], reuseRpcId, files = []) {
       if (get().busyAction?.startsWith('session:')) return 'rejected'
       runtime.flushPendingMuxFrames()
+      runtime.flushPendingCursorFrames()
       set({ commandResult: undefined })
       const session = get().selectedSession
       const text = input.trim()
@@ -220,6 +221,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         } else if (isAcpManagedBackend(session.backend)) {
           if (session.backend === 'cursor' && images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
           if (session.backend === 'pi' && images.length > 0) throw new Error(zhCN.runtime.piTextOnly)
+          runtime.flushPendingCursorFrames()
           // Always re-bind the ACP stream on the current RemoteClientCore before
           // prompting. After WebRTC flaps / Metro reload the module-level handle
           // can point at a dead core while RPC still works on a new one.
@@ -248,6 +250,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
             && promptResult.accepted === true
             && promptResult.stopReason === 'in_progress'
           if (!inProgress) {
+            runtime.flushPendingCursorFrames()
             set(state => ({
               sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
               selectedSession: state.selectedSession?.sessionId === session.sessionId
@@ -314,6 +317,9 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         // "message vanished / reappears after reload" mismatch; timeout/transport
         // errors leave the outcome unknown and must never be judged by timers.
         const unconfirmed = isRpcTimeoutError(error) || isRecoverableTransportError(error)
+        if (isAcpManagedBackend(session.backend) && !unconfirmed) {
+          runtime.flushPendingCursorFrames()
+        }
         set(state => ({
           messages: {
             ...state.messages,
@@ -448,6 +454,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
     },
 
     async stopSession() {
+      runtime.flushPendingCursorFrames()
       const session = get().selectedSession
       if (session === undefined || get().acpReadOnlySessionId === session.sessionId) return
       set({ busyAction: 'stop-session' })
@@ -474,6 +481,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
               ? runtime.connection.requirePi()
               : session.backend === 'antigravity' ? runtime.connection.requireAntigravity() : runtime.connection.requireCursor()
           await acpClient.cancel(cursorNativeId(session))
+          runtime.flushPendingCursorFrames()
           set(state => ({
             sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
             selectedSession: state.selectedSession?.sessionId === session.sessionId
@@ -492,6 +500,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
 
     async respondApproval(itemId, outcome) {
       runtime.flushPendingMuxFrames()
+      runtime.flushPendingCursorFrames()
       set({ busyAction: `approval:${itemId}`, error: undefined })
       try {
         const item = findApproval(get().messages, itemId)
@@ -531,6 +540,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
 
     async respondQuestion(itemId, selected, custom) {
       runtime.flushPendingMuxFrames()
+      runtime.flushPendingCursorFrames()
       set({ busyAction: `question:${itemId}`, error: undefined })
       try {
         const item = findQuestion(get().messages, itemId)

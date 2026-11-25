@@ -28,6 +28,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       ++runtime.sessionLoadGeneration
       runtime.sessionReadAbort?.abort()
       runtime.clearHarnessCatalogSync()
+      runtime.clearPendingCursorFrames()
       sessionFileStatCache.clear()
       const memory = useBrowseMemory.getState()
       const scope = browseScope({...get(), selectedDevice: device})
@@ -142,6 +143,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
               void runtime.closeActiveCodexStream(false)
               void runtime.closeActiveCursorStream(false)
               runtime.clearHarnessCatalogSync()
+              runtime.clearPendingCursorFrames()
               if (get().connection.phase !== 'disconnected') {
                 ++runtime.connectionGeneration
                 ++runtime.sessionLoadGeneration
@@ -316,6 +318,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           // The live subscription is still open. Closing it via openSession drops
           // in-flight deltas, approvals and prompt_completed, and the reopen would
           // discard the already streamed reply. Reconcile read-only with Host truth.
+          runtime.flushPendingCursorFrames()
           const stream = runtime.activeCursorStream
           const frameRevision = runtime.acpFrameRevision
           const sessionGeneration = runtime.sessionLoadGeneration
@@ -408,6 +411,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       runtime.reconnectFlight = undefined
       runtime.clearPendingMuxFrames()
       runtime.clearHarnessCatalogSync()
+      runtime.clearPendingCursorFrames()
       void useAttentionStore.getState().detachConnection()
       sessionFileStatCache.clear()
       await runtime.closeActiveCodexStream(false)
@@ -461,6 +465,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         ++runtime.sessionLoadGeneration
         runtime.clearPendingMuxFrames()
         runtime.clearHarnessCatalogSync()
+        runtime.clearPendingCursorFrames()
         void useAttentionStore.getState().detachConnection()
         sessionFileStatCache.clear()
         void runtime.closeActiveCodexStream(false)

@@ -1,5 +1,6 @@
 import { loadAcpModels } from '../services/acp-models'
 import type { AcpStream, CodexStream, CodexTimelineState } from '@dsh-remote/client-core'
+import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import { isAcpManagedBackend, workspaceStableKey, type AcpCatalogFilterOptions, type AcpManagedBackend } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
@@ -54,6 +55,8 @@ export class SessionRuntime {
   muxFlushTimer: ReturnType<typeof setTimeout> | undefined
   private pendingCodexFrames: { generation: number; frame: { method: string; params: unknown } }[] = []
   private codexFlushTimer: ReturnType<typeof setTimeout> | undefined
+  private pendingCursorFrames: { sessionId: string; generation: number; connectionGeneration: number; frame: AgentAcpFrameData }[] = []
+  private cursorFlushTimer: ReturnType<typeof setTimeout> | undefined
   private codexRecoveryTimer: ReturnType<typeof setTimeout> | undefined
   private cursorRecoveryTimer: ReturnType<typeof setTimeout> | undefined
   private cursorStreamGeneration = 0
@@ -345,9 +348,62 @@ export class SessionRuntime {
     this.cursorRecoveryTimer.unref?.()
   }
 
+  /** Coalesce ACP streaming deltas per 100 ms; flush immediately on approvals, turn end, or idle->running. */
+  enqueueCursorFrame(
+    sessionId: string,
+    generation: number,
+    connectionGeneration: number,
+    frame: AgentAcpFrameData,
+  ): void {
+    if (generation !== this.sessionLoadGeneration || connectionGeneration !== this.connectionGeneration) return
+    const selected = this.store.get().selectedSession
+    if (selected?.sessionId !== sessionId) return
+    const params = typeof frame.frame.params === 'object' && frame.frame.params !== null && !Array.isArray(frame.frame.params)
+      ? frame.frame.params as Record<string, unknown>
+      : undefined
+    if (params?.sessionId !== undefined && params.sessionId !== cursorNativeId(selected)) return
+    this.acpFrameRevision++
+    this.pendingCursorFrames.push({ sessionId, generation, connectionGeneration, frame })
+    if (this.pendingCursorFrames.length >= MUX_FLUSH_MAX
+      || shouldFlushCursorFrameImmediately(frame, selected.running === true)) {
+      this.flushPendingCursorFrames()
+    } else if (this.cursorFlushTimer === undefined) {
+      this.cursorFlushTimer = setTimeout(() => this.flushPendingCursorFrames(), MUX_FLUSH_MS)
+      this.cursorFlushTimer.unref?.()
+    }
+  }
+
+  /** Drain queued ACP frames before any store read or mutation that must observe them. */
+  flushPendingCursorFrames(): void {
+    if (this.cursorFlushTimer !== undefined) clearTimeout(this.cursorFlushTimer)
+    this.cursorFlushTimer = undefined
+    if (this.pendingCursorFrames.length === 0) return
+    const pending = this.pendingCursorFrames
+    this.pendingCursorFrames = []
+    const selectedId = this.store.get().selectedSession?.sessionId
+    const frames = pending
+      .filter(item => item.generation === this.sessionLoadGeneration
+        && item.connectionGeneration === this.connectionGeneration
+        && item.sessionId === selectedId)
+      .map(item => item.frame)
+    if (frames.length === 0) return
+    try {
+      this.store.get().handleCursorFrames(frames)
+    } catch (error) {
+      console.warn('acp frame batch dropped:', error instanceof Error ? error.name : 'unknown')
+    }
+  }
+
+  clearPendingCursorFrames(): void {
+    if (this.cursorFlushTimer !== undefined) clearTimeout(this.cursorFlushTimer)
+    this.cursorFlushTimer = undefined
+    this.pendingCursorFrames = []
+  }
+
   async closeActiveCursorStream(notifyRemote = true): Promise<void> {
     this.cursorStreamGeneration++
     this.clearCursorRecoveryTimer()
+    this.clearPendingCursorFrames()
     const stream = this.activeCursorStream
     this.activeCursorStream = undefined
     if (notifyRemote && stream !== undefined) await stream.close().catch(() => undefined)
@@ -360,10 +416,13 @@ export class SessionRuntime {
   ): Promise<void> {
     const streamGeneration = ++this.cursorStreamGeneration
     this.clearCursorRecoveryTimer()
+    this.clearPendingCursorFrames()
     const previous = this.activeCursorStream
     this.activeCursorStream = undefined
     if (previous !== undefined) await previous.close().catch(() => undefined)
     if (!current() || streamGeneration !== this.cursorStreamGeneration) return
+    const loadGeneration = this.sessionLoadGeneration
+    const connectionGeneration = this.connectionGeneration
     const client = session.backend === 'claude' ? this.connection.requireClaude()
       : session.backend === 'hermes' ? this.connection.requireHermes()
       : session.backend === 'opencode'
@@ -402,6 +461,9 @@ export class SessionRuntime {
       if (!current() || streamGeneration !== this.cursorStreamGeneration) return
       if (this.store.get().selectedSession?.sessionId !== session.sessionId) return
       if (this.activeCursorStream?.streamId !== closed.streamId) return
+      // Drain the coalesced batch before the turn is marked idle so the last
+      // deltas of the turn are not dropped by the close transition.
+      this.flushPendingCursorFrames()
       this.activeCursorStream = undefined
       this.store.set(state => ({
         sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
@@ -423,7 +485,7 @@ export class SessionRuntime {
         frame => {
           if (!current() || (openedStream === undefined && streamGeneration !== this.cursorStreamGeneration)) return
           if (openedStream !== undefined) nextAttempt = 0
-          this.store.get().handleCursorFrame(frame)
+          this.enqueueCursorFrame(session.sessionId, loadGeneration, connectionGeneration, frame)
         },
         closed => {
           if (openedStream === undefined) {
@@ -588,4 +650,31 @@ export class SessionRuntime {
       // ignored: text/image prompts can use the Host's current CodeX default
     }
   }
+}
+
+function isAcpActiveTurnUpdateKind(kind: string | undefined): boolean {
+  return kind === 'agent_message_chunk'
+    || kind === 'agent_message'
+    || kind === 'agent_thought_chunk'
+    || kind === 'agent_thought'
+    || kind === 'tool_call'
+    || kind === 'tool_call_update'
+    || kind === 'user_message_chunk'
+}
+
+function shouldFlushCursorFrameImmediately(frame: AgentAcpFrameData, selectedRunning: boolean): boolean {
+  const method = frame.frame.method
+  if (method === 'session/request_permission' || method === 'cursor/ask_question' || method === 'cursor/create_plan') {
+    return true
+  }
+  const params = typeof frame.frame.params === 'object' && frame.frame.params !== null && !Array.isArray(frame.frame.params)
+    ? frame.frame.params as Record<string, unknown>
+    : undefined
+  const update = params !== undefined && typeof params.update === 'object' && params.update !== null && !Array.isArray(params.update)
+    ? params.update as Record<string, unknown>
+    : params
+  const kind = typeof update?.sessionUpdate === 'string' ? update.sessionUpdate : undefined
+  if (kind === 'prompt_completed' || kind === 'prompt_failed') return true
+  if (!selectedRunning && isAcpActiveTurnUpdateKind(kind)) return true
+  return false
 }

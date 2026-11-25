@@ -438,6 +438,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     async openSession(session) {
       runtime.flushPendingMuxFrames()
       runtime.flushPendingCodexFrames()
+      runtime.flushPendingCursorFrames()
       const compact = get().compactHistory
       const historyModeChanged = runtime.historyCompactMode !== undefined && runtime.historyCompactMode !== compact
       if (historyModeChanged) {
@@ -813,6 +814,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             }),
           ])
           if (!current()) return
+          runtime.flushPendingCursorFrames()
           const items = foldAcpHistory(details.events, session.sessionId)
           let enrichedSession: RemoteSession = {
             ...session,
@@ -1092,6 +1094,11 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     async loadSessionHandoffItems(session) {
       const sid = session.sessionId
       if (!sid) return []
+      if (get().selectedSession?.sessionId === sid) {
+        runtime.flushPendingMuxFrames()
+        runtime.flushPendingCodexFrames()
+        runtime.flushPendingCursorFrames()
+      }
       const cached = [...(acpOlderHistory.get(sid) ?? []), ...(get().messages[sid] ?? [])]
       if (get().connection.phase !== 'connected') {
         if (cached.length > 0) return cached
@@ -1911,6 +1918,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
 
     async loadOlderHistory() {
       runtime.flushPendingMuxFrames()
+      runtime.flushPendingCursorFrames()
       const session = get().selectedSession
       const beforeSeq = get().oldestLoadedSeq
       if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore || get().busyAction?.startsWith('session:')) return

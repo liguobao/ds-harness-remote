@@ -1,4 +1,5 @@
 import { reduceCodexTimelineFrame } from '@dsh-remote/client-core'
+import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import { friendlyError } from '../lib/errors'
 import { strings as zhCN } from '../locales/i18n'
 import {
@@ -19,7 +20,167 @@ import type { AppState } from './store-state'
 
 /** SessionEvent actions use the store's single connection/session runtime. */
 export function createSessionEventActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'handleMuxFrame' | 'handleCodexFrame' | 'handleCodexFrames' | 'handleCursorFrame'> {
+  'handleMuxFrame' | 'handleCodexFrame' | 'handleCodexFrames' | 'handleCursorFrame' | 'handleCursorFrames'> {
+  const handleCursorFrames: AppState['handleCursorFrames'] = frames => {
+    if (frames.length === 0) return
+    const session = get().selectedSession
+    if (session === undefined || !isAcpManagedBackend(session.backend)) return
+    const nativeId = cursorNativeId(session)
+    const matched: Array<{
+      frame: AgentAcpFrameData
+      params: Record<string, unknown> | undefined
+      update: Record<string, unknown> | undefined
+      kind: string | undefined
+    }> = []
+    for (const frame of frames) {
+      const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
+      if (params?.sessionId !== undefined && params.sessionId !== nativeId) continue
+      const update = params === undefined
+        ? undefined
+        : (isRecord(params.update) ? params.update : params)
+      let kind: string | undefined
+      if (frame.frame.method === 'cursor/update_todos') {
+        kind = 'cursor/update_todos'
+      } else if (update !== undefined && typeof update.sessionUpdate === 'string') {
+        kind = update.sessionUpdate
+        if (kind === 'prompt_completed' || kind === 'prompt_failed') {
+          const catchUpCount = Array.isArray(update.catchUp) ? update.catchUp.length : 0
+          // Diagnostic only: terminal kind + catch-up size, never prompt or tool payloads.
+          console.info('[dsh-remote] acp frame:', session.backend, kind, catchUpCount > 0 ? `catchUp=${catchUpCount}` : '')
+        }
+      }
+      matched.push({ frame, params, update, kind })
+    }
+    if (matched.length === 0) return
+
+    let nextTodos: ReturnType<typeof normalizeAcpTodos>
+    let nextMode: string | undefined
+    let nextCommands: RemoteSession['availableCommands']
+    let nextContextPressure: { used: number; size: number; ratio: number } | undefined
+    let nextRunning: boolean | undefined
+    let markOpencodePending = false
+    let promptCompleted = false
+    let failureError: string | undefined
+
+    for (const { params, update, kind } of matched) {
+      runtime.acpFrameRevision++
+      if (kind === 'prompt_completed' || kind === 'prompt_failed') {
+        runtime.acpTerminalRevisions.set(session.sessionId, (runtime.acpTerminalRevisions.get(session.sessionId) ?? 0) + 1)
+      }
+      if (kind === 'cursor/update_todos' || kind === 'plan') {
+        const parsedTodos = normalizeAcpTodos((update ?? params)?.todos ?? (update ?? params)?.entries ?? (update ?? params)?.items)
+        if (parsedTodos !== undefined) nextTodos = parsedTodos
+      }
+      if (kind === 'current_mode_update' && update !== undefined) {
+        const parsedMode = typeof update.currentModeId === 'string' ? update.currentModeId
+          : typeof update.modeId === 'string' ? update.modeId
+          : typeof update.mode === 'string' ? update.mode : undefined
+        if (parsedMode !== undefined) nextMode = parsedMode
+      }
+      if (kind === 'available_commands_update' && update !== undefined && Array.isArray(update.availableCommands)) {
+        nextCommands = update.availableCommands.flatMap(entry => isRecord(entry) && typeof entry.name === 'string' && entry.name.trim()
+          ? [{
+              name: entry.name.trim(),
+              ...(typeof entry.description === 'string' ? { description: entry.description } : {}),
+              ...(isRecord(entry.input) && typeof entry.input.hint === 'string' ? { input: { hint: entry.input.hint } } : {}),
+            }]
+          : [])
+      }
+      if (kind === 'usage_update' && update !== undefined
+        && typeof update.used === 'number' && typeof update.size === 'number') {
+        nextContextPressure = {
+          used: update.used,
+          size: update.size,
+          ratio: update.size > 0 ? Math.min(1, Math.max(0, update.used / update.size)) : 0,
+        }
+      }
+      const isTurnTerminalFrame = kind === 'prompt_completed' || kind === 'prompt_failed'
+      const isTurnActiveFrame = !isTurnTerminalFrame && (
+        kind === 'agent_message_chunk'
+        || kind === 'agent_message'
+        || kind === 'agent_thought_chunk'
+        || kind === 'agent_thought'
+        || kind === 'tool_call'
+        || kind === 'tool_call_update'
+        || kind === 'user_message_chunk'
+      )
+      if (isTurnTerminalFrame) {
+        nextRunning = false
+        if (kind === 'prompt_completed') {
+          promptCompleted = true
+          if (session.backend === 'opencode') markOpencodePending = true
+        } else {
+          failureError = acpPromptFailureMessage(session.backend, update)
+        }
+      } else if (isTurnActiveFrame) {
+        nextRunning = true
+        failureError = undefined
+      }
+    }
+
+    const needsRunningChange = nextRunning !== undefined && (
+      nextRunning === false
+        ? true
+        : (!session.running || get().sessions.some(item => item.sessionId === session.sessionId && !item.running))
+    )
+    const sessionMetaChanged = needsRunningChange || markOpencodePending || failureError !== undefined
+      || nextTodos !== undefined || nextMode !== undefined || nextCommands !== undefined || nextContextPressure !== undefined
+
+    const applySessionMetadata = (item: RemoteSession): RemoteSession => {
+      if (item.sessionId !== session.sessionId) return item
+      const nextValues = {
+        ...item.projections?.values,
+        ...(nextTodos !== undefined ? { todos: nextTodos } : {}),
+        ...(nextContextPressure !== undefined ? { contextPressure: nextContextPressure } : {}),
+        ...(markOpencodePending ? { pendingCatalog: true } : {}),
+      }
+      return {
+        ...item,
+        ...(nextRunning === undefined ? {} : { running: nextRunning }),
+        ...(nextMode !== undefined ? { agentPreset: nextMode } : {}),
+        ...(nextCommands !== undefined ? { availableCommands: nextCommands } : {}),
+        ...((nextTodos !== undefined || nextContextPressure !== undefined || markOpencodePending)
+          ? { projections: { ...item.projections, values: nextValues } }
+          : {}),
+      }
+    }
+
+    set(state => {
+      const previousMessages = state.messages[session.sessionId] ?? []
+      let nextMessages = previousMessages
+      for (const { frame } of matched) {
+        nextMessages = applyCursorFrame(nextMessages, session.sessionId, frame)
+      }
+      const messagesChanged = nextMessages !== previousMessages
+      if (!messagesChanged && !sessionMetaChanged) return {}
+      return {
+        ...(messagesChanged ? {
+          messages: {
+            ...state.messages,
+            [session.sessionId]: nextMessages,
+          },
+        } : {}),
+        ...(sessionMetaChanged
+          ? {
+            sessions: state.sessions.map(applySessionMetadata),
+            selectedSession: state.selectedSession === undefined ? undefined : applySessionMetadata(state.selectedSession),
+            ...(failureError !== undefined ? { error: failureError } : {}),
+          }
+          : {}),
+      }
+    })
+
+    if (promptCompleted) {
+      if (session.backend === 'antigravity') void runtime.refreshAntigravityCatalog()
+      else if (session.backend === 'pi') void runtime.refreshPiCatalog()
+      else if (session.backend === 'opencode') void runtime.refreshOpencodeCatalog()
+      else if (session.backend === 'claude') void runtime.refreshClaudeCatalog()
+      else if (session.backend === 'hermes') void runtime.refreshHermesCatalog()
+      else if (session.backend === 'cursor') void runtime.refreshCursorCatalog()
+      else if (session.backend) void runtime.refreshCustomAcpCatalog(session.backend)
+    }
+  }
+
   return {
     handleMuxFrame(frame) {
       if (frame.payload.type === 'session/catalog-changed') {
@@ -313,105 +474,10 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
     },
 
     handleCursorFrame(frame) {
-      const session = get().selectedSession
-      if (session === undefined || !isAcpManagedBackend(session.backend)) return
-      const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
-      if (params?.sessionId !== undefined && params.sessionId !== cursorNativeId(session)) return
-      const update = params === undefined
-        ? undefined
-        : (isRecord(params.update) ? params.update : params)
-      let kind: string | undefined
-      if (frame.frame.method === 'cursor/update_todos') {
-        kind = 'cursor/update_todos'
-      } else if (update !== undefined && typeof update.sessionUpdate === 'string') {
-        kind = update.sessionUpdate
-        const catchUpCount = Array.isArray(update.catchUp) ? update.catchUp.length : 0
-        // Diagnostic only: kind + catch-up size, never prompt or tool payloads.
-        console.info('[dsh-remote] acp frame:', session.backend, kind, catchUpCount > 0 ? `catchUp=${catchUpCount}` : '')
-      }
-      runtime.acpFrameRevision++
-      if (kind === 'prompt_completed' || kind === 'prompt_failed') {
-        runtime.acpTerminalRevisions.set(session.sessionId, (runtime.acpTerminalRevisions.get(session.sessionId) ?? 0) + 1)
-      }
-      const nextTodos = kind === 'cursor/update_todos' || kind === 'plan'
-        ? normalizeAcpTodos((update ?? params)?.todos ?? (update ?? params)?.entries ?? (update ?? params)?.items)
-        : undefined
-      const nextMode = kind === 'current_mode_update' && update !== undefined
-        ? (typeof update.currentModeId === 'string' ? update.currentModeId
-          : typeof update.modeId === 'string' ? update.modeId
-          : typeof update.mode === 'string' ? update.mode : undefined)
-        : undefined
-      const nextCommands = kind === 'available_commands_update' && update !== undefined && Array.isArray(update.availableCommands)
-        ? update.availableCommands.flatMap(entry => isRecord(entry) && typeof entry.name === 'string' && entry.name.trim()
-          ? [{
-              name: entry.name.trim(),
-              ...(typeof entry.description === 'string' ? { description: entry.description } : {}),
-              ...(isRecord(entry.input) && typeof entry.input.hint === 'string' ? { input: { hint: entry.input.hint } } : {}),
-            }]
-          : [])
-        : undefined
-      const nextContextPressure = kind === 'usage_update' && update !== undefined
-        && typeof update.used === 'number' && typeof update.size === 'number'
-        ? { used: update.used, size: update.size, ratio: update.size > 0 ? Math.min(1, Math.max(0, update.used / update.size)) : 0 }
-        : undefined
-      const isTurnTerminalFrame = kind === 'prompt_completed' || kind === 'prompt_failed'
-      const isTurnActiveFrame = !isTurnTerminalFrame && (
-        kind === 'agent_message_chunk'
-        || kind === 'agent_message'
-        || kind === 'agent_thought_chunk'
-        || kind === 'agent_thought'
-        || kind === 'tool_call'
-        || kind === 'tool_call_update'
-        || kind === 'user_message_chunk'
-      )
-      const markOpencodePending = session.backend === 'opencode' && kind === 'prompt_completed'
-      const applySessionMetadata = (item: RemoteSession): RemoteSession => {
-        if (item.sessionId !== session.sessionId) return item
-        const nextValues = {
-          ...item.projections?.values,
-          ...(nextTodos !== undefined ? { todos: nextTodos } : {}),
-          ...(nextContextPressure !== undefined ? { contextPressure: nextContextPressure } : {}),
-          ...(markOpencodePending ? { pendingCatalog: true } : {}),
-        }
-        return {
-          ...item,
-          ...(isTurnTerminalFrame ? { running: false } : isTurnActiveFrame ? { running: true } : {}),
-          ...(nextMode !== undefined ? { agentPreset: nextMode } : {}),
-          ...(nextCommands !== undefined ? { availableCommands: nextCommands } : {}),
-          ...((nextTodos !== undefined || nextContextPressure !== undefined || markOpencodePending)
-            ? { projections: { ...item.projections, values: nextValues } }
-            : {}),
-        }
-      }
-      const needsRunningRestore = isTurnActiveFrame
-        && (!session.running || get().sessions.some(item => item.sessionId === session.sessionId && !item.running))
-      const sessionMetaChanged = isTurnTerminalFrame || needsRunningRestore || markOpencodePending
-        || nextTodos !== undefined || nextMode !== undefined || nextCommands !== undefined || nextContextPressure !== undefined
-      set(state => ({
-        messages: {
-          ...state.messages,
-          [session.sessionId]: applyCursorFrame(state.messages[session.sessionId] ?? [], session.sessionId, frame),
-        },
-        ...(sessionMetaChanged
-          ? {
-            sessions: state.sessions.map(applySessionMetadata),
-            selectedSession: state.selectedSession === undefined ? undefined : applySessionMetadata(state.selectedSession),
-            ...(kind === 'prompt_failed'
-              ? { error: acpPromptFailureMessage(session.backend, update) }
-              : {}),
-          }
-          : {}),
-      }))
-      if (kind === 'prompt_completed') {
-        if (session.backend === 'antigravity') void runtime.refreshAntigravityCatalog()
-        else if (session.backend === 'pi') void runtime.refreshPiCatalog()
-        else if (session.backend === 'opencode') void runtime.refreshOpencodeCatalog()
-        else if (session.backend === 'claude') void runtime.refreshClaudeCatalog()
-        else if (session.backend === 'hermes') void runtime.refreshHermesCatalog()
-        else if (session.backend === 'cursor') void runtime.refreshCursorCatalog()
-        else if (session.backend) void runtime.refreshCustomAcpCatalog(session.backend)
-      }
+      handleCursorFrames([frame])
     },
+
+    handleCursorFrames,
   }
 }
 

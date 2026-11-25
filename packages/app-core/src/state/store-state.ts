@@ -252,6 +252,7 @@ export interface AppState {
   handleCodexFrame(frame: { method: string; params: unknown }): void
   handleCodexFrames(frames: { method: string; params: unknown }[]): void
   handleCursorFrame(frame: AgentAcpFrameData): void
+  handleCursorFrames(frames: AgentAcpFrameData[]): void
 }
 
 export const disconnected: ConnectionSnapshot = {
