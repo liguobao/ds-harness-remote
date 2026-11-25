@@ -2311,4 +2311,84 @@ describe('HarnessRemoteBridge dsBot/* allowlist', () => {
 
     await bridge.closeAll()
   })
+
+  it('forwards successful dsBot/call responses to forwardedEventsObserver.onDsBotCall without disrupting RPC', async () => {
+    const observed: Array<{ body: { endpoint: string; payload?: Record<string, unknown> | null }; result: unknown }> = []
+    let shouldThrow = false
+    const observer = {
+      onFrame: vi.fn(),
+      onDsBotCall: vi.fn((body: { endpoint: string; payload?: Record<string, unknown> | null }, result: unknown) => {
+        observed.push({ body, result })
+        if (shouldThrow) throw new Error('observer boom')
+      }),
+    }
+    const dispatch = vi.fn(async (_method: string, payload: unknown) => {
+      const endpoint = (payload as { args?: { endpoint?: string } })?.args?.endpoint
+      if (endpoint === 'fail-native') {
+        return { ok: false as const, error: { code: 'gateway/invocation-unavailable', message: 'unavailable', details: {} } }
+      }
+      if (endpoint === 'non-record') {
+        return { ok: true as const, value: 'plain-string' }
+      }
+      return { ok: true as const, value: { ok: true, value: { resolved: endpoint } } }
+    })
+    const bridge = new HarnessRemoteBridge(
+      gateway({ dispatch }),
+      vi.fn(async () => undefined),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      observer,
+    )
+
+    // Direct unary call with object payload
+    await expect(bridge.call({
+      endpoint: 'dsBot/call',
+      payload: { args: { endpoint: 'approval-answer', payload: { id: 'apr-1', choice: 'allow' } } },
+    })).resolves.toEqual({ ok: true, value: { ok: true, value: { resolved: 'approval-answer' } } })
+
+    // Direct unary call with omitted payload normalizes payload to null
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'state' } } })
+
+    // Failed native result, non-record value, and missing endpoint must be skipped
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'fail-native' } } })
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'non-record' } } })
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: {} } })
+
+    // Observer exception must not disrupt RPC settlement (including chunked transfer commit)
+    shouldThrow = true
+    const transferId = '00000000-0000-4000-8000-0000000000d3'
+    const transferBytes = new TextEncoder().encode(JSON.stringify({
+      endpoint: 'dsBot/call',
+      payload: { args: { endpoint: 'notices', payload: { since: 1 } } },
+    }))
+    bridge.openTransfer({ transferId, totalBytes: transferBytes.byteLength, totalChunks: 1 })
+    bridge.appendTransfer({ transferId, index: 0, data: Buffer.from(transferBytes).toString('base64') })
+    await expect(bridge.commitTransfer({ transferId })).resolves.toEqual({
+      kind: 'inline',
+      response: { ok: true, value: { ok: true, value: { resolved: 'notices' } } },
+    })
+
+    expect(observed).toEqual([
+      {
+        body: { endpoint: 'approval-answer', payload: { id: 'apr-1', choice: 'allow' } },
+        result: { ok: true, value: { resolved: 'approval-answer' } },
+      },
+      {
+        body: { endpoint: 'state', payload: null },
+        result: { ok: true, value: { resolved: 'state' } },
+      },
+      {
+        body: { endpoint: 'notices', payload: { since: 1 } },
+        result: { ok: true, value: { resolved: 'notices' } },
+      },
+    ])
+
+    await bridge.closeAll()
+  })
 })

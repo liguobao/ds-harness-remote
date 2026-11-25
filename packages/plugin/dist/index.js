@@ -93010,6 +93010,7 @@ var HostAttentionTracker = class {
       onStreamOpened: () => this.onHarnessEventStreamOpened(),
       onFrame: (frame) => this.observeHarnessEventFrame(frame),
       onEventResult: (eventId, outcomeKind) => this.observeHarnessEventResult(eventId, outcomeKind),
+      onDsBotCall: (body, botResult) => this.observeBotResponse("api/bot", body, { status: 200, json: botResult }),
       onStreamClosed: () => this.onHarnessEventStreamClosed()
     };
   }
@@ -113808,6 +113809,18 @@ var HarnessRemoteBridge = class {
         if (eventId !== void 0) {
           try {
             this.forwardedEventsObserver.onEventResult(eventId, outcomeKind);
+          } catch {
+          }
+        }
+      }
+      if (params.endpoint === "dsBot/call" && nativeResult.ok && isRecord26(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== void 0) {
+        const root2 = record11(params.payload);
+        const args = isRecord26(root2.args) ? root2.args : root2;
+        const botEndpoint = typeof args.endpoint === "string" && args.endpoint.length > 0 ? args.endpoint : void 0;
+        if (botEndpoint !== void 0) {
+          const botPayload = isRecord26(args.payload) ? args.payload : null;
+          try {
+            this.forwardedEventsObserver.onDsBotCall({ endpoint: botEndpoint, payload: botPayload }, nativeResult.value);
           } catch {
           }
         }

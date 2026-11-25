@@ -327,6 +327,7 @@ export interface HarnessForwardedEventsObserver {
   onStreamOpened?(): void
   onFrame(frame: unknown): void
   onEventResult?(eventId: string, outcomeKind?: string): void
+  onDsBotCall?(body: { endpoint: string; payload?: Record<string, unknown> | null }, botResult: unknown): void
   onStreamClosed?(): void
 }
 
@@ -440,6 +441,19 @@ export class HarnessRemoteBridge {
         if (eventId !== undefined) {
           try {
             this.forwardedEventsObserver.onEventResult(eventId, outcomeKind)
+          } catch {
+            // Read-only event observation must never disrupt RPC settlement.
+          }
+        }
+      }
+      if (params.endpoint === 'dsBot/call' && nativeResult.ok && isRecord(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== undefined) {
+        const root = record(params.payload)
+        const args = isRecord(root.args) ? root.args : root
+        const botEndpoint = typeof args.endpoint === 'string' && args.endpoint.length > 0 ? args.endpoint : undefined
+        if (botEndpoint !== undefined) {
+          const botPayload = isRecord(args.payload) ? args.payload : null
+          try {
+            this.forwardedEventsObserver.onDsBotCall({ endpoint: botEndpoint, payload: botPayload }, nativeResult.value)
           } catch {
             // Read-only event observation must never disrupt RPC settlement.
           }

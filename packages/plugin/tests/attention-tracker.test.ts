@@ -836,6 +836,90 @@ describe('HostAttentionTracker', () => {
     await tracker.close()
   })
 
+  it('observes DS-Bot HarnessRemoteBridge dsBot/call responses and clears PluginRouteBridge items across clients', async () => {
+    const tracker = new HostAttentionTracker({ logger: silentLogger(), debounceMs: 50 })
+    const botStateValue = {
+      workspaceId: 'bot-ws',
+      bots: [{ id: 'b1', sessionId: 'bot-sess-1', name: 'Ops Bot' }],
+      rooms: [],
+      work: {
+        bots: { b1: { active: true } },
+        rooms: {},
+        approvals: [{ id: 'apr-1', botId: 'b1', tool: 'shell', reason: 'Restart worker' }],
+      },
+      questions: {
+        'bot-sess-1': { id: 'q-1', question: 'Confirm rollout?' },
+      },
+    }
+
+    const pluginRoute = new PluginRouteBridge(
+      vi.fn(async () => ({ status: 200, json: { ok: true, value: botStateValue } })),
+      silentLogger(),
+      (route, body, result) => { tracker.observeBotResponse(route, body, result) },
+    )
+    const gateway: LocalTypertGateway = {
+      invoke: async () => undefined,
+      dispatch: vi.fn(async (_method: string, payload: unknown) => {
+        const endpoint = (payload as { args?: { endpoint?: string } })?.args?.endpoint
+        if (endpoint === 'state') {
+          return { ok: true as const, value: { ok: true, value: botStateValue } }
+        }
+        return { ok: true as const, value: { ok: true, value: { resolved: true } } }
+      }),
+      open: async () => (async function* () { return })(),
+      failure: () => ({ code: 'internal', message: 'Request failed.', details: {} }),
+      supportsCarrier: true,
+    }
+    const harnessBridge = new HarnessRemoteBridge(
+      gateway,
+      vi.fn(async () => undefined),
+      silentLogger(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      tracker.createHarnessBridgeObserver(),
+    )
+
+    // Client A observes pending approval/question via PluginRouteBridge
+    await pluginRoute.call({ route: 'api/bot', body: { endpoint: 'state', payload: null } })
+    expect(tracker.list().items.map(item => [item.backend, item.mode, item.status])).toEqual([
+      ['ds-bot', 'bot', 'waiting_question'],
+      ['ds-bot', 'bot', 'waiting_approval'],
+      ['ds-bot', 'bot', 'running'],
+    ])
+
+    // Client B resolves both via HarnessRemoteBridge dsBot/call -> tracker clears them immediately
+    await harnessBridge.call({
+      endpoint: 'dsBot/call',
+      payload: { args: { endpoint: 'approval-answer', payload: { id: 'apr-1', choice: 'allow' } } },
+    })
+    expect(tracker.list().items.some(item => item.status === 'waiting_approval')).toBe(false)
+
+    await harnessBridge.call({
+      endpoint: 'dsBot/call',
+      payload: { args: { endpoint: 'answer-question', payload: { sessionId: 'bot-sess-1', questionId: 'q-1', answer: 'yes' } } },
+    })
+    expect(tracker.list().items.some(item => item.status === 'waiting_question')).toBe(false)
+
+    // Pure dsBot/call state snapshot also populates tracker directly
+    await harnessBridge.call({
+      endpoint: 'dsBot/call',
+      payload: { args: { endpoint: 'state', payload: null } },
+    })
+    expect(tracker.list().items.map(item => [item.backend, item.mode, item.status])).toEqual([
+      ['ds-bot', 'bot', 'waiting_question'],
+      ['ds-bot', 'bot', 'waiting_approval'],
+      ['ds-bot', 'bot', 'running'],
+    ])
+
+    await harnessBridge.closeAll()
+    await tracker.close()
+  })
+
   it('enforces priority ordering, truncation, 64-item cap, opaque token TTL/resolve/LRU, ackUnread, and digest debounce/dedupe', async () => {
     vi.useFakeTimers()
     try {
