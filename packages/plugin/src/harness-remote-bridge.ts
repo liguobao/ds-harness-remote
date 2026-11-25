@@ -137,6 +137,8 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'credentials/set',
   'credentials/unset',
   'directoryPicker/list',
+  'dsBot/call',
+  'dsBot/feed',
   'fileReferences/list',
   'goals/clear',
   'goals/complete',
@@ -365,6 +367,7 @@ export class HarnessRemoteBridge {
     this.assertAllowed(params.endpoint)
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
     if (params.endpoint === 'speech/follow') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this speech endpoint.')
+    if (params.endpoint === 'dsBot/feed') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this DS Bot feed endpoint.')
     if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {
       const args = requestArgs(params.payload)
       if (args.ns === 'ds-harness-remote' || args.ns === 'dsh-remote') {
@@ -695,6 +698,9 @@ export class HarnessRemoteBridge {
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'This terminal endpoint is not a stream.')
     if (params.endpoint.startsWith('speech/') && params.endpoint !== 'speech/follow') {
       throw new RpcError('METHOD_NOT_ALLOWED', 'This speech endpoint is not a stream.')
+    }
+    if (params.endpoint === 'dsBot/call') {
+      throw new RpcError('METHOD_NOT_ALLOWED', 'This DS Bot endpoint is not a stream.')
     }
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload)
     if (this.streams.has(params.streamId)) throw new RpcError('REQUEST_CONFLICT', 'The Harness Remote stream is already open.')
