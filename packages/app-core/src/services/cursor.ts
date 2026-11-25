@@ -660,6 +660,9 @@ export function reconcileAcpCachedPrompts(history: ChatItem[], cached: ChatItem[
           && !historyTurns.some(candidate => candidate.index > next.index && samePrompt(prompt, candidate.prompt))) {
           lastMatchedIndex = Math.max(lastMatchedIndex, next.index)
           claimedHistoryPrompts.add(next.prompt.id)
+          // A confirmed successor proves the snapshot already reached past the
+          // locals buffered so far, so they are not a stale tail to retain.
+          unmatchedTail.length = 0
           confirmedIds.add(prompt.id)
         }
       }
