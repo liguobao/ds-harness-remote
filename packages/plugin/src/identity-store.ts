@@ -231,6 +231,7 @@ export class IdentityStore {
       this.identity = undefined
       this.peers.clear()
       await removeIdentityRecords(this.directory)
+      await removeStaleTemporaries(this.directory)
       const identity = await this.loadOrCreateLocked(deviceName)
       if (options.clearPairingPolicy) await rm(join(this.directory, 'pairing-host-only.json'), { force: true })
       return identity
@@ -424,14 +425,14 @@ export async function resetDefaultIdentityRoles(
     if (serverUrl === undefined) {
       if (!roles.includes('host')) return
       const identities = createStore({ directory: root, env: options.env, homeDirectory: options.homeDirectory, role: 'host' })
-      await identities.reset(deviceName)
+      await identities.reset(deviceName, { clearPairingPolicy: true })
       await new ServerCredentialStore(root).clear()
       return
     }
     for (const role of roles) {
       const directory = serverStorageDirectory(root, serverUrl, role)
       const identities = createStore({ directory, env: options.env, homeDirectory: options.homeDirectory, role })
-      await identities.reset(deviceName)
+      await identities.reset(deviceName, { clearPairingPolicy: true })
       await new ServerCredentialStore(directory).clear()
     }
   }
@@ -1036,15 +1037,10 @@ async function ensureDirectory(directory: string): Promise<void> {
 
 /** Drop owned identity records in `directory`, preserving locks and sibling trees. */
 async function removeIdentityRecords(directory: string): Promise<void> {
-  let entries: string[]
-  try {
-    entries = await readdir(directory)
-  } catch {
-    return
-  }
+  const entries = await readdir(directory)
   await Promise.all(entries
     .filter(name => isOwnedIdentityRecord(name))
-    .map(name => unlink(join(directory, name)).catch(() => undefined)))
+    .map(name => rm(join(directory, name), { force: true })))
 }
 
 function isTakeoverLockArtifact(name: string): boolean {

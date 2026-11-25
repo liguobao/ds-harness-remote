@@ -91997,6 +91997,7 @@ var IdentityStore = class {
       this.identity = void 0;
       this.peers.clear();
       await removeIdentityRecords(this.directory);
+      await removeStaleTemporaries(this.directory);
       const identity3 = await this.loadOrCreateLocked(deviceName);
       if (options.clearPairingPolicy) await rm3(join5(this.directory, "pairing-host-only.json"), { force: true });
       return identity3;
@@ -92144,14 +92145,14 @@ async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options =
     if (serverUrl === void 0) {
       if (!roles.includes("host")) return;
       const identities = createStore({ directory: root2, env: options.env, homeDirectory: options.homeDirectory, role: "host" });
-      await identities.reset(deviceName);
+      await identities.reset(deviceName, { clearPairingPolicy: true });
       await new ServerCredentialStore(root2).clear();
       return;
     }
     for (const role2 of roles) {
       const directory = serverStorageDirectory(root2, serverUrl, role2);
       const identities = createStore({ directory, env: options.env, homeDirectory: options.homeDirectory, role: role2 });
-      await identities.reset(deviceName);
+      await identities.reset(deviceName, { clearPairingPolicy: true });
       await new ServerCredentialStore(directory).clear();
     }
   };
@@ -92660,13 +92661,8 @@ async function ensureDirectory(directory) {
   await chmod2(directory, 448);
 }
 async function removeIdentityRecords(directory) {
-  let entries;
-  try {
-    entries = await readdir2(directory);
-  } catch {
-    return;
-  }
-  await Promise.all(entries.filter((name2) => isOwnedIdentityRecord(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
+  const entries = await readdir2(directory);
+  await Promise.all(entries.filter((name2) => isOwnedIdentityRecord(name2)).map((name2) => rm3(join5(directory, name2), { force: true })));
 }
 function isTakeoverLockArtifact(name2) {
   return /^device\.lock\.takeover-[0-9a-f]{16}$/.test(name2);
