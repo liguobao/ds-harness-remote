@@ -273,9 +273,26 @@ The file preview header offers Save to phone. On Android 10 and newer it writes 
 
 ## Live task notifications
 
-Android 16 and later can promote an active task notification to a system Live Update.
-The notification also supplies Xiaomi Focus and Samsung Now Bar presentation data on
-compatible devices. Tapping the task opens its conversation.
+Android 16 and later can promote an active task notification (running turns,
+pending approvals, and unanswered questions) to a system Live Update; running
+tasks with a start timestamp show a live timer, while waiting states show short
+status text. The notification also supplies Xiaomi Focus and Samsung Now Bar
+presentation data on compatible devices. Tapping the notification opens the
+pending attention inbox or the corresponding conversation. When no active task
+remains, the live surface clears back to the standard ongoing connection
+notification, while pending-input, completion, and failure alerts are posted as
+separate notifications when enabled outside the active conversation.
+
+ColorOS 16 and later (Android 16+, on OPPO, OnePlus, and realme devices)
+surface active tasks in Fluid Cloud / Live Alerts through standard Android 16
+Live Updates; no vendor scene identifier or extra build flag is needed. Enable
+the per-app Live Updates / Fluid Cloud toggle in system settings (for example,
+under *Notifications & status bar* for the app—labeled *Live Alerts* or
+「流体云显示实时活动」 depending on system language and firmware; lock screen
+and banner options are optional). That switch is independent of the standard
+notification permission and may be off by default (such as on sideloaded
+builds). Earlier OS versions without Android 16 Live Updates (including ColorOS
+15 and earlier) remain on the standard ongoing notification path.
 
 For vendor-approved builds, set `DSH_VIVO_ATOMIC_SCENE` (vivo or iQOO) or
 `DSH_HUAWEI_LIVE_EVENT` (Huawei Android APK) to the identifier approved for this
