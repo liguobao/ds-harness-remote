@@ -6,6 +6,8 @@ import { RpcError } from '../../safe-error.js'
 import { execFileCommand } from '../windows-spawn.js'
 
 const MAX_RESPONSE_BYTES = 64 * 1024
+const MAX_LIST_RESPONSE_BYTES = 4 * 1024 * 1024
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/
 
 /** Probe the installed CLI, since ACP builds do not all expose a native HTTP listener. */
 export async function opencodeHasNativeApi(binary: string, args: readonly string[], cwd: string | undefined, signal: AbortSignal): Promise<boolean> {
@@ -40,6 +42,33 @@ export class OpencodeNativeApi {
     return typeof session.time.archived === 'number' && Number.isFinite(session.time.archived)
   }
 
+  async listArchived(sessionIds: readonly string[], cwd: string): Promise<Map<string, boolean>> {
+    if (sessionIds.some(id => !SESSION_ID_PATTERN.test(id))) throw new RpcError('INVALID_MESSAGE', 'The OpenCode session ID is invalid.')
+    const wanted = new Set(sessionIds)
+    try {
+      const result = await this.requestJson('GET', '/session', cwd, MAX_LIST_RESPONSE_BYTES)
+      if (!Array.isArray(result)) throw unavailable()
+      const archived = new Map<string, boolean>()
+      const paths = new Map<string, Promise<string>>()
+      for (const row of result) {
+        if (!isNativeRecord(row) || typeof row.id !== 'string' || !wanted.has(row.id)) continue
+        if (archived.has(row.id) || typeof row.directory !== 'string' || !isNativeRecord(row.time)) throw unavailable()
+        let path = paths.get(row.directory)
+        if (!path) {
+          path = realpath(row.directory)
+          paths.set(row.directory, path)
+        }
+        if (await path !== cwd) throw unavailable()
+        const value = row.time.archived
+        if (value != null && (typeof value !== 'number' || !Number.isFinite(value))) throw unavailable()
+        archived.set(row.id, value != null)
+      }
+      return archived
+    } catch {
+      throw unavailable()
+    }
+  }
+
   async archive(sessionId: string, cwd: string): Promise<void> {
     if (await this.isArchived(sessionId, cwd)) return
     const session = await this.session('PATCH', sessionId, cwd)
@@ -49,37 +78,46 @@ export class OpencodeNativeApi {
   close(): void { this.shutdown.abort() }
 
   private async session(method: 'GET' | 'PATCH', sessionId: string, cwd: string): Promise<{ time: { archived?: number } }> {
-    if (!/^[A-Za-z0-9_-]{1,256}$/.test(sessionId)) throw new RpcError('INVALID_MESSAGE', 'The OpenCode session ID is invalid.')
+    if (!SESSION_ID_PATTERN.test(sessionId)) throw new RpcError('INVALID_MESSAGE', 'The OpenCode session ID is invalid.')
     try {
-      const url = new URL(`/session/${encodeURIComponent(sessionId)}`, this.origin)
-      url.searchParams.set('directory', cwd)
-      const response = await this.request(url, {
-        method, redirect: 'error', signal: AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(20_000)]),
-        headers: { authorization: `Basic ${Buffer.from(`opencode:${this.password}`).toString('base64')}`, 'content-type': 'application/json' },
-        ...(method === 'PATCH' ? { body: JSON.stringify({ time: { archived: Date.now() } }) } : {}),
-      })
-      if (!response.ok) { await response.body?.cancel(); throw unavailable() }
-      const reader = response.body?.getReader()
-      if (!reader) throw unavailable()
-      const chunks: Uint8Array[] = []
-      let bytes = 0
-      try {
-        for (;;) {
-          const chunk = await reader.read()
-          if (chunk.done) break
-          bytes += chunk.value.byteLength
-          if (bytes > MAX_RESPONSE_BYTES) throw unavailable()
-          chunks.push(chunk.value)
-        }
-      } finally { await reader.cancel().catch(() => undefined) }
-      const result = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-      if (!result || result.id !== sessionId || typeof result.directory !== 'string' || !result.time || typeof result.time !== 'object'
+      const result = await this.requestJson(method, `/session/${encodeURIComponent(sessionId)}`, cwd, MAX_RESPONSE_BYTES,
+        method === 'PATCH' ? JSON.stringify({ time: { archived: Date.now() } }) : undefined)
+      if (!isNativeRecord(result) || result.id !== sessionId || typeof result.directory !== 'string' || !isNativeRecord(result.time)
         || await realpath(result.directory) !== cwd) throw unavailable()
-      return result
+      return result as { time: { archived?: number } }
     } catch {
       throw unavailable()
     }
   }
+
+  private async requestJson(method: 'GET' | 'PATCH', path: string, cwd: string, maxBytes: number, body?: string): Promise<unknown> {
+    const url = new URL(path, this.origin)
+    url.searchParams.set('directory', cwd)
+    const response = await this.request(url, {
+      method, redirect: 'error', signal: AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(20_000)]),
+      headers: { authorization: `Basic ${Buffer.from(`opencode:${this.password}`).toString('base64')}`, 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body }),
+    })
+    if (!response.ok) { await response.body?.cancel(); throw unavailable() }
+    const reader = response.body?.getReader()
+    if (!reader) throw unavailable()
+    const chunks: Uint8Array[] = []
+    let bytes = 0
+    try {
+      for (;;) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        bytes += chunk.value.byteLength
+        if (bytes > maxBytes) throw unavailable()
+        chunks.push(chunk.value)
+      }
+    } finally { await reader.cancel().catch(() => undefined) }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  }
+}
+
+function isNativeRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export async function opencodeLoopbackPort(): Promise<number> {
