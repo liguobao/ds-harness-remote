@@ -91,13 +91,20 @@ function extractExpectedRecord(entry: ScheduleCatalogEntry): ScheduleRecord {
   }
 }
 
-type SchedulePreset = 'daily' | 'workdays' | 'weekly' | 'monthly' | 'hourly' | 'minutely' | 'once'
+type SchedulePreset = 'daily' | 'workdays' | 'weekly' | 'monthly' | 'hourly' | 'minutely' | 'once' | 'cron'
+
+const MONTHLY_CRON = /^(\d{1,2})\s+(\d{1,2})\s+1\s+\*\s+\*$/u
+
+function monthlyCron(time: string): string {
+  const [hour, minute] = time.split(':').map(Number)
+  return `${minute} ${hour} 1 * *`
+}
 
 /** Preset -> concrete Host selector kind. */
 function presetToKind(preset: SchedulePreset): TimingKind {
   if (preset === 'workdays' || preset === 'weekly') return 'weekly'
   if (preset === 'hourly' || preset === 'minutely') return 'every'
-  if (preset === 'monthly') return 'cron'
+  if (preset === 'monthly' || preset === 'cron') return 'cron'
   if (preset === 'once') return 'at'
   return 'daily'
 }
@@ -149,7 +156,7 @@ export function AutomationTasksModal({
   const [formIntervalMinutes, setFormIntervalMinutes] = useState(60)
   const [formWeekdays, setFormWeekdays] = useState<number[]>([1, 2, 3, 4, 5])
   const [formDelayMinutes, setFormDelayMinutes] = useState(30)
-  const [formCronExpression, setFormCronExpression] = useState('0 9 * * *')
+  const [formCronExpression, setFormCronExpression] = useState('0 9 1 * *')
   const [submitting, setSubmitting] = useState(false)
 
   const formTokenRef = useRef(0)
@@ -249,7 +256,8 @@ export function AutomationTasksModal({
     const query = search.trim().toLowerCase()
     return tasks
       .filter(t => {
-        if (statusFilter !== 'all' && t.status !== statusFilter) return false
+        if (statusFilter === 'active' && t.status !== 'active') return false
+        if (statusFilter === 'inactive' && t.status !== 'inactive' && t.status !== 'ended') return false
         if (!query) return true
         return (
           (t.title || '').toLowerCase().includes(query) ||
@@ -386,6 +394,7 @@ export function AutomationTasksModal({
           { key: 'hourly', label: strings.automation.presetHourly },
           { key: 'minutely', label: strings.automation.presetMinutely },
           { key: 'once', label: strings.automation.presetOnce },
+          { key: 'cron', label: 'Cron' },
         ] as const).map(option => ({ key: option.key, label: option.label, active: formPreset === option.key })),
         select: (key: string) => {
           setTimingDirty(true)
@@ -447,6 +456,7 @@ export function AutomationTasksModal({
     if (formPreset === 'hourly') return strings.automation.presetHourly
     if (formPreset === 'minutely') return strings.automation.presetMinutely
     if (formPreset === 'once') return strings.automation.presetOnce
+    if (formPreset === 'cron') return 'Cron'
     return strings.automation.presetDaily
   }, [formPreset, strings])
 
@@ -495,6 +505,8 @@ export function AutomationTasksModal({
 
   const nextRunsText =
     formTriggerMode === 'now' ? strings.automation.triggerNowHint : nextRunsLabel
+  const showNextRuns = formPreset !== 'cron'
+    && (formPreset !== 'monthly' || formTimeZone === Intl.DateTimeFormat().resolvedOptions().timeZone)
 
   const emptyTitle = useMemo(() => {
     if (statusFilter === 'inactive' && search.trim() === '') {
@@ -528,7 +540,7 @@ export function AutomationTasksModal({
     setFormIntervalMinutes(60)
     setFormWeekdays([1, 2, 3, 4, 5])
     setFormDelayMinutes(30)
-    setFormCronExpression('0 9 * * *')
+    setFormCronExpression('0 9 1 * *')
     setEditSnapshot(null)
     setTimingDirty(false)
     setFormMode('create')
@@ -576,9 +588,9 @@ export function AutomationTasksModal({
     } else if (task.kind === 'cron') {
       const expression = task.expression || '0 9 1 * *'
       setFormKind('cron')
-      setFormPreset('monthly')
       setFormCronExpression(expression)
-      const match = /^(\d{1,2}) (\d{1,2}) 1 \* \*$/u.exec(expression.trim())
+      const match = MONTHLY_CRON.exec(expression.trim())
+      setFormPreset(match === null ? 'cron' : 'monthly')
       if (match !== null) {
         setFormTime(`${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`)
       }
@@ -618,8 +630,14 @@ export function AutomationTasksModal({
       }
     }
 
+    if (formPreset === 'cron' && formTriggerMode === 'scheduled' && !formCronExpression.trim()) {
+      Alert.alert(strings.automation.title, strings.automation.saveFailed)
+      return
+    }
+
     const currentToken = formTokenRef.current
     const tz = formTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
+    const expression = formPreset === 'monthly' ? monthlyCron(formTime.trim()) : formCronExpression.trim()
 
     setSubmitting(true)
     try {
@@ -651,12 +669,8 @@ export function AutomationTasksModal({
             time_zone: tz,
             weekdays: formWeekdays.length > 0 ? formWeekdays : [1, 2, 3, 4, 5],
           }
-        } else if (formPreset === 'monthly') {
-          const parsed = /^(\d{1,2}) (\d{1,2}) 1 \* \*$/u.exec(formCronExpression.trim())
-          const [monthHour, monthMinute] = formTime.split(':')
-          req.cron = parsed === null
-            ? { expression: formCronExpression.trim(), time_zone: tz }
-            : { expression: `${Number(monthMinute)} ${Number(monthHour)} 1 * *`, time_zone: tz }
+        } else if (formPreset === 'monthly' || formPreset === 'cron') {
+          req.cron = { expression, time_zone: tz }
         } else if (formPreset === 'hourly') {
           req.every_seconds = Math.max(60, (formIntervalMinutes || 60) * 60)
         } else if (formPreset === 'minutely') {
@@ -689,16 +703,8 @@ export function AutomationTasksModal({
                 weekdays: formWeekdays.length > 0 ? formWeekdays : [1, 2, 3, 4, 5],
               },
             }
-          } else if (formPreset === 'monthly') {
-            const parsed = /^(\d{1,2}) (\d{1,2}) 1 \* \*$/u.exec(formCronExpression.trim())
-            const [monthHour, monthMinute] = formTime.split(':')
-            change = {
-              kind: 'cron',
-              cron: {
-                expression: parsed === null ? formCronExpression.trim() : `${Number(monthMinute)} ${Number(monthHour)} 1 * *`,
-                time_zone: tz,
-              },
-            }
+          } else if (formPreset === 'monthly' || formPreset === 'cron') {
+            change = { kind: 'cron', cron: { expression, time_zone: tz } }
           } else if (formPreset === 'hourly' || formPreset === 'minutely') {
             change = {
               kind: 'every',
@@ -745,6 +751,8 @@ export function AutomationTasksModal({
           strings.automation.title,
           selectedTask.status === 'active' ? strings.automation.taskPaused : strings.automation.taskResumed
         )
+      } else {
+        Alert.alert(strings.automation.title, strings.automation.saveFailed)
       }
     } finally {
       setToggling(false)
@@ -823,6 +831,12 @@ export function AutomationTasksModal({
       default:
         return strings.automation.frequencyOnce
     }
+  }
+
+  const formatStatus = (status: ScheduleCatalogEntry['status']): string => {
+    if (status === 'active') return strings.automation.statusActive
+    if (status === 'paused') return strings.automation.taskPaused
+    return strings.automation.statusInactive
   }
 
   const formatNextRun = (scheduledAt?: string): { absolute: string; relative: string } => {
@@ -1083,7 +1097,7 @@ export function AutomationTasksModal({
                     </Pressable>
 
                     <View style={styles.cardDivider} />
-                    {effectiveKind !== 'every' && (
+                    {effectiveKind !== 'every' && formPreset !== 'cron' && (
                       <>
                         <Pressable
                           ref={timeRowRef}
@@ -1128,7 +1142,7 @@ export function AutomationTasksModal({
                         </View>
                       </>
                     )}
-                    {formKind === 'cron' && (
+                    {formPreset === 'cron' && (
                       <>
                         <View style={styles.cardDivider} />
                         <View style={styles.paramRow}>
@@ -1148,14 +1162,18 @@ export function AutomationTasksModal({
                       </>
                     )}
 
-                    <View style={styles.cardDivider} />
-                    <View style={styles.nextBlock}>
-                      <View style={styles.nextHead}>
-                        <Text style={styles.rowLabel}>{strings.automation.formNextRuns}</Text>
-                        <Text style={styles.nextValue} numberOfLines={2}>{nextRunsText}</Text>
-                      </View>
-                      <Text style={styles.nextHint}>{strings.automation.formLocalTime}</Text>
-                    </View>
+                    {showNextRuns && (
+                      <>
+                        <View style={styles.cardDivider} />
+                        <View style={styles.nextBlock}>
+                          <View style={styles.nextHead}>
+                            <Text style={styles.rowLabel}>{strings.automation.formNextRuns}</Text>
+                            <Text style={styles.nextValue} numberOfLines={2}>{nextRunsText}</Text>
+                          </View>
+                          <Text style={styles.nextHint}>{strings.automation.formLocalTime}</Text>
+                        </View>
+                      </>
+                    )}
                   </>
                 )}
               </View>
@@ -1314,9 +1332,7 @@ export function AutomationTasksModal({
                             selectedTask.status === 'active' ? styles.statusTextActive : styles.statusTextInactive,
                           ]}
                         >
-                          {selectedTask.status === 'active'
-                            ? strings.automation.statusActive
-                            : strings.automation.statusInactive}
+                          {formatStatus(selectedTask.status)}
                         </Text>
                       </View>
                     </View>
@@ -1346,7 +1362,7 @@ export function AutomationTasksModal({
 
                   {/* Pause / Resume & Edit Action Buttons */}
                   <View style={styles.actionRowContainer}>
-                    <Pressable
+                    {(selectedTask.status === 'active' || selectedTask.status === 'paused') && <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={selectedTask.status === 'active' ? strings.automation.pauseTask : strings.automation.resumeTask}
                       onPress={handleToggleActive}
@@ -1370,7 +1386,7 @@ export function AutomationTasksModal({
                       >
                         {selectedTask.status === 'active' ? strings.automation.pauseTask : strings.automation.resumeTask}
                       </Text>
-                    </Pressable>
+                    </Pressable>}
 
                     <Pressable
                       accessibilityRole="button"
@@ -1606,9 +1622,7 @@ export function AutomationTasksModal({
                                 active ? styles.taskBadgeActive : styles.taskBadgeInactive,
                               ]}
                             >
-                              {active
-                                ? strings.automation.statusActive
-                                : strings.automation.statusInactive}
+                              {formatStatus(task.status)}
                             </Text>
                           </View>
                           <Text style={styles.taskMetaText} numberOfLines={1}>

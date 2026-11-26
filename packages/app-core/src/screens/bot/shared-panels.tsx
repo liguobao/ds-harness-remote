@@ -758,9 +758,8 @@ export function BotSchedulesPanel({
       whenPayload = { kind: 'every', minutes: mins, timeZone }
       fallbackReq = { title: title.trim(), prompt: prompt.trim(), every_seconds: mins * 60 }
     } else {
-      const parts = normalizedTime.split(':')
-      const hh = Number.parseInt(parts[0] ?? '9', 10) || 9
-      const mm = Number.parseInt(parts[1] ?? '0', 10) || 0
+      const hh = Number(normalizedTime.slice(0, 2))
+      const mm = Number(normalizedTime.slice(3))
       const next = new Date()
       next.setHours(hh, mm, 0, 0)
       if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1)

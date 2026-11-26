@@ -1167,6 +1167,26 @@ class ScriptedCore {
 }
 
 describe('HarnessAlphaClient', () => {
+  it('sets schedule activity through the official edit request and rejects conflicts', async () => {
+    const core = new ScriptedCore()
+    const updatedAt = '2026-10-29T08:00:00.000Z'
+    const paused = { id: 'task-1', status: 'paused', updatedAt }
+    const rpc = vi.spyOn(core, 'rpc')
+      .mockResolvedValueOnce({ ok: true, value: paused })
+      .mockResolvedValueOnce({ ok: true, value: { id: 'task-1', code: 'schedule_conflict' } })
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore)
+
+    await expect(client.scheduleSetActive('task-1', false, null)).resolves.toEqual(paused)
+    await expect(client.scheduleSetActive('task-1', true, updatedAt)).resolves.toBeUndefined()
+    expect(rpc.mock.calls.map(([method, params]) => [method, params])).toEqual(
+      [[false, null], [true, updatedAt]].map(([active, expectedUpdatedAt]) => [
+        'harness.remote.call',
+        { endpoint: 'schedule/edit', payload: { args: { request: { id: 'task-1', action: 'update', patch: { active }, expectedUpdatedAt } } } },
+      ]),
+    )
+    await client.close()
+  })
+
   it('ignores a superseded follow snapshot and restores only the latest subscription', async () => {
     const core = new ScriptedCore()
     const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
