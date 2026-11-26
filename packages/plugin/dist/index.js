@@ -67014,7 +67014,11 @@ var AgentAcpClient = class {
         signal?.addEventListener("abort", onAbort, { once: true });
       }
     } catch (error62) {
+      const shouldCloseRemote = !closed && !coreClosed;
       markClosed();
+      if (shouldCloseRemote) {
+        void this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
+      }
       throw error62;
     }
     if (pendingClosed !== void 0) {
