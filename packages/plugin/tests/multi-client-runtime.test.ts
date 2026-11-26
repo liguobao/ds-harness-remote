@@ -1,7 +1,10 @@
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createRpcRequest, type LoopbackRead, type LoopbackWsRead, type RemoteMessage, type RpcErrorPayload, type RpcResponsePayload } from '@dsh-remote/protocol'
 import { describe, expect, it, vi } from 'vitest'
 import { WebSocketServer } from 'ws'
@@ -11,23 +14,48 @@ import type { SafeLogger } from '../src/logging.js'
 import { HostPluginRuntime } from '../src/service.js'
 import { probeRemoteHostFeatures } from '../src/client-capabilities.js'
 import { HostServerConnection } from '../src/server-connection.js'
+import { ServerCredentialStore } from '../src/server-credentials.js'
 import { CodexRemoteDomain } from '../src/codex/domain.js'
 import { CodexAppServerError, type CodexAppServerLike } from '../src/codex/app-server.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
 import type { LocalTypertGateway, TypertRpcResult } from '../src/typert-gateway-contract.js'
 
 describe('HostPluginRuntime multi-Client routing', () => {
-  it('does not start inbound Host authorization when control is disabled at startup', async () => {
+  it('controls inbound Host server connection startup according to hostControl and pairingHostOnly policy', async () => {
     const start = vi.spyOn(HostServerConnection.prototype, 'start').mockImplementation(() => undefined)
     try {
-      await runScenarios([false, true].map(enabled => ({ name: 'hostControl=' + enabled, run: async () => {
+      await runScenarios([
+        { name: 'hostControl=false without pairing policy skips startup', enabled: false, pairingHostOnly: false },
+        { name: 'hostControl=false with pairingHostOnly self-heals startup', enabled: false, pairingHostOnly: true },
+        { name: 'hostControl=true starts normally', enabled: true, pairingHostOnly: false },
+      ].map(({ name, enabled, pairingHostOnly }) => ({ name, run: async () => {
         start.mockClear()
-        const runtime = new HostPluginRuntime({ ...config(), serverUrl: 'https://server.example', hostControl: { enabled } }, Object.assign(identities(), { directory: '/fixture/host-identity' }), logger())
+        const directory = await mkdtemp(join(tmpdir(), 'dsh-host-startup-'))
+        const log = logger()
+        if (pairingHostOnly) await new ServerCredentialStore(directory).restrictPairingHostOnly()
+        const runtime = new HostPluginRuntime(
+          { ...config(), serverUrl: 'https://server.example', hostControl: { enabled } },
+          Object.assign(identities(), { directory }),
+          log,
+        )
         try {
           await runtime.start()
-          expect(start).toHaveBeenCalledTimes(enabled ? 1 : 0)
-          if (!enabled) expect(runtime.hostStatus()).toMatchObject({ online: false, authorized: false, accountRequired: false })
-        } finally { await runtime.close() }
+          const shouldStart = enabled || pairingHostOnly
+          expect(start).toHaveBeenCalledTimes(shouldStart ? 1 : 0)
+          if (!enabled && !pairingHostOnly) {
+            expect(runtime.hostStatus()).toMatchObject({ online: false, authorized: false, accountRequired: false, pairingHostOnly: false })
+            expect(log.info).toHaveBeenCalledWith('host control disabled; skipping server control connection')
+          } else if (!enabled && pairingHostOnly) {
+            expect(runtime.hostStatus()).toMatchObject({ pairingHostOnly: true })
+            expect(log.info).toHaveBeenCalledWith('pairing host-only policy overrides disabled hostControl; starting server control connection')
+          } else {
+            expect(log.info).not.toHaveBeenCalledWith('host control disabled; skipping server control connection')
+            expect(log.info).not.toHaveBeenCalledWith('pairing host-only policy overrides disabled hostControl; starting server control connection')
+          }
+        } finally {
+          await runtime.close()
+          await rm(directory, { recursive: true, force: true })
+        }
       } })))
     } finally { start.mockRestore() }
   })

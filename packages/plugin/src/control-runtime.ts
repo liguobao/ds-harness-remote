@@ -166,7 +166,10 @@ export class PluginControlRuntime {
           || input.verificationCode !== undefined && typeof input.verificationCode !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'Invalid pairing request.')
         if (action === 'start') await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
         const view = await this.host.pairingControl(action, input as { sessionId?: string; verificationCode?: string })
-        if (view?.localSaved && this.host.hostStatus().pairingHostOnly) await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
+        if (view?.localSaved) {
+          await this.persistHostControlEnabled(true, { onlyIfChanged: true })
+          if (this.host.hostStatus().pairingHostOnly) await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
+        }
         return ok(view)
       }
       if (endpoint === 'settings.development.set') return ok(await this.setDevelopment(payload))
@@ -190,10 +193,7 @@ export class PluginControlRuntime {
         const value = record(payload)
         if (typeof value.enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'Host authorization state is required.')
         const status = await this.client.setHostAuthorization(value.enabled)
-        if (this.settings !== undefined) {
-          const current = resolveConfig(this.settings.get())
-          await this.settings.replace(editableConfig({ ...current, hostControl: { enabled: value.enabled } }))
-        }
+        await this.persistHostControlEnabled(value.enabled)
         return ok(status)
       }
       if (endpoint === 'host.reconnect') {
@@ -223,25 +223,39 @@ export class PluginControlRuntime {
           : ok(this.hostOnlyStatus())
         return withUpdate(base, this.updates?.snapshot())
       }
-      if (this.client !== undefined) return this.client.handleControl(endpoint, payload, signal)
-
-      if (endpoint === 'devices') return ok([])
       if (endpoint === 'host.account.login') {
+        if (this.client !== undefined) {
+          const result = await this.client.handleControl(endpoint, payload, signal)
+          if (result.ok) await this.persistHostControlEnabled(true, { onlyIfChanged: true })
+          return result
+        }
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
         const value = record(payload)
         if (typeof value.email !== 'string' || typeof value.password !== 'string') {
           throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required.')
         }
-        return ok(await this.host.authorizeHostWithAccount(value.email, value.password, readAccountVerification(value.verification)))
+        const authorization = await this.host.authorizeHostWithAccount(value.email, value.password, readAccountVerification(value.verification))
+        await this.persistHostControlEnabled(true, { onlyIfChanged: true })
+        return ok(authorization)
       }
       if (endpoint === 'host.registration-code.submit') {
+        if (this.client !== undefined) {
+          const result = await this.client.handleControl(endpoint, payload, signal)
+          if (result.ok) await this.persistHostControlEnabled(true, { onlyIfChanged: true })
+          return result
+        }
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
         const value = record(payload)
         if (typeof value.code !== 'string' || value.code.trim() === '') {
           throw new ClientModeError('INVALID_MESSAGE', 'A Host registration code is required.')
         }
-        return ok(await this.host.authorizeHostWithCode(value.code))
+        const authorization = await this.host.authorizeHostWithCode(value.code)
+        await this.persistHostControlEnabled(true, { onlyIfChanged: true })
+        return ok(authorization)
       }
+      if (this.client !== undefined) return this.client.handleControl(endpoint, payload, signal)
+
+      if (endpoint === 'devices') return ok([])
       if (endpoint === 'mode.set' && record(payload).mode === 'local') {
         return withUpdate(ok(this.hostOnlyStatus()), this.updates?.snapshot())
       }
@@ -267,7 +281,12 @@ export class PluginControlRuntime {
     }
     const current = editableConfig(resolveConfig(this.settings.get()))
     if (value.role === 'client' && this.host?.hostStatus?.()?.pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming connections.')
-    const next = resolveConfig({ ...current, role: value.role, serverUrl: value.serverUrl })
+    const next = resolveConfig({
+      ...current,
+      role: value.role,
+      serverUrl: value.serverUrl,
+      ...(value.role === 'host' ? { hostControl: { enabled: true } } : {}),
+    })
 
     if (!this.storageAvailable && this.startupFailure instanceof Error) {
       throw this.startupFailure
@@ -296,6 +315,10 @@ export class PluginControlRuntime {
       await this.client?.authorizeHostByDefault()
     }
     await this.settings.replace(editableConfig(next))
+    if (value.role === 'host') {
+      this.config.hostControl = { enabled: true }
+      this.client?.setHostControlEnabled?.(true)
+    }
     return {
       status: 'authorized',
       role: value.role,
@@ -720,6 +743,15 @@ export class PluginControlRuntime {
       if (failure?.status === 'rejected') throw failure.reason
     }
     return this.settingsView()
+  }
+
+  private async persistHostControlEnabled(enabled: boolean, options?: { onlyIfChanged?: boolean }): Promise<void> {
+    this.config.hostControl = { enabled }
+    this.client?.setHostControlEnabled?.(enabled)
+    if (this.settings === undefined) return
+    const current = resolveConfig(this.settings.get())
+    if (options?.onlyIfChanged && (current.hostControl?.enabled ?? true) === enabled) return
+    await this.settings.replace(editableConfig({ ...current, hostControl: { enabled } }))
   }
 
   private currentEditableConfig(): Config {

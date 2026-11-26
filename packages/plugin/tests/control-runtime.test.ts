@@ -935,6 +935,172 @@ describe('PluginControlRuntime local log endpoints', () => {
       value: { config: { serverUrl: 'https://good.example.com' }, applies: 'restart', startupError: { code: 'INTERNAL_ERROR' } },
     })
   })
+
+  it('re-enables persisted hostControl across Host re-authorization paths without redundant writes', async () => {
+    await runScenarios([
+      { name: 'host.pairing.confirm localSaved=true restores hostControl', kind: 'pairing-confirm-saved' },
+      { name: 'host.pairing.status localSaved=true restores hostControl', kind: 'pairing-status-saved' },
+      { name: 'host.pairing.confirm localSaved=false keeps hostControl disabled', kind: 'pairing-unsaved' },
+      { name: 'host.pairing.confirm localSaved=true skips write when already enabled', kind: 'pairing-already-enabled' },
+      { name: 'host.account.login with client success restores hostControl', kind: 'login-with-client-ok' },
+      { name: 'host.account.login with client failure preserves retryable and disabled hostControl', kind: 'login-with-client-fail' },
+      { name: 'host.account.login with client skips write when already enabled', kind: 'login-with-client-already-enabled' },
+      { name: 'host.account.login without client success restores hostControl', kind: 'login-no-client-ok' },
+      { name: 'host.account.login without client failure keeps hostControl disabled', kind: 'login-no-client-fail' },
+      { name: 'host.registration-code.submit with client success restores hostControl', kind: 'code-with-client-ok' },
+      { name: 'host.registration-code.submit with client failure preserves retryable and disabled hostControl', kind: 'code-with-client-fail' },
+      { name: 'host.registration-code.submit without client success restores hostControl', kind: 'code-no-client-ok' },
+      { name: 'host.registration-code.submit without client failure keeps hostControl disabled', kind: 'code-no-client-fail' },
+      { name: 'settings.configure role=host restores hostControl', kind: 'configure-host' },
+      { name: 'settings.configure role=client preserves disabled hostControl', kind: 'configure-client' },
+      { name: 'host.authorization.set toggles persisted and in-memory hostControl', kind: 'authorization-set' },
+    ].map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        const directory = await temporaryDirectory()
+        const initialEnabled = scenario.kind === 'pairing-already-enabled' || scenario.kind === 'login-with-client-already-enabled'
+        const settings = settingsBinding({
+          serverUrl: 'https://dsh.r2049.cn',
+          role: 'host',
+          hostControl: { enabled: initialEnabled },
+        })
+        const replaceSpy = vi.spyOn(settings, 'replace')
+        const setHostControlEnabled = vi.fn()
+        const authorizeHostByDefault = vi.fn(async () => undefined)
+        const setHostAuthorization = vi.fn(async (enabled: boolean) => ({ host: { authorized: enabled } }))
+
+        if (scenario.kind.startsWith('pairing-')) {
+          const localSaved = scenario.kind !== 'pairing-unsaved'
+          const pairingControl = vi.fn(async () => ({ state: localSaved ? 'saved' : 'claimed', localSaved }))
+          const clientControl = vi.fn(async () => ({ ok: true, value: {} }))
+          const host = {
+            hostStatus: () => ({ pairingHostOnly: localSaved }),
+            pairingControl,
+          } as unknown as HostAuthorizationControl
+          const client = {
+            handleControl: clientControl,
+            setHostControlEnabled,
+          } as unknown as ClientModeRuntime
+          const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, client, host))
+          const endpoint = scenario.kind === 'pairing-status-saved' ? 'host.pairing.status' : 'host.pairing.confirm'
+          const payload = endpoint === 'host.pairing.status' ? {} : { sessionId: 's1', verificationCode: '00123456' }
+          await expect(handler(endpoint, payload, signal())).resolves.toMatchObject({ ok: true })
+          expect(settings.get().hostControl).toEqual({ enabled: scenario.kind === 'pairing-unsaved' ? false : true })
+          if (scenario.kind === 'pairing-unsaved') {
+            expect(replaceSpy).not.toHaveBeenCalled()
+            expect(setHostControlEnabled).not.toHaveBeenCalled()
+            expect(clientControl).not.toHaveBeenCalled()
+          } else if (scenario.kind === 'pairing-already-enabled') {
+            expect(replaceSpy).not.toHaveBeenCalled()
+            expect(setHostControlEnabled).toHaveBeenCalledWith(true)
+            expect(clientControl).toHaveBeenCalledWith('mode.set', { mode: 'local' }, expect.any(AbortSignal))
+          } else {
+            expect(replaceSpy).toHaveBeenCalledOnce()
+            expect(setHostControlEnabled).toHaveBeenCalledWith(true)
+            expect(clientControl).toHaveBeenCalledWith('mode.set', { mode: 'local' }, expect.any(AbortSignal))
+          }
+          return
+        }
+
+        if (scenario.kind.startsWith('login-') || scenario.kind.startsWith('code-')) {
+          const isCode = scenario.kind.startsWith('code-')
+          const withClient = scenario.kind.includes('with-client')
+          const shouldFail = scenario.kind.endsWith('-fail')
+          const retryableError = Object.assign(new Error('transient upstream error'), { code: 'SERVER_UNAVAILABLE', retryable: true })
+          const clientHandleControl = vi.fn(async () => shouldFail
+            ? { ok: false as const, error: { code: 'internal' as const, message: 'transient upstream error', details: { remoteCode: 'SERVER_UNAVAILABLE', retryable: true } } }
+            : { ok: true as const, value: { method: isCode ? 'host_registration_code' : 'account' } })
+          const authorizeHostWithAccount = vi.fn(async () => {
+            if (shouldFail) throw retryableError
+            return { method: 'account' }
+          })
+          const authorizeHostWithCode = vi.fn(async () => {
+            if (shouldFail) throw retryableError
+            return { method: 'host_registration_code' }
+          })
+          const client = withClient
+            ? { handleControl: clientHandleControl, setHostControlEnabled } as unknown as ClientModeRuntime
+            : undefined
+          const host = {
+            authorizeHostWithAccount,
+            authorizeHostWithCode,
+          } as unknown as HostAuthorizationControl
+          const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, client, host))
+          const endpoint = isCode ? 'host.registration-code.submit' : 'host.account.login'
+          const payload = isCode ? { code: 'ABCD-EFGH' } : { email: 'host@example.com', password: 'secret' }
+          const res = await handler(endpoint, payload, signal())
+          if (shouldFail) {
+            expect(res).toMatchObject({ ok: false, error: { details: { remoteCode: 'SERVER_UNAVAILABLE' } } })
+            if (withClient) expect((res as { ok: false; error: { details: Record<string, unknown> } }).error.details.retryable).toBe(true)
+            expect(replaceSpy).not.toHaveBeenCalled()
+            expect(setHostControlEnabled).not.toHaveBeenCalled()
+            expect(settings.get().hostControl).toEqual({ enabled: false })
+          } else {
+            expect(res).toMatchObject({ ok: true })
+            expect(settings.get().hostControl).toEqual({ enabled: true })
+            if (withClient) {
+              expect(clientHandleControl).toHaveBeenCalledWith(endpoint, payload, expect.any(AbortSignal))
+              expect(setHostControlEnabled).toHaveBeenCalledWith(true)
+            } else {
+              expect(isCode ? authorizeHostWithCode : authorizeHostWithAccount).toHaveBeenCalledOnce()
+            }
+            if (scenario.kind === 'login-with-client-already-enabled') expect(replaceSpy).not.toHaveBeenCalled()
+            else expect(replaceSpy).toHaveBeenCalledOnce()
+          }
+          return
+        }
+
+        if (scenario.kind === 'configure-host' || scenario.kind === 'configure-client') {
+          const role = scenario.kind === 'configure-host' ? 'host' : 'client'
+          vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+            const url = String(input)
+            if (url.endsWith('/auth/login')) return json({
+              token: 'web-account-token-value',
+              expiresAt: Date.now() + 600_000,
+              account: `${role}@example.com`,
+              profile: {},
+              isAdmin: false,
+            })
+            if (url.endsWith('/devices/register')) return json(tokens())
+            throw new Error(`unexpected request: ${url}`)
+          }))
+          const client = {
+            authorizeHostByDefault,
+            setHostControlEnabled,
+          } as unknown as ClientModeRuntime
+          const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, client, undefined))
+          const res = await handler('settings.configure', {
+            role,
+            serverUrl: 'https://dsh.r2049.cn',
+            email: `${role}@example.com`,
+            password: 'correct horse battery staple',
+          }, signal())
+          expect(res).toMatchObject({ ok: true })
+          if (role === 'host') {
+            expect(settings.get().hostControl).toEqual({ enabled: true })
+            expect(setHostControlEnabled).toHaveBeenCalledWith(true)
+          } else {
+            expect(settings.get().hostControl).toEqual({ enabled: false })
+            expect(authorizeHostByDefault).not.toHaveBeenCalled()
+            expect(setHostControlEnabled).not.toHaveBeenCalled()
+          }
+          return
+        }
+
+        const client = {
+          setHostAuthorization,
+          setHostControlEnabled,
+        } as unknown as ClientModeRuntime
+        const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, client, undefined))
+        await expect(handler('host.authorization.set', { enabled: false }, signal())).resolves.toMatchObject({ ok: true })
+        expect(settings.get().hostControl).toEqual({ enabled: false })
+        expect(setHostControlEnabled).toHaveBeenLastCalledWith(false)
+        await expect(handler('host.authorization.set', { enabled: true }, signal())).resolves.toMatchObject({ ok: true })
+        expect(settings.get().hostControl).toEqual({ enabled: true })
+        expect(setHostControlEnabled).toHaveBeenLastCalledWith(true)
+      },
+    })))
+  })
 })
 function register(runtime: PluginControlRuntime) {
   let handler: ((endpoint: string, payload: unknown, signal: AbortSignal) => Promise<ControlResult<unknown>>) | undefined
