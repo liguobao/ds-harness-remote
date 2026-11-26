@@ -30,3 +30,16 @@ export function sessionBackendFromId(id: string): AgentBackend {
   }
   return 'harness'
 }
+
+export function mergeBackendPinnedSessionIds(
+  current: readonly string[],
+  backend: AgentBackend,
+  nextForBackend: readonly string[],
+): string[] {
+  registerAcpBackendId(backend)
+  const normalized = nextForBackend
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    .map(id => backend === 'harness' || id.includes(':') ? id : `${backend}:${id}`)
+  const preserved = current.filter(id => sessionBackendFromId(id) !== backend)
+  return [...new Set([...preserved, ...normalized])]
+}

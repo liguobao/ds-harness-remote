@@ -1,5 +1,6 @@
 import * as Haptics from 'expo-haptics'
 import { friendlyError } from '../lib/errors'
+import { mergeBackendPinnedSessionIds } from '../lib/session-backend'
 import {
   filterVisibleAcpCatalog,
   isAcpManagedBackend,
@@ -57,10 +58,16 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
 
   function persistCatalogNow(): void {
     const state = get()
-    const scope = browseMemory.browseScope?.(state)
-    if (!scope) return
-    browseMemory.saveBrowseCatalog?.(scope, state.workspaces, state.sessions)
-    void Promise.resolve(browseMemory.flushBrowseMemory?.()).catch(() => undefined)
+    if (!state.selectedDevice) return
+    try {
+      const scope = browseMemory.browseScope?.(state)
+      if (!scope) return
+      browseMemory.saveBrowseCatalog?.(scope, state.workspaces, state.sessions, {
+        pinnedSessionIds: state.pinnedSessionIds,
+        archivedSessionIds: state.archivedSessionIds,
+      })
+      void Promise.resolve(browseMemory.flushBrowseMemory?.()).catch(() => undefined)
+    } catch { /* ignore partial mock environments */ }
   }
 
   function clearDeletedShortcuts(target: WorkspaceView | undefined): void {
@@ -224,33 +231,35 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           }
         }
         if (!current()) return
-        const backendPrefix = `${backend}:`
-        set(state => ({
-          hostWorkspaceGit: connection.hasWorkspaceGit?.() ?? false,
-          codexAvailable: connection.hasCodex(),
-          cursorAvailable: connection.hasCursor(),
-          antigravityAvailable: connection.hasAntigravity(),
-          piAvailable: connection.hasPi(),
-          opencodeAvailable: connection.hasOpencode(),
-          claudeAvailable: connection.hasClaude(),
-          hermesAvailable: connection.hasHermes(),
-          customAcpBackends: connection.customAcpBackends?.() ?? [],
-          workspaces: [...state.workspaces.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.workspaces],
-          sessions: [...state.sessions.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.sessions],
-          ...(archivedSessionIds === undefined ? {} : { archivedSessionIds }),
-          ...(pinnedSessionIds !== undefined
-            ? { pinnedSessionIds }
-            : catalog.pinnedSessionIds !== undefined
-              ? {
-                  pinnedSessionIds: [
-                    ...state.pinnedSessionIds.filter(id => !id.startsWith(backendPrefix)),
-                    ...catalog.pinnedSessionIds,
-                  ],
-                }
-              : {}),
-          selectedSession: catalog.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
-          workspaceCatalog: { backend, loading: false },
-        }))
+        set(state => {
+          const nextArchived = archivedSessionIds ?? state.archivedSessionIds
+          const archivedSet = new Set(nextArchived)
+          const rawBackendPinned = backend === 'harness' ? pinnedSessionIds : catalog.pinnedSessionIds
+          const nextPinnedSessionIds = rawBackendPinned !== undefined
+            ? mergeBackendPinnedSessionIds(state.pinnedSessionIds, backend, rawBackendPinned)
+                .filter(id => !archivedSet.has(id))
+            : archivedSessionIds !== undefined
+              ? state.pinnedSessionIds.filter(id => !archivedSet.has(id))
+              : undefined
+          return {
+            hostWorkspaceGit: connection.hasWorkspaceGit?.() ?? false,
+            codexAvailable: connection.hasCodex(),
+            cursorAvailable: connection.hasCursor(),
+            antigravityAvailable: connection.hasAntigravity(),
+            piAvailable: connection.hasPi(),
+            opencodeAvailable: connection.hasOpencode(),
+            claudeAvailable: connection.hasClaude(),
+            hermesAvailable: connection.hasHermes(),
+            customAcpBackends: connection.customAcpBackends?.() ?? [],
+            workspaces: [...state.workspaces.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.workspaces],
+            sessions: [...state.sessions.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.sessions],
+            ...(archivedSessionIds === undefined ? {} : { archivedSessionIds }),
+            ...(nextPinnedSessionIds === undefined ? {} : { pinnedSessionIds: nextPinnedSessionIds }),
+            selectedSession: catalog.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
+            workspaceCatalog: { backend, loading: false },
+          }
+        })
+        persistCatalogNow()
       } catch (error) {
         if (!current()) return
         // A category failure stays with that category, including late tab switches.
@@ -330,6 +339,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           set(state => ({
             workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
             sessions: state.sessions.filter(session => !sessionIds.has(session.sessionId)),
+            pinnedSessionIds: state.pinnedSessionIds.filter(id => !sessionIds.has(id)),
             messages: Object.fromEntries(Object.entries(state.messages).filter(([id]) => !sessionIds.has(id))),
             selectedSession: state.selectedSession !== undefined && sessionIds.has(state.selectedSession.sessionId)
               ? undefined
@@ -350,6 +360,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         set(state => ({
           workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
           sessions: state.sessions.filter(session => !sessionIds.has(session.sessionId)),
+          pinnedSessionIds: state.pinnedSessionIds.filter(id => !sessionIds.has(id)),
           busyAction: undefined,
         }))
         clearDeletedShortcuts(target)
