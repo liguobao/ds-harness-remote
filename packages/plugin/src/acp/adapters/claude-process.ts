@@ -81,7 +81,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
       const gen = this.beginLoadSuppression(id)
       let responded = false
       // Defer the actual call until the suppression/deduplication guard is installed.
-      const load = Promise.resolve().then(() => super.call(method, params, timeoutMs)).then(result => {
+      const load = Promise.resolve().then(() => this.attachSession(params, timeoutMs)).then(result => {
         responded = true
         this.assertLoaded(result, id)
         this.live.set(id, result)
@@ -190,6 +190,24 @@ export class ClaudeAcpClient extends CursorAcpClient {
     return this.historyMetadata.get(sessionId)
   }
 
+  protected callUnderlying(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+    return super.call(method, params, timeoutMs)
+  }
+
+  protected async attachSession(params: unknown, timeoutMs?: number): Promise<unknown> {
+    return this.callUnderlying('session/load', params, timeoutMs)
+  }
+
+  protected async loadHistorySession(
+    client: CursorAcpClient,
+    sessionId: string,
+    cwd: string,
+    _signal?: AbortSignal,
+  ): Promise<{ result: unknown; events?: unknown[] }> {
+    const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
+    return { result }
+  }
+
   /** One temporary process, separate from all live sessions (including active prompts). */
   async history(sessionId: string, cwd: string, signal?: AbortSignal): Promise<unknown[]> {
     signal?.throwIfAborted()
@@ -226,9 +244,9 @@ export class ClaudeAcpClient extends CursorAcpClient {
       await client.start()
       signal?.throwIfAborted()
       if (this.shuttingDown) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
-      const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
+      const loaded = await this.loadHistorySession(client, sessionId, cwd, signal)
       signal?.throwIfAborted()
-      this.assertLoaded(result, sessionId)
+      this.assertLoaded(loaded.result, sessionId)
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
       const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
         client.call('dsh/sessionModels', { sessionId }).catch(() => undefined),
@@ -256,7 +274,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
           this.historyMetadata.delete(oldest)
         }
       }
-      return acpHistoryEvents(updates, sessionId, this.modelLabel)
+      return loaded.events ?? acpHistoryEvents(updates, sessionId, this.modelLabel)
     } catch (error) {
       signal?.throwIfAborted()
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)

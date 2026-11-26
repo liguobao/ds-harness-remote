@@ -210,7 +210,8 @@ export class CursorAcpClient implements CursorAcpLike {
     }
     const budget = timeoutMs
       ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
-    const provisionalLoad = Boolean(backend && method === 'session/load' && id && !this.modelStates.has(id))
+    const isSessionAttach = method === 'session/load' || method === 'session/resume'
+    const provisionalLoad = Boolean(backend && isSessionAttach && id && !this.modelStates.has(id))
     if (provisionalLoad && backend && id) {
       this.modelStates.set(id, new AcpSessionModelState(backend))
     }
@@ -221,14 +222,14 @@ export class CursorAcpClient implements CursorAcpLike {
       if (provisionalLoad && id) this.modelStates.delete(id)
       throw error
     }
-    if (backend && (method === 'session/new' || method === 'session/load' || method === 'session/fork')) {
+    if (backend && (method === 'session/new' || isSessionAttach || method === 'session/fork')) {
       const returnedId = isRecord(result) && typeof result.sessionId === 'string' ? result.sessionId : undefined
-      const sessionId = method === 'session/load' ? id : returnedId
+      const sessionId = isSessionAttach ? id : returnedId
       if (!this.ready || !sessionId || (returnedId && returnedId !== sessionId)) {
         if (provisionalLoad && id) this.modelStates.delete(id)
         throw new CursorAcpError('ACP_INVALID_SESSION', 'ACP returned an invalid session.')
       }
-      const state = (method === 'session/load' ? this.modelStates.get(sessionId) : undefined) ?? new AcpSessionModelState(backend)
+      const state = (isSessionAttach ? this.modelStates.get(sessionId) : undefined) ?? new AcpSessionModelState(backend)
       state.update(result)
       this.modelStates.set(sessionId, state)
     }
