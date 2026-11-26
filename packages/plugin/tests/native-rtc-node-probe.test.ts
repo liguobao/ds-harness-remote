@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { isUsableExternalNode } from '../src/native-rtc-helper.js'
+import { buildExternalNativeRtcFactory, isUsableExternalNode } from '../src/native-rtc-helper.js'
 
 it('probes external RTC runtimes without entering Electron GUI mode and rejects Electron before loading native code', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'dsh-rtc-node-probe-'))
@@ -16,7 +16,7 @@ it('probes external RTC runtimes without entering Electron GUI mode and rejects 
     mkdirSync(moduleDirectory, { recursive: true })
     writeFileSync(join(moduleDirectory, 'index.js'), `
       require('node:fs').writeFileSync(${JSON.stringify(loaded)}, 'loaded');
-      exports.RTCPeerConnection = function () {};
+      exports.RTCPeerConnection = function () { this.close = () => {}; };
     `)
     process.env.NODE_OPTIONS = `--require ${JSON.stringify(preload)}`
     await runScenarios([false, true].map(electron => ({
@@ -35,6 +35,24 @@ it('probes external RTC runtimes without entering Electron GUI mode and rejects 
         expect(existsSync(loaded)).toBe(!electron)
       },
     })))
+    writeFileSync(preload, '')
+    writeFileSync(join(moduleDirectory, 'index.js'), `
+      exports.RTCPeerConnection = function () { process.kill(process.pid, 'SIGKILL'); };
+    `)
+    expect(isUsableExternalNode(process.execPath, join(directory, 'entry.js'))).toBe(false)
+
+    writeFileSync(join(moduleDirectory, 'index.js'), `
+      exports.RTCPeerConnection = function () {
+        this.close = () => {};
+        this.createOffer = () => { process.kill(process.pid, 'SIGKILL'); };
+      };
+    `)
+    const peer = buildExternalNativeRtcFactory(process.execPath, join(directory, 'entry.js')).create({ iceServers: [] })
+    let failures = 0
+    peer.onconnectionstatechange = () => { if (peer.connectionState === 'failed') failures++ }
+    await expect(peer.createOffer()).rejects.toThrow('native rtc helper exited')
+    expect(peer.connectionState).toBe('failed')
+    expect(failures).toBe(1)
   } finally {
     if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS
     else process.env.NODE_OPTIONS = previousNodeOptions

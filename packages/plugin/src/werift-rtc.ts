@@ -134,19 +134,28 @@ interface NativeDataChannel {
   close(): void
 }
 
-/**
- * Node RTC factory used by the Plugin/VS Code clients and Host. Native
- * libwebrtc is preferred because its ICE behavior matches browser Remote Web;
- * werift remains the no-native fallback for environments that cannot load it.
- */
+/** Native RTC uses a child on Linux. musl uses werift because the native binary can crash the Host. */
 export async function loadNodeRtcFactory(options: WeriftFactoryOptions = {}): Promise<RtcPeerConnectionFactory | undefined> {
-  const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === 'werift'
+  const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === 'werift' || shouldUseWeriftForLinuxLibc(process.platform, linuxGlibcVersion())
     ? undefined
-    : isElectronRuntime()
+    : process.platform === 'linux' || isElectronRuntime()
       ? await loadExternalNativeRtcFactory().catch(() => undefined)
       : await loadNativeRtcFactory().catch(() => undefined)
   const factory = nativeFactory ?? await loadWeriftFactory(options)
   return factory === undefined ? undefined : wrapLocalCandidateFilterFactory(factory, options)
+}
+
+export function shouldUseWeriftForLinuxLibc(platform: NodeJS.Platform, glibcVersion: string | undefined): boolean {
+  return platform === 'linux' && glibcVersion === undefined
+}
+
+function linuxGlibcVersion(): string | undefined {
+  if (process.platform !== 'linux') return undefined
+  try {
+    const report = process.report.getReport() as { header?: { glibcVersionRuntime?: unknown } }
+    const version = report.header?.glibcVersionRuntime
+    return typeof version === 'string' ? version : undefined
+  } catch { return undefined }
 }
 
 /** Load (once) a werift-backed factory, or `undefined` when it cannot be loaded. */

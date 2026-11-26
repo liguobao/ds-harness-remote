@@ -193,6 +193,10 @@ Remote 按 `LAN -> P2P -> TURN -> Relay` 协商路径；
 
 WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
+Linux musl 上，Host 使用 werift。Linux glibc 上，Host 在子进程中探测原生 WebRTC。
+探测失败时，Host 使用 werift。
+在 Host 环境中设置 `DSH_REMOTE_WEBRTC_BACKEND=werift` 可强制使用 werift。
+
 所有路径都承载同一份 Noise 密文，并保持相同的 Host/Client 身份边界。
 
 网络拓扑、控制面与数据面、NAT、降级、重连语义和当前验证状态详见[网络与传输](docs/network.md)。

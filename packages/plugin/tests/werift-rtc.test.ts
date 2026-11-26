@@ -15,6 +15,7 @@ import { buildExternalNativeRtcFactory, resolveNativeRtcRequireFrom } from '../s
 import {
   buildWeriftFactory,
   detectHostIpv4Candidates,
+  shouldUseWeriftForLinuxLibc,
   loadNodeRtcFactory,
   loadWeriftFactory,
   orderIceServersForWerift,
@@ -63,6 +64,12 @@ class CapturingWeriftPeerConnection {
 }
 
 describe('werift RTC backend', () => {
+  it('uses werift when Linux reports no glibc runtime', () => {
+    expect(shouldUseWeriftForLinuxLibc('linux', undefined)).toBe(true)
+    expect(shouldUseWeriftForLinuxLibc('linux', '2.39')).toBe(false)
+    expect(shouldUseWeriftForLinuxLibc('darwin', undefined)).toBe(false)
+  })
+
   it('resolves native dependencies from a symlinked plugin physical path', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dsh-remote-rtc-'))
     try {

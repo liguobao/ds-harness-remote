@@ -67014,11 +67014,7 @@ var AgentAcpClient = class {
         signal?.addEventListener("abort", onAbort, { once: true });
       }
     } catch (error62) {
-      const shouldCloseRemote = !closed && !coreClosed;
       markClosed();
-      if (shouldCloseRemote) {
-        void this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
-      }
       throw error62;
     }
     if (pendingClosed !== void 0) {
@@ -89567,6 +89563,9 @@ function isUsableExternalNode(candidate, requireFrom) {
       "const wrtc = require('@roamhq/wrtc');",
       "const RTCPeerConnection = wrtc.RTCPeerConnection ?? wrtc.default?.RTCPeerConnection;",
       "if (typeof RTCPeerConnection !== 'function') throw new Error('missing-rtc');",
+      "const pc = new RTCPeerConnection({ iceServers: [] });",
+      "if (typeof pc.close !== 'function') throw new Error('missing-close');",
+      "pc.close();",
       "console.log(`node:${process.versions.node}`);"
     ].join("")
   ], {
@@ -89605,6 +89604,7 @@ var ExternalNativePeerConnection = class {
     this.child.on("error", (error62) => this.handleExit(error62));
     this.child.stdin.on("error", (error62) => this.handleExit(error62));
     this.ready = this.request("init", { iceServers: configuration.iceServers ?? [], iceTransportPolicy: configuration.iceTransportPolicy }).then(() => void 0);
+    void this.ready.catch(() => void 0);
   }
   connectionState = "new";
   iceConnectionState = "new";
@@ -89758,11 +89758,19 @@ var ExternalNativePeerConnection = class {
     return channel;
   }
   handleExit(error62) {
-    if (!this.closed) this.closed = true;
+    const unexpected = !this.closed;
+    this.closed = true;
     const reason = error62 ?? new Error("native rtc helper exited");
     for (const pending of this.pending.values()) pending.reject(reason);
     this.pending.clear();
     for (const channel of this.channels.values()) channel.updateState("closed", 0);
+    if (unexpected) {
+      this.connectionState = "failed";
+      this.iceConnectionState = "failed";
+      this.signalingState = "closed";
+      this.onconnectionstatechange?.();
+      this.oniceconnectionstatechange?.();
+    }
   }
 };
 var ExternalNativeDataChannel = class {
@@ -90003,9 +90011,22 @@ var cachedFactory;
 var cachedWerift;
 var cachedNativeFactory;
 async function loadNodeRtcFactory(options = {}) {
-  const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === "werift" ? void 0 : isElectronRuntime() ? await loadExternalNativeRtcFactory().catch(() => void 0) : await loadNativeRtcFactory().catch(() => void 0);
+  const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === "werift" || shouldUseWeriftForLinuxLibc(process.platform, linuxGlibcVersion()) ? void 0 : process.platform === "linux" || isElectronRuntime() ? await loadExternalNativeRtcFactory().catch(() => void 0) : await loadNativeRtcFactory().catch(() => void 0);
   const factory = nativeFactory ?? await loadWeriftFactory(options);
   return factory === void 0 ? void 0 : wrapLocalCandidateFilterFactory(factory, options);
+}
+function shouldUseWeriftForLinuxLibc(platform3, glibcVersion) {
+  return platform3 === "linux" && glibcVersion === void 0;
+}
+function linuxGlibcVersion() {
+  if (process.platform !== "linux") return void 0;
+  try {
+    const report = process.report.getReport();
+    const version2 = report.header?.glibcVersionRuntime;
+    return typeof version2 === "string" ? version2 : void 0;
+  } catch {
+    return void 0;
+  }
 }
 async function loadWeriftFactory(options = {}) {
   const cacheable = isCacheableFactoryOptions(options);
