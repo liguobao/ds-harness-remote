@@ -70,8 +70,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         workspaceCatalog: undefined,
         workspaces: sameHost ? state.workspaces : cached?.workspaces ?? [],
         sessions: sameHost ? state.sessions : cached?.sessions ?? [],
-        archivedSessionIds: sameHost ? state.archivedSessionIds : [],
-        pinnedSessionIds: sameHost ? state.pinnedSessionIds : [],
+        archivedSessionIds: sameHost ? state.archivedSessionIds : cached?.archivedSessionIds ?? [],
+        pinnedSessionIds: sameHost ? state.pinnedSessionIds : cached?.pinnedSessionIds ?? [],
         sessionModels: undefined,
         error: undefined,
       }))
@@ -124,6 +124,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
               set(state => ({
                 sessions: state.sessions.filter(item => item.sessionId !== sessionId),
                 workspaces: state.workspaces.map(workspace => ({ ...workspace, sessionIds: workspace.sessionIds.filter(id => id !== sessionId) })),
+                pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
               }))
               if (get().workspaceCatalog?.backend === 'opencode') void get().refreshWorkspaces('opencode')
             },

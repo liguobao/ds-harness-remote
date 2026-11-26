@@ -71,17 +71,21 @@ import { createConnectionActions } from '../src/state/connection-actions'
 import { createWorkspaceActions } from '../src/state/workspace-actions'
 import type { SessionAccess } from '../src/state/session-runtime'
 import { disconnected, type AppState } from '../src/state/store-state'
-import type { RemoteDevice, RemoteSession, WorkspaceView } from '../src/types'
+import type { RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../src/types'
 
-const hostDevice: RemoteDevice = {
+const hostDevice = {
   deviceId: 'host-1',
   name: 'Dev Host',
-  role: 'host',
   online: true,
   trusted: true,
   identityKey: 'ed25519:host-key-1',
   platform: 'darwin',
-}
+} as unknown as RemoteDevice
+
+const testConfig = {
+  baseUrl: 'https://relay.example',
+  account: 'acct-1',
+} as unknown as ServerConfig
 
 const sampleWorkspace: WorkspaceView = {
   workspaceId: 'ws-1',
@@ -126,7 +130,7 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
 
   it('persists pinnedSessionIds in encrypted browse-memory and filters deleted ACP workspaces', async () => {
     const scope = browseScope({
-      config: { baseUrl: 'https://relay.example', account: 'acct-1' },
+      config: testConfig,
       selectedDevice: hostDevice,
     })
     const cursorWs: WorkspaceView = {
@@ -221,7 +225,7 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
     }
 
     let state = {
-      config: { baseUrl: 'https://relay.example', account: 'acct-1' },
+      config: testConfig,
       identity: { deviceId: 'mobile-1', publicKey: 'pk', secretKey: 'sk' },
       transportPreference: 'auto',
       connection: disconnected,

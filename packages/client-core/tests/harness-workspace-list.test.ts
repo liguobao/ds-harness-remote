@@ -103,7 +103,9 @@ describe('normalizeWorkspaceList and workspaceList pinnedSessionIds handling', (
       },
     }))
 
-    const list = await HarnessAlphaClient.prototype.workspaceList.call({ gateway: { open } })
+    const list = await HarnessAlphaClient.prototype.workspaceList.call(
+      { gateway: { open } } as unknown as HarnessAlphaClient,
+    )
     expect(open).toHaveBeenCalledWith('workspace/follow', { args: {} })
     expect(returnSpy).toHaveBeenCalledOnce()
     expect(list.pinnedSessionIds).toBeUndefined()
