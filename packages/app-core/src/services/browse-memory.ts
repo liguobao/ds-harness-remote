@@ -50,7 +50,6 @@ const aad = 'dsh-remote-private-browse-v1'
 export const MAX_CACHED_MESSAGES_PER_SESSION = 30
 export const MAX_CACHED_SESSIONS = 10
 const MAX_DELETED_WORKSPACES_PER_SCOPE = 500
-const MAX_CATALOG_SESSION_IDS = 500
 const MAX_HANDOFF_ORIGINS_PER_SCOPE = 500
 const MAX_TEXT_CHARS = 32768
 
@@ -230,7 +229,6 @@ function sanitizeDeletedWorkspaces(value: unknown): Record<string, string[]> {
 function sanitizeCatalogSessionIds(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))]
-    .slice(0, MAX_CATALOG_SESSION_IDS)
 }
 
 function filterCatalogByDeletedKeys(
@@ -498,7 +496,7 @@ export function saveBrowseCatalog(
   workspaces: WorkspaceView[],
   sessions: RemoteSession[],
   meta?: { pinnedSessionIds?: readonly string[]; archivedSessionIds?: readonly string[] },
-): void {
+): boolean {
   const existing = useBrowseMemory.getState().catalogs[scope]
   const pinnedSessionIds = meta?.pinnedSessionIds !== undefined
     ? sanitizeCatalogSessionIds(meta.pinnedSessionIds)
@@ -512,9 +510,10 @@ export function saveBrowseCatalog(
     ...(pinnedSessionIds !== undefined ? { pinnedSessionIds } : {}),
     ...(archivedSessionIds !== undefined ? { archivedSessionIds } : {}),
   }
-  if (JSON.stringify(existing) === JSON.stringify(catalog)) return
+  if (JSON.stringify(existing) === JSON.stringify(catalog)) return false
   useBrowseMemory.setState(state => ({catalogs: {...state.catalogs, [scope]: catalog}}))
   schedule()
+  return true
 }
 export function saveSessionMessagesSnapshot(scope: string, id: string, messages: ChatItem[]): void {
   updateBrowseEntry(scope, id, { messages: sanitizeCachedMessages(messages) })

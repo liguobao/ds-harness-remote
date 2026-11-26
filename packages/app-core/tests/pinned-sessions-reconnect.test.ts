@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fsFiles = new Map<string, string>()
 let savedSecureKey: string | null = null
+let diskWrites = 0
 
 vi.mock('expo-haptics', () => ({
   notificationAsync: vi.fn(async () => undefined),
@@ -11,6 +12,7 @@ vi.mock('expo-haptics', () => ({
 vi.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///test-docs/',
   writeAsStringAsync: vi.fn(async (path: string, content: string) => {
+    diskWrites++
     fsFiles.set(path, content)
   }),
   moveAsync: vi.fn(async ({ from, to }: { from: string; to: string }) => {
@@ -68,9 +70,10 @@ import {
   useBrowseMemory,
 } from '../src/services/browse-memory'
 import { createConnectionActions } from '../src/state/connection-actions'
+import { createSessionActions } from '../src/state/session-actions'
 import { createWorkspaceActions } from '../src/state/workspace-actions'
 import type { SessionAccess } from '../src/state/session-runtime'
-import { disconnected, type AppState } from '../src/state/store-state'
+import { disconnected, initialData, type AppState } from '../src/state/store-state'
 import type { RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../src/types'
 
 const hostDevice = {
@@ -100,13 +103,14 @@ const sampleSession: RemoteSession = {
   sessionId: 's-1',
   title: 'Pinned Session',
   running: false,
-  createdAt: 100,
+  blank: false,
   updatedAt: 200,
   cwd: '/repo/demo',
 }
 
 describe('pinned session persistence across Host reconnect (#627)', () => {
   beforeEach(async () => {
+    await flushBrowseMemory()
     fsFiles.clear()
     savedSecureKey = null
     useBrowseMemory.setState({ ready: false })
@@ -126,6 +130,8 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
 
     const afterHarnessClear = mergeBackendPinnedSessionIds(afterHarnessUpdate, 'harness', [])
     expect(afterHarnessClear).toEqual(['cursor:c-1', 'aider:a-1'])
+    expect(mergeBackendPinnedSessionIds([], 'aider', ['native:with-colon', 'aider:already-prefixed']))
+      .toEqual(['aider:native:with-colon', 'aider:already-prefixed'])
   })
 
   it('persists pinnedSessionIds in encrypted browse-memory and filters deleted ACP workspaces', async () => {
@@ -147,7 +153,7 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
       backend: 'cursor',
       title: 'Cursor Thread',
       running: false,
-      createdAt: 100,
+      blank: false,
       updatedAt: 300,
       cwd: '/repo/cursor-app',
     }
@@ -172,7 +178,25 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
     expect(useBrowseMemory.getState().catalogs[scope]?.pinnedSessionIds).toEqual(['s-1'])
   })
 
-  it('restores pinnedSessionIds on reconnect and preserves them when workspaceList omits pinnedSessionIds', async () => {
+  it('does not truncate valid metadata or rewrite unchanged catalogs', async () => {
+    const scope = browseScope({ config: testConfig, selectedDevice: hostDevice })
+    const ids = Array.from({ length: 501 }, (_, i) => `s-${i}`)
+    expect(saveBrowseCatalog(scope, [sampleWorkspace], [sampleSession], {
+      pinnedSessionIds: ids, archivedSessionIds: ids,
+    })).toBe(true)
+    await flushBrowseMemory()
+    const writesBefore = diskWrites
+    expect(saveBrowseCatalog(scope, [sampleWorkspace], [sampleSession], {
+      pinnedSessionIds: [...ids], archivedSessionIds: [...ids],
+    })).toBe(false)
+    expect(diskWrites).toBe(writesBefore)
+    useBrowseMemory.setState({ catalogs: {}, ready: false })
+    await hydrateBrowseMemory()
+    expect(useBrowseMemory.getState().catalogs[scope]?.pinnedSessionIds).toEqual(ids)
+    expect(useBrowseMemory.getState().catalogs[scope]?.archivedSessionIds).toEqual(ids)
+  })
+
+  it('persists real pin/unpin actions across reconnect, rejects stale reads and isolates Hosts', async () => {
     const proxy = {
       hostDescribe: vi.fn(async () => ({
         version: '1.0.0',
@@ -180,11 +204,13 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
         attachedSessions: 1,
         canOpenPath: true,
       })),
-      workspaceList: vi.fn(async () => ({
+      workspaceList: vi.fn(async (): Promise<{ items: WorkspaceView[]; archivedSessionIds: string[]; pinnedSessionIds?: string[] }> => ({
         items: [sampleWorkspace],
-        archivedSessionIds: [] as string[],
+        archivedSessionIds: [],
       })),
       sessionList: vi.fn(async () => [sampleSession]),
+      workspacePinSession: vi.fn(async (_id: string) => ['s-1']),
+      workspaceUnpinSession: vi.fn(async (_id: string): Promise<string[]> => []),
     }
 
     const connectionMock = {
@@ -214,6 +240,8 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
       sessionLoadGeneration: 0,
       sessionReadAbort: undefined,
       clearHarnessCatalogSync: vi.fn(),
+      flushPendingMuxFrames: vi.fn(),
+      clearPendingMuxFrames: vi.fn(),
       webRtcFallbackStreak: 0,
       closeActiveCodexStream: vi.fn(async () => undefined),
       closeActiveCursorStream: vi.fn(async () => undefined),
@@ -225,6 +253,7 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
     }
 
     let state = {
+      ...initialData(),
       config: testConfig,
       identity: { deviceId: 'mobile-1', publicKey: 'pk', secretKey: 'sk' },
       transportPreference: 'auto',
@@ -257,29 +286,69 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
       getConnectionGeneration: () => runtimeMock.connectionGeneration,
       closeActiveCursorStream: runtimeMock.closeActiveCursorStream,
     })
-    state = { ...state, ...connectionActions, ...workspaceActions }
+    const sessionActions = createSessionActions({ get, set, runtime: runtimeMock as unknown as SessionAccess['runtime'] })
+    state = { ...state, ...connectionActions, ...workspaceActions, ...sessionActions }
 
     expect(await state.connectDevice(hostDevice)).toBe(true)
     await state.refreshWorkspaces('harness')
 
-    // Simulate pinning a session and persisting to browse-memory
-    set({ pinnedSessionIds: ['s-1', 'cursor:c-1'] })
-    const scope = browseScope(state)
-    saveBrowseCatalog(scope, state.workspaces, state.sessions, {
-      pinnedSessionIds: state.pinnedSessionIds,
-      archivedSessionIds: state.archivedSessionIds,
-    })
+    // Simulate an older background read whose snapshot arrives after the real pin RPC.
+    let resolveStale!: (value: Awaited<ReturnType<typeof proxy.workspaceList>>) => void
+    proxy.workspaceList.mockImplementationOnce(() => new Promise(resolve => { resolveStale = resolve }))
+    const stale = state.syncHarnessCatalog()
+    expect(await state.pinSession('s-1')).toBe(true)
+    expect(proxy.workspacePinSession).toHaveBeenCalledWith('s-1')
+    resolveStale({ items: [sampleWorkspace], archivedSessionIds: [], pinnedSessionIds: [] })
+    await stale
+    expect(state.pinnedSessionIds).toEqual(['s-1'])
 
-    // Disconnect clears active state
+    const scope = browseScope(state)
+    expect(useBrowseMemory.getState().catalogs[scope]?.pinnedSessionIds).toEqual(['s-1'])
+    // Disconnect immediately, without a manual save.
     await state.disconnect()
     expect(state.pinnedSessionIds).toEqual([])
-
-    // Reconnect hydrates pinnedSessionIds from browse-memory immediately
     expect(await state.connectDevice(hostDevice)).toBe(true)
-    expect(state.pinnedSessionIds).toEqual(['s-1', 'cursor:c-1'])
-
-    // Subsequent catalog refresh whose baseline omits pinnedSessionIds keeps pinned sessions intact
+    expect(state.pinnedSessionIds).toEqual(['s-1'])
     await state.refreshWorkspaces('harness')
-    expect(state.pinnedSessionIds).toEqual(['s-1', 'cursor:c-1'])
+    expect(state.pinnedSessionIds).toEqual(['s-1'])
+
+    // Rehydrate from disk (simulates a fresh process rather than only an in-memory reconnect).
+    await state.disconnect()
+    await flushBrowseMemory()
+    useBrowseMemory.setState({ catalogs: {}, ready: false })
+    await hydrateBrowseMemory()
+    expect(await state.connectDevice(hostDevice)).toBe(true)
+    expect(state.pinnedSessionIds).toEqual(['s-1'])
+
+    // Switching Host must not import another Host's pins.
+    const otherHost = { ...hostDevice, deviceId: 'host-2', identityKey: 'ed25519:host-key-2' }
+    expect(await state.connectDevice(otherHost)).toBe(true)
+    expect(state.pinnedSessionIds).toEqual([])
+    expect(await state.connectDevice(hostDevice)).toBe(true)
+    expect(state.pinnedSessionIds).toEqual(['s-1'])
+
+    // A stale foreground refresh must not resurrect an unpinned session.
+    let resolveRefresh!: (value: Awaited<ReturnType<typeof proxy.workspaceList>>) => void
+    let started!: () => void
+    const refreshStarted = new Promise<void>(resolve => { started = resolve })
+    proxy.workspaceList.mockImplementationOnce(() => new Promise(resolve => {
+      resolveRefresh = resolve
+      started()
+    }))
+    const staleRefresh = state.refreshWorkspaces('harness')
+    await refreshStarted
+    expect(await state.unpinSession('s-1')).toBe(true)
+    resolveRefresh({ items: [sampleWorkspace], archivedSessionIds: [], pinnedSessionIds: ['s-1'] })
+    await staleRefresh
+    expect(state.pinnedSessionIds).toEqual([])
+    await state.disconnect()
+    expect(await state.connectDevice(hostDevice)).toBe(true)
+    expect(state.pinnedSessionIds).toEqual([])
+
+    // An explicit empty host response is authoritative, unlike an omitted field.
+    expect(await state.pinSession('s-1')).toBe(true)
+    proxy.workspaceList.mockResolvedValueOnce({ items: [sampleWorkspace], archivedSessionIds: [], pinnedSessionIds: [] })
+    await state.refreshWorkspaces('harness')
+    expect(state.pinnedSessionIds).toEqual([])
   })
 })

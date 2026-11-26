@@ -180,6 +180,7 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
 export function startBrowseTracking(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined
   let previousCatalog: unknown, previousSessions: unknown, previousPinned: unknown, previousArchived: unknown, previousMessages: unknown, previousSelected: string | undefined
+  let previousScope: string | undefined
   let previousUpdated = 0
   let disposed = false
   let observing = false
@@ -235,11 +236,13 @@ export function startBrowseTracking(): () => void {
 
     const scope = browseScope(state)
     if (
-      previousCatalog !== state.workspaces
+      previousScope !== scope
+      || previousCatalog !== state.workspaces
       || previousSessions !== state.sessions
       || previousPinned !== state.pinnedSessionIds
       || previousArchived !== state.archivedSessionIds
     ) {
+      previousScope = scope
       previousCatalog = state.workspaces
       previousSessions = state.sessions
       previousPinned = state.pinnedSessionIds
@@ -365,9 +368,14 @@ export function startBrowseTracking(): () => void {
       && next.selectedDevice !== undefined
       && (next.pinnedSessionIds !== prev.pinnedSessionIds || next.archivedSessionIds !== prev.archivedSessionIds)
     ) {
-      observe()
-      void flushBrowseMemory()
-      return
+      // Persist only changed catalog data immediately; leave notifications and
+      // other expensive observation work on the existing coalesced path.
+      if (useBrowseMemory.getState().ready && saveBrowseCatalog(
+        browseScope(next), next.workspaces, next.sessions, {
+          pinnedSessionIds: next.pinnedSessionIds,
+          archivedSessionIds: next.archivedSessionIds,
+        },
+      )) void flushBrowseMemory()
     }
     scheduleObserve()
   })

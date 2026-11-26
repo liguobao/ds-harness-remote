@@ -1,7 +1,7 @@
 import { extractHandoffOriginFromItems, formatHandoffPayload, type PendingHandoffDraft } from '../lib/handoff-context'
 import { firstLineSnippet } from '../lib/handoff-preview'
 import { isSessionInTargetWorkspace } from '../lib/handoff-workspace'
-import { mergeBackendPinnedSessionIds } from '../lib/session-backend'
+import { catalogMutationVersion, invalidateCatalogMetadata, mergeBackendPinnedSessionIds } from '../lib/session-backend'
 import { isSubagentSession } from '../lib/session-kind'
 import { isAbsoluteHostPath, isAcpManagedBackend } from '../lib/workspace-key'
 import { selectAcpModel } from '../services/acp-models'
@@ -115,11 +115,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     try {
       const scope = browseScope(state)
       if (!scope) return
-      browseMemoryModule.saveBrowseCatalog?.(scope, state.workspaces, state.sessions, {
+      if (browseMemoryModule.saveBrowseCatalog?.(scope, state.workspaces, state.sessions, {
         pinnedSessionIds: state.pinnedSessionIds,
         archivedSessionIds: state.archivedSessionIds,
-      })
-      void Promise.resolve(browseMemoryModule.flushBrowseMemory?.()).catch(() => undefined)
+      })) void Promise.resolve(browseMemoryModule.flushBrowseMemory?.()).catch(() => undefined)
     } catch { /* ignore partial browse-memory mocks in unit tests */ }
   }
 
@@ -413,8 +412,9 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         && get().selectedDevice?.deviceId === deviceId
         && (() => { try { return runtime.connection.requireProxy() === proxy } catch { return false } })()
       try {
+        const metadataVersion = catalogMutationVersion(runtime.connection, 'harness')
         const [workspaces, rows] = await Promise.all([proxy.workspaceList(), proxy.sessionList()])
-        if (!current()) return
+        if (!current() || metadataVersion !== catalogMutationVersion(runtime.connection, 'harness')) return
         set(state => {
           const byId = new Map(rows.map(item => [item.sessionId, item]))
           const marks: typeof state.sessionLifecycles = { ...state.sessionLifecycles }
@@ -1453,10 +1453,12 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         const proxy = runtime.connection.requireProxy()
         const { sessionId: childId } = await proxy.sessionFork(sessionId)
         if (generation !== runtime.connectionGeneration) return undefined
+        const metadataVersion = catalogMutationVersion(runtime.connection, 'harness')
         const [sessions, workspaceList] = await Promise.all([proxy.sessionList(), proxy.workspaceList()])
         if (generation !== runtime.connectionGeneration) return undefined
         const created = sessions.find(s => s.sessionId === childId)
         set(state => {
+          const metadataCurrent = metadataVersion === catalogMutationVersion(runtime.connection, 'harness')
           const archivedSet = new Set(workspaceList.archivedSessionIds)
           return {
             sessions: [
@@ -1467,14 +1469,16 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               ...(state.workspaces ?? []).filter(item => !isHarnessBackend(item.backend)),
               ...workspaceList.items,
             ],
-            archivedSessionIds: workspaceList.archivedSessionIds,
-            pinnedSessionIds: workspaceList.pinnedSessionIds !== undefined
-              ? mergeBackendPinnedSessionIds(
-                  state.pinnedSessionIds,
-                  'harness',
-                  workspaceList.pinnedSessionIds.filter(id => !archivedSet.has(id)),
-                )
-              : state.pinnedSessionIds.filter(id => !archivedSet.has(id)),
+            ...(metadataCurrent ? {
+              archivedSessionIds: workspaceList.archivedSessionIds,
+              pinnedSessionIds: workspaceList.pinnedSessionIds !== undefined
+                ? mergeBackendPinnedSessionIds(
+                    state.pinnedSessionIds,
+                    'harness',
+                    workspaceList.pinnedSessionIds.filter(id => !archivedSet.has(id)),
+                  )
+                : state.pinnedSessionIds.filter(id => !archivedSet.has(id)),
+            } : {}),
             busyAction: undefined,
           }
         })
@@ -1501,6 +1505,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           if (generation !== runtime.connectionGeneration) return false
           if (runtime.activeCodexTimeline?.session.id === sessionId) await runtime.closeActiveCodexStream()
           if (generation !== runtime.connectionGeneration) return false
+          invalidateCatalogMetadata(runtime.connection, 'codex')
           set(state => ({
             sessions: state.sessions.filter(item => item.sessionId !== sessionId),
             workspaces: state.workspaces.map(workspace => ({
@@ -1528,6 +1533,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           if (generation !== runtime.connectionGeneration) return false
           if (get().selectedSession?.sessionId === sessionId) await runtime.closeActiveCursorStream()
           if (generation !== runtime.connectionGeneration) return false
+          invalidateCatalogMetadata(runtime.connection, session.backend)
           set(state => ({
             sessions: state.sessions.filter(item => item.sessionId !== sessionId),
             workspaces: state.workspaces.map(workspace => ({
@@ -1552,6 +1558,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         const proxy = runtime.connection.requireProxy()
         const archivedSessionIds = await proxy.workspaceArchiveSession(sessionId)
         if (generation !== runtime.connectionGeneration) return false
+        invalidateCatalogMetadata(runtime.connection, 'harness')
         // The mutation returns the complete Host-confirmed archive set. Preserve
         // catalog membership, and do not let a second read hide a successful write.
         set(state => ({
@@ -1586,6 +1593,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         const proxy = runtime.connection.requireProxy()
         const archivedSessionIds = await proxy.workspaceUnarchiveSession(sessionId)
         if (generation !== runtime.connectionGeneration) return false
+        invalidateCatalogMetadata(runtime.connection, 'harness')
         set({ archivedSessionIds, busyAction: undefined })
         persistCatalogState()
         return true
@@ -1606,6 +1614,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         try {
           const updated = await acpClientForBackend(runtime.connection, effectiveBackend).pinSession(cursorNativeId(targetSession), effectiveBackend)
           if (generation !== runtime.connectionGeneration) return false
+          invalidateCatalogMetadata(runtime.connection, effectiveBackend)
           set(state => ({
             pinnedSessionIds: mergeBackendPinnedSessionIds(state.pinnedSessionIds, effectiveBackend, updated),
             busyAction: undefined,
@@ -1625,6 +1634,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         const proxy = runtime.connection.requireProxy()
         const pinnedSessionIds = await proxy.workspacePinSession(sessionId)
         if (generation !== runtime.connectionGeneration) return false
+        invalidateCatalogMetadata(runtime.connection, 'harness')
         set(state => ({
           pinnedSessionIds: mergeBackendPinnedSessionIds(state.pinnedSessionIds, 'harness', pinnedSessionIds),
           busyAction: undefined,
@@ -1648,6 +1658,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         try {
           const updated = await acpClientForBackend(runtime.connection, effectiveBackend).unpinSession(cursorNativeId(targetSession), effectiveBackend)
           if (generation !== runtime.connectionGeneration) return false
+          invalidateCatalogMetadata(runtime.connection, effectiveBackend)
           set(state => ({
             pinnedSessionIds: mergeBackendPinnedSessionIds(state.pinnedSessionIds, effectiveBackend, updated)
               .filter(id => id !== sessionId),
@@ -1668,6 +1679,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         const proxy = runtime.connection.requireProxy()
         const pinnedSessionIds = await proxy.workspaceUnpinSession(sessionId)
         if (generation !== runtime.connectionGeneration) return false
+        invalidateCatalogMetadata(runtime.connection, 'harness')
         set(state => ({
           pinnedSessionIds: mergeBackendPinnedSessionIds(state.pinnedSessionIds, 'harness', pinnedSessionIds)
             .filter(id => id !== sessionId),

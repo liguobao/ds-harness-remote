@@ -2,6 +2,7 @@ import { cursorNativeId, finalizeAssistantLive, foldAcpHistory, mergeAcpHistoryA
 import { browseScope, saveSessionMessagesSnapshot, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports, type PreferredTransport } from '../lib/network-route'
+import { invalidateCatalogMetadata, registerAcpBackendId } from '../lib/session-backend'
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
@@ -32,6 +33,10 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       const memory = useBrowseMemory.getState()
       const scope = browseScope({...get(), selectedDevice: device})
       const cached = device.trusted ? memory.catalogs[scope] : undefined
+      // Register cached custom backend prefixes before the first Harness refresh.
+      for (const item of [...(cached?.workspaces ?? []), ...(cached?.sessions ?? [])]) {
+        if (item.backend !== undefined) registerAcpBackendId(item.backend)
+      }
       const sameHost = get().selectedDevice?.deviceId === device.deviceId
       if (!sameHost) {
         runtime.webRtcFallbackStreak = 0
@@ -121,6 +126,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             onOpencodeArchived: nativeId => {
               if (generation !== runtime.connectionGeneration) return
               const sessionId = `opencode:${nativeId}`
+              invalidateCatalogMetadata(runtime.connection, 'opencode')
               set(state => ({
                 sessions: state.sessions.filter(item => item.sessionId !== sessionId),
                 workspaces: state.workspaces.map(workspace => ({ ...workspace, sessionIds: workspace.sessionIds.filter(id => id !== sessionId) })),

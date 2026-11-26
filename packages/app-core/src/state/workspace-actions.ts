@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics'
 import { friendlyError } from '../lib/errors'
-import { mergeBackendPinnedSessionIds } from '../lib/session-backend'
+import { catalogMutationVersion, invalidateCatalogMetadata, mergeBackendPinnedSessionIds } from '../lib/session-backend'
 import {
   filterVisibleAcpCatalog,
   isAcpManagedBackend,
@@ -62,11 +62,10 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
     try {
       const scope = browseMemory.browseScope?.(state)
       if (!scope) return
-      browseMemory.saveBrowseCatalog?.(scope, state.workspaces, state.sessions, {
+      if (browseMemory.saveBrowseCatalog?.(scope, state.workspaces, state.sessions, {
         pinnedSessionIds: state.pinnedSessionIds,
         archivedSessionIds: state.archivedSessionIds,
-      })
-      void Promise.resolve(browseMemory.flushBrowseMemory?.()).catch(() => undefined)
+      })) void Promise.resolve(browseMemory.flushBrowseMemory?.()).catch(() => undefined)
     } catch { /* ignore partial mock environments */ }
   }
 
@@ -125,6 +124,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
       if (get().connection.phase !== 'connected') return
       const scope = captureConnection()
       const refresh = ++refreshGeneration
+      const metadataVersion = catalogMutationVersion(connection, backend)
       const mutation = mutationGeneration
       const busyAction = get().busyAction
       const current = () => scope.current() && refresh === refreshGeneration
@@ -231,6 +231,10 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           }
         }
         if (!current()) return
+        if (metadataVersion !== catalogMutationVersion(connection, backend)) {
+          set({ workspaceCatalog: { backend, loading: false } })
+          return
+        }
         set(state => {
           const nextArchived = archivedSessionIds ?? state.archivedSessionIds
           const archivedSet = new Set(nextArchived)
@@ -336,6 +340,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           if (memScope) {
             browseMemory.markDeletedAcpWorkspace?.(memScope, targetBackend, targetPath, currentState.selectedDevice?.platform)
           }
+          invalidateCatalogMetadata(connection, targetBackend)
           set(state => ({
             workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
             sessions: state.sessions.filter(session => !sessionIds.has(session.sessionId)),
@@ -357,6 +362,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         await proxy.workspaceDelete(workspaceId)
         if (!scope.current()) return false
         const sessionIds = new Set(target?.sessionIds ?? [])
+        invalidateCatalogMetadata(connection, 'harness')
         set(state => ({
           workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
           sessions: state.sessions.filter(session => !sessionIds.has(session.sessionId)),
