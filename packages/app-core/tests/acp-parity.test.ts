@@ -46,6 +46,56 @@ describe('Issue #469 ACP parity (app-core)', () => {
     })
   })
 
+  it('keeps workspace results matched and ordered when catalog calls finish out of order', async () => {
+    const paths = ['/a', '/b', '/c', '/d', '/e']
+    const started: string[] = []
+    const release = new Map<string, (value: unknown) => void>()
+    const client = { call: vi.fn(async (method: string, params: unknown) => {
+      if (method === 'dsh/workspaceList') return paths.map(path => ({ path }))
+      const path = (params as { path: string }).path
+      started.push(path)
+      return new Promise(resolve => { release.set(path, resolve) })
+    }) }
+    const pending = loadAcpDirectoryCatalog({
+      backend: 'opencode', label: 'OpenCode', client,
+      createWorkspace: path => createAcpWorkspace('opencode', path),
+      createSession: input => createAcpSession({ backend: 'opencode', ...input }),
+    })
+    await vi.waitFor(() => expect(started).toEqual(paths.slice(0, 4)))
+    release.get('/b')!({ items: [{ conversationId: 'b' }] })
+    await vi.waitFor(() => expect(started).toEqual(paths))
+    for (const path of ['/e', '/d', '/c', '/a']) {
+      release.get(path)!({ items: [{ conversationId: path.slice(1) }] })
+    }
+    const catalog = await pending
+    expect(catalog.workspaces.map(item => item.path)).toEqual(paths)
+    expect(catalog.sessions.map(item => item.sessionId)).toEqual(paths.map(path => `opencode:${path.slice(1)}`))
+  })
+
+  it('stops starting catalog calls after one workspace call fails', async () => {
+    const paths = ['/a', '/b', '/c', '/d', '/e', '/f']
+    const started: string[] = []
+    const settle = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+    const client = { call: vi.fn(async (method: string, params: unknown) => {
+      if (method === 'dsh/workspaceList') return paths.map(path => ({ path }))
+      const path = (params as { path: string }).path
+      started.push(path)
+      return new Promise((resolve, reject) => { settle.set(path, { resolve, reject }) })
+    }) }
+    const pending = loadAcpDirectoryCatalog({
+      backend: 'opencode', label: 'OpenCode', client,
+      createWorkspace: path => createAcpWorkspace('opencode', path),
+      createSession: input => createAcpSession({ backend: 'opencode', ...input }),
+    })
+    await vi.waitFor(() => expect(started).toEqual(paths.slice(0, 4)))
+    const rejected = expect(pending).rejects.toThrow('catalog failed')
+    settle.get('/a')!.reject(new Error('catalog failed'))
+    await rejected
+    for (const path of ['/b', '/c', '/d']) settle.get(path)!.resolve({ items: [] })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(started).toEqual(paths.slice(0, 4))
+  })
+
   it('projects cursor/ask_question as QuestionActivity and attaches TurnUsage on prompt_completed', () => {
     const sid = 'antigravity:s1'
     let items = applyCursorFrame([], sid, {

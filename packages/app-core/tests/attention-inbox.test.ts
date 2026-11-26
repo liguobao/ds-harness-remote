@@ -3,10 +3,11 @@ import {
   createRemoteAttentionClient,
   type AttentionRpcTransport,
 } from '@dsh-remote/client-core'
-import type {
-  AttentionDigest,
-  AttentionFollowEvent,
-  AttentionItem,
+import {
+  MAX_ATTENTION_TITLE_CHARS,
+  type AttentionDigest,
+  type AttentionFollowEvent,
+  type AttentionItem,
 } from '@dsh-remote/protocol'
 import {
   AttentionDeepLinkBuffer,
@@ -36,6 +37,7 @@ import {
   useAttentionStore,
 } from '../src/state/attention-store'
 import type { BotState } from '../src/services/bot-catalog'
+import { strings } from '../src/locales/i18n'
 import type { RemoteDevice } from '../src/types'
 
 const VALID_TOKEN = '0123456789abcdef0123456789abcdef'
@@ -478,7 +480,152 @@ describe('attentionStore', () => {
   })
 })
 
+describe('legacy attention display titles', () => {
+  it('never surfaces a bare session id for DS-Bot, ACP (<backend>:<nativeId> / acp:<backend>:<nativeId>), or truncated long ids', async () => {
+    const longId = `session-${'a'.repeat(200)}`
+    const cases: Array<{ sessionId: string; backend: string; title: string; expectedTitle: string }> = [
+      { sessionId: 'session-bb1328c8', backend: 'ds-bot', title: '', expectedTitle: 'DS-Bot' },
+      { sessionId: 'session-bb1328c8', backend: 'ds-bot', title: 'session-bb1328c8', expectedTitle: 'DS-Bot' },
+      { sessionId: 'claude:0195a3', backend: 'claude', title: '0195a3', expectedTitle: strings.comfort.liveTaskDefaultTitle },
+      { sessionId: 'claude:0195a3', backend: 'claude', title: 'claude:0195a3', expectedTitle: strings.comfort.liveTaskDefaultTitle },
+      { sessionId: 'acp:claude:0195a3', backend: 'claude', title: '0195a3', expectedTitle: strings.comfort.liveTaskDefaultTitle },
+      { sessionId: 'antigravity:session-123', backend: 'antigravity', title: ' session-123 ', expectedTitle: strings.comfort.liveTaskDefaultTitle },
+      { sessionId: longId, backend: 'harness', title: longId.slice(0, MAX_ATTENTION_TITLE_CHARS), expectedTitle: strings.comfort.liveTaskDefaultTitle },
+    ]
+    for (const c of cases) {
+      const derived = deriveLegacyAttentionItems({
+        sessions: [{ sessionId: c.sessionId, backend: c.backend as never, title: c.title, running: true, blank: false, updatedAt: 100 }],
+        botState: undefined,
+        now: 1000,
+      })
+      expect(derived.find(item => item.status === 'running')?.sessionTitle).toBe(c.expectedTitle)
+    }
+
+    // Live attention.follow snapshots also normalize ACP bare nativeId titles
+    const fake = createFakeAttentionTransport()
+    fake.setHandler(async method => method === 'attention.follow'
+      ? {
+          revision: 1,
+          digest: makeDigest({ revision: 1, runningSessions: 1 }),
+          items: [makeItem({
+            id: 'acp-1',
+            backend: 'acp',
+            acpAdapter: 'claude',
+            sessionId: 'claude:0195a3',
+            sessionTitle: '0195a3',
+            status: 'running',
+          })],
+        }
+      : {})
+    await useAttentionStore.getState().attachConnection({
+      hostId: 'host-acp',
+      generation: 1,
+      advertisedSupported: true,
+      client: createRemoteAttentionClient(fake.transport),
+    })
+    expect(useAttentionStore.getState().items[0]?.sessionTitle).toBe(strings.comfort.liveTaskDefaultTitle)
+  })
+
+  it('falls back to DS-Bot when bot/room names are empty, whitespace, or bare session ids (including questions & part sessions)', () => {
+    for (const badName of ['', '   ', 'bot-sess-1']) {
+      const botState = {
+        bots: [{ id: 'bot-1', sessionId: 'bot-sess-1', parts: ['bot-part-1'], name: badName, preview: '预览', role: 'Analyst', instructions: '', model: 'ds', effort: 'medium', main: true }],
+        rooms: [{ id: 'room-1', sessionId: 'room-sess-1', name: badName === 'bot-sess-1' ? 'room-sess-1' : badName, members: ['bot-1'], notice: '', admin: 'bot-1' }],
+        agents: [],
+        exchangeTurns: {}, btwCards: {}, btwSupported: false, sideChats: {}, activity: {},
+        work: {
+          bots: { 'bot-1': { running: true, updatedAt: 500 } },
+          rooms: { 'room-1': { running: true, updatedAt: 400 } },
+          waiting: {}, turns: {}, steered: {},
+        },
+        questions: {
+          'bot-part-1': { id: 'q-part-1', sessionId: 'bot-part-1', question: 'Continue?', updatedAt: 700 },
+        },
+        approvals: [{ id: 'apr-1', botId: 'bot-1', sessionId: 'bot-sess-2', answerable: true, toolName: 'bash', updatedAt: 600 }],
+        views: {}, closedCards: {}, imVia: {}, connectorRequests: {}, mailRequests: {},
+      } as unknown as BotState
+      const derived = deriveLegacyAttentionItems({ botState, now: 1000 })
+      expect(derived.find(i => i.id === 'legacy:bot:approval:apr-1')?.sessionTitle).toBe('DS-Bot')
+      expect(derived.find(i => i.id === 'legacy:bot:question:q-part-1')?.sessionTitle).toBe('DS-Bot')
+      expect(derived.find(i => i.id === 'legacy:bot:running:bot-sess-1')?.sessionTitle).toBe('DS-Bot')
+      expect(derived.find(i => i.id === 'legacy:bot:running:room-sess-1')?.sessionTitle).toBe('DS-Bot')
+    }
+  })
+
+  it('uses the bot preview as the summary of a running DS-Bot bot entry', () => {
+    const botState = {
+      bots: [{ id: 'bot-1', sessionId: 'bot-sess-1', name: 'Research Bot', preview: '最后一次回复摘要', role: 'Analyst', instructions: '', model: 'ds', effort: 'medium', main: true }],
+      rooms: [],
+      agents: [],
+      exchangeTurns: {}, btwCards: {}, btwSupported: false, sideChats: {}, activity: {},
+      work: { bots: { 'bot-1': { running: true, updatedAt: 500 } }, rooms: {}, waiting: {}, turns: {}, steered: {} },
+      questions: {}, views: {}, closedCards: {}, imVia: {}, connectorRequests: {}, mailRequests: {},
+    } as unknown as BotState
+    const derived = deriveLegacyAttentionItems({
+      sessions: [{ sessionId: 'bot-sess-1', backend: 'ds-bot', title: '', running: true, blank: false, updatedAt: 100 }],
+      botState,
+      now: 1000,
+    })
+    const running = derived.find(item => item.sessionId === 'bot-sess-1' && item.status === 'running')
+    expect(running?.sessionTitle).toBe('Research Bot')
+    expect(running?.summary).toBe('最后一次回复摘要')
+  })
+})
+
 describe('live-surface unified bridge', () => {
+  it('normalizes bare session ids, ACP native ids, DS-Bot titles, handoff markers, and overlong titles across live tasks and alerts', async () => {
+    const overlong = 'T'.repeat(MAX_ATTENTION_TITLE_CHARS + 20)
+    const cases: Array<{ item: AttentionItem; expectedTitle: string }> = [
+      {
+        item: makeItem({ id: 'run-h', sessionId: 'session-bb1328c8', sessionTitle: 'session-bb1328c8', status: 'running' }),
+        expectedTitle: strings.comfort.liveTaskDefaultTitle,
+      },
+      {
+        item: makeItem({ id: 'run-acp', backend: 'acp', acpAdapter: 'claude', sessionId: 'claude:0195a3', sessionTitle: '0195a3', status: 'running' }),
+        expectedTitle: strings.comfort.liveTaskDefaultTitle,
+      },
+      {
+        item: makeItem({ id: 'run-bot', backend: 'ds-bot', mode: 'bot', sessionId: 'bot-sess-1', sessionTitle: 'bot-sess-1', status: 'running' }),
+        expectedTitle: 'DS-Bot',
+      },
+      {
+        item: makeItem({ id: 'run-bot-empty', backend: 'ds-bot', mode: 'bot', sessionId: 'bot-sess-2', sessionTitle: '   ', status: 'running' }),
+        expectedTitle: 'DS-Bot',
+      },
+      {
+        item: makeItem({ id: 'run-handoff', sessionId: 's-ho', sessionTitle: '<!-- dsh-handoff:v1 {"sourceBackend":"codex","targetBackend":"claude"} -->', status: 'running' }),
+        expectedTitle: 'Codex → Claude',
+      },
+      {
+        item: makeItem({ id: 'run-long', sessionId: 's-long', sessionTitle: overlong, status: 'running' }),
+        expectedTitle: overlong.slice(0, MAX_ATTENTION_TITLE_CHARS),
+      },
+    ]
+    for (const c of cases) {
+      for (const useV2 of [false, true]) {
+        const updates: unknown[][] = []
+        const alerts: unknown[][] = []
+        const foreground: LiveSurfaceForegroundBridge = {
+          notifyTask(...args: unknown[]) { alerts.push(args) },
+          ...(useV2 ? { notifyAttention(...args: unknown[]) { alerts.push(args) } } : {}),
+          async updateLiveTask(...args: unknown[]) { updates.push(args) },
+          ...(useV2 ? { async updateLiveTaskV2(...args: unknown[]) { updates.push(args) } } : {}),
+          async clearLiveTask() {},
+        }
+        const controller = createLiveSurfaceController({ foreground, getReactNative: () => ({ Platform: { OS: 'android' } }) })
+        await controller.sync({
+          hostId: 'host', connected: true, notificationsEnabled: true, appState: 'background',
+          items: [{ ...c.item, status: 'waiting_approval' }],
+          digest: null,
+        })
+        expect(updates).toHaveLength(1)
+        expect(updates[0]?.[3]).toBe(c.expectedTitle)
+        expect(alerts).toHaveLength(1)
+        expect(alerts[0]?.[useV2 ? 3 : 2]).toBe(c.expectedTitle)
+      }
+    }
+  })
+
   it('clears a queued Android task when the Host disconnects before the first update settles', async () => {
     const calls: string[] = []
     const foreground: LiveSurfaceForegroundBridge = {

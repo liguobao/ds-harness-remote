@@ -101390,6 +101390,8 @@ import { createServer as createServer3 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
 import { stripVTControlCharacters } from "node:util";
 var MAX_RESPONSE_BYTES = 64 * 1024;
+var MAX_LIST_RESPONSE_BYTES = 4 * 1024 * 1024;
+var SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 async function opencodeHasNativeApi(binary, args, cwd2, signal) {
   try {
     const { stdout, stderr } = await execFileCommand(binary, [...opencodePrivateArgs(args), "--help"], {
@@ -101424,6 +101426,32 @@ var OpencodeNativeApi = class {
     const session2 = await this.session("GET", sessionId, cwd2);
     return typeof session2.time.archived === "number" && Number.isFinite(session2.time.archived);
   }
+  async listArchived(sessionIds, cwd2) {
+    if (sessionIds.some((id7) => !SESSION_ID_PATTERN.test(id7))) throw new RpcError("INVALID_MESSAGE", "The OpenCode session ID is invalid.");
+    const wanted = new Set(sessionIds);
+    try {
+      const result = await this.requestJson("GET", "/session", cwd2, MAX_LIST_RESPONSE_BYTES);
+      if (!Array.isArray(result)) throw unavailable();
+      const archived = /* @__PURE__ */ new Map();
+      const paths = /* @__PURE__ */ new Map();
+      for (const row of result) {
+        if (!isNativeRecord(row) || typeof row.id !== "string" || !wanted.has(row.id)) continue;
+        if (archived.has(row.id) || typeof row.directory !== "string" || !isNativeRecord(row.time)) throw unavailable();
+        let path = paths.get(row.directory);
+        if (!path) {
+          path = realpath3(row.directory);
+          paths.set(row.directory, path);
+        }
+        if (await path !== cwd2) throw unavailable();
+        const value = row.time.archived;
+        if (value != null && (typeof value !== "number" || !Number.isFinite(value))) throw unavailable();
+        archived.set(row.id, value != null);
+      }
+      return archived;
+    } catch {
+      throw unavailable();
+    }
+  }
   async archive(sessionId, cwd2) {
     if (await this.isArchived(sessionId, cwd2)) return;
     const session2 = await this.session("PATCH", sessionId, cwd2);
@@ -101433,44 +101461,56 @@ var OpencodeNativeApi = class {
     this.shutdown.abort();
   }
   async session(method, sessionId, cwd2) {
-    if (!/^[A-Za-z0-9_-]{1,256}$/.test(sessionId)) throw new RpcError("INVALID_MESSAGE", "The OpenCode session ID is invalid.");
+    if (!SESSION_ID_PATTERN.test(sessionId)) throw new RpcError("INVALID_MESSAGE", "The OpenCode session ID is invalid.");
     try {
-      const url2 = new URL(`/session/${encodeURIComponent(sessionId)}`, this.origin);
-      url2.searchParams.set("directory", cwd2);
-      const response = await this.request(url2, {
+      const result = await this.requestJson(
         method,
-        redirect: "error",
-        signal: AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(2e4)]),
-        headers: { authorization: `Basic ${Buffer.from(`opencode:${this.password}`).toString("base64")}`, "content-type": "application/json" },
-        ...method === "PATCH" ? { body: JSON.stringify({ time: { archived: Date.now() } }) } : {}
-      });
-      if (!response.ok) {
-        await response.body?.cancel();
-        throw unavailable();
-      }
-      const reader = response.body?.getReader();
-      if (!reader) throw unavailable();
-      const chunks = [];
-      let bytes = 0;
-      try {
-        for (; ; ) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          bytes += chunk.value.byteLength;
-          if (bytes > MAX_RESPONSE_BYTES) throw unavailable();
-          chunks.push(chunk.value);
-        }
-      } finally {
-        await reader.cancel().catch(() => void 0);
-      }
-      const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      if (!result || result.id !== sessionId || typeof result.directory !== "string" || !result.time || typeof result.time !== "object" || await realpath3(result.directory) !== cwd2) throw unavailable();
+        `/session/${encodeURIComponent(sessionId)}`,
+        cwd2,
+        MAX_RESPONSE_BYTES,
+        method === "PATCH" ? JSON.stringify({ time: { archived: Date.now() } }) : void 0
+      );
+      if (!isNativeRecord(result) || result.id !== sessionId || typeof result.directory !== "string" || !isNativeRecord(result.time) || await realpath3(result.directory) !== cwd2) throw unavailable();
       return result;
     } catch {
       throw unavailable();
     }
   }
+  async requestJson(method, path, cwd2, maxBytes2, body) {
+    const url2 = new URL(path, this.origin);
+    url2.searchParams.set("directory", cwd2);
+    const response = await this.request(url2, {
+      method,
+      redirect: "error",
+      signal: AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(2e4)]),
+      headers: { authorization: `Basic ${Buffer.from(`opencode:${this.password}`).toString("base64")}`, "content-type": "application/json" },
+      ...body === void 0 ? {} : { body }
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw unavailable();
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw unavailable();
+    const chunks = [];
+    let bytes = 0;
+    try {
+      for (; ; ) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        bytes += chunk.value.byteLength;
+        if (bytes > maxBytes2) throw unavailable();
+        chunks.push(chunk.value);
+      }
+    } finally {
+      await reader.cancel().catch(() => void 0);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  }
 };
+function isNativeRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 async function opencodeLoopbackPort() {
   const server = createServer3();
   await new Promise((resolve11, reject) => {
@@ -101737,32 +101777,57 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
         }
         return cached2;
       };
-      const archivedItems = /* @__PURE__ */ new Map();
-      let next = 0;
+      const resolved = new Array(items.length);
+      let nextItem = 0;
       await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
         for (; ; ) {
-          const index = next++;
+          const index = nextItem++;
           if (index >= items.length) return;
           const item = items[index];
           if (!isRecord20(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
-          let cwd2;
-          try {
-            cwd2 = await resolveCwd(item.cwd);
-          } catch {
-            continue;
-          }
-          if (!cwd2) continue;
-          let archived;
-          try {
-            archived = await nativeApi.isArchived(item.sessionId, cwd2);
-          } catch {
-            continue;
-          }
-          if (archived) this.archivedSessions.add(item.sessionId);
-          else this.archivedSessions.delete(item.sessionId);
-          archivedItems.set(index, archived);
+          const cwd2 = await resolveCwd(item.cwd);
+          if (cwd2) resolved[index] = { index, sessionId: item.sessionId, cwd: cwd2 };
         }
       }));
+      const groups = /* @__PURE__ */ new Map();
+      for (const item of resolved) {
+        if (!item) continue;
+        const group = groups.get(item.cwd) ?? [];
+        group.push(item);
+        groups.set(item.cwd, group);
+      }
+      const archivedItems = /* @__PURE__ */ new Map();
+      const missing = [];
+      const grouped = [...groups.values()];
+      let nextGroup = 0;
+      await Promise.all(Array.from({ length: Math.min(4, grouped.length) }, async () => {
+        for (; ; ) {
+          const group = grouped[nextGroup++];
+          if (!group) return;
+          const batch = group.length > 1 ? await nativeApi.listArchived(group.map((item) => item.sessionId), group[0].cwd).catch(() => /* @__PURE__ */ new Map()) : /* @__PURE__ */ new Map();
+          for (const item of group) {
+            const archived = batch.get(item.sessionId);
+            if (archived === void 0) missing.push(item);
+            else archivedItems.set(item.index, archived);
+          }
+        }
+      }));
+      let nextMissing = 0;
+      await Promise.all(Array.from({ length: Math.min(4, missing.length) }, async () => {
+        for (; ; ) {
+          const item = missing[nextMissing++];
+          if (!item) return;
+          try {
+            archivedItems.set(item.index, await nativeApi.isArchived(item.sessionId, item.cwd));
+          } catch {
+          }
+        }
+      }));
+      for (const item of resolved) {
+        if (!item || !archivedItems.has(item.index)) continue;
+        if (archivedItems.get(item.index)) this.archivedSessions.add(item.sessionId);
+        else this.archivedSessions.delete(item.sessionId);
+      }
       const sessions = items.flatMap((item, index) => archivedItems.has(index) ? [{ ...item, archived: archivedItems.get(index) }] : []);
       return { ...result, sessions };
     }

@@ -269,8 +269,9 @@ describe('OpencodeAcpClient', () => {
       }
     })
     const request = vi.fn(async (url: unknown) => {
-      const id = new URL(String(url)).pathname.split('/').at(-1)
-      return new Response(JSON.stringify({ id, directory: cwd, time: id === 'archived' ? { archived: 123 } : {} }))
+      const path = new URL(String(url)).pathname
+      const session = (id: string) => ({ id, directory: cwd, time: id === 'archived' ? { archived: 123 } : {} })
+      return new Response(JSON.stringify(path === '/session' ? ['archived', 'active'].map(session) : session(path.split('/').at(-1)!)))
     })
     const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
     // Inject the native transport while retaining the real ACP request path.
@@ -280,8 +281,35 @@ describe('OpencodeAcpClient', () => {
       await expect(client.call('session/list', {})).resolves.toMatchObject({
         sessions: [{ sessionId: 'archived', archived: true }, { sessionId: 'active', archived: false }], nextCursor: 'next-page',
       })
-      expect(request).toHaveBeenCalledTimes(2)
+      expect(request).toHaveBeenCalledTimes(1)
       await expect(client.call('session/prompt', { sessionId: 'archived', prompt: [] })).rejects.toMatchObject({ code: 'ACP_SESSION_ARCHIVED' })
+    } finally { await client.close() }
+  })
+
+  it('uses individual archive reads only for rows missing from the native list', async () => {
+    const fake = fakeProcess()
+    const cwd = await realpath(process.cwd())
+    fake.child.stdin.on('data', chunk => {
+      for (const line of String(chunk).trim().split('\n')) {
+        const message = JSON.parse(line)
+        const result = message.method === 'initialize' ? { protocolVersion: 1 }
+          : { sessions: ['a', 'b', 'c'].map(sessionId => ({ sessionId, cwd })) }
+        fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`)
+      }
+    })
+    const request = vi.fn(async (url: unknown) => {
+      const path = new URL(String(url)).pathname
+      const session = (id: string) => ({ id, directory: cwd, time: id === 'a' ? { archived: 123 } : {} })
+      return new Response(JSON.stringify(path === '/session' ? ['a', 'b'].map(session) : session('c')))
+    })
+    const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
+    Object.assign(client, { nativeApi: new OpencodeNativeApi('http://127.0.0.1:12345', request as typeof fetch) })
+    try {
+      await client.start()
+      await expect(client.call('session/list', {})).resolves.toMatchObject({
+        sessions: [{ sessionId: 'a', archived: true }, { sessionId: 'b', archived: false }, { sessionId: 'c', archived: false }],
+      })
+      expect(request.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/session', '/session/c'])
     } finally { await client.close() }
   })
 
