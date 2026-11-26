@@ -48,4 +48,20 @@ describe('OpenCode native archive boundary', () => {
     const args = opencodePrivateArgs(['acp', '--port', '4096', '--hostname=0.0.0.0', '--mdns', 'true', '--cwd', cwd], 12345)
     expect(args).toEqual(['acp', '--cwd', cwd, '--hostname=127.0.0.1', '--port=12345', '--mdns=false'])
   })
+
+  it('rejects batch archive metadata with a wrong scope or duplicate session', async () => {
+    const cwd = await realpath(process.cwd()), other = await realpath('..')
+    await runScenarios([
+      { name: 'wrong directory', rows: [{ id: 'ses_1', directory: other, time: {} }] },
+      { name: 'duplicate session', rows: [{ id: 'ses_1', directory: cwd, time: {} }, { id: 'ses_1', directory: cwd, time: {} }] },
+      { name: 'invalid archive time', rows: [{ id: 'ses_1', directory: cwd, time: { archived: 'yes' } }] },
+    ].map(scenario => ({ name: scenario.name, run: async () => {
+      const request = vi.fn(async () => new Response(JSON.stringify(scenario.rows)))
+      const api = new OpencodeNativeApi('http://127.0.0.1:12345', request as typeof fetch)
+      try {
+        await expect(api.listArchived(['ses_1'], cwd)).rejects.toMatchObject({ code: 'OPENCODE_ARCHIVE_UNAVAILABLE' })
+        expect(request).toHaveBeenCalledTimes(1)
+      } finally { api.close() }
+    } })))
+  })
 })

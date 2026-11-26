@@ -291,32 +291,60 @@ export class OpencodeAcpClient implements CursorAcpLike {
         }
         return cached
       }
-      const archivedItems = new Map<number, boolean>()
-      let next = 0
+      const resolved: Array<{ index: number; sessionId: string; cwd: string } | undefined> = new Array(items.length)
+      let nextItem = 0
       await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
         for (;;) {
-          const index = next++
+          const index = nextItem++
           if (index >= items.length) return
           const item = items[index]
           if (!isRecord(item) || typeof item.sessionId !== 'string' || typeof item.cwd !== 'string') continue
-          let cwd: string | undefined
-          try {
-            cwd = await resolveCwd(item.cwd)
-          } catch {
-            continue
-          }
-          if (!cwd) continue
-          let archived: boolean
-          try {
-            archived = await nativeApi.isArchived(item.sessionId, cwd)
-          } catch {
-            continue
-          }
-          if (archived) this.archivedSessions.add(item.sessionId)
-          else this.archivedSessions.delete(item.sessionId)
-          archivedItems.set(index, archived)
+          const cwd = await resolveCwd(item.cwd)
+          if (cwd) resolved[index] = { index, sessionId: item.sessionId, cwd }
         }
       }))
+      const groups = new Map<string, Array<{ index: number; sessionId: string; cwd: string }>>()
+      for (const item of resolved) {
+        if (!item) continue
+        const group = groups.get(item.cwd) ?? []
+        group.push(item)
+        groups.set(item.cwd, group)
+      }
+      const archivedItems = new Map<number, boolean>()
+      const missing: Array<{ index: number; sessionId: string; cwd: string }> = []
+      const grouped = [...groups.values()]
+      let nextGroup = 0
+      await Promise.all(Array.from({ length: Math.min(4, grouped.length) }, async () => {
+        for (;;) {
+          const group = grouped[nextGroup++]
+          if (!group) return
+          const batch = group.length > 1
+            ? await nativeApi.listArchived(group.map(item => item.sessionId), group[0]!.cwd).catch(() => new Map<string, boolean>())
+            : new Map<string, boolean>()
+          for (const item of group) {
+            const archived = batch.get(item.sessionId)
+            if (archived === undefined) missing.push(item)
+            else archivedItems.set(item.index, archived)
+          }
+        }
+      }))
+      let nextMissing = 0
+      await Promise.all(Array.from({ length: Math.min(4, missing.length) }, async () => {
+        for (;;) {
+          const item = missing[nextMissing++]
+          if (!item) return
+          try {
+            archivedItems.set(item.index, await nativeApi.isArchived(item.sessionId, item.cwd))
+          } catch {
+            // Keep the prior behavior for an unconfirmed archive state.
+          }
+        }
+      }))
+      for (const item of resolved) {
+        if (!item || !archivedItems.has(item.index)) continue
+        if (archivedItems.get(item.index)) this.archivedSessions.add(item.sessionId)
+        else this.archivedSessions.delete(item.sessionId)
+      }
       // The gateway retains authority for archived history, but excludes these
       // entries from its public/default catalog.
       const sessions = items.flatMap((item, index) => archivedItems.has(index)

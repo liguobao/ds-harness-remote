@@ -157,24 +157,40 @@ export async function loadAcpDirectoryCatalog(spec: {
   const sessions = new Map<string, RemoteSession>()
   let hasPinnedField = false
   const pinnedSessionIds = new Set<string>()
-  for (const [key, workspace] of workspaces) {
-    const isWarm = workspace.path === spec.warmPath || key === warmKey
-    let result: unknown
-    try {
-      result = await spec.client.call('dsh/sessionList', {
-        backend: spec.backend,
-        path: workspace.path,
-        limit: 100,
-        prewarm: isWarm,
-      })
-    } catch (error) {
-      // Keep stale remembered directories selectable for deletion instead of breaking the whole backend catalog.
-      if (!isWarm && isMissingHostDirectoryError(error)) {
-        workspaces.set(key, { ...workspace, sessionIds: [] })
-        continue
+  const entries = [...workspaces]
+  const results: Array<{ value?: unknown; missing?: true }> = new Array(entries.length)
+  let next = 0
+  let failed = false
+  await Promise.all(Array.from({ length: Math.min(4, entries.length) }, async () => {
+    while (!failed) {
+      const index = next++
+      if (index >= entries.length) return
+      const [key, workspace] = entries[index]!
+      const isWarm = workspace.path === spec.warmPath || key === warmKey
+      try {
+        results[index] = { value: await spec.client.call('dsh/sessionList', {
+          backend: spec.backend,
+          path: workspace.path,
+          limit: 100,
+          prewarm: isWarm,
+        }) }
+      } catch (error) {
+        // Keep stale remembered directories selectable for deletion.
+        if (!isWarm && isMissingHostDirectoryError(error)) {
+          results[index] = { missing: true }
+          continue
+        }
+        failed = true
+        throw error
       }
-      throw error
     }
+  }))
+  for (const [index, [key, workspace]] of entries.entries()) {
+    if (results[index]?.missing) {
+      workspaces.set(key, { ...workspace, sessionIds: [] })
+      continue
+    }
+    const result = results[index]?.value
     if (!isObjectRecord(result) || !Array.isArray(result.items)) {
       throw new Error(`Invalid ${spec.label} session catalog.`)
     }
