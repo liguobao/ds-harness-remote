@@ -319,7 +319,7 @@ class RemoteForegroundService : Service() {
       }
       val safeExtraCount = task.extraCount.coerceAtLeast(0)
       val displayStatus = if (safeExtraCount > 0) "$baseStatus · +$safeExtraCount" else baseStatus
-      val safeTitle = task.title.ifBlank { baseStatus }
+      val safeTitle = task.title.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(160) ?: baseStatus
       val titleWithCount = listOf(safeTitle, task.countText).filter { it.isNotBlank() }.joinToString(" · ")
       val timed = !task.isWaitingInput && task.startedAtMs in 1..System.currentTimeMillis()
       val status = task.phase.ifBlank { baseStatus }

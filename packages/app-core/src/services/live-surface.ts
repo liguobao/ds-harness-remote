@@ -19,7 +19,7 @@ import {
 } from '../lib/attention-deeplink'
 import { resolveAttentionBackendIdentity } from '../lib/attention-backend'
 import { strings } from '../locales/i18n'
-import { attentionFallbackTitle, isBareSessionId, selectAttentionCounts } from '../state/attention-store'
+import { normalizeAttentionTitle, selectAttentionCounts } from '../state/attention-store'
 import { foregroundService } from './foreground-service'
 
 export interface IosLiveActivityPayload {
@@ -176,15 +176,6 @@ function statusTextForLiveItem(status: AttentionStatus): string {
   }
 }
 
-/** Never surface a bare session id as a human-facing title. */
-function attentionDisplayTitle(item: AttentionItem): string {
-  const raw = item.sessionTitle.trim()
-  if (raw.length === 0 || isBareSessionId(raw, item.sessionId)) {
-    return attentionFallbackTitle(item)
-  }
-  return raw
-}
-
 function notificationBodyForItem(item: AttentionItem): string {
   const platform = resolveAttentionBackendIdentity(item).label
   let action: string
@@ -318,7 +309,7 @@ export function createLiveSurfaceController(
         const deepLink = useDigestToken
           ? buildAttentionDeepLinkUrl(hostId, digest!.attentionToken)
           : buildConversationDeepLinkUrl(hostId, item.sessionId, item.mode)
-        const title = attentionDisplayTitle(item)
+        const title = normalizeAttentionTitle(item)
         const body = notificationBodyForItem(item)
         const tag = `attention:${hostId}:${item.sessionId}`
 
@@ -380,7 +371,7 @@ export function createLiveSurfaceController(
       const extraCount = Math.max(0, activeItems.length - 1)
       const isWaitingInput = topActive.status === 'waiting_approval' || topActive.status === 'waiting_question'
       const badge = attentionItemBadge(topActive)
-      const title = attentionDisplayTitle(topActive)
+      const title = normalizeAttentionTitle(topActive)
       const statusText = `${resolveAttentionBackendIdentity(topActive).label} · ${phase}`
       const summary = topActive.summary ?? ''
       const updatedAtMs = topActive.updatedAt > 0 ? topActive.updatedAt : 0

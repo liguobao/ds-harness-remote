@@ -144,24 +144,42 @@ let activeAbort: AbortController | undefined
 let activeAttachPromise: Promise<void> | undefined
 
 /** A raw session id is never a title: DS-Bot sessions get their platform label, others the local default. */
-export function attentionFallbackTitle(item: Pick<AttentionItem, 'backend' | 'mode'>): string {
+function attentionFallbackTitle(item: Pick<AttentionItem, 'backend' | 'mode'>): string {
   return item.mode === 'bot' || item.backend === 'ds-bot'
     ? 'DS-Bot'
     : strings.comfort.liveTaskDefaultTitle
 }
 
-export function isBareSessionId(title: string | undefined, sessionId: string): boolean {
-  if (title === undefined) return false
-  const trimmed = title.trim()
-  if (trimmed.length === 0) return false
-  if (trimmed === sessionId) return true
-  const colonIndex = sessionId.indexOf(':')
-  return colonIndex > 0 && trimmed === sessionId.slice(colonIndex + 1)
+function matchesBareId(trimmed: string, id: string): boolean {
+  return trimmed === id || (id.length > MAX_ATTENTION_TITLE_CHARS && trimmed === id.slice(0, MAX_ATTENTION_TITLE_CHARS))
 }
 
-function normalizeAttentionTitle(item: AttentionItem): string {
-  const raw = item.sessionTitle
-  if (raw.trim().length === 0 || isBareSessionId(raw, item.sessionId)) {
+function isBareSessionId(title: string | undefined, sessionId: string): boolean {
+  if (title === undefined) return false
+  const trimmed = title.trim()
+  const id = sessionId.trim()
+  if (trimmed.length === 0 || id.length === 0) return false
+  if (matchesBareId(trimmed, id)) return true
+  const colonIndex = id.indexOf(':')
+  if (colonIndex <= 0) return false
+  const afterFirst = id.slice(colonIndex + 1)
+  if (afterFirst.length > 0 && matchesBareId(trimmed, afterFirst)) return true
+  if (id.startsWith('acp:')) {
+    const secondColon = afterFirst.indexOf(':')
+    if (secondColon > 0) {
+      const nativeId = afterFirst.slice(secondColon + 1)
+      if (nativeId.length > 0 && matchesBareId(trimmed, nativeId)) return true
+    }
+  }
+  return false
+}
+
+/** Normalizes any AttentionItem title: rejects bare session ids, sanitizes handoff markers, and caps length. */
+export function normalizeAttentionTitle(
+  item: Pick<AttentionItem, 'backend' | 'mode' | 'sessionId' | 'sessionTitle'>,
+): string {
+  const raw = item.sessionTitle.trim()
+  if (raw.length === 0 || isBareSessionId(raw, item.sessionId)) {
     return attentionFallbackTitle(item).slice(0, MAX_ATTENTION_TITLE_CHARS)
   }
   const preview = parseHandoffPreview(raw)
@@ -484,31 +502,36 @@ export function deriveAttentionDigest(
   }
 }
 
-function validBotTitle(name: string | undefined, sessionId: string): string | undefined {
+function validBotTitle(name: string | undefined, ...sessionIds: ReadonlyArray<string | undefined>): string | undefined {
   if (typeof name !== 'string') return undefined
   const trimmed = name.trim()
-  if (trimmed.length === 0 || isBareSessionId(trimmed, sessionId)) return undefined
+  if (trimmed.length === 0) return undefined
+  for (const id of sessionIds) {
+    if (id !== undefined && isBareSessionId(trimmed, id)) return undefined
+  }
   return trimmed.slice(0, MAX_ATTENTION_TITLE_CHARS)
 }
 
 function botSessionTitle(botState: BotState, sessionId: string, botId?: string, roomId?: string): string {
   if (roomId) {
-    const title = validBotTitle(botState.rooms.find(r => r.id === roomId)?.name, sessionId)
+    const room = botState.rooms.find(r => r.id === roomId)
+    const title = validBotTitle(room?.name, sessionId, room?.sessionId)
     if (title !== undefined) return title
   }
   if (botId) {
-    const title = validBotTitle(botState.bots.find(b => b.id === botId)?.name, sessionId)
+    const bot = botState.bots.find(b => b.id === botId)
+    const title = validBotTitle(bot?.name, sessionId, bot?.sessionId)
     if (title !== undefined) return title
   }
   const matchedRoom = botState.rooms.find(
     r => r.sessionId === sessionId || r.parts?.includes(sessionId) || r.ownParts?.includes(sessionId),
   )
-  const matchedRoomTitle = validBotTitle(matchedRoom?.name, sessionId)
+  const matchedRoomTitle = validBotTitle(matchedRoom?.name, sessionId, matchedRoom?.sessionId)
   if (matchedRoomTitle !== undefined) return matchedRoomTitle
   const matchedBot = botState.bots.find(
     b => b.sessionId === sessionId || b.parts?.includes(sessionId),
   )
-  const matchedBotTitle = validBotTitle(matchedBot?.name, sessionId)
+  const matchedBotTitle = validBotTitle(matchedBot?.name, sessionId, matchedBot?.sessionId)
   if (matchedBotTitle !== undefined) return matchedBotTitle
   return 'DS-Bot'
 }
