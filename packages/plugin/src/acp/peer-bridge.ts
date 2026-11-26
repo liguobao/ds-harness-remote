@@ -139,16 +139,19 @@ export class AcpPeerBridge {
         throw error
       }
     } else {
-      await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId)
-      if (typeof this.domain.deliverPendingApprovals === 'function') {
-        await this.domain.deliverPendingApprovals(this.context.connectionId, params.sessionId)
-      }
-      // Replay gives a reconnecting Client the frames it missed; when the adapter
-      // behind the session is gone it must not then wait for a producer that no
-      // longer exists, so the stream closes as failed.
-      if (!this.domain.isSessionBackendReady(params.sessionId) && !this.domain.hasTurnInFlight(params.sessionId)) {
+      try {
+        await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId)
+        if (typeof this.domain.deliverPendingApprovals === 'function') {
+          await this.domain.deliverPendingApprovals(this.context.connectionId, params.sessionId)
+        }
+        // A failed backend cannot send new frames after replay.
+        if (!this.domain.isSessionBackendReady(params.sessionId) && !this.domain.hasTurnInFlight(params.sessionId)) {
+          this.streams.delete(params.streamId)
+          await this.publish('agent.acp.stream.closed', { streamId: params.streamId, reason: 'failed' }).catch(() => undefined)
+        }
+      } catch (error) {
         this.streams.delete(params.streamId)
-        await this.publish('agent.acp.stream.closed', { streamId: params.streamId, reason: 'failed' }).catch(() => undefined)
+        throw error
       }
     }
     return { opened: true, streamId: params.streamId, sessionId: params.sessionId }
