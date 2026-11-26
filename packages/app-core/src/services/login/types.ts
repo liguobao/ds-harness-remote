@@ -6,6 +6,7 @@ export interface LoginChannelContext {
   baseUrl: string
   identity: DeviceIdentity
   publicApi: RemoteServerApi
+  recoverIdentity?: () => Promise<DeviceIdentity>
 }
 
 /** Result of a completed login; device credentials are persisted separately. */

@@ -1,5 +1,8 @@
 import type { DeviceCredentials, DeviceIdentity } from '../types'
-import { RemoteServerApi } from './api'
+import { AccountRequiredError, RemoteApiError } from '../lib/errors'
+import type { RemoteServerApi } from './api'
+
+export { AccountRequiredError } from '../lib/errors'
 
 type TokenPair = Pick<DeviceCredentials, 'accessToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'>
 
@@ -46,7 +49,7 @@ export class ServerSessionManager {
   }
 
   /**
-   * Register this Android device under a short-lived account token. The account
+   * Register this phone under a short-lived account token. The account
    * token is used only for HTTPS registration and never persisted.
    */
   async registerWithAccountToken(
@@ -54,12 +57,24 @@ export class ServerSessionManager {
     identity: DeviceIdentity,
     accountToken: string,
     account: string,
+    recoverIdentity?: () => Promise<DeviceIdentity>,
   ): Promise<AuthenticatedServer> {
     const publicApi = this.apiFactory(baseUrl)
-    const tokens = await publicApi.registerDevice(identity, accountToken)
+    let registeredIdentity = identity
+    let tokens: TokenPair
+    try {
+      tokens = await publicApi.registerDevice(identity, accountToken)
+    } catch (error) {
+      if (recoverIdentity === undefined || !(error instanceof RemoteApiError) || error.retryable
+        || (error.code !== 'DEVICE_OWNERSHIP_REQUIRED' && error.code !== 'DEVICE_REVOKED')) throw error
+      // A fresh account login can enroll a new device after the Server
+      // explicitly rejects the old one. Its registration stays untouched.
+      registeredIdentity = await recoverIdentity()
+      tokens = await publicApi.registerDevice(registeredIdentity, accountToken)
+    }
     const credentials: DeviceCredentials = {
       serverUrl: baseUrl,
-      deviceId: identity.deviceId,
+      deviceId: registeredIdentity.deviceId,
       authorizationMethod: 'account',
       account,
       ...tokens,
@@ -132,8 +147,4 @@ export class ServerSessionManager {
       credentials,
     }
   }
-}
-
-export class AccountRequiredError extends Error {
-  constructor(message: string) { super(message) }
 }

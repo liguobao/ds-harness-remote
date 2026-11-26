@@ -22,13 +22,14 @@ export function createOAuthRedirectChannel(options: {
       return url.toString()
     },
 
-    async completeSignIn({ baseUrl, identity, publicApi }, accountToken) {
+    async completeSignIn({ baseUrl, identity, publicApi, recoverIdentity }, accountToken) {
       const profile = await publicApi.accountMe(accountToken)
       const { credentials } = await serverSession.registerWithAccountToken(
         baseUrl,
         identity,
         accountToken,
         profile.account,
+        recoverIdentity,
       )
       return {
         account: credentials.account ?? profile.account,

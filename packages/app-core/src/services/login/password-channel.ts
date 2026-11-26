@@ -9,7 +9,7 @@ export const passwordLoginChannel: ImmediateLoginChannel<PasswordLoginInput> = {
   method: 'password',
   busyAction: 'server',
 
-  async signIn({ baseUrl, identity, publicApi }, input) {
+  async signIn({ baseUrl, identity, publicApi, recoverIdentity }, input) {
     const login = 'challenge' in input
       ? await publicApi.verifyAccountLogin(input.challenge, input.code)
       : await publicApi.loginAccount(input.email, input.password)
@@ -18,6 +18,7 @@ export const passwordLoginChannel: ImmediateLoginChannel<PasswordLoginInput> = {
       identity,
       login.token,
       login.account,
+      recoverIdentity,
     )
     return {
       account: credentials.account ?? login.account,

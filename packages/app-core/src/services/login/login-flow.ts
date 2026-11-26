@@ -9,11 +9,15 @@ import type {
 } from './types'
 
 export class LoginFlow {
-  async createContext(baseUrl: string, identity: DeviceIdentity): Promise<LoginChannelContext> {
+  async createContext(
+    baseUrl: string,
+    identity: DeviceIdentity,
+    recoverIdentity?: LoginChannelContext['recoverIdentity'],
+  ): Promise<LoginChannelContext> {
     const normalized = normalizeServerUrl(baseUrl)
     const publicApi = new RemoteServerApi(normalized)
     await publicApi.health()
-    return { baseUrl: normalized, identity, publicApi }
+    return { baseUrl: normalized, identity, publicApi, recoverIdentity }
   }
 
   signInWith<TInput>(

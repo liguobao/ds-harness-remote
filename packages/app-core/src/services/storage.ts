@@ -62,9 +62,9 @@ export async function saveServerConfig(config: ServerConfig): Promise<void> {
 }
 
 export async function loadOrCreateIdentity(): Promise<DeviceIdentity> {
-  const platform = Platform.OS === 'ios' ? 'ios' : 'android'
   const stored = await readJson<DeviceIdentity>(KEYS.identity)
   if (stored !== undefined) {
+    const platform = Platform.OS === 'ios' ? 'ios' : 'android'
     // Repair identities created when the shared mobile client assumed Android.
     // Keep the device ID and keys so existing credentials remain valid.
     if (stored.platform !== platform) {
@@ -74,6 +74,11 @@ export async function loadOrCreateIdentity(): Promise<DeviceIdentity> {
     return stored
   }
 
+  return createDeviceIdentity()
+}
+
+export async function createDeviceIdentity(): Promise<DeviceIdentity> {
+  const platform = Platform.OS === 'ios' ? 'ios' : 'android'
   const keyPair = generateKeyPair(Crypto.getRandomBytes(32))
   const model = Device.modelName?.trim()
   const appId = Application.applicationId

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { RemoteServerApi } from '../src/services/api'
 import { AccountRequiredError, ServerSessionManager } from '../src/services/server-session-manager'
 import type { DeviceCredentials, DeviceIdentity } from '../src/types'
@@ -107,6 +108,59 @@ describe('Server credential session', () => {
     const saved = save.mock.calls[0]?.[0] as DeviceCredentials
     expect(saved.account).toBe('user@example.com')
     expect(saved).not.toHaveProperty('accountToken')
+  })
+
+  it('registers a new iOS identity only after the server explicitly rejects the old registration', async () => {
+    const oldIdentity: DeviceIdentity = { ...identity, name: 'iPhone', platform: 'ios' }
+    const nextIdentity: DeviceIdentity = {
+      ...oldIdentity,
+      deviceId: '0198abc0-1234-7abc-8123-123456789abd',
+      publicKey: 'E'.repeat(43),
+    }
+    await runScenarios([
+      { name: 'other account or legacy owner', status: 403, body: { error: { code: 'DEVICE_OWNERSHIP_REQUIRED' } }, recover: true },
+      { name: 'revoked identity', status: 401, body: { error: { code: 'DEVICE_REVOKED' } }, recover: true },
+      { name: 'uncoded conflict', status: 409, body: {}, recover: false, code: 'INVALID_MESSAGE' },
+      { name: 'pairing required', status: 403, body: { error: { code: 'PAIRING_REQUIRED' } }, recover: false, code: 'PAIRING_REQUIRED' },
+      { name: 'account token rejected', status: 401, body: { error: { code: 'AUTH_INVALID' } }, recover: false, code: 'AUTH_INVALID' },
+      { name: 'retryable server error', status: 503, body: { error: { code: 'DEVICE_OWNERSHIP_REQUIRED' } }, recover: false, code: 'DEVICE_OWNERSHIP_REQUIRED' },
+      { name: 'new registration rejected', status: 403, body: { error: { code: 'DEVICE_OWNERSHIP_REQUIRED' } }, recover: true, code: 'DEVICE_OWNERSHIP_REQUIRED' },
+    ].map(scenario => ({ name: scenario.name, run: async () => {
+      const baseUrl = 'https://remote.example.com'
+      const account = 'user@example.com'
+      const accountToken = 'account-jwt-token-123456'
+      const posted: Array<{ deviceId: string; identityKey: string; platform: string }> = []
+      const recoverIdentity = vi.fn(async () => nextIdentity)
+      const save = vi.fn(async (_credentials: DeviceCredentials) => {})
+      const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+        expect(input).toBe(`${baseUrl}/api/v1/devices/register`)
+        expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${accountToken}`)
+        posted.push(JSON.parse(init?.body as string).device)
+        if (posted.length === 1 || scenario.code !== undefined) return jsonResponse(scenario.body, scenario.status)
+        return jsonResponse({
+          accessToken: 'registered-access-token', accessTokenExpiresAt: Date.now() + 60_000,
+          refreshToken: 'registered-refresh-token', refreshTokenExpiresAt: Date.now() + 120_000,
+        })
+      })
+      const manager = new ServerSessionManager(
+        { load: async () => undefined, save },
+        (url, accessToken) => new RemoteServerApi(url, accessToken, fetchImplementation),
+      )
+      const registration = manager.registerWithAccountToken(baseUrl, oldIdentity, accountToken, account, recoverIdentity)
+      if (scenario.code === undefined) {
+        await expect(registration).resolves.toMatchObject({ credentials: { deviceId: nextIdentity.deviceId, account } })
+        expect(save).toHaveBeenCalledTimes(1)
+        expect(save).toHaveBeenCalledWith(expect.objectContaining({ deviceId: nextIdentity.deviceId }))
+      } else {
+        await expect(registration).rejects.toMatchObject({ code: scenario.code })
+        expect(save).not.toHaveBeenCalled()
+      }
+      const identities = scenario.recover ? [oldIdentity, nextIdentity] : [oldIdentity]
+      expect(posted).toMatchObject(identities.map(device => ({
+        deviceId: device.deviceId, identityKey: device.publicKey, platform: 'ios',
+      })))
+      expect(recoverIdentity).toHaveBeenCalledTimes(scenario.recover ? 1 : 0)
+    } })))
   })
 })
 

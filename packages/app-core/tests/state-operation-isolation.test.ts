@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import type { AppState, StoreAccess } from '../src/state/store-state'
 import type { AndroidRemoteRuntime } from '../src/services/remote-runtime'
-import type { RemoteSession, WorkspaceView } from '../src/types'
+import type { LoginChannelContext } from '../src/services/login'
+import type { DeviceIdentity, RemoteSession, WorkspaceView } from '../src/types'
 
 const mocks = vi.hoisted(() => ({
-  authenticate: vi.fn(), reconcile: vi.fn(), createContext: vi.fn(), signInWith: vi.fn(),
+  authenticate: vi.fn(), reconcile: vi.fn(), createContext: vi.fn(), signInWith: vi.fn(), completeRedirect: vi.fn(),
   storage: Object.fromEntries([
     'loadTrustedHosts', 'forgetHost', 'clearCodexPermissionPresets', 'clearDeviceCredentials',
-    'saveServerConfig', 'saveMemberShortcutScopes', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
+    'saveServerConfig', 'saveMemberShortcutScopes', 'clearLocalData', 'loadOrCreateIdentity', 'createDeviceIdentity', 'saveLanguagePreference',
     'saveCompactHistory', 'saveThemePreference', 'saveChatAppearance', 'loadChatAppearance', 'saveActivityDockMode', 'loadActivityDockMode', 'saveQuickPromptActionMode', 'loadQuickPromptActionMode', 'saveBusySendMode', 'loadBusySendMode', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
     'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
   ].map(name => [name, vi.fn()])),
@@ -19,8 +20,9 @@ vi.mock('../src/services/storage', () => mocks.storage)
 vi.mock('../src/services/server-session', () => ({ serverSession: { authenticate: mocks.authenticate } }))
 vi.mock('../src/services/device-directory', () => ({ reconcileTrustedDevices: mocks.reconcile }))
 vi.mock('../src/services/login', () => ({
-  loginFlow: { createContext: mocks.createContext, signInWith: mocks.signInWith },
+  loginFlow: { createContext: mocks.createContext, signInWith: mocks.signInWith, completeRedirect: mocks.completeRedirect },
   passwordLoginChannel: { busyAction: 'login' },
+  redirectLoginChannelFor: () => ({ completeBusyAction: 'server' }),
 }))
 vi.mock('../src/services/rpc-id', () => ({ createNativeRpcId: () => 'test-rpc' }))
 vi.mock('../src/services/codex', async importOriginal => ({
@@ -88,6 +90,37 @@ beforeEach(prepare)
 afterEach(() => vi.restoreAllMocks())
 
 describe('account directory operation isolation', () => {
+  it('uses the persisted replacement identity when refreshing devices after sign-in', async () => {
+    const baseUrl = 'https://example.invalid'
+    const token = 'account-jwt-token-123456'
+    const nextIdentity: DeviceIdentity = {
+      deviceId: 'replacement-phone', name: 'iPhone', platform: 'ios', publicKey: 'public', privateKey: 'private',
+    }
+    await runScenarios([
+      { name: 'password', login: (state: AppState) => state.configureServer(baseUrl, 'B', 'password') },
+      { name: 'browser OAuth', login: (state: AppState) => state.completeOAuth(token) },
+      { name: 'QR OAuth', login: (state: AppState) => state.completeQrLogin(baseUrl, token, 'oauth') },
+    ].map(({ name, login }) => ({ name, run: async () => {
+      const store = accountFixture()
+      store.set({ pendingOAuthBaseUrl: baseUrl, pendingOAuthLoginMethod: 'oauth' })
+      mocks.storage.createDeviceIdentity!.mockResolvedValue(nextIdentity)
+      mocks.createContext.mockImplementation(async (url, identity, recoverIdentity) => ({ baseUrl: url, identity, recoverIdentity }))
+      const completeSignIn = async (context: LoginChannelContext) => {
+        expect(context.identity).toBe(store.get().identity)
+        const replacement = await context.recoverIdentity?.()
+        expect(store.get().identity).toBe(replacement)
+        return { account: 'B', loginMethod: name === 'password' ? 'password' : 'oauth' }
+      }
+      mocks.signInWith.mockImplementationOnce((_channel, context) => completeSignIn(context))
+      mocks.completeRedirect.mockImplementationOnce((_channel, context) => completeSignIn(context))
+      await expect(login(store.get())).resolves.toBe(true)
+      expect(store.get().account).toBe('B')
+      expect(mocks.storage.createDeviceIdentity).toHaveBeenCalledOnce()
+      expect(mocks.authenticate).toHaveBeenCalledWith(baseUrl, nextIdentity)
+      expect(mocks.storage.clearLocalData).not.toHaveBeenCalled()
+    } })), prepare)
+  })
+
   it('saves a validated server and isolates old credentials while rejecting failed switches', async () => {
     await runScenarios(['new-server', 'same-server', 'unavailable', 'invalid'].map(name => ({
       name,
