@@ -575,16 +575,16 @@ window.__ModuleLoader__.load({
       const RemoteMentionIcon = (props: { size?: number; color?: string }): unknown => React.createElement('svg', {
         width: props.size ?? 18,
         height: props.size ?? 18,
-        viewBox: '0 0 24 24',
+        viewBox: '0 0 16 16',
         fill: 'none',
         stroke: props.color ?? 'currentColor',
-        strokeWidth: 1.8,
+        strokeWidth: 1,
         strokeLinecap: 'round',
         strokeLinejoin: 'round',
         'aria-hidden': true,
         className: 'dshRemoteComputerIcon',
-      }, React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
-        React.createElement('path', { d: 'M8 21h8M12 17v4' }))
+      }, React.createElement('rect', { x: 1.5, y: 2.5, width: 13, height: 9, rx: 1.5 }),
+        React.createElement('path', { d: 'M5 14h6M8 11.5v2.5' }))
       ctx.inject(['inputTriggers'], inputContext => {
         const hostCache = new Map<string, RemoteDevice>()
         inputContext.effect(() => {
