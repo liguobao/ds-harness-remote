@@ -1,4 +1,5 @@
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
+import { AgentAcpClient } from '@dsh-remote/client-core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatItem, HistoryEntry, MuxStreamFrame, RemoteSession } from '../src/types'
 import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
@@ -1240,6 +1241,130 @@ describe('session restore state machine', () => {
       }
       expect(acp.prompt).toHaveBeenCalledTimes(stale ? 1 : 2)
     } })), prepareScenario1)
+  })
+
+  it('reconciles an acknowledged ACP prompt whose reply arrived while away', async () => {
+    const scenarios = [
+      { name: 'matches the first saved turn in an existing session after an empty Host read', before: [], after: ['prompt', 'later'], accepted: true, locals: 0 },
+      { name: 'matches the last saved turn when the reply is complete', before: ['previous'], after: ['previous', 'prompt'], accepted: true, locals: 0 },
+      { name: 'matches a persisted user row before its reply is saved', before: ['previous'], after: ['previous', 'prompt', 'later'], accepted: true, partial: true, locals: 0 },
+      { name: 'uses acknowledgement received during the restore read', before: ['previous'], after: ['previous', 'prompt', 'later'], accepted: true, lateAck: true, locals: 0 },
+      { name: 'matches the next turn even if an older prompt has the same text', before: ['prompt'], after: ['prompt', 'prompt', 'later'], accepted: true, locals: 0 },
+      { name: 'keeps the local row when the snapshot is still stale', before: ['prompt'], after: ['prompt'], accepted: true, locals: 1 },
+      { name: 'keeps the local row when another turn intervenes', before: ['previous'], after: ['previous', 'other', 'prompt'], accepted: true, locals: 1 },
+      { name: 'keeps the local row when multiple new history turns have the same text', before: ['previous'], after: ['previous', 'prompt', 'prompt', 'later'], accepted: true, locals: 1 },
+      { name: 'keeps the local row when an older Host cannot confirm the session was idle', before: [], after: ['prompt', 'later'], weakEmpty: true, accepted: true, locals: 1 },
+      { name: 'keeps a prompt without Host acknowledgement', before: [], after: ['prompt', 'later'], accepted: false, locals: 1 },
+    ]
+    const history = (prompts: string[]) => prompts.flatMap((text, index) => {
+      const turn = index + 1
+      return [
+        entry('user/message', turn * 10, { id: `user-${turn}`, source: { kind: 'user' }, content: [{ type: 'text', text }] }),
+        entry('assistant/message', turn * 10 + 1, { turn, message: { id: `answer-${turn}`, content: [{ type: 'text', text: `answer ${turn}` }] } }),
+        entry('turn/end', turn * 10 + 2, { turn, reason: { kind: 'completed' } }),
+      ]
+    })
+    const historyClient = acp as typeof acp & Partial<Pick<AgentAcpClient, 'loadSessionDetails'>>
+    historyClient.loadSessionDetails = AgentAcpClient.prototype.loadSessionDetails
+    await runScenarios(scenarios.map(({ name, before, after, accepted, weakEmpty = false, partial = false, lateAck = false, locals }) => ({ name, run: async () => {
+      const selected = { ...session, backend: 'antigravity' as const, sessionId: 'antigravity:restore', nativeId: 'restore' }
+      acp.transferCall.mockResolvedValueOnce({ events: history(before), running: weakEmpty ? undefined : false })
+      expect(await useAppStore.getState().openSession(selected)).toBe(true)
+      if (!accepted) acp.prompt.mockResolvedValueOnce({ accepted: false, stopReason: 'cancelled' })
+      let acknowledge!: (result: { accepted: boolean; stopReason: string }) => void
+      if (lateAck) acp.prompt.mockReturnValueOnce(new Promise(resolve => { acknowledge = resolve }))
+      const sending = useAppStore.getState().sendMessage('prompt')
+      if (lateAck) await vi.waitFor(() => expect(acp.prompt).toHaveBeenCalledTimes(1))
+      else expect(await sending).toBe('sent')
+
+      const expected = [
+        ...after.map((_, index) => `user-${index + 1}`),
+        ...Array.from({ length: locals }, () => expect.stringMatching(/^local:/)),
+      ]
+      const restore = async (events: HistoryEntry[]) => {
+        let finishRead!: (result: { events: HistoryEntry[]; running: boolean }) => void
+        if (lateAck) acp.transferCall.mockReturnValueOnce(new Promise(resolve => { finishRead = resolve }))
+        else acp.transferCall.mockResolvedValueOnce({ events, running: false })
+        const opening = useAppStore.getState().openSession(selected)
+        if (lateAck) {
+          await vi.waitFor(() => expect(acp.transferCall).toHaveBeenCalledTimes(2))
+          acknowledge({ accepted: true, stopReason: 'in_progress' })
+          expect(await sending).toBe('sent')
+          finishRead({ events, running: false })
+        }
+        expect(await opening).toBe(true)
+        const users = useAppStore.getState().messages[selected.sessionId]!
+          .filter(item => item.kind === 'message' && item.role === 'user')
+        expect(users.map(item => item.id)).toEqual(expected)
+      }
+      if (partial) await restore(history(after).filter(({ event }) => event.seq !== 21 && event.seq !== 22))
+      await restore(history(after))
+      expect(acp.prompt).toHaveBeenCalledTimes(1)
+    } })), prepareScenario1).finally(() => { delete historyClient.loadSessionDetails })
+  })
+
+  it('marks empty Host history for every non-Cursor ACP backend so the first prompt is confirmed instead of duplicated', async () => {
+    await runScenarios((['claude', 'opencode', 'pi', 'hermes'] as const).map(backend => ({
+      name: `${backend}: empty history marks the first prompt as having no predecessor`,
+      run: async () => {
+        const client = acp as typeof acp & Partial<Pick<AgentAcpClient, 'loadSessionDetails'>>
+        client.loadSessionDetails = AgentAcpClient.prototype.loadSessionDetails
+        try {
+          const selected: RemoteSession = { ...session, backend, sessionId: `${backend}:empty`, nativeId: 'empty' }
+          // The Host answers with an idle, empty transcript for a brand-new session
+          // exactly like it does for antigravity; every native catalog backend does.
+          acp.transferCall.mockResolvedValueOnce({ events: [], running: false })
+          expect(await useAppStore.getState().openSession(selected)).toBe(true)
+          expect(await useAppStore.getState().sendMessage('hello')).toBe('sent')
+          const pending = useAppStore.getState().messages[selected.sessionId]!
+            .filter(item => item.kind === 'message' && item.role === 'user')
+          expect(pending).toHaveLength(1)
+          expect(pending[0]!.id).toMatch(/^local:/)
+
+          // The Host persisted the first turn: restoring must adopt that history row
+          // instead of keeping the optimistic local row (otherwise A -> B -> A).
+          acp.transferCall.mockResolvedValueOnce({
+            events: [
+              entry('user/message', 10, { id: 'user-1', source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] }),
+              entry('assistant/message', 11, { turn: 1, message: { id: 'answer-1', content: [{ type: 'text', text: 'hi' }] } }),
+              entry('turn/end', 12, { turn: 1, reason: { kind: 'completed' } }),
+            ],
+            running: false,
+          })
+          expect(await useAppStore.getState().openSession(selected)).toBe(true)
+          const restored = useAppStore.getState().messages[selected.sessionId]!
+            .filter(item => item.kind === 'message' && item.role === 'user')
+          expect(restored.map(item => item.id)).toEqual(['user-1'])
+        } finally {
+          delete client.loadSessionDetails
+        }
+      },
+    })), prepareScenario1)
+  })
+
+  it('does not treat an empty Cursor Host read as a known-empty session', async () => {
+    const client = acp as typeof acp & Partial<Pick<AgentAcpClient, 'loadSessionDetails'>>
+    client.loadSessionDetails = AgentAcpClient.prototype.loadSessionDetails
+    try {
+      const selected: RemoteSession = { ...session, backend: 'cursor', sessionId: 'cursor:opaque', nativeId: 'opaque' }
+      // Cursor's history reader is optional on the Host: it answers `events: []`
+      // for a session whose transcript it simply cannot read, so an empty list
+      // proves nothing and must not mark the session as known-empty.
+      acp.transferCall.mockResolvedValueOnce({ events: [], running: false })
+      expect(await useAppStore.getState().openSession(selected)).toBe(true)
+      expect(await useAppStore.getState().sendMessage('hello')).toBe('sent')
+      const sent = useAppStore.getState().messages[selected.sessionId]!
+        .find(item => item.kind === 'message' && item.role === 'user')
+      expect(sent?.kind).toBe('message')
+      if (sent?.kind !== 'message') throw new Error('expected an optimistic user row')
+      expect(sent.id).toMatch(/^local:/)
+      // No predecessor claim: the optimistic row must not be adopted as the first
+      // turn of a session we know nothing about (claude/opencode/pi/hermes carry
+      // `acpPromptAfter: null` here; Cursor must stay untouched).
+      expect(sent.acpPromptAfter).toBeUndefined()
+    } finally {
+      delete client.loadSessionDetails
+    }
   })
 
   it('keeps only new ACP subscription deltas while history is loading', async () => {

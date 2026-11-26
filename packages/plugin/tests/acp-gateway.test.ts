@@ -2,9 +2,13 @@ import { AGENT_ACP_TRANSFER_CHUNK_BYTES, createEvent, encodeMessage, MAX_SECURE_
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
-import { realpath } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
+import { AcpWorkspaceStore } from '../src/acp/workspace-store.js'
 import { AntigravityAcpError } from '../src/acp/adapters/antigravity-process.js'
 import { CursorAcpError, type CursorAcpInbound, type CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
 import { OpencodeAcpError } from '../src/acp/adapters/opencode-process.js'
@@ -2116,6 +2120,150 @@ describe('AcpRemoteGateway', () => {
         }
       },
     })))
+  })
+
+  it('normalizes file:// and Windows URI catalog cwds across workspaceList, sessionList, session/load, and history', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-acp-cwd-'))
+    try {
+      const dirA = join(root, 'vue fabric 中文')
+      const dirB = join(root, 'other-proj')
+      await mkdir(dirA, { recursive: true })
+      await mkdir(dirB, { recursive: true })
+      const projA = await realpath(dirA)
+      const projB = await realpath(dirB)
+      const fileUriA = pathToFileURL(projA).href
+
+      const history = vi.fn(async () => [{ method: 'session/update', params: { sessionId: 's-uri' } }])
+      const acp = Object.assign(readyAcp(), { history })
+      acp.call = vi.fn(async (method: string, params: any) => {
+        if (method === 'session/list') {
+          return {
+            sessions: [
+              { sessionId: 's-uri', cwd: fileUriA, title: 'URI Session', updatedAt: '2026-11-25T10:00:00Z' },
+              { sessionId: 's-remote-rejected', cwd: 'file://remote/share/bad' },
+            ],
+            nextCursor: null,
+          }
+        }
+        if (method === 'session/load') return { sessionId: params.sessionId }
+        return {}
+      })
+
+      const gw1 = new AcpRemoteGateway(
+        { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: ['acp'] }] },
+        silentLogger(),
+        () => acp,
+      )
+      await gw1.start()
+      try {
+        expect(await gw1.call('c1', { method: 'dsh/workspaceList', params: { backend: 'antigravity' } })).toEqual([
+          { path: projA, title: 'vue fabric 中文' },
+        ])
+        await expect(gw1.call('c1', { method: 'dsh/sessionList', params: { backend: 'antigravity', path: projA } })).resolves.toMatchObject({
+          items: [{ conversationId: 's-uri', title: 'URI Session', cwd: projA }],
+        })
+        await gw1.call('c1', { method: 'session/load', params: { backend: 'antigravity', sessionId: 's-uri' } })
+        expect(acp.call).toHaveBeenLastCalledWith('session/load', { backend: 'antigravity', sessionId: 's-uri', cwd: projA, mcpServers: [] })
+        await expect(gw1.call('c1', { method: 'dsh/sessionHistory', params: { backend: 'antigravity', sessionId: 'antigravity:s-uri' } })).resolves.toMatchObject({
+          events: [{ method: 'session/update', params: { sessionId: 's-uri' } }],
+        })
+        expect(history).toHaveBeenCalledWith('s-uri', projA, expect.any(AbortSignal))
+      } finally {
+        await gw1.close()
+      }
+
+      if (process.platform === 'win32') {
+        const toVscodeWinPathname = (p: string) =>
+          `/${p[0]!.toLowerCase()}%3A/${p.slice(3).split('\\').map(seg => encodeURIComponent(seg)).join('/')}`
+        const winEncodedA = toVscodeWinPathname(projA)
+        const winEncodedB = toVscodeWinPathname(projB)
+        const listCalls: Array<unknown> = []
+        const agyWin = Object.assign(readyAcp(), { history: vi.fn(async () => []) })
+        agyWin.call = vi.fn(async (method: string, params: any) => {
+          if (method === 'session/list') {
+            listCalls.push(params)
+            if (params?.cwd) return { sessions: [], nextCursor: null }
+            return {
+              sessions: [
+                { sessionId: 's-win-a', cwd: winEncodedA, title: 'Win A', updatedAt: '2026-11-25T10:00:00Z' },
+                { sessionId: 's-win-b', cwd: winEncodedB, title: 'Win B', updatedAt: '2026-11-25T09:00:00Z' },
+              ],
+              nextCursor: null,
+            }
+          }
+          if (method === 'session/load') return { sessionId: params.sessionId }
+          return {}
+        })
+        const gwWin = new AcpRemoteGateway(
+          { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: ['acp'] }] },
+          silentLogger(),
+          () => agyWin,
+        )
+        await gwWin.start()
+        try {
+          const workspaces = await gwWin.call('c2', { method: 'dsh/workspaceList', params: { backend: 'antigravity' } }) as Array<{ path: string }>
+          expect(workspaces.map(w => w.path).sort()).toEqual([projA, projB].sort())
+          listCalls.length = 0
+          const listed = await gwWin.call('c2', { method: 'dsh/sessionList', params: { backend: 'antigravity', path: projA } }) as { items: Array<{ conversationId: string; cwd: string }> }
+          expect(listCalls).toEqual([{ cwd: projA }, {}])
+          expect(listed.items).toEqual([expect.objectContaining({ conversationId: 's-win-a', cwd: projA })])
+          await gwWin.call('c2', { method: 'session/load', params: { backend: 'antigravity', sessionId: 's-win-a' } })
+          expect(agyWin.call).toHaveBeenLastCalledWith('session/load', { backend: 'antigravity', sessionId: 's-win-a', cwd: projA, mcpServers: [] })
+        } finally {
+          await gwWin.close()
+        }
+      }
+
+      const claudeListCalls: Array<unknown> = []
+      const claude = Object.assign(readyAcp(), { history: vi.fn(async () => []) })
+      claude.call = vi.fn(async (method: string, params: any) => {
+        if (method === 'session/list') {
+          claudeListCalls.push(params)
+          return { sessions: [], nextCursor: null }
+        }
+        return {}
+      })
+      const gwClaude = new AcpRemoteGateway(
+        { enabled: true, backends: [{ id: 'claude', enabled: true, command: 'claude-agent-acp', args: [] }] },
+        silentLogger(),
+        () => claude,
+      )
+      await gwClaude.start()
+      try {
+        await expect(gwClaude.call('c3', { method: 'dsh/sessionList', params: { backend: 'claude', path: projA } })).resolves.toEqual({ items: [] })
+        expect(claudeListCalls).toEqual([{ cwd: projA }])
+      } finally {
+        await gwClaude.close()
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to default Host workspace for empty antigravity catalog unless deleted', async () => {
+    const storeDir = await mkdtemp(join(tmpdir(), 'dsh-acp-empty-agy-'))
+    const agy = Object.assign(readyAcp(), { history: vi.fn(async () => []) })
+    agy.call = vi.fn(async method => method === 'session/list' ? { sessions: [], nextCursor: null } : {})
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: ['acp'] }] },
+      silentLogger(),
+      () => agy,
+      undefined,
+      undefined,
+      undefined,
+      AcpWorkspaceStore.inDirectory(storeDir),
+    )
+    await gateway.start()
+    try {
+      const expectedDefault = await realpath(process.cwd())
+      const workspaces = await gateway.call('owner', { method: 'dsh/workspaceList', params: { backend: 'antigravity' } }) as Array<{ path: string }>
+      expect(workspaces.some(w => w.path === expectedDefault)).toBe(true)
+      await gateway.call('owner', { method: 'dsh/workspaceDelete', params: { backend: 'antigravity', path: expectedDefault } })
+      expect(await gateway.call('owner', { method: 'dsh/workspaceList', params: { backend: 'antigravity' } })).toEqual([])
+    } finally {
+      await gateway.close()
+      await rm(storeDir, { recursive: true, force: true })
+    }
   })
 })
 

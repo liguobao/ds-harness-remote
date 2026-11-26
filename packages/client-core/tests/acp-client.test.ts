@@ -150,11 +150,11 @@ describe('ACP image transfer', () => {
 })
 
 describe('AgentAcpClient.openStream', () => {
-  function createStreamCore(rpcImpl?: (method: string, params: unknown) => Promise<unknown>) {
+  function createStreamCore(rpcImpl?: (method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>) {
     const eventHandlers = new Set<(event: { event: string; data: unknown }) => void>()
     const closeHandlers = new Set<(error?: Error) => void>()
-    const rpc = vi.fn(async (method: string, params: unknown) => {
-      if (rpcImpl) return rpcImpl(method, params)
+    const rpc = vi.fn(async (method: string, params: unknown, signal?: AbortSignal) => {
+      if (rpcImpl) return rpcImpl(method, params, signal)
       return { opened: true }
     })
     return {
@@ -177,6 +177,42 @@ describe('AgentAcpClient.openStream', () => {
       },
     }
   }
+
+  it('releases a Host stream slot when opening times out or the caller cancels', async () => {
+    await runScenarios(['timeout', 'abort'].map(outcome => ({
+      name: outcome,
+      run: async () => {
+        let rejectOpen!: (error: Error) => void
+        let activeStreamId = ''
+        const core = createStreamCore((method, params, signal) => {
+          const streamId = (params as { streamId: string }).streamId
+          if (method === 'agent.acp.stream.open') {
+            activeStreamId = streamId
+            return new Promise((_, reject) => {
+              rejectOpen = reject
+              signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { code: 'RPC_ABORTED' })), { once: true })
+            })
+          }
+          if (method === 'agent.acp.stream.close' && activeStreamId === streamId) {
+            activeStreamId = ''
+            if (outcome === 'timeout') return new Promise(() => undefined)
+          }
+          return Promise.resolve({ closed: true })
+        })
+        const controller = new AbortController()
+        const client = new AgentAcpClient(core as never)
+        const pending = client.openStream('ses-1', () => undefined, undefined, controller.signal)
+        const rejected = expect(pending).rejects.toMatchObject({ code: outcome === 'timeout' ? 'RPC_TIMEOUT' : 'RPC_ABORTED' })
+        if (outcome === 'abort') controller.abort()
+        if (outcome === 'timeout') rejectOpen(Object.assign(new Error('timeout'), { code: 'RPC_TIMEOUT' }))
+        await rejected
+        expect(activeStreamId).toBe('')
+        expect(core.rpc.mock.calls.filter(([method]) => method === 'agent.acp.stream.close')).toHaveLength(1)
+        expect(core.eventHandlers.size).toBe(0)
+        expect(core.closeHandlers.size).toBe(0)
+      },
+    })))
+  })
 
   it('unsubscribes on stream.closed so reopened streams do not invoke stale onFrame', async () => {
     const core = createStreamCore()

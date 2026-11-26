@@ -1,6 +1,7 @@
 import { realpath } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
+import { AcpPeerBridge } from '../src/acp/peer-bridge.js'
 import type { CursorAcpInbound, CursorAcpInboundHandler, CursorAcpLike, CursorAcpUnavailableHandler } from '../src/acp/adapters/cursor-process.js'
 import type { SafeLogger } from '../src/logging.js'
 
@@ -56,6 +57,42 @@ const sessionUpdate = (sessionId: string, text: string): CursorAcpInbound => ({
 })
 
 describe('ACP connection isolation', () => {
+  it('releases a stream slot when close arrives before replay completes', async () => {
+    let finishReplay!: () => void
+    const replay = new Promise<void>(resolve => { finishReplay = resolve })
+    const domain = {
+      assertStreamable: () => undefined,
+      replayBufferedFrames: () => replay,
+      isSessionBackendReady: () => true,
+      hasTurnInFlight: () => false,
+    }
+    const peer = new AcpPeerBridge(domain as never, { connectionId: 'phone' } as never, async () => undefined)
+    const opening = Array.from({ length: 16 }, (_, index) => peer.openStream({ streamId: `stream-${index}`, sessionId: 'ses-1' }))
+    await expect(peer.openStream({ streamId: 'overflow', sessionId: 'ses-1' })).rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    peer.closeStream({ streamId: 'stream-0' })
+    const replacement = peer.openStream({ streamId: 'replacement', sessionId: 'ses-1' })
+    finishReplay()
+    await Promise.all([...opening, replacement])
+    await expect(peer.openStream({ streamId: 'overflow', sessionId: 'ses-1' })).rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    peer.closeStream({ streamId: 'replacement' })
+    await expect(peer.openStream({ streamId: 'available', sessionId: 'ses-1' })).resolves.toMatchObject({ opened: true })
+  })
+
+  it('releases a stream slot when replay fails', async () => {
+    let failReplay = true
+    const domain = {
+      assertStreamable: () => undefined,
+      replayBufferedFrames: async () => { if (failReplay) throw new Error('replay failed') },
+      isSessionBackendReady: () => true,
+      hasTurnInFlight: () => false,
+    }
+    const peer = new AcpPeerBridge(domain as never, { connectionId: 'phone' } as never, async () => undefined)
+    await expect(peer.openStream({ streamId: 'stream-1', sessionId: 'ses-1' })).rejects.toThrow('replay failed')
+    expect(peer.hasStreamFor('ses-1')).toBe(false)
+    failReplay = false
+    await expect(peer.openStream({ streamId: 'stream-1', sessionId: 'ses-1' })).resolves.toMatchObject({ opened: true })
+  })
+
   it("delivers a session's live frames only to the connection that owns it", async () => {
     const cwd = await realpath(process.cwd())
     const adapter = fakeAcp(method => method === 'session/new' ? { sessionId: 'owned-1' } : {})
