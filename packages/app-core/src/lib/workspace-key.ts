@@ -160,8 +160,9 @@ export async function loadAcpDirectoryCatalog(spec: {
   const entries = [...workspaces]
   const results: Array<{ value?: unknown; missing?: true }> = new Array(entries.length)
   let next = 0
+  let failed = false
   await Promise.all(Array.from({ length: Math.min(4, entries.length) }, async () => {
-    for (;;) {
+    while (!failed) {
       const index = next++
       if (index >= entries.length) return
       const [key, workspace] = entries[index]!
@@ -179,6 +180,7 @@ export async function loadAcpDirectoryCatalog(spec: {
           results[index] = { missing: true }
           continue
         }
+        failed = true
         throw error
       }
     }
