@@ -940,6 +940,7 @@ const enUS = {
     editRule: 'Edit rule',
     formTitle: 'Task name',
     formPrompt: 'Reminder prompt',
+    formCronRequired: 'Enter a Cron expression',
     formFrequency: 'Frequency',
     formTargetSession: 'Target session',
     formTime: 'Trigger time',

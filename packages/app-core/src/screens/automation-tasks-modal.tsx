@@ -93,7 +93,7 @@ function extractExpectedRecord(entry: ScheduleCatalogEntry): ScheduleRecord {
 
 type SchedulePreset = 'daily' | 'workdays' | 'weekly' | 'monthly' | 'hourly' | 'minutely' | 'once' | 'cron'
 
-const MONTHLY_CRON = /^(\d{1,2})\s+(\d{1,2})\s+1\s+\*\s+\*$/u
+const MONTHLY_CRON = /^([0-5]?\d)\s+([01]?\d|2[0-3])\s+1\s+\*\s+\*$/u
 
 function monthlyCron(time: string): string {
   const [hour, minute] = time.split(':').map(Number)
@@ -257,7 +257,7 @@ export function AutomationTasksModal({
     return tasks
       .filter(t => {
         if (statusFilter === 'active' && t.status !== 'active') return false
-        if (statusFilter === 'inactive' && t.status !== 'inactive' && t.status !== 'ended') return false
+        if (statusFilter === 'inactive' && t.status === 'active') return false
         if (!query) return true
         return (
           (t.title || '').toLowerCase().includes(query) ||
@@ -591,9 +591,11 @@ export function AutomationTasksModal({
       setFormCronExpression(expression)
       const match = MONTHLY_CRON.exec(expression.trim())
       setFormPreset(match === null ? 'cron' : 'monthly')
-      if (match !== null) {
-        setFormTime(`${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`)
-      }
+      setFormTime(
+        match === null
+          ? '09:00'
+          : `${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`,
+      )
     } else {
       setFormKind('at')
       setFormPreset('once')
@@ -631,7 +633,7 @@ export function AutomationTasksModal({
     }
 
     if (formPreset === 'cron' && formTriggerMode === 'scheduled' && !formCronExpression.trim()) {
-      Alert.alert(strings.automation.title, strings.automation.saveFailed)
+      Alert.alert(strings.automation.title, strings.automation.formCronRequired)
       return
     }
 

@@ -940,6 +940,7 @@ const esES = {
     editRule: 'Editar regla',
     formTitle: 'Nombre de la tarea',
     formPrompt: 'Instrucción de recordatorio',
+    formCronRequired: 'Introduce una expresión Cron',
     formFrequency: 'Frecuencia',
     formTargetSession: 'Sesión de destino',
     formTime: 'Hora de activación',
