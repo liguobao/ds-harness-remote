@@ -622,6 +622,34 @@ describe('IdentityStore', () => {
     }
   })
 
+  it('keeps an owned root usable when a foreign directory occupies the legacy name', async () => {
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    const target = join(home, 'ds-harness-remote')
+    await mkdir(join(source, 'bin'), { recursive: true })
+    await writeFile(join(source, 'access.json'), '{"owner":"other-plugin"}')
+    await writeFile(join(source, 'machines.json'), '{"machines":[]}')
+    await writeFile(join(source, 'bin', 'helper.bin'), 'other-plugin-binary')
+    const origin = 'https://first.example.com'
+    const ownedDirectory = serverStorageDirectory(target, origin, 'host')
+    await new IdentityStore({ directory: ownedDirectory }).loadOrCreate('Host')
+    const before = await readdir(source, { withFileTypes: true })
+      .then(entries => entries.map(entry => entry.name).sort())
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).resolves.toBe(target)
+    expect(await readdir(source).then(names => names.sort())).toEqual(before)
+    expect(JSON.parse(await readFile(join(ownedDirectory, 'device.json'), 'utf8')).deviceId).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('still refuses two roots that both hold owned identities', async () => {
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    const target = join(home, 'ds-harness-remote')
+    const origin = 'https://first.example.com'
+    await new IdentityStore({ directory: serverStorageDirectory(source, origin, 'host') }).loadOrCreate('Host')
+    await new IdentityStore({ directory: serverStorageDirectory(target, origin, 'host') }).loadOrCreate('Host')
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).rejects.toThrow('Both Remote storage directories exist')
+  })
+
   it('creates and reloads one stable device identity', async () => {
     const directory = await temporaryDirectory()
     const first = await new IdentityStore({ directory }).loadOrCreate('Workstation')
