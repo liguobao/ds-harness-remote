@@ -67014,7 +67014,11 @@ var AgentAcpClient = class {
         signal?.addEventListener("abort", onAbort, { once: true });
       }
     } catch (error62) {
+      const shouldCloseRemote = !closed && !coreClosed;
       markClosed();
+      if (shouldCloseRemote) {
+        void this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
+      }
       throw error62;
     }
     if (pendingClosed !== void 0) {
@@ -102733,13 +102737,18 @@ var AcpPeerBridge = class {
         throw error62;
       }
     } else {
-      await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
-      if (typeof this.domain.deliverPendingApprovals === "function") {
-        await this.domain.deliverPendingApprovals(this.context.connectionId, params.sessionId);
-      }
-      if (!this.domain.isSessionBackendReady(params.sessionId) && !this.domain.hasTurnInFlight(params.sessionId)) {
+      try {
+        await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
+        if (typeof this.domain.deliverPendingApprovals === "function") {
+          await this.domain.deliverPendingApprovals(this.context.connectionId, params.sessionId);
+        }
+        if (!this.domain.isSessionBackendReady(params.sessionId) && !this.domain.hasTurnInFlight(params.sessionId)) {
+          this.streams.delete(params.streamId);
+          await this.publish("agent.acp.stream.closed", { streamId: params.streamId, reason: "failed" }).catch(() => void 0);
+        }
+      } catch (error62) {
         this.streams.delete(params.streamId);
-        await this.publish("agent.acp.stream.closed", { streamId: params.streamId, reason: "failed" }).catch(() => void 0);
+        throw error62;
       }
     }
     return { opened: true, streamId: params.streamId, sessionId: params.sessionId };
