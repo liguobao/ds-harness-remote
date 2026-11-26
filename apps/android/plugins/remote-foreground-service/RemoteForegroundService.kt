@@ -319,7 +319,7 @@ class RemoteForegroundService : Service() {
       }
       val safeExtraCount = task.extraCount.coerceAtLeast(0)
       val displayStatus = if (safeExtraCount > 0) "$baseStatus · +$safeExtraCount" else baseStatus
-      val safeTitle = task.title.ifBlank { baseStatus }
+      val safeTitle = task.title.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(160) ?: baseStatus
       val titleWithCount = listOf(safeTitle, task.countText).filter { it.isNotBlank() }.joinToString(" · ")
       val timed = !task.isWaitingInput && task.startedAtMs in 1..System.currentTimeMillis()
       val status = task.phase.ifBlank { baseStatus }
@@ -358,7 +358,8 @@ class RemoteForegroundService : Service() {
 
         if (Build.VERSION.SDK_INT >= 36) {
           builder.setRequestPromotedOngoing(true)
-          if (!timed) builder.setShortCriticalText(islandLabel(status))
+          // The promoted chip is what Fluid Cloud shows: the conversation, not the host name.
+          if (!timed) builder.setShortCriticalText(safeTitle)
           if (task.summary.isNotBlank()) {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(listOf(displayStatus, task.summary)
               .filter { it.isNotBlank() }.joinToString("\n")))
@@ -426,9 +427,11 @@ class RemoteForegroundService : Service() {
         else -> R.string.remote_status_connecting
       })
     val showHost = connectionStatus == "connected" && connectedHostName.isNotEmpty()
+    // A blank workspace label must not degrade the title to a bare host name.
+    val connectionTitle = if (showHost && workspaceLabel.isNotBlank()) islandLabel(workspaceLabel) else title
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.mipmap.ic_launcher_foreground)
-      .setContentTitle(if (showHost) islandLabel(workspaceLabel) else title)
+      .setContentTitle(connectionTitle)
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setOngoing(true)
       .setOnlyAlertOnce(true)

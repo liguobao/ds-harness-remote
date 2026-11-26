@@ -143,8 +143,45 @@ let activeSubscription: AttentionFollowSubscription | undefined
 let activeAbort: AbortController | undefined
 let activeAttachPromise: Promise<void> | undefined
 
-function normalizeAttentionTitle(item: AttentionItem): string {
-  const raw = item.sessionTitle
+/** A raw session id is never a title: DS-Bot sessions get their platform label, others the local default. */
+function attentionFallbackTitle(item: Pick<AttentionItem, 'backend' | 'mode'>): string {
+  return item.mode === 'bot' || item.backend === 'ds-bot'
+    ? 'DS-Bot'
+    : strings.comfort.liveTaskDefaultTitle
+}
+
+function matchesBareId(trimmed: string, id: string): boolean {
+  return trimmed === id || (id.length > MAX_ATTENTION_TITLE_CHARS && trimmed === id.slice(0, MAX_ATTENTION_TITLE_CHARS))
+}
+
+function isBareSessionId(title: string | undefined, sessionId: string): boolean {
+  if (title === undefined) return false
+  const trimmed = title.trim()
+  const id = sessionId.trim()
+  if (trimmed.length === 0 || id.length === 0) return false
+  if (matchesBareId(trimmed, id)) return true
+  const colonIndex = id.indexOf(':')
+  if (colonIndex <= 0) return false
+  const afterFirst = id.slice(colonIndex + 1)
+  if (afterFirst.length > 0 && matchesBareId(trimmed, afterFirst)) return true
+  if (id.startsWith('acp:')) {
+    const secondColon = afterFirst.indexOf(':')
+    if (secondColon > 0) {
+      const nativeId = afterFirst.slice(secondColon + 1)
+      if (nativeId.length > 0 && matchesBareId(trimmed, nativeId)) return true
+    }
+  }
+  return false
+}
+
+/** Normalizes any AttentionItem title: rejects bare session ids, sanitizes handoff markers, and caps length. */
+export function normalizeAttentionTitle(
+  item: Pick<AttentionItem, 'backend' | 'mode' | 'sessionId' | 'sessionTitle'>,
+): string {
+  const raw = item.sessionTitle.trim()
+  if (raw.length === 0 || isBareSessionId(raw, item.sessionId)) {
+    return attentionFallbackTitle(item).slice(0, MAX_ATTENTION_TITLE_CHARS)
+  }
   const preview = parseHandoffPreview(raw)
   const fallback = preview?.sourceBackend && preview?.targetBackend
     ? `${harnessDisplayName(preview.sourceBackend)} → ${harnessDisplayName(preview.targetBackend)}`
@@ -465,24 +502,48 @@ export function deriveAttentionDigest(
   }
 }
 
+function validBotTitle(name: string | undefined, ...sessionIds: ReadonlyArray<string | undefined>): string | undefined {
+  if (typeof name !== 'string') return undefined
+  const trimmed = name.trim()
+  if (trimmed.length === 0) return undefined
+  for (const id of sessionIds) {
+    if (id !== undefined && isBareSessionId(trimmed, id)) return undefined
+  }
+  return trimmed.slice(0, MAX_ATTENTION_TITLE_CHARS)
+}
+
 function botSessionTitle(botState: BotState, sessionId: string, botId?: string, roomId?: string): string {
   if (roomId) {
     const room = botState.rooms.find(r => r.id === roomId)
-    if (room?.name) return room.name.slice(0, MAX_ATTENTION_TITLE_CHARS)
+    const title = validBotTitle(room?.name, sessionId, room?.sessionId)
+    if (title !== undefined) return title
   }
   if (botId) {
     const bot = botState.bots.find(b => b.id === botId)
-    if (bot?.name) return bot.name.slice(0, MAX_ATTENTION_TITLE_CHARS)
+    const title = validBotTitle(bot?.name, sessionId, bot?.sessionId)
+    if (title !== undefined) return title
   }
   const matchedRoom = botState.rooms.find(
     r => r.sessionId === sessionId || r.parts?.includes(sessionId) || r.ownParts?.includes(sessionId),
   )
-  if (matchedRoom?.name) return matchedRoom.name.slice(0, MAX_ATTENTION_TITLE_CHARS)
+  const matchedRoomTitle = validBotTitle(matchedRoom?.name, sessionId, matchedRoom?.sessionId)
+  if (matchedRoomTitle !== undefined) return matchedRoomTitle
   const matchedBot = botState.bots.find(
     b => b.sessionId === sessionId || b.parts?.includes(sessionId),
   )
-  if (matchedBot?.name) return matchedBot.name.slice(0, MAX_ATTENTION_TITLE_CHARS)
+  const matchedBotTitle = validBotTitle(matchedBot?.name, sessionId, matchedBot?.sessionId)
+  if (matchedBotTitle !== undefined) return matchedBotTitle
   return 'DS-Bot'
+}
+
+function botSessionPreview(botState: BotState, sessionId: string): string | undefined {
+  const matchedRoom = botState.rooms.find(
+    r => r.sessionId === sessionId || r.parts?.includes(sessionId) || r.ownParts?.includes(sessionId),
+  )
+  const matchedBot = botState.bots.find(
+    b => b.sessionId === sessionId || b.parts?.includes(sessionId),
+  )
+  return trimSnippet(matchedRoom?.preview || matchedBot?.preview, MAX_ATTENTION_SUMMARY_CHARS)
 }
 
 function collectBotSessionIds(botState: BotState | undefined): Set<string> {
@@ -625,13 +686,15 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
           const sessionId = bot?.sessionId
           if (!sessionId || coveredBotSessions.has(sessionId)) continue
           const id = `legacy:bot:running:${sessionId}`
+          const preview = trimSnippet(bot?.preview, MAX_ATTENTION_SUMMARY_CHARS)
           itemsById.set(id, {
             id,
             backend: 'ds-bot',
             mode: 'bot',
             sessionId,
-            sessionTitle: (bot?.name ?? 'DS-Bot').slice(0, MAX_ATTENTION_TITLE_CHARS),
+            sessionTitle: validBotTitle(bot?.name, sessionId) ?? 'DS-Bot',
             status: 'running',
+            ...(preview !== undefined ? { summary: preview } : {}),
             updatedAt: isRecord(entry) ? extractBotTimestamp(entry, now) : now,
           })
           coveredBotSessions.add(sessionId)
@@ -644,13 +707,15 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
           const sessionId = room?.sessionId
           if (!sessionId || coveredBotSessions.has(sessionId)) continue
           const id = `legacy:bot:running:${sessionId}`
+          const preview = trimSnippet(room?.preview, MAX_ATTENTION_SUMMARY_CHARS)
           itemsById.set(id, {
             id,
             backend: 'ds-bot',
             mode: 'bot',
             sessionId,
-            sessionTitle: (room?.name ?? 'DS-Bot').slice(0, MAX_ATTENTION_TITLE_CHARS),
+            sessionTitle: validBotTitle(room?.name, sessionId) ?? 'DS-Bot',
             status: 'running',
+            ...(preview !== undefined ? { summary: preview } : {}),
             updatedAt: isRecord(entry) ? extractBotTimestamp(entry, now) : now,
           })
           coveredBotSessions.add(sessionId)
@@ -666,7 +731,7 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
 
     const lifecycle = lifecycles[session.sessionId]
     const sessionMessages = messagesMap[session.sessionId] ?? []
-    const isBotSession = botSessionIds.has(session.sessionId)
+    const isBotSession = botSessionIds.has(session.sessionId) || session.backend === 'ds-bot'
     const workspace = workspaceBySession.get(session.sessionId)
     const mapped = isBotSession
       ? { backend: 'ds-bot' as AttentionBackend }
@@ -677,10 +742,11 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
       sources.handoffOrigins?.[session.sessionId],
       sessionMessages,
     )
-    const title = (resolvedTitle !== undefined
-      ? resolvedTitle
-      : (isBotSession && botState ? botSessionTitle(botState, session.sessionId) : session.sessionId)
+    const title = (resolvedTitle !== undefined && resolvedTitle.trim().length > 0 && !isBareSessionId(resolvedTitle, session.sessionId)
+      ? resolvedTitle.trim()
+      : (isBotSession && botState ? botSessionTitle(botState, session.sessionId) : attentionFallbackTitle({ backend: mapped.backend, mode }))
     ).slice(0, MAX_ATTENTION_TITLE_CHARS)
+    const botSummary = isBotSession && botState ? botSessionPreview(botState, session.sessionId) : undefined
     const updatedAt = typeof session.updatedAt === 'number' && Number.isSafeInteger(session.updatedAt) && session.updatedAt > 0
       ? session.updatedAt
       : now
@@ -704,18 +770,18 @@ export function deriveLegacyAttentionItems(sources: LegacyAttentionSources): Att
     } else if (active) {
       status = 'running'
       itemId = `legacy:running:${session.sessionId}`
-      summary = latestAssistantSnippet(sessionMessages)
+      summary = latestAssistantSnippet(sessionMessages) ?? botSummary
     } else if (lifecycle?.finished === 'failed') {
       itemId = `legacy:failed:${session.sessionId}`
       if (!acked.has(itemId)) {
         status = 'failed_unread'
-        summary = latestAssistantSnippet(sessionMessages)
+        summary = latestAssistantSnippet(sessionMessages) ?? botSummary
       }
     } else if (lifecycle?.finished === 'completed' || completedSessionIds.has(session.sessionId)) {
       itemId = `legacy:completed:${session.sessionId}`
       if (!acked.has(itemId)) {
         status = 'completed_unread'
-        summary = latestAssistantSnippet(sessionMessages)
+        summary = latestAssistantSnippet(sessionMessages) ?? botSummary
       }
     }
 

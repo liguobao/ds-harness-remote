@@ -19,7 +19,7 @@ import {
 } from '../lib/attention-deeplink'
 import { resolveAttentionBackendIdentity } from '../lib/attention-backend'
 import { strings } from '../locales/i18n'
-import { selectAttentionCounts } from '../state/attention-store'
+import { normalizeAttentionTitle, selectAttentionCounts } from '../state/attention-store'
 import { foregroundService } from './foreground-service'
 
 export interface IosLiveActivityPayload {
@@ -309,9 +309,7 @@ export function createLiveSurfaceController(
         const deepLink = useDigestToken
           ? buildAttentionDeepLinkUrl(hostId, digest!.attentionToken)
           : buildConversationDeepLinkUrl(hostId, item.sessionId, item.mode)
-        const title = item.sessionTitle.trim().length > 0
-          ? item.sessionTitle.trim()
-          : strings.comfort.liveTaskDefaultTitle
+        const title = normalizeAttentionTitle(item)
         const body = notificationBodyForItem(item)
         const tag = `attention:${hostId}:${item.sessionId}`
 
@@ -373,9 +371,7 @@ export function createLiveSurfaceController(
       const extraCount = Math.max(0, activeItems.length - 1)
       const isWaitingInput = topActive.status === 'waiting_approval' || topActive.status === 'waiting_question'
       const badge = attentionItemBadge(topActive)
-      const title = topActive.sessionTitle.trim().length > 0
-        ? topActive.sessionTitle.trim()
-        : strings.comfort.liveTaskDefaultTitle
+      const title = normalizeAttentionTitle(topActive)
       const statusText = `${resolveAttentionBackendIdentity(topActive).label} · ${phase}`
       const summary = topActive.summary ?? ''
       const updatedAtMs = topActive.updatedAt > 0 ? topActive.updatedAt : 0
