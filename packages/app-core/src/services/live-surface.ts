@@ -19,7 +19,7 @@ import {
 } from '../lib/attention-deeplink'
 import { resolveAttentionBackendIdentity } from '../lib/attention-backend'
 import { strings } from '../locales/i18n'
-import { selectAttentionCounts } from '../state/attention-store'
+import { attentionFallbackTitle, isBareSessionId, selectAttentionCounts } from '../state/attention-store'
 import { foregroundService } from './foreground-service'
 
 export interface IosLiveActivityPayload {
@@ -179,7 +179,9 @@ function statusTextForLiveItem(status: AttentionStatus): string {
 /** Never surface a bare session id as a human-facing title. */
 function attentionDisplayTitle(item: AttentionItem): string {
   const raw = item.sessionTitle.trim()
-  if (raw.length === 0 || raw === item.sessionId) return strings.comfort.liveTaskDefaultTitle
+  if (raw.length === 0 || isBareSessionId(raw, item.sessionId)) {
+    return attentionFallbackTitle(item)
+  }
   return raw
 }
 
