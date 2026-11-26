@@ -35,7 +35,14 @@ vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }))
 
-vi.mock('lucide-react-native', () => new Proxy({}, { get: (_target, prop) => String(prop) }))
+vi.mock('../src/ui/duotone-icons', () => {
+  const iconProxy = new Proxy({}, { get: (_target, prop) => String(prop) })
+  return {
+    DuotoneIcons: iconProxy,
+    DuotoneIcon: 'DuotoneIcon',
+    MotionPressable: 'Pressable',
+  }
+})
 vi.mock('../src/ui/animated-ellipsis', () => ({ AnimatedEllipsis: 'AnimatedEllipsis' }))
 vi.mock('../src/ui/alert', () => ({ Alert: { alert: vi.fn() } }))
 vi.mock('../src/ui/components', () => ({

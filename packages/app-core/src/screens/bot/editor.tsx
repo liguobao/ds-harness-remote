@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Alert } from '../../ui/alert'
 import { strings as s } from '../../locales/i18n'
 import { canDeleteBot, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotOperation, type BotObject, type BotRemoteClient } from '../../services/bot-catalog'
-import { ChevronDown, ChevronUp, RotateCcw, Trash2, X } from 'lucide-react-native'
 import { Button, IconButton } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -89,7 +89,7 @@ export function BotEffortBar({
           )}
           <Text style={localStyles.effortValue}>{activeStop.label}</Text>
           {(canReset || !hasDefault) && (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={s.bots.resetEffort}
               disabled={disabled || !canReset}
@@ -101,8 +101,8 @@ export function BotEffortBar({
                 pressed && { opacity: 0.7 },
               ]}
             >
-              <RotateCcw size={13} color={colors.muted} />
-            </Pressable>
+              <DuotoneIcons.RotateCcw size={13} color={colors.muted} />
+            </MotionPressable>
           )}
         </View>
       </View>
@@ -114,7 +114,7 @@ export function BotEffortBar({
             const filled = index <= activeIndex
             const selected = index === activeIndex
             return (
-              <Pressable
+              <MotionPressable
                 key={stop.id || 'default'}
                 accessibilityRole="button"
                 accessibilityLabel={`${s.bots.effort}: ${stop.label}`}
@@ -136,7 +136,7 @@ export function BotEffortBar({
                 >
                   {stop.label}
                 </Text>
-              </Pressable>
+              </MotionPressable>
             )
           })}
         </View>
@@ -246,9 +246,9 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
       onClose()
     }
   }
-  const header = <View style={styles.row}><Text style={[styles.heading, styles.grow]}>{editing ? s.bots.edit : kind === 'bot' ? s.bots.newBot : s.bots.newGroup}</Text><IconButton label={s.common.close} icon={X} disabled={busy} onPress={onClose} /></View>
+  const header = <View style={styles.row}><Text style={[styles.heading, styles.grow]}>{editing ? s.bots.edit : kind === 'bot' ? s.bots.newBot : s.bots.newGroup}</Text><IconButton label={s.common.close} icon={DuotoneIcons.X} disabled={busy} onPress={onClose} /></View>
   const actions = <View style={styles.actions}>
-    {canDelete && <Button variant="danger" icon={Trash2} label={s.bots.delete} disabled={busy} onPress={confirmDelete} />}
+    {canDelete && <Button variant="danger" icon={DuotoneIcons.Trash2} label={s.bots.delete} disabled={busy} onPress={confirmDelete} />}
     <View style={styles.grow} />
     <Button variant="quiet" label={s.bots.cancel} disabled={busy} onPress={onClose} />
     <Button loading={busy} label={bot || room ? s.bots.save : s.bots.create} disabled={busy || !name.trim() || (kind === 'room' && members.length < 2)} onPress={() => void save()} />
@@ -276,16 +276,16 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
         {kind === 'bot' ? <>
           {editing && <>{field(s.bots.role, role, setRole)}{field(s.bots.instructions, instructions, setInstructions, true)}</>}
           <Text style={styles.heading}>{s.bots.model}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel={s.bots.model} accessibilityState={{ expanded: modelPicker }} style={[styles.input, styles.row]} disabled={busy} onPress={() => setModelPicker(value => !value)}>{selectedModelEngine !== undefined && <BotAgentBadge engine={selectedModelEngine} size={16} />}<Text style={[styles.body, styles.grow]} numberOfLines={1}>{model ? text(selectedModelEntry?.name) || text(selectedModelEntry?.label) || model : s.bots.defaultModel}</Text>{modelPicker ? <ChevronUp size={18} color={colors.muted} /> : <ChevronDown size={18} color={colors.muted} />}</Pressable>
+          <MotionPressable accessibilityRole="button" accessibilityLabel={s.bots.model} accessibilityState={{ expanded: modelPicker }} style={[styles.input, styles.row]} disabled={busy} onPress={() => setModelPicker(value => !value)}>{selectedModelEngine !== undefined && <BotAgentBadge engine={selectedModelEngine} size={16} />}<Text style={[styles.body, styles.grow]} numberOfLines={1}>{model ? text(selectedModelEntry?.name) || text(selectedModelEntry?.label) || model : s.bots.defaultModel}</Text>{modelPicker ? <DuotoneIcons.ChevronUp size={18} color={colors.muted} /> : <DuotoneIcons.ChevronDown size={18} color={colors.muted} />}</MotionPressable>
           {modelPicker && <View style={styles.field}><BotChoice label={s.bots.defaultModel} checked={model === ''} disabled={busy} onPress={() => { setModel(''); setEffort(''); setModelPicker(false) }} />{groupedModels.map(group => <View key={group.provider} style={localStyles.providerGroup}><View style={localStyles.providerHeader}><BotAgentBadge engine={group.provider} size={14} /><Text style={localStyles.providerTitle}>{group.label}</Text></View>{group.items.map((entry, i) => { const ref = text(entry.ref); const isDefault = state.defaultModel !== undefined && ref === state.defaultModel; const labelText = text(entry.name) || text(entry.label) || ref; return <BotChoice key={ref || i} label={isDefault ? `${labelText} (${s.bots.defaultEffort})` : labelText} checked={model === ref} disabled={busy || ref === ''} onPress={() => { setModel(ref); setEffort(''); setModelPicker(false) }} /> })}</View>)}</View>}
           {state.models.length === 0 && <Text style={styles.muted}>{s.bots.noModel}</Text>}
           {efforts.length > 0 && <BotEffortBar efforts={efforts} defaultEffort={defaultEffort} current={effort} disabled={busy} onPick={setEffort} />}
           {editing && bot && <>
             <Text style={styles.heading}>{s.bots.workingFolder}</Text>
-            <Pressable accessibilityRole="button" style={[styles.input, styles.row]} disabled={busy} onPress={() => setFolderPickerOpen(true)}>
+            <MotionPressable accessibilityRole="button" style={[styles.input, styles.row]} disabled={busy} onPress={() => setFolderPickerOpen(true)}>
               <Text style={[styles.body, styles.grow]} numberOfLines={1}>{workDir ? folderBasename(workDir) : s.bots.teamWorkspace}</Text>
-              <ChevronDown size={18} color={colors.muted} />
-            </Pressable>
+              <DuotoneIcons.ChevronDown size={18} color={colors.muted} />
+            </MotionPressable>
             <Text style={styles.heading}>{s.bots.permissions}</Text>
             <View style={{ flexDirection: 'row', gap: 6 }}>
               {([

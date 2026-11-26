@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
-import { X } from 'lucide-react-native'
+import { StyleSheet, Text, TextInput, View } from 'react-native'
 import { strings as s } from '../../locales/i18n'
 import { object, text, type BotObject } from '../../services/bot-catalog'
 import { Button } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -45,7 +45,7 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
             <Text style={localStyles.questionTitle}>{promptTitle}</Text>
             {Boolean(detailText) && <Text style={localStyles.detailText}>{detailText}</Text>}
           </View>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={s.bots.dismiss}
             disabled={busy}
@@ -53,8 +53,8 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
             onPress={dismiss}
             style={({ pressed }) => [localStyles.closeBtn, pressed && { opacity: 0.55 }, busy && { opacity: 0.35 }]}
           >
-            <X size={18} color={colors.muted} strokeWidth={1.9} />
-          </Pressable>
+            <DuotoneIcons.X size={18} color={colors.muted} strokeWidth={1.9} />
+          </MotionPressable>
         </View>
 
         {options.length > 0 && (
@@ -64,7 +64,7 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
               const desc = text(option.description)
               const isChecked = selected.includes(label)
               return (
-                <Pressable
+                <MotionPressable
                   key={i}
                   accessibilityRole={isMulti ? 'checkbox' : 'button'}
                   accessibilityState={{ checked: isChecked, disabled: busy }}
@@ -92,7 +92,7 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
                     <Text style={localStyles.optionLabel}>{label}</Text>
                     {Boolean(desc) && <Text style={localStyles.optionDesc}>{desc}</Text>}
                   </View>
-                </Pressable>
+                </MotionPressable>
               )
             })}
           </View>

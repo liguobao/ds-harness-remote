@@ -1,9 +1,9 @@
 import { memo, useMemo, useState, type ReactNode } from 'react'
-import { ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
-import { Bot, ChevronDown, ChevronRight, Layers, Search, Settings2, User, Wrench, X } from 'lucide-react-native'
+import { ActivityIndicator, FlatList, Keyboard, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import type { ChatImage, ChatItem, ChatMessage } from '../types'
 import { strings } from '../locales/i18n'
 import { IconButton } from '../ui/components'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { NativeMarkdown } from '../ui/markdown'
 import { radius, spacing, type, type ThemeColors } from '../ui/theme'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -13,7 +13,13 @@ import { MessageActions, messageClock, messageTime } from './message-actions'
 
 type Category = 'all' | 'system' | 'user' | 'context' | 'assistant' | 'tool'
 const CATEGORIES = ['all', 'system', 'user', 'context', 'assistant', 'tool'] as const
-const CATEGORY_ICONS = { system: Settings2, user: User, context: Layers, assistant: Bot, tool: Wrench }
+const CATEGORY_ICONS = {
+  system: DuotoneIcons.Settings2,
+  user: DuotoneIcons.User,
+  context: DuotoneIcons.Layers,
+  assistant: DuotoneIcons.Bot,
+  tool: DuotoneIcons.Wrench,
+}
 function category(item: ChatItem): Exclude<Category, 'all'> {
   if (item.kind !== 'message') return 'tool'
   return item.context ? 'context' : item.role
@@ -47,31 +53,33 @@ export function ChatTrajectory({ items, renderItem, renderImages, hasMore, loadi
   }, [items, filter, query])
   return <View style={[styles.root, { width: '100%', maxWidth: contentMaxWidth, alignSelf: 'center' }]}>
     <View style={styles.search}>
-      <Search size={18} color={colors.muted} />
+      <DuotoneIcons.Search size={18} color={colors.muted} />
       <TextInput accessibilityLabel={strings.trajectory.search} placeholder={strings.trajectory.search}
         placeholderTextColor={colors.muted} selectionColor={colors.primary} value={query} onChangeText={setQuery}
         autoCorrect={false} returnKeyType="search" onSubmitEditing={() => Keyboard.dismiss()} style={styles.searchInput} />
-      {query.length > 0 && <IconButton label={strings.trajectory.clearSearch} icon={X} dense onPress={() => setQuery('')} />}
+      {query.length > 0 && <IconButton label={strings.trajectory.clearSearch} icon={DuotoneIcons.X} dense onPress={() => setQuery('')} />}
     </View>
     <View style={styles.filterBar} accessibilityRole="tablist">
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.filters}>
-        {CATEGORIES.map(key => <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected: key === filter }}
+        {CATEGORIES.map(key => <MotionPressable key={key} accessibilityRole="tab" accessibilityState={{ selected: key === filter }}
+          scaleTo={0.96}
           onPress={() => setFilter(key)} style={({ pressed }) => [styles.filter, key === filter && styles.filterSelected, pressed && styles.pressed]}>
           <Text style={[styles.filterText, key === filter && styles.filterTextSelected]}>{strings.trajectory[key]}</Text>
-        </Pressable>)}
+        </MotionPressable>)}
       </ScrollView>
     </View>
     <FlatList data={rows} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       onScrollBeginDrag={() => Keyboard.dismiss()} initialNumToRender={6} maxToRenderPerBatch={6}
       ListHeaderComponent={<View style={styles.listHeader}>
         <Text style={styles.hint}>{strings.trajectory.loadedOnly}</Text>
-        {hasMore && <Pressable accessibilityRole="button" accessibilityLabel={strings.chat.older}
+        {hasMore && <MotionPressable accessibilityRole="button" accessibilityLabel={strings.chat.older}
           accessibilityState={{ disabled: loading, busy: loading }} disabled={loading} onPress={loadOlder}
+          scaleTo={0.97}
           style={({ pressed }) => [styles.loadOlder, pressed && styles.pressed]}>
           {loading ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.loadOlderText}>{strings.chat.older}</Text>}
-        </Pressable>}
+        </MotionPressable>}
       </View>}
-      ListEmptyComponent={<View style={styles.empty}><Search size={24} color={colors.muted} /><Text style={styles.emptyText}>{strings.trajectory.empty}</Text></View>}
+      ListEmptyComponent={<View style={styles.empty}><DuotoneIcons.Search size={24} color={colors.muted} /><Text style={styles.emptyText}>{strings.trajectory.empty}</Text></View>}
       contentContainerStyle={styles.list} renderItem={({ item }) => <TrajectoryEntry item={item} renderItem={renderItem} renderImages={renderImages} />} />
   </View>
 }
@@ -95,17 +103,18 @@ const TrajectoryEntry = memo(function TrajectoryEntry({ item, renderItem, render
     <Text style={styles.role}>{label}</Text>
     {item.turn !== undefined && <Text numberOfLines={1} style={styles.turn}>{strings.trajectory.turn} {item.turn}</Text>}
     {time !== undefined && <Text style={styles.time}>{messageClock(time)}</Text>}
-    {message !== undefined && (expanded ? <ChevronDown size={16} color={colors.muted} /> : <ChevronRight size={16} color={colors.muted} />)}
+    {message !== undefined && (expanded ? <DuotoneIcons.ChevronDown size={16} color={colors.muted} /> : <DuotoneIcons.ChevronRight size={16} color={colors.muted} />)}
   </View>
   return <View style={styles.entry}>
     {message === undefined ? <>{meta}{renderItem(item)}</> : <>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? strings.trajectory.collapse : strings.trajectory.expand} · ${label} · ${preview.slice(0, 120)}`}
+      <MotionPressable accessibilityRole="button" accessibilityLabel={`${expanded ? strings.trajectory.collapse : strings.trajectory.expand} · ${label} · ${preview.slice(0, 120)}`}
         accessibilityState={{ expanded }} onPress={() => setExpanded(value => !value)}
+        scaleTo={0.98}
         style={({ pressed }) => [styles.messageHeader, pressed && styles.pressed]}>
         {meta}
         {!expanded && <Text style={styles.preview} numberOfLines={4}>{preview}</Text>}
         {!expanded && (message.images?.length ?? 0) > 0 && <Text style={styles.attachmentHint}>{strings.trajectory.attachments(message.images!.length)}</Text>}
-      </Pressable>
+      </MotionPressable>
       {expanded && <TrajectoryMessage item={message} renderImages={renderImages} />}
     </>}
   </View>
@@ -132,15 +141,15 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   filterBar: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   filters: { paddingHorizontal: spacing.lg, gap: spacing.md },
   filter: { minHeight: 48, paddingHorizontal: spacing.xxs, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  filterSelected: { borderBottomColor: colors.primary },
+  filterSelected: { borderBottomColor: colors.ink },
   filterText: { ...type.small, color: colors.muted },
-  filterTextSelected: { color: colors.primary, fontWeight: '600' },
+  filterTextSelected: { color: colors.ink, fontWeight: '600' },
   pressed: { backgroundColor: colors.surfaceStrong },
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl, flexGrow: 1 },
   listHeader: { paddingTop: spacing.sm, paddingBottom: spacing.xxs },
   hint: { ...type.caption, color: colors.muted },
   loadOlder: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: spacing.xs },
-  loadOlderText: { ...type.small, color: colors.primary },
+  loadOlderText: { ...type.small, color: colors.ink },
   entry: { paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   meta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 24, marginBottom: spacing.xs },
   role: { ...type.caption, color: colors.muted },

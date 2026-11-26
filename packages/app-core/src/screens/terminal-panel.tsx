@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
-import { CirclePlus } from 'lucide-react-native'
 import { requireSessionTools } from '../state/store'
 import { createNativeRpcId } from '../services/rpc-id'
 import { TerminalAttachment } from '../services/terminal-attachment'
@@ -9,6 +8,7 @@ import type { TerminalInfo } from '../services/session-tools'
 import { terminalHtml } from '../generated/terminal-html'
 import { strings as t } from '../locales/i18n'
 import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { androidRipple, continuousRadius } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { radius, spacing, type } from '../ui/theme'
@@ -33,13 +33,22 @@ function TerminalChip({
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled, selected }}
       disabled={disabled}
       android_ripple={androidRipple(colors)}
       onPress={onPress}
+      scaleTo={0.96}
+      inverse={variant === 'primary'}
+      surfaceColor={
+        variant === 'primary'
+          ? colors.inverse
+          : variant === 'danger'
+            ? colors.dangerSoft
+            : colors.surfaceStrong
+      }
       style={({ pressed }) => [
         styles.chip,
         variant === 'primary' && styles.chipPrimary,
@@ -60,7 +69,7 @@ function TerminalChip({
       >
         {label}
       </Text>
-    </Pressable>
+    </MotionPressable>
   )
 }
 
@@ -202,7 +211,7 @@ export function TerminalPanel({ sessionId, onClose, headerAccessory }: { session
   return <BlurHeaderFrame inset header={<View><TopBar
     title={t.tools.terminal}
     onBack={onClose}
-    action={<IconButton label={t.tools.newTerminal} icon={CirclePlus} tint={colors.primary} onPress={() => void create()} disabled={busy || !ready} />}
+    action={<IconButton label={t.tools.newTerminal} icon={DuotoneIcons.CirclePlus} onPress={() => void create()} disabled={busy || !ready} />}
   />{headerAccessory}</View>}>
     {(items.length > 0 || active !== undefined) && (
       <ScrollView
@@ -313,7 +322,7 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    chipPrimary: { backgroundColor: colors.primary },
+    chipPrimary: { backgroundColor: colors.inverse },
     chipQuiet: { backgroundColor: colors.surfaceStrong },
     chipDanger: { backgroundColor: colors.dangerSoft },
     chipKey: {
@@ -324,7 +333,7 @@ function createStyles(colors: ThemeColors) {
     chipPressed: { opacity: 0.72 },
     chipDisabled: { opacity: 0.45 },
     chipText: { ...type.small, fontSize: 13, fontWeight: '500', color: colors.ink },
-    chipTextPrimary: { color: colors.onPrimary ?? colors.white, fontWeight: '600' },
+    chipTextPrimary: { color: colors.onInverse, fontWeight: '600' },
     chipTextDanger: { color: colors.danger, fontWeight: '600' },
     notice: {
       flexDirection: 'row',

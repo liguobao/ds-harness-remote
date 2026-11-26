@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { CalendarDays, MessageSquare, Search, X } from 'lucide-react-native'
 import { strings } from '../../locales/i18n'
 import type { BotState } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
 import { useBotTeamStore } from '../../state/bot-store'
 import { GroupCard, GroupRow, IconButton } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { OfficialMenuIcons } from '../../ui/official-menu-icons'
 import { useResponsiveLayout } from '../../ui/responsive'
 import { radius, spacing, type } from '../../ui/theme'
@@ -34,13 +34,13 @@ export function BotPlusMenuModal({
       <ModalSurface onClose={onClose}>
         <View style={styles.header}>
           <Text style={styles.title}>{strings.chat.moreActions}</Text>
-          <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+          <IconButton label={strings.common.close} icon={DuotoneIcons.X} onPress={onClose} />
         </View>
         <View style={styles.sheetBody}>
           <GroupCard>
             <GroupRow
               first
-              icon={MessageSquare}
+              icon={DuotoneIcons.MessageSquare}
               label={strings.chat.referenceChat}
               detail={strings.chat.referenceChatDetail}
               onPress={() => {
@@ -50,7 +50,7 @@ export function BotPlusMenuModal({
             />
             {onOpenSchedules !== undefined && (
               <GroupRow
-                icon={CalendarDays}
+                icon={DuotoneIcons.CalendarDays}
                 label={strings.bots.schedules}
                 detail={strings.bots.manage}
                 onPress={() => {
@@ -133,11 +133,11 @@ export function ReferenceChatModal({
             <Text style={styles.title}>{strings.chat.referenceChat}</Text>
             <Text style={styles.subtitle}>{strings.chat.referenceChatSubtitle}</Text>
           </View>
-          <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+          <IconButton label={strings.common.close} icon={DuotoneIcons.X} onPress={onClose} />
         </View>
 
         <View style={styles.searchBar}>
-          <Search size={16} color={colors.muted} />
+          <DuotoneIcons.Search size={16} color={colors.muted} />
           <TextInput
             value={query}
             onChangeText={setQuery}
@@ -146,14 +146,14 @@ export function ReferenceChatModal({
             style={styles.searchInput}
           />
           {query.length > 0 && (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.common.close}
               hitSlop={8}
               onPress={() => setQuery('')}
             >
-              <X size={15} color={colors.muted} />
-            </Pressable>
+              <DuotoneIcons.X size={15} color={colors.muted} />
+            </MotionPressable>
           )}
         </View>
 
@@ -176,7 +176,7 @@ export function ReferenceChatModal({
               <Text style={styles.sectionHeading}>{strings.bots.title}</Text>
               <GroupCard>
                 {groups.bots.map((item, index) => (
-                  <Pressable
+                  <MotionPressable
                     key={item.id}
                     accessibilityRole="button"
                     accessibilityLabel={item.mentionLabel}
@@ -209,7 +209,7 @@ export function ReferenceChatModal({
                         </Text>
                       )}
                     </View>
-                  </Pressable>
+                  </MotionPressable>
                 ))}
               </GroupCard>
             </View>
@@ -220,7 +220,7 @@ export function ReferenceChatModal({
               <Text style={styles.sectionHeading}>{strings.mention.sessionSection}</Text>
               <GroupCard>
                 {groups.conversations.map((item, index) => (
-                  <Pressable
+                  <MotionPressable
                     key={item.id}
                     accessibilityRole="button"
                     accessibilityLabel={item.title}
@@ -249,7 +249,7 @@ export function ReferenceChatModal({
                         </Text>
                       )}
                     </View>
-                  </Pressable>
+                  </MotionPressable>
                 ))}
               </GroupCard>
             </View>
@@ -284,20 +284,20 @@ export function ReferencedChatPills({
             {item.bot ? (
               <BotAvatar bot={item.bot} size={18} />
             ) : (
-              <MessageSquare size={14} color={colors.primary} />
+              <DuotoneIcons.MessageSquare size={14} color={colors.primary} />
             )}
             <Text numberOfLines={1} style={styles.referencePillText}>
               {strings.chat.referencedChat(item.mentionLabel)}
             </Text>
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={`${strings.common.delete} ${item.mentionLabel}`}
               hitSlop={8}
               onPress={() => onRemove(item.sessionId)}
               style={styles.referencePillRemove}
             >
-              <X size={13} color={colors.primary} />
-            </Pressable>
+              <DuotoneIcons.X size={13} color={colors.primary} />
+            </MotionPressable>
           </View>
         ))}
       </ScrollView>

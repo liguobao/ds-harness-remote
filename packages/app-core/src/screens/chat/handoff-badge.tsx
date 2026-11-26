@@ -1,6 +1,6 @@
-import { ArrowRightLeft } from 'lucide-react-native'
 import { StyleSheet, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
+import { DuotoneIcons } from '../../ui/duotone-icons'
 import { radius, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -27,7 +27,12 @@ export function HandoffOriginBadge({
       ]}
       accessibilityLabel={label.length > 0 ? strings.handoff.badgeFrom(label) : strings.handoff.title}
     >
-      <ArrowRightLeft size={compact ? 10 : 11} color={colors.primary} strokeWidth={2.2} />
+      <DuotoneIcons.ArrowRightLeft
+        size={compact ? 10 : 11}
+        color={colors.ink}
+        surfaceColor={selected ? colors.surface : colors.surfaceStrong}
+        strokeWidth={2.2}
+      />
       {label.length > 0 && (
         <Text style={[styles.text, compact && styles.textCompact]} numberOfLines={1}>
           {label}
@@ -45,7 +50,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: radius.pill,
-    backgroundColor: colors.primarySoft,
+    backgroundColor: colors.surfaceStrong,
     maxWidth: 92,
     flexShrink: 0,
   },
@@ -62,7 +67,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontSize: 10.5,
     lineHeight: 13,
     fontWeight: '600',
-    color: colors.primary,
+    color: colors.ink,
     flexShrink: 1,
   },
   textCompact: {

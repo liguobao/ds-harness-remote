@@ -1,13 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native'
+import { ActivityIndicator, Modal, StyleSheet, Text, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
-import { Code, Maximize2, Shapes, X } from 'lucide-react-native'
 import { SvgXml } from 'react-native-svg'
 import { WebView } from 'react-native-webview'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { strings as t } from '../../locales/i18n'
 import { CodeBlockView } from '../code-block'
 import { IconCheckOutline, IconCopyOutline } from '../dsh-icons'
+import { DuotoneIcons, MotionPressable } from '../duotone-icons'
 import { useTheme } from '../theme-context'
 import { MAX_MERMAID_SOURCE_CHARS, mermaidThemeFor, useMermaidDiagram, type MermaidDiagram } from './mermaid-renderer'
 
@@ -71,10 +71,10 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
   if (showSource) {
     return <View>
       <CodeBlockView code={code} language="mermaid" />
-      <Pressable accessibilityRole="button" onPress={() => setShowSource(false)} hitSlop={6} style={styles.backToDiagram}>
-        <Shapes size={14} color={colors.primary} />
-        <Text style={[styles.link, { color: colors.primary }]}>{t.diagram.showDiagram}</Text>
-      </Pressable>
+      <MotionPressable accessibilityRole="button" onPress={() => setShowSource(false)} hitSlop={6} scaleTo={0.96} style={styles.backToDiagram}>
+        <DuotoneIcons.Shapes size={14} color={colors.ink} />
+        <Text style={[styles.link, { color: colors.ink }]}>{t.diagram.showDiagram}</Text>
+      </MotionPressable>
     </View>
   }
 
@@ -85,13 +85,13 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
         <Text numberOfLines={1} style={[styles.language, { color: colors.muted }]}>mermaid</Text>
         <View style={styles.actions}>
           <HeaderButton label={t.diagram.showSource} onPress={() => setShowSource(true)}>
-            <Code size={14} color={colors.muted} />
+            <DuotoneIcons.Code size={14} color={colors.muted} />
           </HeaderButton>
           <HeaderButton label={copied ? t.diagram.copied : t.diagram.copySource} onPress={copy}>
             {copied ? <IconCheckOutline size={14} color="#10B981" /> : <IconCopyOutline size={14} color={colors.muted} />}
           </HeaderButton>
           {diagram !== undefined && <HeaderButton label={t.diagram.openFullScreen} onPress={() => setViewer(true)}>
-            <Maximize2 size={14} color={colors.muted} />
+            <DuotoneIcons.Maximize2 size={14} color={colors.muted} />
           </HeaderButton>}
         </View>
       </View>
@@ -101,18 +101,18 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
             <ActivityIndicator color={colors.primary} />
             <Text style={{ color: colors.muted }}>{t.diagram.rendering}</Text>
           </View>
-          : <Pressable accessibilityRole="imagebutton" accessibilityLabel={`${t.diagram.label}. ${t.diagram.openFullScreen}`}
-            accessibilityHint={t.diagram.openFullScreen} onPress={() => setViewer(true)} onLongPress={copy} delayLongPress={400}>
+          : <MotionPressable accessibilityRole="imagebutton" accessibilityLabel={`${t.diagram.label}. ${t.diagram.openFullScreen}`}
+            accessibilityHint={t.diagram.openFullScreen} onPress={() => setViewer(true)} onLongPress={copy} delayLongPress={400} scaleTo={0.98}>
             {diagram.inline !== undefined && width > 0
               ? <InlineDiagram diagram={diagram} xml={diagram.inline} width={width} />
               : diagram.inline !== undefined
                 ? <View style={styles.placeholder} />
-                : <View style={[styles.fullScreenCard, { backgroundColor: colors.primarySoft }]}>
-                  <Maximize2 size={18} color={colors.primary} />
+                : <View style={[styles.fullScreenCard, { backgroundColor: colors.surfaceStrong }]}>
+                  <DuotoneIcons.Maximize2 size={18} color={colors.ink} surfaceColor={colors.surfaceStrong} />
                   <Text style={[styles.cardTitle, { color: colors.ink }]}>{t.diagram.fullScreenOnly}</Text>
                   <Text style={{ color: colors.muted }}>{t.diagram.tapToOpen}</Text>
                 </View>}
-          </Pressable>}
+          </MotionPressable>}
       </View>
       {diagram !== undefined && viewer && <DiagramViewer diagram={diagram} onClose={() => setViewer(false)} onCopy={copy} copied={copied} />}
     </View>
@@ -120,10 +120,11 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
 })
 
 function HeaderButton({ label, onPress, children }: { label: string; onPress: () => void; children: React.ReactNode }) {
-  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} hitSlop={8}
+  const { colors } = useTheme()
+  return <MotionPressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} hitSlop={8} scaleTo={0.92} surfaceColor={colors.surfaceStrong}
     style={({ pressed }) => [styles.actionButton, { opacity: pressed ? 0.6 : 1 }]}>
     {children}
-  </Pressable>
+  </MotionPressable>
 }
 
 function InlineDiagram({ diagram, xml, width }: { diagram: MermaidDiagram; xml: string; width: number }) {
@@ -146,13 +147,13 @@ function DiagramViewer({ diagram, onClose, onCopy, copied }: { diagram: MermaidD
   return <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
     <SafeAreaView style={[styles.viewer, { backgroundColor: colors.background }]}>
       <View style={[styles.viewerBar, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel={t.diagram.close} hitSlop={8} style={styles.viewerButton}>
-          <X size={22} color={colors.ink} />
-        </Pressable>
+        <MotionPressable onPress={onClose} accessibilityRole="button" accessibilityLabel={t.diagram.close} hitSlop={8} scaleTo={0.92} style={styles.viewerButton}>
+          <DuotoneIcons.X size={22} color={colors.ink} />
+        </MotionPressable>
         <Text style={[styles.viewerTitle, { color: colors.ink }]}>{t.diagram.label}</Text>
-        <Pressable onPress={onCopy} accessibilityRole="button" accessibilityLabel={copied ? t.diagram.copied : t.diagram.copySource} hitSlop={8} style={styles.viewerButton}>
+        <MotionPressable onPress={onCopy} accessibilityRole="button" accessibilityLabel={copied ? t.diagram.copied : t.diagram.copySource} hitSlop={8} scaleTo={0.92} style={styles.viewerButton}>
           {copied ? <IconCheckOutline size={20} color="#10B981" /> : <IconCopyOutline size={20} color={colors.ink} />}
-        </Pressable>
+        </MotionPressable>
       </View>
       <WebView source={{ html, baseUrl: 'about:blank' }} style={{ flex: 1, backgroundColor: colors.background }}
         accessibilityLabel={t.diagram.label}

@@ -13,24 +13,7 @@ import {
 } from 'react-native'
 import { Alert } from '../ui/alert'
 import { sanitizeHandoffDisplayTitle } from '../lib/handoff-preview'
-import {
-  AlertCircle,
-  ArrowLeft,
-  Bot,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  Edit2,
-  MessageSquare,
-  Pause,
-  Play,
-  Plus,
-  RefreshCw,
-  Search,
-  Trash2,
-  X,
-} from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
@@ -891,36 +874,43 @@ export function AutomationTasksModal({
         {isNonNativeBackend ? (
           <View style={styles.flex}>
             <View style={styles.header}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={strings.common.close}
                 onPress={onClose}
                 hitSlop={8}
+                scaleTo={0.92}
+                surfaceColor={colors.elevated}
                 style={styles.headerBtn}
               >
-                <ArrowLeft size={20} color={colors.ink} />
-              </Pressable>
+                <DuotoneIcons.ArrowLeft size={20} color={colors.ink} />
+              </MotionPressable>
               <Text style={styles.headerTitle}>{strings.automation.title}</Text>
               <View style={styles.headerRightSpacer} />
             </View>
             <View style={styles.centerContainer}>
-              <AlertCircle size={52} color={colors.muted} style={styles.emptyIcon} />
+              <View style={styles.emptyIcon}>
+                <DuotoneIcons.AlertCircle size={52} color={colors.muted} />
+              </View>
               <Text style={styles.unsupportedHeading}>{strings.automation.unsupportedBackendTitle}</Text>
               <Text style={styles.unsupportedBody}>{strings.automation.unsupportedBackendDesc}</Text>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
+                inverse
+                surfaceColor={colors.inverse}
+                scaleTo={0.97}
                 onPress={onClose}
                 style={({ pressed }) => [styles.emptyActionBtn, pressed && styles.pressedBg]}
               >
                 <Text style={styles.emptyActionBtnText}>{strings.common.back}</Text>
-              </Pressable>
+              </MotionPressable>
             </View>
           </View>
         ) : formMode !== null ? (
           /* Create / Edit Form View */
           <View style={styles.flex}>
             <View style={styles.formHeader}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={strings.common.cancel}
                 onPress={() => {
@@ -929,10 +919,12 @@ export function AutomationTasksModal({
                   setFormMode(null)
                 }}
                 hitSlop={8}
+                scaleTo={0.92}
+                surfaceColor={colors.elevated}
                 style={[styles.headerBtn, styles.formBackBtn]}
               >
-                <ArrowLeft size={20} color={colors.ink} />
-              </Pressable>
+                <DuotoneIcons.ArrowLeft size={20} color={colors.ink} />
+              </MotionPressable>
               <View style={styles.formHeaderText}>
                 <Text style={styles.formEyebrow}>{strings.automation.title}</Text>
                 <Text style={styles.formTitleLeft} numberOfLines={1}>
@@ -972,59 +964,71 @@ export function AutomationTasksModal({
                   />
                 </View>
                 <View style={styles.cardDivider} />
-                <Pressable
-                  ref={modelRowRef}
-                  accessibilityRole="button"
-                  onPress={() => openPickerAt('model', modelRowRef)}
-                  style={styles.paramRow}
-                >
-                  <View style={styles.modelLabel}>
-                    <Bot size={14} color={colors.muted} />
-                    <Text style={styles.modelName} numberOfLines={1}>{currentModelLabel}</Text>
-                  </View>
-                  <ChevronDown size={16} color={colors.subtle} />
-                </Pressable>
+                <View ref={modelRowRef} collapsable={false}>
+                  <MotionPressable
+                    accessibilityRole="button"
+                    scaleTo={0.985}
+                    surfaceColor={colors.card}
+                    onPress={() => openPickerAt('model', modelRowRef)}
+                    style={styles.paramRow}
+                  >
+                    <View style={styles.modelLabel}>
+                      <DuotoneIcons.Bot size={14} color={colors.muted} />
+                      <Text style={styles.modelName} numberOfLines={1}>{currentModelLabel}</Text>
+                    </View>
+                    <DuotoneIcons.ChevronDown size={16} color={colors.subtle} />
+                  </MotionPressable>
+                </View>
               </View>
 
 
               {/* 2. 设置 */}
               <View style={styles.formCard}>
-                <Pressable
-                  ref={projectRowRef}
-                  accessibilityRole="button"
-                  onPress={() => openPickerAt('project', projectRowRef)}
-                  style={styles.paramRow}
-                >
-                  <Text style={styles.rowLabel}>{strings.automation.project}</Text>
-                  <View style={styles.dropdown}>
-                    <Text style={styles.dropdownText} numberOfLines={1}>
-                      {pickedWorkspace?.title ?? strings.automation.selectProject}
-                    </Text>
-                    <ChevronDown size={14} color={colors.muted} />
-                  </View>
-                </Pressable>
+                <View ref={projectRowRef} collapsable={false}>
+                  <MotionPressable
+                    accessibilityRole="button"
+                    scaleTo={0.985}
+                    surfaceColor={colors.card}
+                    onPress={() => openPickerAt('project', projectRowRef)}
+                    style={styles.paramRow}
+                  >
+                    <Text style={styles.rowLabel}>{strings.automation.project}</Text>
+                    <View style={styles.dropdown}>
+                      <Text style={styles.dropdownText} numberOfLines={1}>
+                        {pickedWorkspace?.title ?? strings.automation.selectProject}
+                      </Text>
+                      <DuotoneIcons.ChevronDown size={14} color={colors.muted} />
+                    </View>
+                  </MotionPressable>
+                </View>
                 <View style={styles.cardDivider} />
-                <Pressable
-                  ref={sendToRowRef}
-                  accessibilityRole="button"
-                  onPress={() => openPickerAt('sendTo', sendToRowRef)}
-                  style={styles.paramRow}
-                >
-                  <Text style={styles.rowLabel}>{strings.automation.sendTo}</Text>
-                  <View style={styles.dropdown}>
-                    <Text style={styles.dropdownText} numberOfLines={1}>{sendToLabel}</Text>
-                    <ChevronDown size={14} color={colors.muted} />
-                  </View>
-                </Pressable>
+                <View ref={sendToRowRef} collapsable={false}>
+                  <MotionPressable
+                    accessibilityRole="button"
+                    scaleTo={0.985}
+                    surfaceColor={colors.card}
+                    onPress={() => openPickerAt('sendTo', sendToRowRef)}
+                    style={styles.paramRow}
+                  >
+                    <Text style={styles.rowLabel}>{strings.automation.sendTo}</Text>
+                    <View style={styles.dropdown}>
+                      <Text style={styles.dropdownText} numberOfLines={1}>{sendToLabel}</Text>
+                      <DuotoneIcons.ChevronDown size={14} color={colors.muted} />
+                    </View>
+                  </MotionPressable>
+                </View>
                 {formTargetMode === 'existing' && (
                   <View style={styles.optionWrap}>
                     {availableSessions.map(session => {
                       const active = formTargetSessionId === session.sessionId
                       return (
-                        <Pressable
+                        <MotionPressable
                           key={session.sessionId}
                           accessibilityRole="button"
                           accessibilityState={{ selected: active }}
+                          inverse={active}
+                          surfaceColor={active ? colors.inverse : colors.background}
+                          scaleTo={0.95}
                           onPress={() => setFormTargetSessionId(session.sessionId)}
                           style={[styles.optionChip, active && styles.optionChipActive]}
                         >
@@ -1034,7 +1038,7 @@ export function AutomationTasksModal({
                           >
                             {sessionLabel(session.sessionId, resolveSessionDisplayTitle(session) ?? session.title)}
                           </Text>
-                        </Pressable>
+                        </MotionPressable>
                       )
                     })}
                   </View>
@@ -1051,15 +1055,17 @@ export function AutomationTasksModal({
                     ] as const).map(option => {
                       const active = formTriggerMode === option.key
                       return (
-                        <Pressable
+                        <MotionPressable
                           key={option.key}
                           accessibilityRole="button"
                           accessibilityState={{ selected: active }}
+                          surfaceColor={active ? colors.card : colors.background}
+                          scaleTo={0.96}
                           onPress={() => setFormTriggerMode(option.key)}
                           style={[styles.triggerSegmentItem, active && styles.triggerSegmentItemActive]}
                         >
                           <Text style={[styles.triggerSegmentText, active && styles.triggerSegmentTextActive]}>{option.label}</Text>
-                        </Pressable>
+                        </MotionPressable>
                       )
                     })}
                   </View>
@@ -1069,37 +1075,43 @@ export function AutomationTasksModal({
                 {formTriggerMode === 'scheduled' && (
                   <>
                     <View style={styles.cardDivider} />
-                    <Pressable
-                      ref={repeatRowRef}
-                      accessibilityRole="button"
-                      onPress={() => openPickerAt('repeat', repeatRowRef)}
-                      style={styles.paramRow}
-                    >
-                      <Text style={styles.rowLabel}>{strings.automation.formFrequency}</Text>
-                      <View style={styles.dropdown}>
-                        <Text style={styles.dropdownText}>{currentKindLabel}</Text>
-                        <ChevronDown size={14} color={colors.muted} />
-                      </View>
-                    </Pressable>
+                    <View ref={repeatRowRef} collapsable={false}>
+                      <MotionPressable
+                        accessibilityRole="button"
+                        scaleTo={0.985}
+                        surfaceColor={colors.card}
+                        onPress={() => openPickerAt('repeat', repeatRowRef)}
+                        style={styles.paramRow}
+                      >
+                        <Text style={styles.rowLabel}>{strings.automation.formFrequency}</Text>
+                        <View style={styles.dropdown}>
+                          <Text style={styles.dropdownText}>{currentKindLabel}</Text>
+                          <DuotoneIcons.ChevronDown size={14} color={colors.muted} />
+                        </View>
+                      </MotionPressable>
+                    </View>
 
                     <View style={styles.cardDivider} />
                     {effectiveKind !== 'every' && (
                       <>
-                        <Pressable
-                          ref={timeRowRef}
-                          accessibilityRole="button"
-                          onPress={() => openPickerAt('time', timeRowRef)}
-                          style={styles.paramRow}
-                        >
-                          <Text style={styles.rowLabel}>
-                            {effectiveKind === 'at' ? strings.automation.timingOnce : strings.automation.formTime}
-                          </Text>
-                          <Text style={styles.rowValue}>
-                            {effectiveKind === 'at'
-                              ? `+${formDelayMinutes} ${strings.automation.minuteUnit}`
-                              : formTime}
-                          </Text>
-                        </Pressable>
+                        <View ref={timeRowRef} collapsable={false}>
+                          <MotionPressable
+                            accessibilityRole="button"
+                            scaleTo={0.985}
+                            surfaceColor={colors.card}
+                            onPress={() => openPickerAt('time', timeRowRef)}
+                            style={styles.paramRow}
+                          >
+                            <Text style={styles.rowLabel}>
+                              {effectiveKind === 'at' ? strings.automation.timingOnce : strings.automation.formTime}
+                            </Text>
+                            <Text style={styles.rowValue}>
+                              {effectiveKind === 'at'
+                                ? `+${formDelayMinutes} ${strings.automation.minuteUnit}`
+                                : formTime}
+                            </Text>
+                          </MotionPressable>
+                        </View>
                       </>
                     )}
                     {formKind === 'weekly' && (
@@ -1111,17 +1123,20 @@ export function AutomationTasksModal({
                             {localizedWeekdays.map(day => {
                               const selected = formWeekdays.includes(day.day)
                               return (
-                                <Pressable
+                                <MotionPressable
                                   key={day.day}
                                   accessibilityRole="button"
                                   accessibilityState={{ selected }}
+                                  inverse={selected}
+                                  surfaceColor={selected ? colors.inverse : colors.background}
+                                  scaleTo={0.94}
                                   onPress={() => handleToggleWeekday(day.day)}
                                   style={[styles.weekdayChip, selected && styles.optionChipActive]}
                                 >
                                   <Text style={[styles.optionChipText, selected && styles.optionChipTextActive]}>
                                     {day.label}
                                   </Text>
-                                </Pressable>
+                                </MotionPressable>
                               )
                             })}
                           </View>
@@ -1163,9 +1178,11 @@ export function AutomationTasksModal({
             </ScrollView>
 
             <View style={styles.formFooter}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 android_ripple={androidRipple(colors)}
+                surfaceColor={colors.surfaceStrong}
+                scaleTo={0.97}
                 onPress={() => {
                   formTokenRef.current++
                   setSubmitting(false)
@@ -1174,20 +1191,23 @@ export function AutomationTasksModal({
                 style={({ pressed }) => [styles.footerCancelBtn, pressed && styles.pressedBg]}
               >
                 <Text style={styles.footerCancelText}>{strings.common.cancel}</Text>
-              </Pressable>
-              <Pressable
+              </MotionPressable>
+              <MotionPressable
                 accessibilityRole="button"
                 android_ripple={androidRipple(colors)}
+                inverse
+                surfaceColor={colors.inverse}
+                scaleTo={0.97}
                 onPress={handleSaveForm}
                 disabled={submitting}
                 style={({ pressed }) => [styles.footerSaveBtn, pressed && styles.pressedBg]}
               >
                 {submitting ? (
-                  <ActivityIndicator size="small" color={colors.onPrimary ?? colors.white} />
+                  <ActivityIndicator size="small" color={colors.onInverse} />
                 ) : (
                   <Text style={styles.footerSaveText}>{strings.automation.saveTask}</Text>
                 )}
-              </Pressable>
+              </MotionPressable>
   
             <Modal
               visible={picker !== null}
@@ -1215,10 +1235,12 @@ export function AutomationTasksModal({
                 >
                   <ScrollView style={styles.pickerScroll} contentContainerStyle={styles.pickerScrollContent} nestedScrollEnabled>
                     {picker?.options.map((option, index) => (
-                      <Pressable
+                      <MotionPressable
                         key={option.key}
                         accessibilityRole="button"
                         accessibilityState={{ selected: option.active }}
+                        surfaceColor={colors.card}
+                        scaleTo={0.985}
                         onPress={() => {
                           picker.select(option.key)
                           setPickerAnchor(null)
@@ -1231,8 +1253,8 @@ export function AutomationTasksModal({
                         >
                           {option.label}
                         </Text>
-                        {option.active && <Check size={16} color={colors.primary} />}
-                      </Pressable>
+                        {option.active && <DuotoneIcons.Check size={16} color={colors.ink} />}
+                      </MotionPressable>
                     ))}
                   </ScrollView>
                 </View>
@@ -1245,15 +1267,17 @@ export function AutomationTasksModal({
           <View style={styles.flex}>
             {/* Detail Header */}
             <View style={styles.header}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={strings.common.back}
                 onPress={() => setSelectedTaskId(null)}
                 hitSlop={8}
+                scaleTo={0.92}
+                surfaceColor={colors.elevated}
                 style={styles.headerBtn}
               >
-                <ArrowLeft size={20} color={colors.ink} />
-              </Pressable>
+                <DuotoneIcons.ArrowLeft size={20} color={colors.ink} />
+              </MotionPressable>
               <Text style={styles.headerTitle} numberOfLines={1}>
                 {selectedTask.title || strings.automation.detailTitle}
               </Text>
@@ -1262,24 +1286,26 @@ export function AutomationTasksModal({
 
             {/* Detail Tabs */}
             <View style={styles.tabBar}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
+                scaleTo={0.97}
                 onPress={() => setActiveTab('rule')}
                 style={[styles.tabItem, activeTab === 'rule' && styles.tabItemActive]}
               >
                 <Text style={[styles.tabText, activeTab === 'rule' && styles.tabTextActive]}>
                   {strings.automation.detailRule}
                 </Text>
-              </Pressable>
-              <Pressable
+              </MotionPressable>
+              <MotionPressable
                 accessibilityRole="button"
+                scaleTo={0.97}
                 onPress={() => setActiveTab('records')}
                 style={[styles.tabItem, activeTab === 'records' && styles.tabItemActive]}
               >
                 <Text style={[styles.tabText, activeTab === 'records' && styles.tabTextActive]}>
                   {strings.automation.detailRecords}
                 </Text>
-              </Pressable>
+              </MotionPressable>
             </View>
 
             <ScrollView contentContainerStyle={styles.detailContent}>
@@ -1346,9 +1372,11 @@ export function AutomationTasksModal({
 
                   {/* Pause / Resume & Edit Action Buttons */}
                   <View style={styles.actionRowContainer}>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       accessibilityLabel={selectedTask.status === 'active' ? strings.automation.pauseTask : strings.automation.resumeTask}
+                      surfaceColor={selectedTask.status === 'active' ? colors.warningSoft : colors.successSoft}
+                      scaleTo={0.97}
                       onPress={handleToggleActive}
                       disabled={toggling}
                       style={({ pressed }) => [
@@ -1358,9 +1386,9 @@ export function AutomationTasksModal({
                       ]}
                     >
                       {selectedTask.status === 'active' ? (
-                        <Pause size={16} color={colors.warning} />
+                        <DuotoneIcons.Pause size={16} color={colors.warning} surfaceColor={colors.warningSoft} />
                       ) : (
-                        <Play size={16} color={colors.success} />
+                        <DuotoneIcons.Play size={16} color={colors.success} surfaceColor={colors.successSoft} />
                       )}
                       <Text
                         style={[
@@ -1370,51 +1398,57 @@ export function AutomationTasksModal({
                       >
                         {selectedTask.status === 'active' ? strings.automation.pauseTask : strings.automation.resumeTask}
                       </Text>
-                    </Pressable>
+                    </MotionPressable>
 
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       accessibilityLabel={strings.automation.editRule}
+                      surfaceColor={colors.surfaceStrong}
+                      scaleTo={0.97}
                       onPress={() => openEditForm(selectedTask)}
                       style={({ pressed }) => [styles.editRuleBtn, pressed && styles.pressedBg]}
                     >
-                      <Edit2 size={16} color={colors.primary} />
+                      <DuotoneIcons.Edit2 size={16} color={colors.ink} surfaceColor={colors.surfaceStrong} />
                       <Text style={styles.editRuleBtnText}>{strings.automation.editRule}</Text>
-                    </Pressable>
+                    </MotionPressable>
                   </View>
 
                   {/* Linked Session Section */}
                   <View style={styles.card}>
                     <Text style={styles.cardHeaderTitle}>{strings.automation.linkedSession}</Text>
                     <View style={styles.linkedSessionRow}>
-                      <MessageSquare size={16} color={colors.muted} />
+                      <DuotoneIcons.MessageSquare size={16} color={colors.muted} />
                       <Text style={styles.linkedSessionTitle} numberOfLines={1}>
                         {sessionLabel(selectedTask.sessionId, linkedSession ? (resolveSessionDisplayTitle(linkedSession) ?? linkedSession.title) : undefined)}
                       </Text>
                     </View>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
+                      surfaceColor={colors.surfaceStrong}
+                      scaleTo={0.97}
                       onPress={() => void handleOpenLinkedSession()}
                       style={({ pressed }) => [styles.actionButton, pressed && styles.pressedBg]}
                     >
                       <Text style={styles.actionButtonText}>
                         {strings.automation.openLinkedSession}
                       </Text>
-                    </Pressable>
+                    </MotionPressable>
                   </View>
 
                   {/* Delete Button */}
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
+                    surfaceColor={colors.dangerSoft}
+                    scaleTo={0.97}
                     onPress={handleDelete}
                     disabled={deleting}
                     style={({ pressed }) => [styles.deleteBtn, pressed && styles.pressedBg]}
                   >
-                    <Trash2 size={16} color={colors.danger} />
+                    <DuotoneIcons.Trash2 size={16} color={colors.danger} surfaceColor={colors.dangerSoft} />
                     <Text style={styles.deleteBtnText}>
                       {deleting ? strings.automation.deletePending : strings.automation.deleteTask}
                     </Text>
-                  </Pressable>
+                  </MotionPressable>
                 </>
               ) : (
                 <View style={styles.card}>
@@ -1445,58 +1479,70 @@ export function AutomationTasksModal({
           <View style={styles.flex}>
             {/* Top Header */}
             <View style={styles.header}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={strings.common.close}
                 onPress={onClose}
                 hitSlop={8}
+                scaleTo={0.92}
+                surfaceColor={colors.elevated}
                 style={styles.headerBtn}
               >
-                <ArrowLeft size={20} color={colors.ink} />
-              </Pressable>
+                <DuotoneIcons.ArrowLeft size={20} color={colors.ink} />
+              </MotionPressable>
               <Text style={styles.headerTitle}>{strings.automation.title}</Text>
               <View style={styles.headerRight}>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.common.refresh}
                   onPress={() => void loadTasks()}
                   disabled={loading}
                   hitSlop={8}
+                  scaleTo={0.92}
+                  surfaceColor={colors.elevated}
                   style={styles.headerBtn}
                 >
-                  <RefreshCw size={18} color={colors.ink} />
-                </Pressable>
-                <Pressable
+                  <DuotoneIcons.RefreshCw size={18} color={colors.ink} active={loading} />
+                </MotionPressable>
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.automation.newTask}
                   onPress={openCreateForm}
                   hitSlop={8}
+                  inverse
+                  surfaceColor={colors.inverse}
+                  scaleTo={0.92}
                   style={[styles.headerBtn, styles.headerBtnPrimary]}
                 >
-                  <Plus size={20} color={colors.white} />
-                </Pressable>
+                  <DuotoneIcons.Plus size={20} color={colors.onInverse} inverse surfaceColor={colors.inverse} />
+                </MotionPressable>
               </View>
             </View>
             {/* Error Banner if error occurred */}
             {Boolean(error) && (
               <View style={styles.errorBanner}>
-                <AlertCircle size={16} color={colors.danger} />
+                <DuotoneIcons.AlertCircle size={16} color={colors.danger} surfaceColor={colors.dangerSoft} />
                 <Text style={styles.errorBannerText} numberOfLines={2}>
                   {strings.automation.loadError}
                 </Text>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
+                  inverse
+                  surfaceColor={colors.danger}
+                  scaleTo={0.95}
                   onPress={() => void loadTasks()}
                   style={styles.errorRetryBtn}
                 >
                   <Text style={styles.errorRetryBtnText}>{strings.automation.retry}</Text>
-                </Pressable>
+                </MotionPressable>
               </View>
             )}
 
             {/* Search Input */}
             <View style={styles.searchWrapper}>
-              <Search size={15} color={colors.muted} style={styles.searchIcon} />
+              <View style={styles.searchIcon}>
+                <DuotoneIcons.Search size={15} color={colors.muted} />
+              </View>
               <TextInput
                 value={search}
                 onChangeText={setSearch}
@@ -1505,14 +1551,15 @@ export function AutomationTasksModal({
                 style={styles.searchInput}
               />
               {search.length > 0 && (
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.automation.clearSearch}
+                  scaleTo={0.9}
                   onPress={() => setSearch('')}
                   hitSlop={8}
                 >
-                  <X size={15} color={colors.muted} />
-                </Pressable>
+                  <DuotoneIcons.X size={15} color={colors.muted} />
+                </MotionPressable>
               )}
             </View>
 
@@ -1520,10 +1567,12 @@ export function AutomationTasksModal({
             <View style={styles.filterRow}>
               <View style={styles.segmented}>
                 {(['all', 'active', 'inactive'] as const).map(f => (
-                  <Pressable
+                  <MotionPressable
                     key={f}
                     accessibilityRole="button"
                     accessibilityState={{ selected: statusFilter === f }}
+                    surfaceColor={statusFilter === f ? colors.card : colors.surfaceStrong}
+                    scaleTo={0.97}
                     onPress={() => setStatusFilter(f)}
                     style={[styles.segment, statusFilter === f && styles.segmentActive]}
                   >
@@ -1539,7 +1588,7 @@ export function AutomationTasksModal({
                           ? strings.automation.filterActive
                           : strings.automation.filterInactive}
                     </Text>
-                  </Pressable>
+                  </MotionPressable>
                 ))}
               </View>
             </View>
@@ -1562,7 +1611,9 @@ export function AutomationTasksModal({
                   />
                 }
               >
-                <Clock size={56} color={colors.subtle} style={styles.emptyIcon} />
+                <View style={styles.emptyIcon}>
+                  <DuotoneIcons.Clock size={56} color={colors.subtle} />
+                </View>
                 <Text style={styles.emptyHeading}>{emptyTitle}</Text>
               </ScrollView>
             ) : (
@@ -1582,9 +1633,11 @@ export function AutomationTasksModal({
                     const nextRun = formatNextRun(task.scheduledAt)
                     const active = task.status === 'active'
                     return (
-                      <Pressable
+                      <MotionPressable
                         key={task.id}
                         accessibilityRole="button"
+                        surfaceColor={colors.card}
+                        scaleTo={0.985}
                         onPress={() => setSelectedTaskId(task.id)}
                         style={({ pressed }) => [
                           styles.taskRow,
@@ -1593,7 +1646,7 @@ export function AutomationTasksModal({
                         ]}
                       >
                         <View style={styles.taskIconBox}>
-                          <Clock size={17} color={active ? colors.primary : colors.muted} />
+                          <DuotoneIcons.Clock size={17} color={active ? colors.ink : colors.muted} surfaceColor={colors.surfaceStrong} />
                         </View>
                         <View style={styles.taskContent}>
                           <View style={styles.taskTitleRow}>
@@ -1616,8 +1669,8 @@ export function AutomationTasksModal({
                             {active ? ` · ${nextRun.absolute} ${nextRun.relative}` : ''}
                           </Text>
                         </View>
-                        <ChevronRight size={16} color={colors.subtle} />
-                      </Pressable>
+                        <DuotoneIcons.ChevronRight size={16} color={colors.subtle} />
+                      </MotionPressable>
                     )
                   })}
                 </View>
@@ -1653,8 +1706,8 @@ function createStyles(colors: ThemeColors) {
       ...floatingShadow(colors),
     },
     saveHeaderBtn: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.inverse,
+      borderColor: colors.inverse,
     },
     headerRightSpacer: { width: 44 },
     headerTitle: {
@@ -1670,7 +1723,7 @@ function createStyles(colors: ThemeColors) {
     newBtn: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.primary,
+      backgroundColor: colors.inverse,
       width: 'auto',
       paddingHorizontal: spacing.md,
       height: 44,
@@ -1678,9 +1731,10 @@ function createStyles(colors: ThemeColors) {
       borderWidth: 0,
       gap: 4,
     },
-    newBtnText: { ...type.smallStrong, color: colors.white },
+    newBtnText: { ...type.smallStrong, color: colors.onInverse },
     headerBtnPrimary: {
-      backgroundColor: colors.primary,
+      backgroundColor: colors.inverse,
+      borderColor: colors.inverse,
     },
     filterRow: {
       flexDirection: 'row',
@@ -1756,7 +1810,7 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: colors.primarySoft,
+      backgroundColor: colors.surfaceStrong,
     },
     taskContent: { flex: 1 },
     taskTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -1890,11 +1944,11 @@ function createStyles(colors: ThemeColors) {
       gap: spacing.xs,
       paddingVertical: spacing.sm + 2,
       borderRadius: radius.pill,
-      backgroundColor: colors.primarySoft,
+      backgroundColor: colors.surfaceStrong,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.primary,
+      borderColor: colors.border,
     },
-    editRuleBtnText: { ...type.bodyStrong, color: colors.primary },
+    editRuleBtnText: { ...type.bodyStrong, color: colors.ink },
     deleteBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -2067,15 +2121,15 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.separator,
     },
     optionChipActive: {
-      backgroundColor: colors.primarySoft,
-      borderColor: colors.primary,
+      backgroundColor: colors.inverse,
+      borderColor: colors.inverse,
     },
     optionChipText: {
       fontSize: 13,
       color: colors.ink,
     },
     optionChipTextActive: {
-      color: colors.primary,
+      color: colors.onInverse,
       fontWeight: '600',
     },
     weekdayChip: {
@@ -2234,7 +2288,7 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
     },
     dropdownItemTextActive: {
-      color: colors.primary,
+      color: colors.ink,
       fontWeight: '600',
     },
     dropdownEmpty: {
@@ -2296,12 +2350,12 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
       ...continuousRadius(radius.pill),
-      backgroundColor: colors.primary,
+      backgroundColor: colors.inverse,
       overflow: 'hidden',
     },
     footerSaveText: {
       ...type.bodyStrong,
-      color: colors.onPrimary ?? colors.white,
+      color: colors.onInverse,
     },
     formCard: {
       backgroundColor: colors.card,
@@ -2345,8 +2399,8 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.separator,
     },
     sessionPillActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.inverse,
+      borderColor: colors.inverse,
     },
     sessionPillText: {
       ...type.small,
@@ -2354,7 +2408,7 @@ function createStyles(colors: ThemeColors) {
       maxWidth: 160,
     },
     sessionPillTextActive: {
-      color: colors.white,
+      color: colors.onInverse,
       fontWeight: '600',
     },
     kindSelectorRow: {
@@ -2377,15 +2431,15 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.separator,
     },
     kindPillActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.inverse,
+      borderColor: colors.inverse,
     },
     kindPillText: {
       ...type.small,
       color: colors.muted,
     },
     kindPillTextActive: {
-      color: colors.white,
+      color: colors.onInverse,
       fontWeight: '600',
     },
     timingDetailBox: {
@@ -2409,8 +2463,8 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.separator,
     },
     timeChipActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.inverse,
+      borderColor: colors.inverse,
     },
     timeChipText: {
       ...type.caption,
@@ -2418,7 +2472,7 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '600',
     },
     timeChipTextActive: {
-      color: colors.white,
+      color: colors.onInverse,
     },
     timeInput: {
       backgroundColor: colors.card,
@@ -2448,8 +2502,8 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.separator,
     },
     weekdayCircleActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+      backgroundColor: colors.inverse,
+      borderColor: colors.inverse,
     },
     weekdayCircleText: {
       ...type.small,
@@ -2457,10 +2511,10 @@ function createStyles(colors: ThemeColors) {
       color: colors.muted,
     },
     weekdayCircleTextActive: {
-      color: colors.white,
+      color: colors.onInverse,
     },
     submitFormBtn: {
-      backgroundColor: colors.primary,
+      backgroundColor: colors.inverse,
       height: 50,
       borderRadius: radius.pill,
       alignItems: 'center',
@@ -2470,7 +2524,7 @@ function createStyles(colors: ThemeColors) {
     },
     submitFormBtnText: {
       ...type.bodyStrong,
-      color: colors.white,
+      color: colors.onInverse,
     },
   })
 }

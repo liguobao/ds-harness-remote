@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import type { LucideIcon } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { type UiIconComponent } from '../../ui/components'
+import { MotionPressable } from '../../ui/duotone-icons'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 
 export interface BotPopoverAction {
   key: string
   label: string
-  icon?: LucideIcon
+  icon?: UiIconComponent
   danger?: boolean
   selected?: boolean
   disabled?: boolean
@@ -79,7 +80,7 @@ export function BotFloatingPopover({
             const Icon = action.icon
             const inkColor = action.danger ? colors.danger : colors.ink
             return (
-              <Pressable
+              <MotionPressable
                 key={action.key}
                 accessibilityRole="menuitem"
                 accessibilityLabel={action.label}
@@ -99,7 +100,7 @@ export function BotFloatingPopover({
                 <Text numberOfLines={1} style={[styles.label, action.danger && styles.labelDanger]}>
                   {action.label}
                 </Text>
-              </Pressable>
+              </MotionPressable>
             )
           })}
         </Animated.View>

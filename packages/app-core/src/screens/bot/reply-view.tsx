@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import * as Clipboard from 'expo-clipboard'
-import { Check, Copy } from 'lucide-react-native'
-import { StyleSheet, Text, View, Pressable } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { strings as s } from '../../locales/i18n'
 import { text, type BotObject } from '../../services/bot-catalog'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { NativeMarkdown } from '../../ui/markdown'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
@@ -125,7 +125,7 @@ function MentionBody({ body, mentions }: { body: string; mentions?: BotMentionCo
   spans.forEach((span, index) => {
     if (span.start > cursor) runs.push(<Text key={`t${index}`} style={styles.body}>{body.slice(cursor, span.start)}</Text>)
     runs.push(
-      <Pressable
+      <MotionPressable
         key={`m${index}`}
         onPress={() => mentions.onPress(span.bot.id)}
         accessibilityRole="link"
@@ -135,7 +135,7 @@ function MentionBody({ body, mentions }: { body: string; mentions?: BotMentionCo
           <BotAvatar bot={span.bot} size={16} />
           <Text style={[styles.body, localStyles.mentionName]}>{span.bot.name}</Text>
         </View>
-      </Pressable>,
+      </MotionPressable>,
     )
     cursor = span.end
   })
@@ -204,9 +204,9 @@ const createReplyStyles = (colors: ThemeColors) =>
 function ReplyCopy({ text }: { text: string }) {
   const { colors } = useTheme()
   const [copied, setCopied] = useState(false)
-  return <Pressable accessibilityRole="button" accessibilityLabel={copied ? s.messageActions.copied : s.messageActions.copy}
+  return <MotionPressable accessibilityRole="button" accessibilityLabel={copied ? s.messageActions.copied : s.messageActions.copy}
     disabled={!text} hitSlop={8} style={{ minWidth: 32, minHeight: 32, alignItems: 'center', justifyContent: 'center' }}
     onPress={async () => { await Clipboard.setStringAsync(text); setCopied(true) }}>
-    {copied ? <Check size={14} color={colors.primary} /> : <Copy size={14} color={colors.muted} />}
-  </Pressable>
+    {copied ? <DuotoneIcons.Check size={14} color={colors.primary} /> : <DuotoneIcons.Copy size={14} color={colors.muted} />}
+  </MotionPressable>
 }

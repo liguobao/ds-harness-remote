@@ -29,7 +29,7 @@ export function Toggle({ value, onValueChange, disabled = false, accessibilityLa
         onValueChange={onValueChange}
         disabled={disabled}
         accessibilityLabel={accessibilityLabel}
-        trackColor={{ false: colors.disabled, true: colors.primary }}
+        trackColor={{ false: colors.disabled, true: colors.inverse }}
         ios_backgroundColor={colors.disabled}
       />
     )
@@ -107,13 +107,13 @@ function createStyles(colors: ThemeColors) {
     },
     trackActive: {
       borderRadius: TRACK_HEIGHT / 2,
-      backgroundColor: colors.primary,
+      backgroundColor: colors.inverse,
     },
     thumb: {
       width: THUMB_SIZE,
       height: THUMB_SIZE,
       borderRadius: THUMB_SIZE / 2,
-      backgroundColor: colors.white,
+      backgroundColor: colors.onInverse,
       shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 1 },
       shadowOpacity: 0.14,

@@ -14,6 +14,7 @@ import {
   IconCopyOutline,
   IconDatabaseOutline,
 } from '../ui/dsh-icons'
+import { MotionPressable } from '../ui/duotone-icons'
 
 export { formatTokens }
 
@@ -215,11 +216,12 @@ export const MessageActions = memo(function MessageActions({ item, hideTime }: {
       <View style={[styles.row, styles.userRow]}>
         {time !== undefined && !hideTime && <Text style={[styles.userTimeText, { color: colors.subtle }]}>{messageClock(time)}</Text>}
         <Animated.View style={{ opacity: copyOpacity }}>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
             disabled={item.text.length === 0}
             hitSlop={8}
+            scaleTo={0.9}
             style={styles.actionBtn}
             onPress={handleCopy}
           >
@@ -228,7 +230,7 @@ export const MessageActions = memo(function MessageActions({ item, hideTime }: {
             ) : (
               <IconCopyOutline size={13} color={colors.subtle} />
             )}
-          </Pressable>
+          </MotionPressable>
         </Animated.View>
       </View>
     )
@@ -245,11 +247,12 @@ export const MessageActions = memo(function MessageActions({ item, hideTime }: {
     <>
       <View style={[styles.assistantRow, botConversation && { justifyContent: 'flex-end' }]}>
         <Animated.View style={{ opacity: copyOpacity }}>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy}
             disabled={item.text.length === 0}
             hitSlop={8}
+            scaleTo={0.9}
             style={styles.actionBtn}
             onPress={handleCopy}
           >
@@ -258,26 +261,28 @@ export const MessageActions = memo(function MessageActions({ item, hideTime }: {
             ) : (
               <IconCopyOutline size={14} color={colors.muted} />
             )}
-          </Pressable>
+          </MotionPressable>
         </Animated.View>
         {supportsBranch && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={strings.messageActions.branch}
             accessibilityState={{ disabled }}
             disabled={disabled}
             hitSlop={8}
+            scaleTo={0.9}
             style={styles.actionBtn}
             onPress={() => void branch()}
           >
             <IconBranchOutline size={14} color={colors.muted} />
-          </Pressable>
+          </MotionPressable>
         )}
         {!botConversation && !pending && item.usage !== undefined && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={strings.messageActions.usage}
             hitSlop={8}
+            scaleTo={0.95}
             style={styles.usageBtn}
             onPress={() => setUsageOpen(true)}
           >
@@ -285,7 +290,7 @@ export const MessageActions = memo(function MessageActions({ item, hideTime }: {
             <Text numberOfLines={1} style={[styles.usageText, { color: colors.muted }]}>
               {usageLabel}
             </Text>
-          </Pressable>
+          </MotionPressable>
         )}
         {time !== undefined && (
           <Text style={[styles.timeText, { color: colors.subtle }]}>

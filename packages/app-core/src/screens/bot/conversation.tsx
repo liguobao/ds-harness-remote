@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, Pressable, Text, TextInput, View } from 'react-native'
-import { Users } from 'lucide-react-native'
+import { AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, Text, TextInput, View } from 'react-native'
 import { strings as s } from '../../locales/i18n'
 import { BUILT_IN_PROMPTS, type CustomPrompt } from '../../services/storage'
 import { botMessageRequest, formatBotSubmission, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
@@ -10,6 +9,7 @@ import { useBotTeamStore } from '../../state/bot-store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Alert } from '../../ui/alert'
 import { Button } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, NativeMarkdown, openSafeExternalUrl } from '../../ui/markdown'
 import { detectMention, type MentionGroup } from '../../ui/mention-popover'
 import { useResponsiveLayout } from '../../ui/responsive'
@@ -236,7 +236,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         id: row.id,
         icon: row.bot
           ? ({ size = 16 }) => <BotAvatar bot={row.bot!} size={size + 6} />
-          : Users,
+          : DuotoneIcons.Users,
         title: row.label,
         description: row.description,
         onPress: () => insertAtMention(row.text),
@@ -789,7 +789,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       ListHeaderComponent={<View style={styles.section}>
         {showLoadOlder && (
           <View style={styles.earlierTop}>
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={s.bots.loadOlder}
               disabled={olderLoading || olderBusy || !ready || !connected}
@@ -801,7 +801,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
               style={({ pressed }) => [styles.earlierPill, pressed && { opacity: 0.72 }]}
             >
               <Text style={styles.earlierPillText}>{s.bots.loadOlder}</Text>
-            </Pressable>
+            </MotionPressable>
           </View>
         )}
         {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, cardId: entry.id })} /> : entry.kind === 'closed' ? <BotSettledCard key={i} title={text(entry.title) || text(object(entry.question).question) || s.bots.question} closed={text(entry.closed) || 'dismissed'} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><View style={styles.row}><Text style={[styles.muted, styles.grow]}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text>{text(entry.via) !== '' && <BotViaPill platform={text(entry.via)} />}</View><NativeMarkdown text={text(entry.text)} /></View>)}

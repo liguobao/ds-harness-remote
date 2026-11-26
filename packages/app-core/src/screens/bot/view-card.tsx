@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { PanResponder, ScrollView, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../../ui/toggle'
-import { Minus, Plus } from 'lucide-react-native'
+import { DuotoneIcons } from '../../ui/duotone-icons'
 import { strings as s } from '../../locales/i18n'
 import { object, objects, text, type BotObject } from '../../services/bot-catalog'
 import { checkedBotView } from '../../services/bot-view'
@@ -110,9 +110,9 @@ function NumberInput({ node, value, change }: { node: BotObject; value: unknown;
   const label = text(node.label)
   return <View style={styles.field}>
     <Text style={styles.body}>{label}{node.unit ? ` (${text(node.unit)})` : ''}</Text>
-    <View style={styles.row}><IconButton label={`${s.bots.decrease}: ${label}`} icon={Minus} disabled={min !== undefined && number <= min} onPress={() => increment(-1)} />
+    <View style={styles.row}><IconButton label={`${s.bots.decrease}: ${label}`} icon={DuotoneIcons.Minus} disabled={min !== undefined && number <= min} onPress={() => increment(-1)} />
       <TextInput accessibilityLabel={label} style={[styles.input, styles.grow]} keyboardType="numbers-and-punctuation" value={draft} maxLength={40} onChangeText={text => { setDraft(text); change(text.trim() ? Number(text) : NaN) }} />
-      <IconButton label={`${s.bots.increase}: ${label}`} icon={Plus} disabled={max !== undefined && number >= max} onPress={() => increment(1)} />
+      <IconButton label={`${s.bots.increase}: ${label}`} icon={DuotoneIcons.Plus} disabled={max !== undefined && number >= max} onPress={() => increment(1)} />
     </View>
     {node.type === 'slider' && min !== undefined && max !== undefined && max > min && <LocalSlider label={label} min={min} max={max} step={step} value={Number.isFinite(number) ? number : min} change={update} />}
     {(min !== undefined || max !== undefined) && <Text style={styles.muted}>{min ?? '−∞'} – {max ?? '∞'}</Text>}

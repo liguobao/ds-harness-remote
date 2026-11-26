@@ -71,20 +71,20 @@ vi.mock('react-native-svg', () => {
   }
 })
 
-vi.mock('lucide-react-native', () => {
+vi.mock('../src/ui/duotone-icons', () => {
   const React = require('react')
+  const cache = new Map<string, any>()
+  const iconProxy = new Proxy({}, {
+    get: (_target, prop) => {
+      const key = String(prop)
+      if (!cache.has(key)) cache.set(key, (props: any) => React.createElement(key, props))
+      return cache.get(key)
+    },
+  })
   return {
-    ChevronDown: (props: any) => React.createElement('ChevronDown', props),
-    ChevronUp: (props: any) => React.createElement('ChevronUp', props),
-    ChevronRight: (props: any) => React.createElement('ChevronRight', props),
-    Layers: (props: any) => React.createElement('Layers', props),
-    Users: (props: any) => React.createElement('Users', props),
-    X: (props: any) => React.createElement('X', props),
-    Flag: (props: any) => React.createElement('Flag', props),
-    PauseCircle: (props: any) => React.createElement('PauseCircle', props),
-    RefreshCw: (props: any) => React.createElement('RefreshCw', props),
-    Square: (props: any) => React.createElement('Square', props),
-    Terminal: (props: any) => React.createElement('Terminal', props),
+    DuotoneIcons: iconProxy,
+    DuotoneIcon: (props: any) => React.createElement('DuotoneIcon', props),
+    MotionPressable: (props: any) => React.createElement('Pressable', props, typeof props.children === 'function' ? props.children({ pressed: false, longPressed: false }) : props.children),
   }
 })
 
@@ -125,7 +125,8 @@ vi.mock('../src/ui/sheet', () => {
 })
 
 import React from 'react'
-import { X as XIcon } from 'lucide-react-native'
+import { DuotoneIcons } from '../src/ui/duotone-icons'
+const XIcon = DuotoneIcons.X
 import {
   AgentStatusGlyph,
   AgentTeamCard,

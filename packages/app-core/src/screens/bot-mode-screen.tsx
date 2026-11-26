@@ -1,23 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Animated, AppState, Easing, Pressable, ScrollView, Text, View } from 'react-native'
+import { ActivityIndicator, Animated, AppState, Easing, ScrollView, Text, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import {
-  ArrowLeftRight,
-  Bot,
-  ChevronLeft,
-  Copy,
-  Info,
-  Menu,
-  MoreHorizontal,
-  MoreVertical,
-  Pencil,
-  Plus,
-  Square,
-  Trash2,
-  Users,
-} from 'lucide-react-native'
 import { strings as s } from '../locales/i18n'
 import { browseScope } from '../services/browse-memory'
 import { canDeleteBot, objects, resolveBotTargetSessionId, text, type BotRemoteClient } from '../services/bot-catalog'
@@ -25,6 +10,7 @@ import { getConnectionGeneration, requireBotClient, useAppStore } from '../state
 import { useBotTeamStore } from '../state/bot-store'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, TopBar } from '../ui/components'
 import { KeyboardInset } from '../ui/keyboard-inset'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
@@ -248,14 +234,14 @@ export function BotModeScreen({
   if (bot || room) {
     headerMoreActions.push({
       key: 'profile',
-      icon: Info,
+      icon: DuotoneIcons.Info,
       label: s.bots.details,
       onPress: () => setDetailsOpen(true),
     })
     if (bot) {
       headerMoreActions.push({
         key: 'new-session',
-        icon: Plus,
+        icon: DuotoneIcons.Plus,
         label: s.bots.newSession,
         disabled: busy || Boolean(state?.readOnly),
         onPress: () => void perform('bot-new-part', { botId: bot.id }),
@@ -263,7 +249,7 @@ export function BotModeScreen({
     }
     headerMoreActions.push({
       key: 'edit',
-      icon: Pencil,
+      icon: DuotoneIcons.Pencil,
       label: s.bots.edit,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => setEditor({ kind: bot ? 'bot' : 'room', id: selectedId }),
@@ -271,7 +257,7 @@ export function BotModeScreen({
     if (bot && (!bot.main || mainCount > 1)) {
       headerMoreActions.push({
         key: 'main',
-        icon: ArrowLeftRight,
+        icon: DuotoneIcons.ArrowLeftRight,
         label: bot.main ? s.bots.removeMain : s.bots.replaceMain,
         disabled: busy || Boolean(state?.readOnly),
         onPress: () => void perform('set-main', { id: bot.id, main: !bot.main }),
@@ -280,7 +266,7 @@ export function BotModeScreen({
     if (room) {
       headerMoreActions.push({
         key: 'stop-room',
-        icon: Square,
+        icon: DuotoneIcons.Square,
         label: s.bots.stop,
         disabled: busy || Boolean(state?.readOnly),
         onPress: () => void perform('stop-room-work', { roomId: room.id }),
@@ -288,7 +274,7 @@ export function BotModeScreen({
     }
     headerMoreActions.push({
       key: 'copy-id',
-      icon: Copy,
+      icon: DuotoneIcons.Copy,
       label: s.bots.copyId,
       onPress: () => {
         const id = bot?.id ?? room?.id ?? ''
@@ -298,7 +284,7 @@ export function BotModeScreen({
     if ((bot && canDeleteBot(state, bot)) || room) {
       headerMoreActions.push({
         key: 'delete',
-        icon: Trash2,
+        icon: DuotoneIcons.Trash2,
         label: s.bots.delete,
         danger: true,
         disabled: busy || Boolean(state?.readOnly),
@@ -322,19 +308,19 @@ export function BotModeScreen({
     <View style={[styles.headerBar, { paddingTop: insets.top + 8, minHeight: 54 + insets.top }]}>
       <View style={styles.headerSide}>
         {navBack !== undefined && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={onOpenDrawer ? s.chat.openHostSessions : s.common.back}
             onPress={navBack}
             hitSlop={8}
             style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
           >
-            <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
-          </Pressable>
+            <DuotoneIcons.ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
+          </MotionPressable>
         )}
       </View>
 
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={bot?.name ?? room?.name ?? s.bots.title}
         onPress={() => setDetailsOpen(true)}
@@ -347,7 +333,7 @@ export function BotModeScreen({
         ) : roomLeadBot ? (
           <BotAvatar bot={roomLeadBot} size={26} />
         ) : (
-          <Users size={18} color={colors.primary} />
+          <DuotoneIcons.Users size={18} color={colors.primary} />
         )}
         <Text numberOfLines={1} style={styles.headerPillName}>
           {goalTitle || (bot?.name ?? room?.name ?? s.bots.title)}
@@ -358,18 +344,18 @@ export function BotModeScreen({
             {goalDoneCount}/{goalSteps.length}
           </Text>
         )}
-      </Pressable>
+      </MotionPressable>
 
       <View style={styles.headerSide}>
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={s.sessions.moreActions}
           onPress={() => setChatMoreOpen(true)}
           hitSlop={8}
           style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
         >
-          <MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
-        </Pressable>
+          <DuotoneIcons.MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
+        </MotionPressable>
       </View>
     </View>
   ) : (
@@ -378,7 +364,7 @@ export function BotModeScreen({
       titleLines={1}
       centered={80}
       titleAccessory={null}
-      backIcon={onOpenDrawer ? Menu : undefined}
+      backIcon={onOpenDrawer ? DuotoneIcons.Menu : undefined}
       backLabel={onOpenDrawer ? s.chat.openHostSessions : undefined}
       onBack={navBack}
       onTitlePress={onDeviceInfo}
@@ -386,7 +372,7 @@ export function BotModeScreen({
         <IconButton
           dense
           label={s.settings.more}
-          icon={MoreVertical}
+          icon={DuotoneIcons.MoreVertical}
           onPress={onMore}
         />
       }
@@ -439,7 +425,7 @@ export function BotModeScreen({
                 </View>
               ) : connectionPhase !== 'connected' && targetSessionId && state !== undefined ? (
                 <EmptyState
-                  icon={Bot}
+                  icon={DuotoneIcons.Bot}
                   title={s.status.offline}
                   body={visibleError ?? s.workspaces.offlineBody}
                   action={<Button label={s.bots.back} onPress={() => handleSelect(undefined)} />}
@@ -450,7 +436,7 @@ export function BotModeScreen({
                 </ScrollView>
               ) : state.bots.length === 0 ? (
                 <EmptyState
-                  icon={Bot}
+                  icon={DuotoneIcons.Bot}
                   title={s.bots.empty}
                   body={s.bots.emptyHint}
                   action={
@@ -463,7 +449,7 @@ export function BotModeScreen({
                 />
               ) : (
                 <EmptyState
-                  icon={Bot}
+                  icon={DuotoneIcons.Bot}
                   title={s.bots.sessionUnavailable}
                   body={visibleError ?? s.bots.sessionUnavailable}
                   action={<Button label={s.bots.back} onPress={() => handleSelect(undefined)} />}

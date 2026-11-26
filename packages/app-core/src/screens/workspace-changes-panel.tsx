@@ -1,20 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import {
-  Check,
-  ChevronRight,
-  CircleCheck,
-  Copy,
-  FileDiff,
-  GitBranch,
-  MessageSquarePlus,
-  MoveHorizontal,
-  RefreshCw,
-  TextWrap,
-  X,
-} from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import type {
   WorkspaceGitDiffResult,
   WorkspaceGitFileEntry,
@@ -320,7 +308,6 @@ export function WorkspaceChangesPanel({
 
   const codeSurfaceColor = colors.codeSurface ?? colors.surface
   const codeHeaderColor = colors.codeHeader ?? colors.surfaceStrong
-  const onPrimaryColor = colors.onPrimary ?? colors.white
 
   const renderDiffLine = (hunkIndex: number, line: ParsedDiffLine, lineIndex: number) => {
     const selectable = onQuoteToComposer !== undefined
@@ -402,15 +389,16 @@ export function WorkspaceChangesPanel({
     }
 
     return (
-      <Pressable
+      <MotionPressable
         key={lineIndex}
         accessibilityRole="button"
         accessibilityState={{ selected: isSelected }}
+        disableScale
         onPress={() => handleToggleLine(hunkIndex, lineIndex)}
         style={({ pressed }) => [rowStyle, pressed && styles.pressed]}
       >
         {rowContent}
-      </Pressable>
+      </MotionPressable>
     )
   }
 
@@ -419,8 +407,10 @@ export function WorkspaceChangesPanel({
     const dir = fileDirname(item.path)
     const subtitle = item.oldPath !== undefined ? `${item.oldPath} → ${item.path}` : dir
     return (
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
+        scaleTo={0.985}
+        surfaceColor={colors.background}
         onPress={() => setSelectedFile(item)}
         style={({ pressed }) => [
           styles.fileRow,
@@ -463,9 +453,9 @@ export function WorkspaceChangesPanel({
               )}
             </>
           )}
-          <ChevronRight size={16} color={colors.subtle} />
+          <DuotoneIcons.ChevronRight size={16} color={colors.subtle} />
         </View>
-      </Pressable>
+      </MotionPressable>
     )
   }
 
@@ -485,7 +475,7 @@ export function WorkspaceChangesPanel({
             action={
               <IconButton
                 label={t.tools.refresh}
-                icon={RefreshCw}
+                icon={DuotoneIcons.RefreshCw}
                 onPress={handleRefresh}
                 disabled={refreshBusy}
               />
@@ -502,7 +492,7 @@ export function WorkspaceChangesPanel({
               <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.summaryTopRow}>
                   <View style={styles.branchRow}>
-                    <GitBranch size={15} color={colors.primary} />
+                    <DuotoneIcons.GitBranch size={15} color={colors.ink} surfaceColor={colors.card} />
                     <Text style={[styles.branchText, { color: colors.ink }]} numberOfLines={1} ellipsizeMode="tail">
                       {status.branch ?? status.headShortSha ?? 'HEAD'}
                     </Text>
@@ -521,15 +511,18 @@ export function WorkspaceChangesPanel({
                 {scopeOptions.map(option => {
                   const active = scope === option.id
                   return (
-                    <Pressable
+                    <MotionPressable
                       key={option.id}
                       accessibilityRole="button"
                       accessibilityState={{ selected: active }}
+                      inverse={active}
+                      surfaceColor={active ? colors.inverse : colors.surfaceStrong}
+                      scaleTo={0.95}
                       onPress={() => handleScopeChange(option.id)}
                       style={({ pressed }) => [
                         styles.scopePill,
                         active
-                          ? { backgroundColor: colors.primarySoft, borderColor: colors.primary }
+                          ? { backgroundColor: colors.inverse, borderColor: colors.inverse }
                           : { backgroundColor: colors.surfaceStrong, borderColor: 'transparent' },
                         pressed && styles.pressed,
                       ]}
@@ -537,13 +530,13 @@ export function WorkspaceChangesPanel({
                       <Text
                         style={[
                           styles.scopePillText,
-                          { color: active ? colors.primary : colors.muted },
+                          { color: active ? colors.onInverse : colors.muted },
                           active && styles.scopePillTextActive,
                         ]}
                       >
                         {option.label}
                       </Text>
-                    </Pressable>
+                    </MotionPressable>
                   )
                 })}
               </View>
@@ -575,7 +568,7 @@ export function WorkspaceChangesPanel({
           {!statusLoading && statusError === undefined && status !== undefined && !status.isGitRepo && (
             <View style={styles.emptyWrap}>
               <View style={[styles.emptyIconBox, { backgroundColor: colors.surfaceStrong }]}>
-                <GitBranch size={24} color={colors.muted} />
+                <DuotoneIcons.GitBranch size={24} color={colors.muted} surfaceColor={colors.surfaceStrong} />
               </View>
               <Text style={[styles.emptyTitle, { color: colors.ink }]}>{t.tools.changesNotGitRepo}</Text>
             </View>
@@ -594,7 +587,7 @@ export function WorkspaceChangesPanel({
               ListEmptyComponent={
                 <View style={styles.emptyWrap}>
                   <View style={[styles.emptyIconBox, { backgroundColor: colors.successSoft }]}>
-                    <CircleCheck size={24} color={colors.success} />
+                    <DuotoneIcons.CircleCheck size={24} color={colors.success} surfaceColor={colors.successSoft} />
                   </View>
                   <Text style={[styles.emptyTitle, { color: colors.ink }]}>{t.tools.changesClean}</Text>
                 </View>
@@ -606,9 +599,11 @@ export function WorkspaceChangesPanel({
         <View style={styles.container}>
           <View style={[styles.diffToolbar, { backgroundColor: colors.surface, borderBottomColor: colors.separator }]}>
             <View style={styles.diffToolbarTop}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={selectedFile.path}
+                scaleTo={0.97}
+                surfaceColor={colors.surface}
                 onPress={() => { void handleCopyPath(selectedFile.path) }}
                 style={({ pressed }) => [styles.copyPathButton, pressed && styles.pressed]}
               >
@@ -616,9 +611,9 @@ export function WorkspaceChangesPanel({
                   {selectedFile.path}
                 </Text>
                 {copiedPath
-                  ? <Check size={14} color={colors.success} />
-                  : <Copy size={14} color={colors.muted} />}
-              </Pressable>
+                  ? <DuotoneIcons.Check size={14} color={colors.success} />
+                  : <DuotoneIcons.Copy size={14} color={colors.muted} />}
+              </MotionPressable>
               <View style={styles.summaryStats}>
                 {isDiffBinary ? (
                   <View style={[styles.binTag, { backgroundColor: colors.surfaceStrong }]}>
@@ -638,9 +633,11 @@ export function WorkspaceChangesPanel({
             </View>
 
             <View style={styles.diffToolbarActions}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityState={{ selected: wrap }}
+                scaleTo={0.95}
+                surfaceColor={colors.surfaceStrong}
                 onPress={() => setWrap(current => !current)}
                 style={({ pressed }) => [
                   styles.toolbarPill,
@@ -649,28 +646,31 @@ export function WorkspaceChangesPanel({
                 ]}
               >
                 {wrap
-                  ? <TextWrap size={14} color={colors.primary} />
-                  : <MoveHorizontal size={14} color={colors.muted} />}
+                  ? <DuotoneIcons.TextWrap size={14} color={colors.ink} />
+                  : <DuotoneIcons.MoveHorizontal size={14} color={colors.muted} />}
                 <Text style={[styles.toolbarPillText, { color: wrap ? colors.ink : colors.muted }]}>
                   {wrap ? t.tools.changesWrapOn : t.tools.changesWrapOff}
                 </Text>
-              </Pressable>
+              </MotionPressable>
 
               {onQuoteToComposer !== undefined && (
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
+                  inverse
+                  surfaceColor={colors.inverse}
+                  scaleTo={0.95}
                   onPress={() => onQuoteToComposer(formatDiffReference(selectedFile.path))}
                   style={({ pressed }) => [
                     styles.toolbarPill,
-                    { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+                    { backgroundColor: colors.inverse, borderColor: colors.inverse },
                     pressed && styles.pressed,
                   ]}
                 >
-                  <MessageSquarePlus size={14} color={colors.primary} />
-                  <Text style={[styles.toolbarPillText, { color: colors.primary, fontWeight: '600' }]}>
+                  <DuotoneIcons.MessageSquarePlus size={14} color={colors.onInverse} inverse surfaceColor={colors.inverse} />
+                  <Text style={[styles.toolbarPillText, { color: colors.onInverse, fontWeight: '600' }]}>
                     {t.tools.changesQuoteFile}
                   </Text>
-                </Pressable>
+                </MotionPressable>
               )}
             </View>
           </View>
@@ -712,14 +712,14 @@ export function WorkspaceChangesPanel({
               {isDiffBinary ? (
                 <View style={styles.emptyWrap}>
                   <View style={[styles.emptyIconBox, { backgroundColor: colors.surfaceStrong }]}>
-                    <FileDiff size={24} color={colors.muted} />
+                    <DuotoneIcons.FileDiff size={24} color={colors.muted} surfaceColor={colors.surfaceStrong} />
                   </View>
                   <Text style={[styles.emptyTitle, { color: colors.ink }]}>{t.tools.changesBinary}</Text>
                 </View>
               ) : allHunks.length === 0 ? (
                 <View style={styles.emptyWrap}>
                   <View style={[styles.emptyIconBox, { backgroundColor: colors.surfaceStrong }]}>
-                    <FileDiff size={24} color={colors.muted} />
+                    <DuotoneIcons.FileDiff size={24} color={colors.muted} surfaceColor={colors.surfaceStrong} />
                   </View>
                   <Text style={[styles.emptyTitle, { color: colors.ink }]}>{t.tools.changesEmptyDiff}</Text>
                 </View>
@@ -762,20 +762,23 @@ export function WorkspaceChangesPanel({
                             )}
                           </View>
                           {onQuoteToComposer !== undefined && (
-                            <Pressable
+                            <MotionPressable
                               accessibilityRole="button"
+                              inverse
+                              surfaceColor={colors.inverse}
+                              scaleTo={0.95}
                               onPress={() => onQuoteToComposer(formatDiffReference(selectedFile.path, hunkRange))}
                               style={({ pressed }) => [
                                 styles.hunkQuoteButton,
-                                { backgroundColor: colors.primary },
+                                { backgroundColor: colors.inverse },
                                 pressed && styles.pressed,
                               ]}
                             >
-                              <MessageSquarePlus size={13} color={onPrimaryColor} />
-                              <Text style={[styles.hunkQuoteText, { color: onPrimaryColor }]} numberOfLines={1}>
+                              <DuotoneIcons.MessageSquarePlus size={13} color={colors.onInverse} inverse surfaceColor={colors.inverse} />
+                              <Text style={[styles.hunkQuoteText, { color: colors.onInverse }]} numberOfLines={1}>
                                 {t.tools.changesQuoteModify}
                               </Text>
-                            </Pressable>
+                            </MotionPressable>
                           )}
                         </View>
 
@@ -819,8 +822,10 @@ export function WorkspaceChangesPanel({
                 {selectedReference}
               </Text>
               <View style={styles.selectionBarActions}>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
+                  scaleTo={0.95}
+                  surfaceColor={colors.surfaceStrong}
                   onPress={() => setSelection(undefined)}
                   style={({ pressed }) => [
                     styles.selectionClearButton,
@@ -828,28 +833,31 @@ export function WorkspaceChangesPanel({
                     pressed && styles.pressed,
                   ]}
                 >
-                  <X size={14} color={colors.muted} />
+                  <DuotoneIcons.X size={14} color={colors.muted} />
                   <Text style={[styles.selectionClearText, { color: colors.ink }]}>
                     {t.tools.changesSelectionClear}
                   </Text>
-                </Pressable>
-                <Pressable
+                </MotionPressable>
+                <MotionPressable
                   accessibilityRole="button"
+                  inverse
+                  surfaceColor={colors.inverse}
+                  scaleTo={0.95}
                   onPress={() => {
                     onQuoteToComposer(selectedReference)
                     setSelection(undefined)
                   }}
                   style={({ pressed }) => [
                     styles.selectionQuoteButton,
-                    { backgroundColor: colors.primary },
+                    { backgroundColor: colors.inverse },
                     pressed && styles.pressed,
                   ]}
                 >
-                  <MessageSquarePlus size={14} color={onPrimaryColor} />
-                  <Text style={[styles.selectionQuoteText, { color: onPrimaryColor }]}>
+                  <DuotoneIcons.MessageSquarePlus size={14} color={colors.onInverse} inverse surfaceColor={colors.inverse} />
+                  <Text style={[styles.selectionQuoteText, { color: colors.onInverse }]}>
                     {t.tools.changesQuoteModify}
                   </Text>
-                </Pressable>
+                </MotionPressable>
               </View>
             </View>
           )}

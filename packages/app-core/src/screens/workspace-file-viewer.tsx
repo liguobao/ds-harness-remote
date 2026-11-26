@@ -17,7 +17,6 @@ import * as Clipboard from 'expo-clipboard'
 import { randomUUID } from 'expo-crypto'
 import { File as LocalFile, FileMode, Paths } from 'expo-file-system'
 import * as FileSystem from 'expo-file-system/legacy'
-import { ChevronLeft, Copy, Download, ExternalLink, MoreHorizontal, RefreshCw, Share as ShareIcon, X } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings as t } from '../locales/i18n'
 import { isMessageFilePath, formatSubmittedFileSize } from './chat/submitted-files'
@@ -39,6 +38,7 @@ import { requireSessionTools } from '../state/store'
 import { Alert } from '../ui/alert'
 import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
 import { DshFileTypeIcon } from '../ui/dsh-icons'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { MarkdownLinkProvider, NativeMarkdown } from '../ui/markdown'
 import { continuousRadius, elevationStyle, monoFontFamily } from '../ui/platform-style'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
@@ -391,12 +391,12 @@ export function WorkspaceFileViewer({
       centered
       titleAlign="center"
       onBack={onLeadingPress}
-      backIcon={leadingMode === 'close' ? X : ChevronLeft}
+      backIcon={leadingMode === 'close' ? DuotoneIcons.X : DuotoneIcons.ChevronLeft}
       backLabel={leadingMode === 'close' ? t.common.close : t.common.back}
       action={
         <IconButton
           label={t.tools.moreFileActions}
-          icon={MoreHorizontal}
+          icon={DuotoneIcons.MoreHorizontal}
           onPress={() => setMenuOpen(true)}
         />
       }
@@ -559,9 +559,11 @@ export function WorkspaceFileViewer({
 
             <View style={[styles.menuDivider, { backgroundColor: colors.separator }]} />
 
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               disabled={tooLargeToSave || downloading || sharing}
+              scaleTo={0.98}
+              surfaceColor={colors.elevated}
               onPress={() => {
                 setMenuOpen(false)
                 void download()
@@ -575,16 +577,18 @@ export function WorkspaceFileViewer({
               {downloading ? (
                 <ActivityIndicator size="small" color={colors.primary} />
               ) : (
-                <Download size={18} color={colors.ink} strokeWidth={1.9} />
+                <DuotoneIcons.Download size={18} color={colors.ink} strokeWidth={1.9} />
               )}
               <Text style={[styles.menuRowText, { color: colors.ink }]}>
                 {downloading ? t.tools.downloading : t.tools.download}
               </Text>
-            </Pressable>
+            </MotionPressable>
 
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               disabled={tooLargeToSave || sharing || downloading}
+              scaleTo={0.98}
+              surfaceColor={colors.elevated}
               onPress={() => void openExternalOrShare()}
               style={({ pressed }) => [
                 styles.menuRow,
@@ -595,32 +599,36 @@ export function WorkspaceFileViewer({
               {sharing ? (
                 <ActivityIndicator size="small" color={colors.primary} />
               ) : Platform.OS === 'ios' ? (
-                <ShareIcon size={18} color={colors.ink} strokeWidth={1.9} />
+                <DuotoneIcons.Share size={18} color={colors.ink} strokeWidth={1.9} />
               ) : (
-                <ExternalLink size={18} color={colors.ink} strokeWidth={1.9} />
+                <DuotoneIcons.ExternalLink size={18} color={colors.ink} strokeWidth={1.9} />
               )}
               <Text style={[styles.menuRowText, { color: colors.ink }]}>
                 {Platform.OS === 'ios' ? t.tools.shareFile : t.tools.openExternal}
               </Text>
-            </Pressable>
+            </MotionPressable>
 
             {!messageAttachment && (
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
+                scaleTo={0.98}
+                surfaceColor={colors.elevated}
                 onPress={() => void copyPath()}
                 style={({ pressed }) => [
                   styles.menuRow,
                   pressed && { backgroundColor: colors.surfaceStrong },
                 ]}
               >
-                <Copy size={18} color={colors.ink} strokeWidth={1.9} />
+                <DuotoneIcons.Copy size={18} color={colors.ink} strokeWidth={1.9} />
                 <Text style={[styles.menuRowText, { color: colors.ink }]}>{t.tools.copyPath}</Text>
-              </Pressable>
+              </MotionPressable>
             )}
 
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               disabled={loading || downloading || sharing}
+              scaleTo={0.98}
+              surfaceColor={colors.elevated}
               onPress={() => {
                 setMenuOpen(false)
                 setRevision(v => v + 1)
@@ -631,9 +639,9 @@ export function WorkspaceFileViewer({
                 (loading || downloading || sharing) && styles.menuRowDisabled,
               ]}
             >
-              <RefreshCw size={18} color={colors.ink} strokeWidth={1.9} />
+              <DuotoneIcons.RefreshCw size={18} color={colors.ink} strokeWidth={1.9} />
               <Text style={[styles.menuRowText, { color: colors.ink }]}>{t.tools.refresh}</Text>
-            </Pressable>
+            </MotionPressable>
           </View>
         </View>
       )}

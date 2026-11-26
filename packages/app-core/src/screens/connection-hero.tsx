@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Animated, Easing, StyleSheet, View } from 'react-native'
 import Svg, { Path, Rect } from 'react-native-svg'
-import { Check, Lock, X } from 'lucide-react-native'
+import { DuotoneIcons } from '../ui/duotone-icons'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -101,14 +101,14 @@ export function ConnectionHero({ secured, ready, failed }: {
       </View>
 
       <Animated.View style={[styles.badge, styles.badgeLock, { opacity: lock, transform: [{ scale: lock }] }]}>
-        <Lock size={10} strokeWidth={2.6} color={colors.white} />
+        <DuotoneIcons.Lock size={10} strokeWidth={2.6} color={colors.white} surfaceColor={colors.primary} />
       </Animated.View>
       <Animated.View style={[styles.badge, styles.badgeReady, { opacity: done, transform: [{ scale: done }] }]}>
-        <Check size={11} strokeWidth={3} color={colors.white} />
+        <DuotoneIcons.Check size={11} strokeWidth={3} color={colors.white} surfaceColor={colors.success} />
       </Animated.View>
       {failed && (
         <View style={[styles.badge, styles.badgeFailed]}>
-          <X size={11} strokeWidth={3} color={colors.white} />
+          <DuotoneIcons.X size={11} strokeWidth={3} color={colors.white} surfaceColor={colors.danger} />
         </View>
       )}
     </View>

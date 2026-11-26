@@ -1,4 +1,4 @@
-import { ArrowUp, CircleStop, X } from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -157,35 +157,38 @@ function ExpandedComposerContent({
         }]}
       >
         <View style={styles.expandedComposerHeader}>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={strings.chat.collapseComposer}
             onPress={onClose}
             hitSlop={8}
+            scaleTo={0.92}
             style={({ pressed }) => [styles.expandedCollapseButton, pressed && styles.plusPressed]}
           >
             <CollapseCornerIcon size={18} color={colors.ink} />
-          </Pressable>
+          </MotionPressable>
         </View>
 
         {quotes && quotes.length > 0 && (
           <View style={styles.expandedQuotesWrap}>
             {quotes.map((quoteText, index) => (
-              <Pressable
+              <MotionPressable
                 key={`expanded-quote-${index}`}
                 accessibilityRole="button"
                 accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
                 disabled={onRemoveQuote === undefined}
                 onPress={() => onRemoveQuote?.(index)}
                 hitSlop={4}
+                scaleTo={0.94}
+                surfaceColor={colors.surfaceStrong}
                 style={styles.composerQuotePill}
               >
-                <QuoteMarkIcon size={12} color={colors.primary} />
+                <QuoteMarkIcon size={12} color={colors.ink} />
                 <Text numberOfLines={1} style={styles.composerQuotePillText}>
                   “{formatQuoteDraftSnippet(quoteText, 18)}”
                 </Text>
-                {onRemoveQuote !== undefined && <X size={12} color={colors.primary} />}
-              </Pressable>
+                {onRemoveQuote !== undefined && <DuotoneIcons.X size={12} color={colors.ink} surfaceColor={colors.surfaceStrong} />}
+              </MotionPressable>
             ))}
           </View>
         )}
@@ -219,7 +222,7 @@ function ExpandedComposerContent({
 
         <View style={styles.expandedFooter}>
           {replyActive && !hasContent ? (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.stop}
               accessibilityState={{ disabled: stopping, busy: stopping }}
@@ -228,16 +231,19 @@ function ExpandedComposerContent({
                 triggerLightHaptic()
                 onStop()
               }}
+              inverse
+              surfaceColor={colors.inverse}
+              scaleTo={0.9}
               style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
             >
               {stopping ? (
                 <ActivityIndicator size="small" color={colors.onInverse} />
               ) : (
-                <CircleStop size={20} color={colors.onInverse} />
+                <DuotoneIcons.CircleStop size={20} color={colors.onInverse} inverse surfaceColor={colors.inverse} />
               )}
-            </Pressable>
+            </MotionPressable>
           ) : (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.send}
               accessibilityState={{ disabled: sendDisabled, busy: sending }}
@@ -246,14 +252,17 @@ function ExpandedComposerContent({
                 onSubmit()
                 onClose()
               }}
+              inverse={!sendDisabled}
+              surfaceColor={sendDisabled ? colors.surfaceStrong : colors.inverse}
+              scaleTo={0.9}
               style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, !sending && sendDisabled && styles.sendDisabled]}
             >
               {sending ? (
                 <ActivityIndicator size="small" color={colors.onInverse ?? colors.white} />
               ) : (
-                <ArrowUp size={20} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} strokeWidth={2.4} />
+                <DuotoneIcons.ArrowUp size={20} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} inverse={!sendDisabled} surfaceColor={sendDisabled ? colors.surfaceStrong : colors.inverse} />
               )}
-            </Pressable>
+            </MotionPressable>
           )}
         </View>
       </Animated.View>

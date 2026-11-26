@@ -1,6 +1,5 @@
-import { Check, ChevronLeft, ChevronRight, Folder, GitCompareArrows, Pencil, Plus, Terminal, Trash2, X, Zap } from 'lucide-react-native'
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, ScrollView, Text, TextInput, View } from 'react-native'
 import { strings as zhCN } from '../../locales/i18n'
 import type { CustomPrompt, QuickPromptActionMode } from '../../services/storage'
 import type {
@@ -9,7 +8,8 @@ import type {
   ModelProviderGroup,
   PermissionSelect,
 } from '../../types'
-import { Button, IconButton } from '../../ui/components'
+import { Button, IconButton, type UiIconComponent } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { usePickerListMaxHeight } from './modal'
@@ -31,7 +31,7 @@ export function ModePicker({ visible, options, current, loading, selecting, onCl
   const listMaxHeight = usePickerListMaxHeight()
   return (
     <SheetModal visible={visible} onClose={onClose}>
-        <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
+        <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectMode}</Text><IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={onClose} /></View>
         <ScrollView
           style={{ flexShrink: 1, maxHeight: listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
@@ -47,20 +47,22 @@ export function ModePicker({ visible, options, current, loading, selecting, onCl
             const broken = option.broken !== undefined
             const description = agentPresetDescription(option)
             return (
-              <Pressable
+              <MotionPressable
                 key={option.id}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isCurrent, disabled: selecting || broken }}
                 disabled={selecting || broken}
                 onPress={() => onPick(option.id)}
-                style={[styles.permissionOption, isCurrent && styles.modelOptionCurrent, (selecting || broken) && styles.plusMenuOptionDisabled]}
+                scaleTo={0.98}
+                surfaceColor={isCurrent ? colors.surfaceStrong : colors.grouped}
+                style={[styles.permissionOption, isCurrent && { borderWidth: 1, borderColor: colors.ink, backgroundColor: colors.surfaceStrong }, (selecting || broken) && styles.plusMenuOptionDisabled]}
               >
                 <View style={styles.permissionOptionCopy}>
                   <Text style={styles.permissionOptionName}>{agentPresetName(option)}</Text>
                   {description !== undefined && <Text style={styles.permissionOptionDescription}>{description}</Text>}
                 </View>
-                {isCurrent && <Check size={16} color={colors.primary} />}
-              </Pressable>
+                {isCurrent && <DuotoneIcons.Check size={16} color={colors.ink} />}
+              </MotionPressable>
             )
           })}
         </ScrollView>
@@ -83,7 +85,7 @@ export function PermissionPicker({ visible, permissions, onClose, onPick, loadin
   if (permissions === undefined) return null
   return (
     <SheetModal visible={visible} onClose={onClose}>
-        <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.approvalMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
+        <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.approvalMode}</Text><IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={onClose} /></View>
         <ScrollView
           style={{ flexShrink: 1, maxHeight: listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
@@ -95,10 +97,18 @@ export function PermissionPicker({ visible, permissions, onClose, onPick, loadin
           {permissions.options.filter(option => option.value !== 'custom').map(option => {
             const current = option.value === permissions.currentValue
             return (
-              <Pressable key={option.value} accessibilityRole="button" accessibilityState={{ selected: current }} onPress={() => onPick(option.value)} style={[styles.permissionOption, current && styles.modelOptionCurrent]}>
+              <MotionPressable
+                key={option.value}
+                accessibilityRole="button"
+                accessibilityState={{ selected: current }}
+                onPress={() => onPick(option.value)}
+                scaleTo={0.98}
+                surfaceColor={current ? colors.surfaceStrong : colors.grouped}
+                style={[styles.permissionOption, current && { borderWidth: 1, borderColor: colors.ink, backgroundColor: colors.surfaceStrong }]}
+              >
                 <View style={styles.permissionOptionCopy}><Text style={styles.permissionOptionName}>{permissionDisplayName(option.value, option.name)}</Text>{permissionDisplayDescription(option.value, option.description) !== undefined && <Text style={styles.permissionOptionDescription}>{permissionDisplayDescription(option.value, option.description)}</Text>}</View>
-                {current && <Check size={16} color={colors.primary} />}
-              </Pressable>
+                {current && <DuotoneIcons.Check size={16} color={colors.ink} />}
+              </MotionPressable>
             )
           })}
         </ScrollView>
@@ -115,16 +125,16 @@ export function ToolAccessPicker({ visible, supportsChanges = true, onClose, onP
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const listMaxHeight = usePickerListMaxHeight()
-  const options: Array<{ id: SessionToolsMode; icon: typeof Folder; name: string; description: string }> = [
-    { id: 'files', icon: Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
+  const options: Array<{ id: SessionToolsMode; icon: UiIconComponent; name: string; description: string }> = [
+    { id: 'files', icon: DuotoneIcons.Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
     ...(supportsChanges
-      ? [{ id: 'changes' as const, icon: GitCompareArrows, name: zhCN.tools.changes, description: zhCN.chat.toolChangesDescription }]
+      ? [{ id: 'changes' as const, icon: DuotoneIcons.GitCompareArrows, name: zhCN.tools.changes, description: zhCN.chat.toolChangesDescription }]
       : []),
-    { id: 'terminal', icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
+    { id: 'terminal', icon: DuotoneIcons.Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
   ]
   return (
     <SheetModal visible={visible} onClose={onClose}>
-        <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.toolAccess}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
+        <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.toolAccess}</Text><IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={onClose} /></View>
         <ScrollView
           style={{ flexShrink: 1, maxHeight: listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
@@ -134,19 +144,21 @@ export function ToolAccessPicker({ visible, supportsChanges = true, onClose, onP
           {options.map(option => {
             const Icon = option.icon
             return (
-              <Pressable
+              <MotionPressable
                 key={option.id}
                 accessibilityRole="button"
                 onPress={() => onPick(option.id)}
+                scaleTo={0.98}
+                surfaceColor={colors.grouped}
                 style={({ pressed }) => [styles.permissionOption, pressed && styles.plusMenuOptionPressed]}
               >
-                <Icon size={20} color={colors.primary} />
+                <Icon size={20} color={colors.ink} />
                 <View style={styles.permissionOptionCopy}>
                   <Text style={styles.permissionOptionName}>{option.name}</Text>
                   <Text style={styles.permissionOptionDescription}>{option.description}</Text>
                 </View>
-                <ChevronRight size={16} color={colors.muted} />
-              </Pressable>
+                <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+              </MotionPressable>
             )
           })}
         </ScrollView>
@@ -172,7 +184,7 @@ export function PromptsPicker({ visible, prompts, actionMode = 'fill', onToggleA
     <SheetModal visible={visible} onClose={onClose}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{zhCN.chat.toolPrompts}</Text>
-          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+          <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={onClose} />
         </View>
         <ScrollView
           style={{ flexShrink: 1, maxHeight: Math.max(140, listMaxHeight - (onToggleActionMode ? 112 : 56)) }}
@@ -186,49 +198,55 @@ export function PromptsPicker({ visible, prompts, actionMode = 'fill', onToggleA
               <Text style={styles.permissionOptionDescription}>{zhCN.chat.toolPromptEmptyBody}</Text>
             </View>
           ) : prompts.map(prompt => (
-            <Pressable
+            <MotionPressable
               key={prompt.id}
               accessibilityRole="button"
               accessibilityLabel={prompt.title}
               onPress={() => onPick(prompt)}
+              scaleTo={0.98}
+              surfaceColor={colors.grouped}
               style={({ pressed }) => [styles.permissionOption, pressed && styles.plusMenuOptionPressed]}
             >
               <View style={styles.permissionOptionCopy}>
                 <Text style={styles.permissionOptionName}>{prompt.title}</Text>
                 <Text style={styles.permissionOptionDescription} numberOfLines={2}>{prompt.text}</Text>
               </View>
-              <ChevronRight size={16} color={colors.muted} />
-            </Pressable>
+              <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+            </MotionPressable>
           ))}
         </ScrollView>
         {onToggleActionMode !== undefined && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={zhCN.settings.quickPromptActionMode}
             onPress={() => onToggleActionMode(nextMode)}
+            scaleTo={0.98}
+            surfaceColor={colors.card}
             style={({ pressed }) => [styles.effortRow, pressed && styles.plusMenuOptionPressed]}
           >
             <View style={styles.plusMenuOptionValue}>
-              <Zap size={15} color={colors.primary} />
+              <DuotoneIcons.Zap size={15} color={colors.ink} />
               <Text style={styles.effortRowLabel}>{zhCN.settings.quickPromptActionMode}</Text>
             </View>
             <View style={styles.plusMenuOptionValue}>
               <Text style={styles.effortRowValue}>{modeLabel}</Text>
-              <ChevronRight size={16} color={colors.muted} />
+              <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
             </View>
-          </Pressable>
+          </MotionPressable>
         )}
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={zhCN.chat.toolPromptEdit}
           onPress={onManage}
+          scaleTo={0.98}
+          surfaceColor={colors.card}
           style={({ pressed }) => [styles.effortRow, pressed && styles.plusMenuOptionPressed]}
         >
           <Text style={styles.effortRowLabel}>{zhCN.chat.toolPromptEdit}</Text>
           <View style={styles.plusMenuOptionValue}>
-            <ChevronRight size={16} color={colors.muted} />
+            <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
           </View>
-        </Pressable>
+        </MotionPressable>
     </SheetModal>
   )
 }
@@ -250,12 +268,12 @@ export function PromptsManager({ visible, prompts, promptsLoading, onBack, onClo
     <SheetModal visible={visible} onClose={onClose} onRequestClose={onBack}>
         <View style={styles.modalHeader}>
           <View style={styles.modalHeaderCopy}>
-            <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={onBack} />
+            <IconButton label={zhCN.common.back} icon={DuotoneIcons.ChevronLeft} onPress={onBack} />
             <Text style={styles.modalTitle} numberOfLines={1}>{zhCN.chat.toolPromptEdit}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <IconButton label={zhCN.chat.toolPromptAdd} icon={Plus} tint={colors.primary} onPress={onAdd} disabled={promptsLoading} />
-            <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+            <IconButton label={zhCN.chat.toolPromptAdd} icon={DuotoneIcons.Plus} tint={colors.ink} onPress={onAdd} disabled={promptsLoading} />
+            <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={onClose} />
           </View>
         </View>
         <ScrollView
@@ -275,8 +293,8 @@ export function PromptsManager({ visible, prompts, promptsLoading, onBack, onClo
                 <Text style={styles.permissionOptionName}>{prompt.title}</Text>
                 <Text style={styles.permissionOptionDescription} numberOfLines={2}>{prompt.text}</Text>
               </View>
-              <IconButton label={zhCN.chat.toolPromptEditTitle(prompt.title)} icon={Pencil} onPress={() => onEdit(prompt)} dense disabled={promptsLoading} />
-              <IconButton label={zhCN.common.delete} icon={Trash2} onPress={() => onDelete(prompt)} dense disabled={promptsLoading} />
+              <IconButton label={zhCN.chat.toolPromptEditTitle(prompt.title)} icon={DuotoneIcons.Pencil} onPress={() => onEdit(prompt)} dense disabled={promptsLoading} />
+              <IconButton label={zhCN.common.delete} icon={DuotoneIcons.Trash2} onPress={() => onDelete(prompt)} dense disabled={promptsLoading} />
             </View>
           ))}
         </ScrollView>
@@ -307,12 +325,12 @@ export function PromptEditor({ visible, prompt, promptsLoading, onBack, onClose,
     <SheetModal visible={visible} onClose={onClose} onRequestClose={onBack}>
         <View style={styles.modalHeader}>
           <View style={styles.modalHeaderCopy}>
-            <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={onBack} />
+            <IconButton label={zhCN.common.back} icon={DuotoneIcons.ChevronLeft} onPress={onBack} />
             <Text style={styles.modalTitle} numberOfLines={1}>
               {prompt === undefined ? zhCN.chat.toolPromptAdd : zhCN.chat.toolPromptEditTitle(prompt.title)}
             </Text>
           </View>
-          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+          <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={onClose} />
         </View>
         <ScrollView style={{ flexShrink: 1, maxHeight: listMaxHeight }} keyboardShouldPersistTaps="handled">
           <Text style={styles.promptInputLabel}>{zhCN.chat.toolPromptTitlePlaceholder}</Text>
@@ -335,16 +353,19 @@ export function PromptEditor({ visible, prompt, promptsLoading, onBack, onClose,
             style={[styles.promptInput, styles.promptTextArea]}
           />
         </ScrollView>
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={zhCN.chat.toolPromptSave}
           disabled={!canSave}
+          inverse={canSave}
+          surfaceColor={canSave ? colors.inverse : colors.surface}
+          scaleTo={0.97}
           onPress={() => onSave(title, text)}
-          style={({ pressed }) => [styles.effortRow, { justifyContent: 'center', backgroundColor: canSave ? colors.primary : colors.surface, marginTop: 12 }, pressed && canSave && styles.plusMenuOptionPressed]}
+          style={({ pressed }) => [styles.effortRow, { justifyContent: 'center', backgroundColor: canSave ? colors.inverse : colors.surface, marginTop: 12 }, pressed && canSave && { opacity: 0.8 }]}
         >
-          <Check size={16} color={canSave ? colors.surface : colors.disabled} />
-          <Text style={[styles.effortRowLabel, { color: canSave ? colors.surface : colors.disabled, marginLeft: 6 }]}>{zhCN.chat.toolPromptSave}</Text>
-        </Pressable>
+          <DuotoneIcons.Check size={16} color={canSave ? colors.onInverse : colors.disabled} />
+          <Text style={[styles.effortRowLabel, { color: canSave ? colors.onInverse : colors.disabled, marginLeft: 6 }]}>{zhCN.chat.toolPromptSave}</Text>
+        </MotionPressable>
     </SheetModal>
   )
 }
@@ -374,13 +395,13 @@ export function ModelPicker({ visible, models, onClose, onPick }: {
         <View style={styles.modalHeader}>
           <View style={styles.modalHeaderCopy}>
             {effortView && (
-              <IconButton label={zhCN.common.back} icon={ChevronLeft} onPress={() => setEffortView(false)} />
+              <IconButton label={zhCN.common.back} icon={DuotoneIcons.ChevronLeft} onPress={() => setEffortView(false)} />
             )}
             <Text style={styles.modalTitle} numberOfLines={1}>
               {effortView ? zhCN.chat.reasoningEffort : zhCN.chat.selectModel}
             </Text>
           </View>
-          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+          <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={onClose} />
         </View>
         <ScrollView
           style={{ flexShrink: 1, maxHeight: showEffortRow ? Math.max(140, listMaxHeight - 56) : listMaxHeight }}
@@ -396,21 +417,23 @@ export function ModelPicker({ visible, models, onClose, onPick }: {
                   {group.models.map(model => {
                     const current = models.current.provider === group.id && models.current.model === model.id
                     return (
-                      <Pressable
+                      <MotionPressable
                         key={model.id}
                         accessibilityRole="button"
                         accessibilityState={{ selected: current }}
+                        scaleTo={0.98}
+                        surfaceColor={current ? colors.surfaceStrong : colors.grouped}
                         onPress={() => {
                           if (current) onPick(group, model, models.current.reasoningEffort)
                           else onPick(group, model)
                         }}
-                        style={[styles.modelOption, current && styles.modelOptionCurrent]}
+                        style={[styles.modelOption, current && { borderColor: colors.ink, backgroundColor: colors.surfaceStrong }]}
                       >
                         <View style={styles.modelOptionCopy}>
                           <Text style={styles.modelOptionName} numberOfLines={1}>{model.name}</Text>
                         </View>
-                        {current && <Check size={16} color={colors.primary} />}
-                      </Pressable>
+                        {current && <DuotoneIcons.Check size={16} color={colors.ink} />}
+                      </MotionPressable>
                     )
                   })}
                 </View>
@@ -424,41 +447,45 @@ export function ModelPicker({ visible, models, onClose, onPick }: {
               {efforts.map(effort => {
                 const current = activeEffortId === effort.id
                 return (
-                  <Pressable
+                  <MotionPressable
                     key={effort.id}
                     accessibilityRole="button"
                     accessibilityState={{ selected: current }}
                     accessibilityLabel={zhCN.chat.reasoningEffortLabel(effort.name)}
+                    scaleTo={0.98}
+                    surfaceColor={current ? colors.surfaceStrong : colors.grouped}
                     onPress={() => {
                       if (currentGroup !== undefined && currentModel !== undefined) {
                         onPick(currentGroup, currentModel, effort.id)
                       }
                     }}
-                    style={[styles.modelOption, current && styles.modelOptionCurrent]}
+                    style={[styles.modelOption, current && { borderColor: colors.ink, backgroundColor: colors.surfaceStrong }]}
                   >
                     <View style={styles.modelOptionCopy}>
                       <Text style={styles.modelOptionName} numberOfLines={1}>{effort.name}</Text>
                     </View>
-                    {current && <Check size={16} color={colors.primary} />}
-                  </Pressable>
+                    {current && <DuotoneIcons.Check size={16} color={colors.ink} />}
+                  </MotionPressable>
                 )
               })}
             </>
           )}
         </ScrollView>
         {showEffortRow && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={zhCN.chat.reasoningEffort}
+            scaleTo={0.98}
+            surfaceColor={colors.card}
             onPress={() => setEffortView(true)}
             style={({ pressed }) => [styles.effortRow, pressed && styles.plusMenuOptionPressed]}
           >
             <Text style={styles.effortRowLabel}>{zhCN.chat.reasoningEffort}</Text>
             <View style={styles.plusMenuOptionValue}>
               <Text style={styles.effortRowValue} numberOfLines={1}>{activeEffort?.name ?? zhCN.chat.reasoningEffortDefault}</Text>
-              <ChevronRight size={16} color={colors.muted} />
+              <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
             </View>
-          </Pressable>
+          </MotionPressable>
         )}
     </SheetModal>
   )

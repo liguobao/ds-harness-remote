@@ -14,13 +14,24 @@ import {
   type ViewStyle,
 } from 'react-native'
 import { BlurTargetView, BlurView } from 'expo-blur'
-import { AlertCircle, ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from './duotone-icons'
 import { floatingShadow, radius, spacing, type } from './theme'
 import { androidRipple, continuousRadius, elevationStyle, monoFontFamily } from './platform-style'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
+
+export type UiIconComponent = ComponentType<{
+  size?: number
+  color?: string
+  fill?: string
+  strokeWidth?: number
+  active?: boolean
+  inverse?: boolean
+  surfaceColor?: string
+  style?: StyleProp<ViewStyle>
+}>
 
 export function Screen({ children, scroll = true, refreshing = false, onRefresh, scrollRef, fill = false }: {
   children: ReactNode
@@ -160,7 +171,7 @@ export function TopBar({
   onSubtitlePress?: () => void
   onTitlePress?: () => void
   onBack?: () => void
-  backIcon?: ComponentType<{ size?: number; color?: string; fill?: string; strokeWidth?: number }>
+  backIcon?: UiIconComponent
   backLabel?: string
   action?: ReactNode
   /** Set above 1 when the title carries structured text that may not fit one line. */
@@ -214,7 +225,7 @@ export function TopBar({
           {onBack !== undefined && (
             <View style={styles.floatingChip}>
               <FloatingChipContext.Provider value>
-                <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? (Platform.OS === 'ios' ? ChevronLeft : ArrowLeft)} onPress={onBack} hitSlop={8} />
+                <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? (Platform.OS === 'ios' ? DuotoneIcons.ChevronLeft : DuotoneIcons.ArrowLeft)} onPress={onBack} hitSlop={8} />
               </FloatingChipContext.Provider>
             </View>
           )}
@@ -247,11 +258,12 @@ export function TopBar({
               )
           )
           : (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={title}
               onPress={onTitlePress}
               hitSlop={titleRowHitSlop}
+              scaleTo={0.97}
               style={({ pressed }) => [
                 compactHeader ? styles.topBarTitleRowCompact : styles.topBarTitleRow,
                 betweenAligned && styles.topBarTitleRowBetween,
@@ -261,17 +273,18 @@ export function TopBar({
             >
               <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft, titleAccessory === undefined && styles.topBarTitleLink, { flexShrink: 1 }]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
               {titleAccessory}
-            </Pressable>
+            </MotionPressable>
           )}
         {hasSubtitle && (
           onSubtitlePress === undefined
             ? <Text style={[styles.topBarSubtitle, compactHeader && styles.topBarSubtitleCompact, leftAligned && styles.topBarSubtitleLeft]} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
             : (
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={subtitleLabel ?? subtitle}
                 onPress={onSubtitlePress}
                 hitSlop={subtitleRowHitSlop}
+                scaleTo={0.97}
                 style={({ pressed }) => [
                   compactHeader ? styles.topBarSubtitleRowCompact : styles.topBarSubtitleRow,
                   betweenAligned && styles.topBarSubtitleRowBetween,
@@ -279,8 +292,8 @@ export function TopBar({
                 ]}
               >
                 <Text style={[styles.topBarSubtitle, compactHeader && styles.topBarSubtitleCompact, leftAligned && styles.topBarSubtitleLeft]} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
-                {subtitleAccessory ?? (compactHeader ? <ChevronDown size={13} color={colors.muted} /> : <ChevronRight size={14} color={colors.subtle} />)}
-              </Pressable>
+                {subtitleAccessory ?? (compactHeader ? <DuotoneIcons.ChevronDown size={13} color={colors.muted} /> : <DuotoneIcons.ChevronRight size={14} color={colors.subtle} />)}
+              </MotionPressable>
             )
         )}
       </View>
@@ -297,11 +310,14 @@ export function TopBar({
   )
 }
 
-export function IconButton({ label, icon: Icon, onPress, disabled = false, tint, fill, dense = false, hitSlop, filled = false, large = false }: {
+export function IconButton({ label, icon: Icon, onPress, onLongPress, disabled = false, active, tint, fill, dense = false, hitSlop, filled = false, large = false }: {
   label: string
-  icon: ComponentType<{ size?: number; color?: string; fill?: string; strokeWidth?: number }>
+  icon: UiIconComponent
   onPress: () => void
+  onLongPress?: () => void
   disabled?: boolean
+  /** Controlled active flag forwarded directly to animated duotone icons. */
+  active?: boolean
   /** Overrides the default `ink` glyph color, e.g. to mark an active toggle. */
   tint?: string
   /**
@@ -317,20 +333,24 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false, tint,
   large?: boolean
   /** Optional larger touch expansion for controls placed at screen edges. */
   hitSlop?: number
-  /** Solid DeepSeek-blue disc for the screen's primary action (e.g. create). */
+  /** Solid monochrome disc for the screen's primary action (e.g. create). */
   filled?: boolean
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const inChip = useContext(FloatingChipContext)
+  const surfaceColor = filled ? colors.inverse : (inChip ? colors.elevated : colors.background)
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled}
       hitSlop={hitSlop ?? (dense ? 4 : 8)}
-      android_ripple={androidRipple(colors, true)}
       onPress={onPress}
+      onLongPress={onLongPress}
+      inverse={filled}
+      surfaceColor={surfaceColor}
+      scaleTo={0.92}
       style={({ pressed }) => [
         styles.iconButton,
         dense && styles.iconButtonDense,
@@ -341,15 +361,24 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false, tint,
         disabled && styles.disabled,
       ]}
     >
-      <Icon size={large ? 25 : dense || inChip ? 20 : 21} color={filled ? (colors.onPrimary ?? colors.white) : tint ?? colors.ink} fill={fill ?? 'none'} strokeWidth={filled ? 2.2 : 1.9} />
-    </Pressable>
+      <Icon
+        size={large ? 25 : dense || inChip ? 20 : 21}
+        color={filled ? colors.onInverse : tint ?? colors.ink}
+        surfaceColor={surfaceColor}
+        inverse={filled}
+        active={active}
+        fill={fill ?? 'none'}
+        strokeWidth={filled ? 2.2 : 1.9}
+      />
+    </MotionPressable>
   )
 }
 
-export function Button({ label, onPress, icon: Icon, variant = 'primary', loading = false, disabled = false }: {
+export function Button({ label, onPress, onLongPress, icon: Icon, variant = 'primary', loading = false, disabled = false }: {
   label: string
   onPress: () => void
-  icon?: LucideIcon
+  onLongPress?: () => void
+  icon?: UiIconComponent
   variant?: 'primary' | 'secondary' | 'danger' | 'quiet' | 'inverse'
   loading?: boolean
   disabled?: boolean
@@ -357,6 +386,7 @@ export function Button({ label, onPress, icon: Icon, variant = 'primary', loadin
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const isDisabled = disabled || loading
+  const isInverse = variant === 'primary' || variant === 'inverse' || variant === 'danger'
   const variantStyle =
     variant === 'primary' ? styles.buttonPrimary
       : variant === 'secondary' ? styles.buttonSecondary
@@ -364,18 +394,25 @@ export function Button({ label, onPress, icon: Icon, variant = 'primary', loadin
           : variant === 'inverse' ? styles.buttonInverse
             : styles.buttonQuiet
   const foregroundColor =
-    variant === 'inverse' ? colors.onInverse
-      : variant === 'primary' ? (colors.onPrimary ?? colors.white)
-        : variant === 'danger' ? colors.white
-          : colors.ink
+    variant === 'inverse' || variant === 'primary' ? colors.onInverse
+      : variant === 'danger' ? colors.white
+        : colors.ink
+  const surfaceColor =
+    variant === 'primary' || variant === 'inverse' ? colors.inverse
+      : variant === 'secondary' ? colors.surfaceStrong
+        : variant === 'danger' ? colors.danger
+          : colors.background
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: isDisabled, busy: loading }}
       disabled={isDisabled}
-      android_ripple={androidRipple(colors)}
       onPress={onPress}
+      onLongPress={onLongPress}
+      inverse={isInverse}
+      surfaceColor={surfaceColor}
+      scaleTo={0.97}
       style={({ pressed }) => [
         styles.button,
         variantStyle,
@@ -385,9 +422,9 @@ export function Button({ label, onPress, icon: Icon, variant = 'primary', loadin
     >
       {loading
         ? <ActivityIndicator size="small" color={foregroundColor} />
-        : Icon !== undefined && <Icon size={19} color={foregroundColor} />}
+        : Icon !== undefined && <Icon size={19} color={foregroundColor} inverse={isInverse} surfaceColor={surfaceColor} />}
       <Text style={[styles.buttonText, variant === 'primary' && styles.buttonTextPrimary, variant === 'danger' && styles.buttonTextOnColor, variant === 'inverse' && { color: colors.onInverse }]}>{label}</Text>
-    </Pressable>
+    </MotionPressable>
   )
 }
 
@@ -431,16 +468,16 @@ export function ErrorBanner({ message, onDismiss, onRetry }: { message: string; 
   const styles = useThemedStyles(createStyles)
   return (
     <View accessibilityRole="alert" style={styles.errorBanner}>
-      <AlertCircle size={20} color={colors.danger} />
+      <DuotoneIcons.AlertCircle size={20} color={colors.danger} surfaceColor={colors.dangerSoft} />
       <Text style={styles.errorBannerText}>{message}</Text>
-      {onRetry !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={zhCN.common.retry} style={styles.errorButton} onPress={onRetry}><Text style={styles.errorAction}>{zhCN.common.retry}</Text></Pressable>}
-      {onDismiss !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={zhCN.common.close} style={styles.errorButton} onPress={onDismiss}><Text style={styles.errorAction}>{zhCN.common.close}</Text></Pressable>}
+      {onRetry !== undefined && <MotionPressable accessibilityRole="button" accessibilityLabel={zhCN.common.retry} scaleTo={0.95} style={styles.errorButton} onPress={onRetry}><Text style={styles.errorAction}>{zhCN.common.retry}</Text></MotionPressable>}
+      {onDismiss !== undefined && <MotionPressable accessibilityRole="button" accessibilityLabel={zhCN.common.close} scaleTo={0.95} style={styles.errorButton} onPress={onDismiss}><Text style={styles.errorAction}>{zhCN.common.close}</Text></MotionPressable>}
     </View>
   )
 }
 
-export function EmptyState({ icon: Icon = WifiOff, title, body, action }: {
-  icon?: LucideIcon
+export function EmptyState({ icon: Icon = DuotoneIcons.WifiOff, title, body, action }: {
+  icon?: UiIconComponent
   title: ReactNode
   body: string
   action?: ReactNode
@@ -449,7 +486,7 @@ export function EmptyState({ icon: Icon = WifiOff, title, body, action }: {
   const styles = useThemedStyles(createStyles)
   return (
     <View style={styles.emptyState}>
-      <View style={styles.emptyIcon}><Icon size={25} color={colors.primary} /></View>
+      <View style={styles.emptyIcon}><Icon size={25} color={colors.ink} surfaceColor={colors.surfaceStrong} /></View>
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptyBody}>{body}</Text>
       {action !== undefined && <View style={styles.emptyAction}>{action}</View>}
@@ -457,25 +494,28 @@ export function EmptyState({ icon: Icon = WifiOff, title, body, action }: {
   )
 }
 
-export function ListRow({ title, subtitle, meta, metaInline = false, icon: Icon, onPress, status }: {
+export function ListRow({ title, subtitle, meta, metaInline = false, icon: Icon, onPress, onLongPress, status }: {
   title: string
   subtitle?: string
   meta?: string
   metaInline?: boolean
-  icon?: LucideIcon
+  icon?: UiIconComponent
   onPress: () => void
+  onLongPress?: () => void
   status?: ReactNode
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
-      android_ripple={androidRipple(colors)}
       onPress={onPress}
+      onLongPress={onLongPress}
+      scaleTo={0.98}
+      surfaceColor={colors.background}
       style={({ pressed }) => [styles.listRow, pressed && styles.listRowPressed]}
     >
-      {Icon !== undefined && <View style={styles.rowIcon}><Icon size={21} color={colors.primary} /></View>}
+      {Icon !== undefined && <View style={styles.rowIcon}><Icon size={21} color={colors.ink} surfaceColor={colors.surfaceStrong} /></View>}
       <View style={styles.rowCopy}>
         <View style={styles.rowTitleLine}>
           <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
@@ -493,8 +533,8 @@ export function ListRow({ title, subtitle, meta, metaInline = false, icon: Icon,
               {meta !== undefined && <Text style={styles.rowMeta} numberOfLines={1}>{meta}</Text>}
             </>}
       </View>
-      <ChevronRight size={20} color={colors.subtle} />
-    </Pressable>
+      <DuotoneIcons.ChevronRight size={20} color={colors.subtle} />
+    </MotionPressable>
   )
 }
 
@@ -510,9 +550,9 @@ export function KeyValue({ label, value, mono = false, onPress, expanded }: { la
       <Text style={styles.keyLabel}>{label}</Text>
       {onPress === undefined
         ? <Text style={[styles.keyValueText, mono && styles.mono]} selectable={mono}>{value}</Text>
-        : <Pressable accessibilityRole="link" accessibilityLabel={`${label}: ${value}`} accessibilityState={expanded === undefined ? undefined : { expanded }} onPress={onPress} hitSlop={8} style={styles.keyValueLinkTarget}>
+        : <MotionPressable accessibilityRole="link" accessibilityLabel={`${label}: ${value}`} accessibilityState={expanded === undefined ? undefined : { expanded }} onPress={onPress} hitSlop={8} scaleTo={0.97} style={styles.keyValueLinkTarget}>
             {({ pressed }) => <Text style={[styles.keyValueText, styles.keyValueLink, pressed && styles.keyValueLinkPressed]}>{value}</Text>}
-          </Pressable>}
+          </MotionPressable>}
     </View>
   )
 }
@@ -523,13 +563,13 @@ export function LoadingRows({ count = 3 }: { count?: number }) {
 }
 
 export function RefreshAction({ refreshing, onPress }: { refreshing: boolean; onPress: () => void }) {
-  return <IconButton label={zhCN.common.refresh} icon={RefreshCw} onPress={onPress} disabled={refreshing} />
+  return <IconButton label={zhCN.common.refresh} icon={DuotoneIcons.RefreshCw} active={refreshing ? true : undefined} onPress={onPress} disabled={refreshing} />
 }
 
 export function SuccessNotice({ children }: { children: ReactNode }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  return <View style={styles.successNotice}><CircleCheck size={19} color={colors.success} /><Text style={styles.successNoticeText}>{children}</Text></View>
+  return <View style={styles.successNotice}><DuotoneIcons.CircleCheck size={19} color={colors.success} surfaceColor={colors.successSoft} /><Text style={styles.successNoticeText}>{children}</Text></View>
 }
 
 /** Rounded inset section, the settings-style container used across screens. */
@@ -545,8 +585,8 @@ export function GroupCard({ children, style, raised = false }: { children: React
  * or accessory and a chevron when pressable. Rows after the first draw an
  * inset separator aligned with the label.
  */
-export function GroupRow({ icon: Icon, iconSpace = false, label, detail, value, accessory, onPress, first = false, danger = false, chevron, selected = false, accessibilityLabel, disabled = false }: {
-  icon?: ComponentType<{ size?: number; color?: string; strokeWidth?: number }>
+export function GroupRow({ icon: Icon, iconSpace = false, label, detail, value, accessory, onPress, onLongPress, first = false, danger = false, chevron, selected = false, accessibilityLabel, disabled = false }: {
+  icon?: UiIconComponent
   /** Keep the icon column empty so the label lines up with iconed sibling rows. */
   iconSpace?: boolean
   label: string
@@ -554,6 +594,7 @@ export function GroupRow({ icon: Icon, iconSpace = false, label, detail, value, 
   value?: string
   accessory?: ReactNode
   onPress?: () => void
+  onLongPress?: () => void
   first?: boolean
   danger?: boolean
   chevron?: boolean
@@ -567,59 +608,66 @@ export function GroupRow({ icon: Icon, iconSpace = false, label, detail, value, 
   const content = ({ pressed }: { pressed: boolean }) => (
     <View style={[styles.groupRow, pressed && styles.groupRowPressed]}>
       {Icon !== undefined
-        ? <View style={styles.groupRowIcon}><Icon size={21} color={danger ? colors.danger : selected ? colors.primary : colors.ink} strokeWidth={1.8} /></View>
+        ? <View style={styles.groupRowIcon}><Icon size={21} color={danger ? colors.danger : colors.ink} surfaceColor={colors.cardOpaque} strokeWidth={1.8} /></View>
         : iconSpace && <View style={styles.groupRowIcon} />}
       <View style={[styles.groupRowBody, !first && styles.groupRowDivider]}>
         <View style={styles.groupRowCopy}>
-          <Text style={[styles.groupRowLabel, danger && { color: colors.danger }, selected && { color: colors.primary }]} numberOfLines={1}>{label}</Text>
+          <Text style={[styles.groupRowLabel, danger && { color: colors.danger }, selected && { fontWeight: '600' }]} numberOfLines={1}>{label}</Text>
           {detail !== undefined && <Text style={styles.groupRowDetail} numberOfLines={3}>{detail}</Text>}
         </View>
         {value !== undefined && <Text style={styles.groupRowValue} numberOfLines={1}>{value}</Text>}
         {accessory}
-        {showChevron && <ChevronRight size={19} color={colors.subtle} />}
+        {showChevron && <DuotoneIcons.ChevronRight size={19} color={colors.subtle} />}
       </View>
     </View>
   )
-  if (onPress === undefined) return content({ pressed: false })
+  if (onPress === undefined && onLongPress === undefined) return content({ pressed: false })
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ selected, disabled }}
       disabled={disabled}
-      android_ripple={androidRipple(colors)}
       onPress={onPress}
+      onLongPress={onLongPress}
+      scaleTo={0.985}
+      surfaceColor={colors.cardOpaque}
       style={disabled ? styles.disabled : undefined}
     >
       {content}
-    </Pressable>
+    </MotionPressable>
   )
 }
 
 /** Rounded filter pill with an optional count, as in "全部 3 · 已归档 1". */
-export function FilterChip({ label, count, selected, onPress, icon: Icon }: {
+export function FilterChip({ label, count, selected, onPress, onLongPress, icon: Icon }: {
   label: string
   count?: number
   selected: boolean
   onPress: () => void
-  icon?: ComponentType<{ size?: number; color?: string; strokeWidth?: number }>
+  onLongPress?: () => void
+  icon?: UiIconComponent
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const surfaceColor = selected ? colors.inverse : colors.surface
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={count === undefined ? label : `${label} ${count}`}
       accessibilityState={{ selected }}
-      android_ripple={androidRipple(colors)}
       onPress={onPress}
+      onLongPress={onLongPress}
+      inverse={selected}
+      surfaceColor={surfaceColor}
+      scaleTo={0.94}
       hitSlop={4}
       style={({ pressed }) => [styles.filterChip, selected && styles.filterChipSelected, pressed && styles.buttonPressed]}
     >
-      {Icon !== undefined && <Icon size={15} color={selected ? colors.ink : colors.muted} strokeWidth={2} />}
+      {Icon !== undefined && <Icon size={15} color={selected ? colors.onInverse : colors.muted} inverse={selected} surfaceColor={surfaceColor} strokeWidth={2} />}
       <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]} numberOfLines={1}>{label}</Text>
-      {count !== undefined && <Text style={styles.filterChipCount}>{count}</Text>}
-    </Pressable>
+      {count !== undefined && <Text style={[styles.filterChipCount, selected && styles.filterChipCountSelected]}>{count}</Text>}
+    </MotionPressable>
   )
 }
 
@@ -682,17 +730,17 @@ function createStyles(colors: ThemeColors) {
     iconButtonInChip: { width: 40, height: 40 },
     iconButtonLarge: { width: 56, height: 56 },
     iconButtonPressed: { backgroundColor: colors.surfaceStrong },
-    iconButtonFilled: { backgroundColor: colors.primary },
-    iconButtonFilledPressed: { backgroundColor: colors.primaryPressed },
+    iconButtonFilled: { backgroundColor: colors.inverse },
+    iconButtonFilledPressed: { opacity: 0.85 },
     button: { minHeight: 50, paddingHorizontal: spacing.xl, ...continuousRadius(radius.pill), flexDirection: 'row', gap: spacing.xs, alignItems: 'center', justifyContent: 'center' },
-    buttonPrimary: { backgroundColor: colors.primary },
-    buttonSecondary: { backgroundColor: colors.surfaceStrong },
+    buttonPrimary: { backgroundColor: colors.inverse },
+    buttonSecondary: { backgroundColor: colors.surfaceStrong, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
     buttonDanger: { backgroundColor: colors.danger },
     buttonQuiet: { backgroundColor: 'transparent' },
     buttonInverse: { backgroundColor: colors.inverse },
-    buttonPressed: { opacity: 0.82 },
+    buttonPressed: { opacity: 0.86 },
     buttonText: { ...type.bodyStrong, color: colors.ink },
-    buttonTextPrimary: { color: colors.onPrimary ?? colors.white },
+    buttonTextPrimary: { color: colors.onInverse },
     buttonTextOnColor: { color: colors.white },
     disabled: { opacity: 0.52 },
     field: { gap: 7 },
@@ -710,13 +758,13 @@ function createStyles(colors: ThemeColors) {
     errorButton: { minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs },
     errorAction: { ...type.smallStrong, color: colors.danger, paddingVertical: 2 },
     emptyState: { paddingVertical: 56, alignItems: 'center', paddingHorizontal: spacing.xl },
-    emptyIcon: { width: 56, height: 56, borderRadius: radius.xl, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
+    emptyIcon: { width: 56, height: 56, borderRadius: radius.xl, backgroundColor: colors.surfaceStrong, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
     emptyTitle: { ...type.heading, color: colors.ink, textAlign: 'center' },
     emptyBody: { ...type.body, color: colors.muted, textAlign: 'center', marginTop: spacing.xs, maxWidth: 320 },
     emptyAction: { marginTop: spacing.xl, alignSelf: 'stretch' },
     listRow: { minHeight: 82, paddingVertical: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
     listRowPressed: { backgroundColor: colors.surfaceStrong },
-    rowIcon: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+    rowIcon: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.surfaceStrong, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
     rowCopy: { flex: 1, gap: 3 },
     rowTitleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
     rowTitle: { ...type.bodyStrong, color: colors.ink, flex: 1 },
@@ -752,10 +800,11 @@ function createStyles(colors: ThemeColors) {
     groupRowLabel: { ...type.body, fontSize: 16, color: colors.ink },
     groupRowDetail: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
     groupRowValue: { ...type.small, fontSize: 15, color: colors.muted, maxWidth: '45%' },
-    filterChip: { height: 36, paddingHorizontal: 14, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'transparent' },
-    filterChipSelected: { backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
+    filterChip: { height: 36, paddingHorizontal: 14, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    filterChipSelected: { backgroundColor: colors.inverse, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.inverse, ...floatingShadow(colors) },
     filterChipText: { ...type.small, fontSize: 15, color: colors.muted },
-    filterChipTextSelected: { color: colors.ink, fontWeight: '600' },
+    filterChipTextSelected: { color: colors.onInverse, fontWeight: '600' },
     filterChipCount: { ...type.small, fontSize: 15, color: colors.subtle },
+    filterChipCountSelected: { color: colors.onInverse, opacity: 0.78 },
   })
 }

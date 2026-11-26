@@ -12,9 +12,9 @@ import {
   View,
 } from 'react-native'
 import Svg, { Circle, Path } from 'react-native-svg'
-import { ChevronDown, ChevronRight, ChevronUp, Layers, Users, X } from 'lucide-react-native'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import * as theme from '../../ui/theme'
 import type { ThemeColors } from '../../ui/theme'
 import { useTheme } from '../../ui/theme-context'
@@ -263,16 +263,18 @@ export const SubagentsCard = memo(function SubagentsCard({
 
   return (
     <View style={styles.card} testID={testID}>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${title} · ${statsText}`}
         accessibilityState={{ expanded: isOpen }}
         onPress={onClose ?? handleToggle}
+        scaleTo={0.98}
+        surfaceColor={colors.card}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
         testID={`${testID}-header`}
       >
         <View style={styles.leadIcon}>
-          <Layers size={16} color={colors.muted} />
+          <DuotoneIcons.Layers size={16} color={colors.muted} />
         </View>
 
         <Text style={styles.title} numberOfLines={1}>
@@ -287,14 +289,14 @@ export const SubagentsCard = memo(function SubagentsCard({
 
         <View style={styles.chevron}>
           {onClose ? (
-            <X size={16} color={colors.muted} />
+            <DuotoneIcons.X size={16} color={colors.muted} />
           ) : isOpen ? (
-            <ChevronUp size={16} color={colors.muted} />
+            <DuotoneIcons.ChevronUp size={16} color={colors.muted} />
           ) : (
-            <ChevronDown size={16} color={colors.muted} />
+            <DuotoneIcons.ChevronDown size={16} color={colors.muted} />
           )}
         </View>
-      </Pressable>
+      </MotionPressable>
 
       {isOpen && (
         <View style={styles.contentWrap} testID={`${testID}-content`}>
@@ -312,11 +314,13 @@ export const SubagentsCard = memo(function SubagentsCard({
               const stateLabel = isRunning ? strings.status.running : strings.sessions.child
 
               return (
-                <Pressable
+                <MotionPressable
                   key={item.sessionId}
                   accessibilityRole="button"
                   accessibilityLabel={`${role} ${parsed.task} · ${stateLabel}`}
                   onPress={() => onOpen?.(item)}
+                  scaleTo={0.98}
+                  surfaceColor={colors.card}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   testID={`${testID}-item-${index}`}
                 >
@@ -332,8 +336,8 @@ export const SubagentsCard = memo(function SubagentsCard({
                       <Text style={styles.rowTask} numberOfLines={2}>{parsed.task}</Text>
                     )}
                   </View>
-                  <ChevronRight size={15} color={colors.subtle ?? colors.muted} />
-                </Pressable>
+                  <DuotoneIcons.ChevronRight size={15} color={colors.subtle ?? colors.muted} />
+                </MotionPressable>
               )
             })}
           </ScrollView>
@@ -409,16 +413,18 @@ export const AgentTeamCard = memo(function AgentTeamCard({
 
   return (
     <View style={styles.card} testID={testID}>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${title} · ${statsText}`}
         accessibilityState={{ expanded: isOpen }}
         onPress={onClose ?? handleToggle}
+        scaleTo={0.98}
+        surfaceColor={colors.card}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
         testID={`${testID}-header`}
       >
         <View style={styles.leadIcon}>
-          <Users size={16} color={colors.muted} />
+          <DuotoneIcons.Users size={16} color={colors.muted} />
         </View>
 
         <Text style={styles.title} numberOfLines={1}>
@@ -433,14 +439,14 @@ export const AgentTeamCard = memo(function AgentTeamCard({
 
         <View style={styles.chevron}>
           {onClose ? (
-            <X size={16} color={colors.muted} />
+            <DuotoneIcons.X size={16} color={colors.muted} />
           ) : isOpen ? (
-            <ChevronUp size={16} color={colors.muted} />
+            <DuotoneIcons.ChevronUp size={16} color={colors.muted} />
           ) : (
-            <ChevronDown size={16} color={colors.muted} />
+            <DuotoneIcons.ChevronDown size={16} color={colors.muted} />
           )}
         </View>
-      </Pressable>
+      </MotionPressable>
 
       {isOpen && (
         <View style={styles.contentWrap} testID={`${testID}-content`}>
@@ -508,7 +514,7 @@ export const AgentTeamCard = memo(function AgentTeamCard({
                     )}
                   </View>
                   {session !== undefined ? (
-                    <ChevronRight size={15} color={colors.subtle ?? colors.muted} />
+                    <DuotoneIcons.ChevronRight size={15} color={colors.subtle ?? colors.muted} />
                   ) : (
                     <View style={{ width: 15 }} />
                   )}
@@ -525,16 +531,18 @@ export const AgentTeamCard = memo(function AgentTeamCard({
                   {content}
                 </View>
               ) : (
-                <Pressable
+                <MotionPressable
                   key={member.id}
                   accessibilityRole="button"
                   accessibilityLabel={`${role} ${active?.subject ?? ''} · ${stateLabel}`}
                   onPress={() => onOpen?.(session)}
+                  scaleTo={0.98}
+                  surfaceColor={colors.card}
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                   testID={`${testID}-item-${index}`}
                 >
                   {content}
-                </Pressable>
+                </MotionPressable>
               )
             })}
           </ScrollView>
@@ -559,20 +567,22 @@ export function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
       <SimpleModalSurface onClose={onClose} colors={colors}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{strings.chat.subagentsTitle(sessions.length)}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} hitSlop={8}>
-            <X size={18} color={colors.muted} />
-          </Pressable>
+          <MotionPressable accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} hitSlop={8} scaleTo={0.92} surfaceColor={colors.cardOpaque}>
+            <DuotoneIcons.X size={18} color={colors.muted} />
+          </MotionPressable>
         </View>
         <ScrollView style={[styles.subagentList, { maxHeight: listMaxHeight }]} keyboardShouldPersistTaps="handled">
           {sessions.map(item => {
             const parsed = parseAgentLabel(resolveSessionDisplayTitle(item) ?? item.title)
             const role = parsed.role ?? item.title ?? strings.sessions.child
             return (
-              <Pressable
+              <MotionPressable
                 key={item.sessionId}
                 accessibilityRole="button"
                 accessibilityLabel={`${role} ${parsed.task}`}
                 onPress={() => onOpen(item)}
+                scaleTo={0.98}
+                surfaceColor={colors.cardOpaque}
                 style={({ pressed }) => [styles.subagentRow, pressed && styles.resendRowPressed]}
               >
                 <View style={styles.teamRowCopy}>
@@ -586,8 +596,8 @@ export function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
                     <Text style={styles.teamRowTask} numberOfLines={2}>{parsed.task}</Text>
                   )}
                 </View>
-                <ChevronRight size={15} color={colors.subtle} />
-              </Pressable>
+                <DuotoneIcons.ChevronRight size={15} color={colors.subtle} />
+              </MotionPressable>
             )
           })}
         </ScrollView>
@@ -618,9 +628,9 @@ export function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onO
       <SimpleModalSurface onClose={onClose} colors={colors}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{strings.chat.teamTitle(members.length)}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} hitSlop={8}>
-            <X size={18} color={colors.muted} />
-          </Pressable>
+          <MotionPressable accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} hitSlop={8} scaleTo={0.92} surfaceColor={colors.cardOpaque}>
+            <DuotoneIcons.X size={18} color={colors.muted} />
+          </MotionPressable>
         </View>
         <ScrollView style={[styles.subagentList, { maxHeight: listMaxHeight }]} keyboardShouldPersistTaps="handled">
           {members.map(member => {
@@ -673,16 +683,18 @@ export function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onO
                 {row}
                 <View style={{ width: 15 }} />
               </View>
-              : <Pressable
+              : <MotionPressable
                 key={member.id}
                 accessibilityRole="button"
                 accessibilityLabel={`${role} ${active?.subject ?? ''} ${stateLabel}`}
                 onPress={() => onOpen(session)}
+                scaleTo={0.98}
+                surfaceColor={colors.cardOpaque}
                 style={({ pressed }) => [styles.subagentRow, pressed && styles.resendRowPressed]}
               >
                 {row}
-                <ChevronRight size={15} color={colors.subtle} />
-              </Pressable>
+                <DuotoneIcons.ChevronRight size={15} color={colors.subtle} />
+              </MotionPressable>
           })}
         </ScrollView>
       </SimpleModalSurface>

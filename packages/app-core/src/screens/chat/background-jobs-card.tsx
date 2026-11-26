@@ -4,7 +4,6 @@ import {
   Animated,
   Easing,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,9 +11,9 @@ import {
   View,
 } from 'react-native'
 import Svg, { Circle, Path, Rect } from 'react-native-svg'
-import { ChevronDown, ChevronUp, RefreshCw, Square, Terminal, X } from 'lucide-react-native'
 import type { RemoteGatewayStream } from '@dsh-remote/client-core'
 import { IconJobOutline } from '../../ui/dsh-icons'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ThemeColors } from '../../ui/theme'
 import { monoFontFamily } from '../../ui/platform-style'
@@ -280,7 +279,7 @@ export const JobLogPanel = memo(function JobLogPanel({
     <View style={styles.logPanel} testID={testID}>
       <View style={styles.logHeader}>
         <View style={styles.logHeaderTitleRow}>
-          <Terminal size={12} color={colors.muted} />
+          <DuotoneIcons.Terminal size={12} color={colors.muted} />
           <Text style={styles.logHeaderTitle}>{copy.jobOutput}</Text>
         </View>
         {lost && <Text style={styles.logLostNotice}>{copy.truncated}</Text>}
@@ -294,14 +293,16 @@ export const JobLogPanel = memo(function JobLogPanel({
       )}
 
       {error && output.length === 0 && (
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           onPress={() => setAttempt(a => a + 1)}
+          scaleTo={0.96}
+          surfaceColor={colors.surfaceStrong}
           style={styles.retry}
           testID={`${testID}-retry`}
         >
           <Text style={styles.retryText}>{copy.retry}</Text>
-        </Pressable>
+        </MotionPressable>
       )}
 
       {output.length > 0 ? (
@@ -382,11 +383,13 @@ export const BackgroundJobItem = memo(function BackgroundJobItem({
 
         <View style={styles.jobActions}>
           {isKillable && (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={copy.stopJob}
               disabled={isStopping}
               onPress={() => onKill(job.id)}
+              scaleTo={0.95}
+              surfaceColor={colors.dangerSoft}
               style={({ pressed }) => [
                 styles.stopBtn,
                 pressed && styles.stopBtnPressed,
@@ -397,7 +400,7 @@ export const BackgroundJobItem = memo(function BackgroundJobItem({
               {isStopping ? (
                 <ActivityIndicator size={12} color={colors.warning ?? '#F59E0B'} />
               ) : (
-                <Square size={12} color={colors.danger ?? '#EF4444'} fill={colors.danger ?? '#EF4444'} />
+                <DuotoneIcons.Square size={12} color={colors.danger ?? '#EF4444'} fill={colors.danger ?? '#EF4444'} />
               )}
               <Text
                 style={[
@@ -407,19 +410,21 @@ export const BackgroundJobItem = memo(function BackgroundJobItem({
               >
                 {isStopping ? copy.stoppingJob : copy.stopJob}
               </Text>
-            </Pressable>
+            </MotionPressable>
           )}
 
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={logsOpen ? copy.hideLogs : copy.jobLogs}
             accessibilityState={{ expanded: logsOpen }}
             onPress={() => setLogsOpen(prev => !prev)}
+            scaleTo={0.95}
+            surfaceColor={colors.surfaceStrong}
             style={({ pressed }) => [styles.logsBtn, pressed && styles.logsBtnPressed]}
             testID={`${testID}-logs-btn`}
           >
             <Text style={styles.logsBtnText}>{logsOpen ? copy.hideLogs : copy.jobLogs}</Text>
-          </Pressable>
+          </MotionPressable>
         </View>
       </View>
 
@@ -514,11 +519,13 @@ export const BackgroundJobsCard = memo(function BackgroundJobsCard({
 
   return (
     <View style={styles.card} testID={testID}>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${copy.backgroundJobs || copy.jobs} · ${statsText}`}
         accessibilityState={{ expanded: isOpen }}
         onPress={onClose ?? handleToggle}
+        scaleTo={0.98}
+        surfaceColor={colors.card}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
         testID={`${testID}-header`}
       >
@@ -539,33 +546,35 @@ export const BackgroundJobsCard = memo(function BackgroundJobsCard({
 
         <View style={styles.headerTrailing}>
           {onRefresh && (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.common.refresh}
               onPress={onRefresh}
               hitSlop={8}
+              scaleTo={0.92}
+              surfaceColor={colors.card}
               style={styles.refreshBtn}
               testID={`${testID}-refresh-btn`}
             >
               {refreshing ? (
                 <ActivityIndicator size={14} color={colors.primary} />
               ) : (
-                <RefreshCw size={14} color={colors.muted} />
+                <DuotoneIcons.RefreshCw size={14} color={colors.muted} />
               )}
-            </Pressable>
+            </MotionPressable>
           )}
 
           <View style={styles.chevron}>
             {onClose ? (
-              <X size={16} color={colors.muted} />
+              <DuotoneIcons.X size={16} color={colors.muted} />
             ) : isOpen ? (
-              <ChevronUp size={16} color={colors.muted} />
+              <DuotoneIcons.ChevronUp size={16} color={colors.muted} />
             ) : (
-              <ChevronDown size={16} color={colors.muted} />
+              <DuotoneIcons.ChevronDown size={16} color={colors.muted} />
             )}
           </View>
         </View>
-      </Pressable>
+      </MotionPressable>
 
       {isOpen && (
         <View style={styles.contentWrap} testID={`${testID}-content`}>
@@ -579,14 +588,16 @@ export const BackgroundJobsCard = memo(function BackgroundJobsCard({
           )}
 
           {error && (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               onPress={onRefresh}
+              scaleTo={0.96}
+              surfaceColor={colors.card}
               style={styles.retry}
               testID={`${testID}-error-retry`}
             >
               <Text style={styles.retryText}>{copy.retry}</Text>
-            </Pressable>
+            </MotionPressable>
           )}
 
           {jobs.length === 0 && !loading && !error && (
@@ -859,6 +870,6 @@ const createStyles = (colors: ThemeColors) =>
     },
     retryText: {
       ...typography.small,
-      color: colors.primary,
+      color: colors.ink,
     },
   })

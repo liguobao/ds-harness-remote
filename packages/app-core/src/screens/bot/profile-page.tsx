@@ -6,7 +6,6 @@ import {
   Dimensions,
   Easing,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,27 +13,6 @@ import {
 } from 'react-native'
 import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
-import {
-  ArrowLeftRight,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  CopyPlus,
-  FileText,
-  FolderOpen,
-  Globe,
-  MoreHorizontal,
-  Pause,
-  Play,
-  Plus,
-  Settings,
-  Square,
-  Trash2,
-  Users,
-  X,
-} from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings as s } from '../../locales/i18n'
 import {
@@ -51,6 +29,7 @@ import {
 } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
 import { Button, IconButton } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { Toggle } from '../../ui/toggle'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -313,19 +292,19 @@ export function BotProfilePage({
   if (bot) {
     popoverActions.push({
       key: 'browser',
-      icon: Globe,
+      icon: DuotoneIcons.Globe,
       label: s.bots.browser,
       onPress: () => setTopTab('browser'),
     })
     popoverActions.push({
       key: 'sessions',
-      icon: FolderOpen,
+      icon: DuotoneIcons.FolderOpen,
       label: `${s.bots.sessions} (${allParts.length})`,
       onPress: () => openSubPage('sessions'),
     })
     popoverActions.push({
       key: 'new-part',
-      icon: Plus,
+      icon: DuotoneIcons.Plus,
       label: s.bots.newSession,
       disabled: busy || Boolean(state.readOnly),
       onPress: () => {
@@ -336,7 +315,7 @@ export function BotProfilePage({
     if (!bot.main || mainCount > 1) {
       popoverActions.push({
         key: 'main',
-        icon: ArrowLeftRight,
+        icon: DuotoneIcons.ArrowLeftRight,
         label: bot.main ? s.bots.removeMain : s.bots.replaceMain,
         disabled: busy || Boolean(state.readOnly),
         onPress: () => void perform('set-main', { id: bot.id, main: !bot.main }),
@@ -345,7 +324,7 @@ export function BotProfilePage({
     if (!bot.private) {
       popoverActions.push({
         key: 'duplicate',
-        icon: CopyPlus,
+        icon: DuotoneIcons.CopyPlus,
         label: s.bots.duplicate,
         disabled: busy || Boolean(state.readOnly),
         onPress: () => {
@@ -356,14 +335,14 @@ export function BotProfilePage({
     }
     popoverActions.push({
       key: 'copy-id',
-      icon: Copy,
+      icon: DuotoneIcons.Copy,
       label: s.bots.copyId,
       onPress: () => void Clipboard.setStringAsync(bot.id),
     })
     if (canDeleteBot(state, bot)) {
       popoverActions.push({
         key: 'delete',
-        icon: Trash2,
+        icon: DuotoneIcons.Trash2,
         label: s.bots.delete,
         danger: true,
         disabled: busy || Boolean(state.readOnly),
@@ -373,20 +352,20 @@ export function BotProfilePage({
   } else if (room) {
     popoverActions.push({
       key: 'stop-room',
-      icon: Square,
+      icon: DuotoneIcons.Square,
       label: s.bots.stop,
       disabled: busy || Boolean(state.readOnly),
       onPress: () => void perform('stop-room-work', { roomId: room.id }),
     })
     popoverActions.push({
       key: 'copy-id',
-      icon: Copy,
+      icon: DuotoneIcons.Copy,
       label: s.bots.copyId,
       onPress: () => void Clipboard.setStringAsync(room.id),
     })
     popoverActions.push({
       key: 'delete',
-      icon: Trash2,
+      icon: DuotoneIcons.Trash2,
       label: s.bots.delete,
       danger: true,
       disabled: busy || Boolean(state.readOnly),
@@ -451,18 +430,18 @@ export function BotProfilePage({
         >
           {/* Top Action Bar (`<` on left, `⚙` Settings + `•••` More on right, matching Figure 1) */}
           <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={s.common.back}
               onPress={onClose}
               hitSlop={8}
               style={({ pressed }) => [styles.circleBtn, { backgroundColor: cardBg }, pressed && styles.btnPressed]}
             >
-              <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
-            </Pressable>
+              <DuotoneIcons.ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
+            </MotionPressable>
 
             <View style={styles.topRightGroup}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={s.bots.botSettings}
                 disabled={busy || Boolean(state.readOnly)}
@@ -475,18 +454,18 @@ export function BotProfilePage({
                   (busy || Boolean(state.readOnly)) && { opacity: 0.45 },
                 ]}
               >
-                <Settings size={19} color={colors.ink} strokeWidth={1.9} />
-              </Pressable>
+                <DuotoneIcons.Settings size={19} color={colors.ink} strokeWidth={1.9} />
+              </MotionPressable>
 
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={s.sessions.moreActions}
                 onPress={() => setMoreOpen(true)}
                 hitSlop={8}
                 style={({ pressed }) => [styles.circleBtn, { backgroundColor: cardBg }, pressed && styles.btnPressed]}
               >
-                <MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
-              </Pressable>
+                <DuotoneIcons.MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
+              </MotionPressable>
             </View>
           </View>
 
@@ -509,7 +488,7 @@ export function BotProfilePage({
                     </View>
                   ) : null
                 })}
-                {room.members.length === 0 && <Users size={34} color={colors.muted} />}
+                {room.members.length === 0 && <DuotoneIcons.Users size={34} color={colors.muted} />}
               </View>
             ) : null}
 
@@ -545,7 +524,7 @@ export function BotProfilePage({
                 ] as const).map(([key, label]) => {
                   const active = topTab === key
                   return (
-                    <Pressable
+                    <MotionPressable
                       key={key}
                       accessibilityRole="tab"
                       accessibilityState={{ selected: active }}
@@ -561,7 +540,7 @@ export function BotProfilePage({
                       <Text style={[styles.segmentedTabText, active && styles.segmentedTabTextActive]}>
                         {label}
                       </Text>
-                    </Pressable>
+                    </MotionPressable>
                   )
                 })}
               </View>
@@ -590,7 +569,7 @@ export function BotProfilePage({
                   {/* 1. 模型 (Model Selector Box, matching Figure 1) */}
                   <View style={styles.fieldSection}>
                     <Text style={styles.fieldSectionTitle}>{s.bots.model}</Text>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       disabled={busy || Boolean(state.readOnly)}
                       onPress={() => setModelPickerOpen(true)}
@@ -621,8 +600,8 @@ export function BotProfilePage({
                           </Text>
                         )}
                       </View>
-                      <ChevronDown size={18} color={colors.muted} />
-                    </Pressable>
+                      <DuotoneIcons.ChevronDown size={18} color={colors.muted} />
+                    </MotionPressable>
                   </View>
 
                   {/* 2. 权限 (3-Segment Pill: 仅可查看 | 工作区内修改 | 完全权限, matching Figure 1) */}
@@ -643,7 +622,7 @@ export function BotProfilePage({
                       ).map(([val, label, danger]) => {
                         const active = currentPerm === val
                         return (
-                          <Pressable
+                          <MotionPressable
                             key={val}
                             accessibilityRole="radio"
                             accessibilityState={{ checked: active }}
@@ -671,7 +650,7 @@ export function BotProfilePage({
                             >
                               {label}
                             </Text>
-                          </Pressable>
+                          </MotionPressable>
                         )
                       })}
                     </View>
@@ -680,7 +659,7 @@ export function BotProfilePage({
                   {/* 3. 工作文件夹 (Working Folder Selector Box: `总工作区 ∨`, matching Figure 1) */}
                   <View style={styles.fieldSection}>
                     <Text style={styles.fieldSectionTitle}>{s.bots.workingFolder}</Text>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       disabled={busy || Boolean(state.readOnly)}
                       onPress={() => setFolderPickerOpen(true)}
@@ -700,13 +679,13 @@ export function BotProfilePage({
                           </Text>
                         )}
                       </View>
-                      <ChevronDown size={18} color={colors.muted} />
-                    </Pressable>
+                      <DuotoneIcons.ChevronDown size={18} color={colors.muted} />
+                    </MotionPressable>
                   </View>
 
                   {/* 4. Instructions / `在 Bot 设置里添加说明` (matching Figure 1) */}
                   {bot.instructions.trim() ? (
-                    <Pressable
+                    <MotionPressable
                       onPress={() => {
                         onClose()
                         onEdit()
@@ -716,9 +695,9 @@ export function BotProfilePage({
                       <Text style={[styles.selectorSubText, { color: colors.ink, lineHeight: 19 }]} numberOfLines={3}>
                         {bot.instructions.trim()}
                       </Text>
-                    </Pressable>
+                    </MotionPressable>
                   ) : (
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       onPress={() => {
                         onClose()
@@ -727,14 +706,14 @@ export function BotProfilePage({
                       style={styles.centeredHintBtn}
                     >
                       <Text style={styles.centeredHintText}>{s.bots.addInstructionsHint}</Text>
-                    </Pressable>
+                    </MotionPressable>
                   )}
 
                   {/* 5. 记忆 (Memory: `📄 3 条    管理 >`, matching Figure 1) */}
                   {state.memory !== false && (
                     <View style={styles.fieldSection}>
                       <Text style={styles.fieldSectionTitle}>{s.bots.memory}</Text>
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="button"
                         onPress={() => openSubPage('memory')}
                         style={({ pressed }) => [
@@ -743,22 +722,22 @@ export function BotProfilePage({
                           pressed && styles.cardRowPressed,
                         ]}
                       >
-                        <FileText size={17} color={colors.muted} />
+                        <DuotoneIcons.FileText size={17} color={colors.muted} />
                         <Text style={[styles.selectorPrimaryText, { flex: 1, fontWeight: '400' }]} numberOfLines={1}>
                           {memoryCountLabel}
                         </Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
                           <Text style={styles.manageLinkText}>{s.bots.memoryManage}</Text>
-                          <ChevronRight size={16} color={colors.muted} />
+                          <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
                         </View>
-                      </Pressable>
+                      </MotionPressable>
                     </View>
                   )}
 
                   {/* 6. 用量 (Usage: `Chief    600.9K tok · 缓存命中 74%`, matching Figure 1) */}
                   <View style={styles.fieldSection}>
                     <Text style={styles.fieldSectionTitle}>{s.bots.usage}</Text>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       onPress={() => {
                         loadFullUsage()
@@ -776,8 +755,8 @@ export function BotProfilePage({
                       <Text style={[styles.selectorSubText, { flex: 1, textAlign: 'right' }]} numberOfLines={1}>
                         {usageInlineText}
                       </Text>
-                      <ChevronRight size={16} color={colors.muted} />
-                    </Pressable>
+                      <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+                    </MotionPressable>
                   </View>
 
                   {/* 7. 定时任务 (Scheduled Tasks: `还没有定时任务，去添加` or task rows, matching Figure 1) */}
@@ -789,9 +768,9 @@ export function BotProfilePage({
                           : s.bots.scheduledTasks}
                       </Text>
                       {botSchedules.length > 0 && (
-                        <Pressable onPress={() => openSubPage('schedules', false)} hitSlop={8}>
+                        <MotionPressable onPress={() => openSubPage('schedules', false)} hitSlop={8}>
                           <Text style={styles.manageLinkText}>{s.bots.memoryManage}</Text>
-                        </Pressable>
+                        </MotionPressable>
                       )}
                     </View>
 
@@ -800,7 +779,7 @@ export function BotProfilePage({
                         <ActivityIndicator size="small" color={colors.primary} />
                       </View>
                     ) : botSchedules.length === 0 ? (
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="button"
                         onPress={() => openSubPage('schedules', true)}
                         style={({ pressed }) => [
@@ -810,10 +789,10 @@ export function BotProfilePage({
                         ]}
                       >
                         <Text style={[styles.selectorSubText, { flex: 1 }]}>{s.bots.schedulesNoneAdd}</Text>
-                        <ChevronRight size={16} color={colors.muted} />
-                      </Pressable>
+                        <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+                      </MotionPressable>
                     ) : (
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="button"
                         onPress={() => openSubPage('schedules', false)}
                         style={({ pressed }) => [
@@ -832,25 +811,25 @@ export function BotProfilePage({
                                 {formatScheduleSummary(task)}
                               </Text>
                             </View>
-                            <ChevronRight size={16} color={colors.subtle} />
+                            <DuotoneIcons.ChevronRight size={16} color={colors.subtle} />
                           </View>
                         ))}
-                      </Pressable>
+                      </MotionPressable>
                     )}
                   </View>
 
                   {/* 会话分段快捷入口 + 置顶开关 */}
                   <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       onPress={() => openSubPage('sessions')}
                       style={({ pressed }) => [styles.cardRow, pressed && styles.cardRowPressed]}
                     >
-                      <FolderOpen size={19} color={colors.ink} />
+                      <DuotoneIcons.FolderOpen size={19} color={colors.ink} />
                       <Text style={styles.rowLabel}>{s.bots.sessions}</Text>
                       <Text style={styles.rowValue}>{s.bots.sessionsCount(allParts.length)}</Text>
-                      <ChevronRight size={18} color={colors.subtle} />
-                    </Pressable>
+                      <DuotoneIcons.ChevronRight size={18} color={colors.subtle} />
+                    </MotionPressable>
                     {!bot.tile && (
                       <View style={[styles.toggleRow, styles.cardRowDivider]}>
                         <Text style={styles.rowLabel}>{s.bots.pinChat}</Text>
@@ -866,7 +845,7 @@ export function BotProfilePage({
 
                   {canDeleteBot(state, bot) && (
                     <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="button"
                         accessibilityLabel={s.bots.delete}
                         disabled={busy || Boolean(state.readOnly)}
@@ -877,9 +856,9 @@ export function BotProfilePage({
                           (busy || Boolean(state.readOnly)) && { opacity: 0.45 },
                         ]}
                       >
-                        <Trash2 size={19} color={colors.danger} />
+                        <DuotoneIcons.Trash2 size={19} color={colors.danger} />
                         <Text style={[styles.rowLabel, { color: colors.danger }]}>{s.bots.delete}</Text>
-                      </Pressable>
+                      </MotionPressable>
                     </View>
                   )}
                 </View>
@@ -894,7 +873,7 @@ export function BotProfilePage({
                         {text(room.goal.status) === 'running' ? (
                           <Button
                             variant="secondary"
-                            icon={Pause}
+                            icon={DuotoneIcons.Pause}
                             label={s.automation.pauseTask}
                             disabled={busy || Boolean(state.readOnly)}
                             onPress={() => void perform('goal-control', { roomId: room.id, action: 'pause' })}
@@ -902,7 +881,7 @@ export function BotProfilePage({
                         ) : text(room.goal.status) === 'paused' ? (
                           <Button
                             variant="secondary"
-                            icon={Play}
+                            icon={DuotoneIcons.Play}
                             label={s.automation.resumeTask}
                             disabled={busy || Boolean(state.readOnly)}
                             onPress={() => void perform('goal-control', { roomId: room.id, action: 'resume' })}
@@ -910,7 +889,7 @@ export function BotProfilePage({
                         ) : null}
                         <Button
                           variant="secondary"
-                          icon={Square}
+                          icon={DuotoneIcons.Square}
                           label={s.bots.stop}
                           disabled={busy || Boolean(state.readOnly)}
                           onPress={() => void perform('goal-control', { roomId: room.id, action: 'stop' })}
@@ -927,7 +906,7 @@ export function BotProfilePage({
                           const memberBot = state.bots.find(entry => entry.id === memberId)
                           return (
                             <View key={memberId} style={[styles.memberRow, index > 0 && styles.cardRowDivider]}>
-                              {memberBot ? <BotAvatar bot={memberBot} size={36} /> : <Users size={24} color={colors.muted} />}
+                              {memberBot ? <BotAvatar bot={memberBot} size={36} /> : <DuotoneIcons.Users size={24} color={colors.muted} />}
                               <View style={styles.memberBody}>
                                 <Text style={styles.rowLabel} numberOfLines={1}>
                                   {memberBot?.name ?? memberId}
@@ -941,7 +920,7 @@ export function BotProfilePage({
                               <IconButton
                                 dense
                                 label={s.bots.stop}
-                                icon={Square}
+                                icon={DuotoneIcons.Square}
                                 disabled={busy || Boolean(state.readOnly)}
                                 onPress={() => void perform('stop-member-work', { roomId: room.id, botId: memberId })}
                               />
@@ -955,22 +934,22 @@ export function BotProfilePage({
                   {state.memory !== false && (
                     <View style={styles.fieldSection}>
                       <Text style={styles.fieldSectionTitle}>{s.bots.memory}</Text>
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="button"
                         onPress={() => openSubPage('memory')}
                         style={({ pressed }) => [styles.selectorBox, { backgroundColor: cardBg }, pressed && styles.cardRowPressed]}
                       >
-                        <FileText size={17} color={colors.muted} />
+                        <DuotoneIcons.FileText size={17} color={colors.muted} />
                         <Text style={[styles.selectorPrimaryText, { flex: 1, fontWeight: '400' }]}>{memoryCountLabel}</Text>
                         <Text style={styles.manageLinkText}>{s.bots.memoryManage}</Text>
-                        <ChevronRight size={16} color={colors.muted} />
-                      </Pressable>
+                        <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+                      </MotionPressable>
                     </View>
                   )}
 
                   <View style={styles.fieldSection}>
                     <Text style={styles.fieldSectionTitle}>{s.bots.scheduledTasks}</Text>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       onPress={() => openSubPage('schedules', botSchedules.length === 0)}
                       style={({ pressed }) => [styles.selectorBox, { backgroundColor: cardBg }, pressed && styles.cardRowPressed]}
@@ -980,8 +959,8 @@ export function BotProfilePage({
                           ? s.bots.schedulesEnabled(botSchedules.length)
                           : s.bots.schedulesNoneAdd}
                       </Text>
-                      <ChevronRight size={16} color={colors.muted} />
-                    </Pressable>
+                      <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+                    </MotionPressable>
                   </View>
 
                   <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
@@ -997,7 +976,7 @@ export function BotProfilePage({
                   </View>
 
                   <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       accessibilityLabel={s.bots.delete}
                       disabled={busy || Boolean(state.readOnly)}
@@ -1008,9 +987,9 @@ export function BotProfilePage({
                         (busy || Boolean(state.readOnly)) && { opacity: 0.45 },
                       ]}
                     >
-                      <Trash2 size={19} color={colors.danger} />
+                      <DuotoneIcons.Trash2 size={19} color={colors.danger} />
                       <Text style={[styles.rowLabel, { color: colors.danger }]}>{s.bots.delete}</Text>
-                    </Pressable>
+                    </MotionPressable>
                   </View>
                 </View>
               ) : null}
@@ -1027,15 +1006,15 @@ export function BotProfilePage({
               ]}
             >
               <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={s.common.back}
                   onPress={closeSubPage}
                   hitSlop={8}
                   style={({ pressed }) => [styles.circleBtn, { backgroundColor: cardBg }, pressed && styles.btnPressed]}
                 >
-                  <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
-                </Pressable>
+                  <DuotoneIcons.ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
+                </MotionPressable>
 
                 <Text style={styles.subPageTitle} numberOfLines={1}>
                   {mountedSubPage === 'sessions'
@@ -1048,7 +1027,7 @@ export function BotProfilePage({
                 </Text>
 
                 {mountedSubPage === 'sessions' && bot ? (
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     accessibilityLabel={s.bots.newSession}
                     disabled={busy || Boolean(state.readOnly)}
@@ -1064,8 +1043,8 @@ export function BotProfilePage({
                       (busy || Boolean(state.readOnly)) && { opacity: 0.4 },
                     ]}
                   >
-                    <Plus size={20} color={colors.ink} strokeWidth={2.1} />
-                  </Pressable>
+                    <DuotoneIcons.Plus size={20} color={colors.ink} strokeWidth={2.1} />
+                  </MotionPressable>
                 ) : (
                   <View style={styles.circlePlaceholder} />
                 )}
@@ -1085,7 +1064,7 @@ export function BotProfilePage({
                           ? matched.title
                           : s.bots.sessionNumber(allParts.length - index)
                       return (
-                        <Pressable
+                        <MotionPressable
                           key={partId}
                           accessibilityRole="button"
                           accessibilityLabel={label}
@@ -1109,11 +1088,11 @@ export function BotProfilePage({
                             </Text>
                           </View>
                           {current ? (
-                            <Check size={18} color={colors.primary} strokeWidth={2.2} />
+                            <DuotoneIcons.Check size={18} color={colors.primary} strokeWidth={2.2} />
                           ) : (
-                            <ChevronRight size={18} color={colors.subtle} />
+                            <DuotoneIcons.ChevronRight size={18} color={colors.subtle} />
                           )}
-                        </Pressable>
+                        </MotionPressable>
                       )
                     })}
                   </View>
@@ -1199,12 +1178,12 @@ export function BotProfilePage({
               <View style={{ gap: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={styles.subCardTitle}>{s.bots.model}</Text>
-                  <Pressable onPress={() => setModelPickerOpen(false)} hitSlop={8}>
-                    <X size={20} color={colors.muted} />
-                  </Pressable>
+                  <MotionPressable onPress={() => setModelPickerOpen(false)} hitSlop={8}>
+                    <DuotoneIcons.X size={20} color={colors.muted} />
+                  </MotionPressable>
                 </View>
                 <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
-                  <Pressable
+                  <MotionPressable
                     onPress={() => {
                       setModelPickerOpen(false)
                       void perform('update-bot', { id: bot.id, model: '' })
@@ -1212,8 +1191,8 @@ export function BotProfilePage({
                     style={styles.partRow}
                   >
                     <Text style={[styles.rowLabel, { flex: 1 }]}>{s.bots.defaultModel}</Text>
-                    {!bot.model && <Check size={18} color={colors.primary} />}
-                  </Pressable>
+                    {!bot.model && <DuotoneIcons.Check size={18} color={colors.primary} />}
+                  </MotionPressable>
                   {groupBotModels(state.models).map(group => (
                     <View key={group.provider} style={{ marginTop: 8 }}>
                       <Text style={[styles.fieldSectionTitle, { paddingHorizontal: 14, marginBottom: 4 }]}>
@@ -1224,7 +1203,7 @@ export function BotProfilePage({
                         const label = text(item.name) || text(item.label) || ref
                         const selected = bot.model === ref
                         return (
-                          <Pressable
+                          <MotionPressable
                             key={ref}
                             onPress={() => {
                               setModelPickerOpen(false)
@@ -1236,8 +1215,8 @@ export function BotProfilePage({
                             <Text style={[styles.rowLabel, { flex: 1 }]} numberOfLines={1}>
                               {label}
                             </Text>
-                            {selected && <Check size={18} color={colors.primary} />}
-                          </Pressable>
+                            {selected && <DuotoneIcons.Check size={18} color={colors.primary} />}
+                          </MotionPressable>
                         )
                       })}
                     </View>

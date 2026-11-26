@@ -2,31 +2,12 @@ import { useState } from 'react'
 import {
   ActivityIndicator,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native'
-import {
-  Bot,
-  CalendarClock,
-  Check,
-  Folder,
-  Globe,
-  KeyRound,
-  MessageSquareShare,
-  Monitor,
-  Plug,
-  Plus,
-  Search,
-  ShieldCheck,
-  Sparkles,
-  Terminal,
-  Users,
-  X,
-} from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import {
   object,
@@ -42,6 +23,7 @@ import {
   IconButton,
   SectionTitle,
 } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -92,7 +74,7 @@ export function DsBotConnectorsSubpage({
             {isConnected && toolCount > 0 ? s.dsBotSettings.connectedTools(toolCount) : conn.desc}
           </Text>
         </View>
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={isConnected ? s.dsBotSettings.connectedName(conn.name) : s.dsBotSettings.connectName(conn.name)}
           onPress={() => setSelectedConnector(conn)}
@@ -105,7 +87,7 @@ export function DsBotConnectorsSubpage({
           <Text style={[styles.connectBtnText, isConnected && { color: colors.primary }]}>
             {isConnected ? s.dsBotSettings.connected : s.dsBotSettings.connect}
           </Text>
-        </Pressable>
+        </MotionPressable>
       </View>
     )
   }
@@ -116,7 +98,7 @@ export function DsBotConnectorsSubpage({
     <>
       <View style={styles.searchToolbar}>
         <View style={styles.searchBox}>
-          <Search size={16} color={colors.muted} />
+          <DuotoneIcons.Search size={16} color={colors.muted} />
           <TextInput
             value={connectorQuery}
             onChangeText={setConnectorQuery}
@@ -125,19 +107,19 @@ export function DsBotConnectorsSubpage({
             style={styles.searchInput}
           />
           {Boolean(connectorQuery) && (
-            <Pressable onPress={() => setConnectorQuery('')} hitSlop={8}>
-              <X size={15} color={colors.muted} />
-            </Pressable>
+            <MotionPressable onPress={() => setConnectorQuery('')} hitSlop={8}>
+              <DuotoneIcons.X size={15} color={colors.muted} />
+            </MotionPressable>
           )}
         </View>
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           onPress={() => setCustomConnectorGuideOpen(true)}
           style={({ pressed }) => [styles.inlineCreateBtn, pressed && { opacity: 0.75 }]}
         >
-          <Plus size={15} color={colors.ink} />
+          <DuotoneIcons.Plus size={15} color={colors.ink} />
           <Text style={styles.inlineCreateBtnText}>{s.dsBotSettings.custom}</Text>
-        </Pressable>
+        </MotionPressable>
       </View>
 
       <ScrollView
@@ -148,7 +130,7 @@ export function DsBotConnectorsSubpage({
         {DS_BOT_CONNECTOR_CATEGORIES.map(cat => {
           const on = connectorCat === cat.id
           return (
-            <Pressable
+            <MotionPressable
               key={cat.id}
               onPress={() => setConnectorCat(cat.id)}
               style={[styles.smallPill, on && styles.smallPillActive]}
@@ -156,7 +138,7 @@ export function DsBotConnectorsSubpage({
               <Text style={[styles.smallPillText, on && styles.smallPillTextActive]}>
                 {cat.label}
               </Text>
-            </Pressable>
+            </MotionPressable>
           )
         })}
       </ScrollView>
@@ -215,13 +197,13 @@ export function DsBotConnectorsSubpage({
             <View style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={styles.sheetTitle}>{selectedConnector.name}</Text>
-                <IconButton label={s.common.close} icon={X} onPress={() => setSelectedConnector(null)} />
+                <IconButton label={s.common.close} icon={DuotoneIcons.X} onPress={() => setSelectedConnector(null)} />
               </View>
               <Text style={styles.rowSub}>{selectedConnector.desc}</Text>
               <GroupCard>
                 <GroupRow
                   first
-                  icon={Plug}
+                  icon={DuotoneIcons.Plug}
                   label={s.dsBotSettings.authMethod}
                   value={
                     selectedConnector.authKind === 'oauth'
@@ -235,7 +217,7 @@ export function DsBotConnectorsSubpage({
                   chevron={false}
                 />
                 <GroupRow
-                  icon={Monitor}
+                  icon={DuotoneIcons.Monitor}
                   label={s.dsBotSettings.setupNotes}
                   detail={s.dsBotSettings.connectorSetupDetail}
                   chevron={false}
@@ -253,7 +235,7 @@ export function DsBotConnectorsSubpage({
             <View style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={styles.sheetTitle}>{s.dsBotSettings.addCustomConnector}</Text>
-                <IconButton label={s.common.close} icon={X} onPress={() => setCustomConnectorGuideOpen(false)} />
+                <IconButton label={s.common.close} icon={DuotoneIcons.X} onPress={() => setCustomConnectorGuideOpen(false)} />
               </View>
               <Text style={styles.rowSub}>
                 {s.dsBotSettings.customConnectorIntro}
@@ -261,13 +243,13 @@ export function DsBotConnectorsSubpage({
               <GroupCard>
                 <GroupRow
                   first
-                  icon={Globe}
+                  icon={DuotoneIcons.Globe}
                   label={s.dsBotSettings.remoteMcp}
                   detail={s.dsBotSettings.remoteMcpDetail}
                   chevron={false}
                 />
                 <GroupRow
-                  icon={Terminal}
+                  icon={DuotoneIcons.Terminal}
                   label={s.dsBotSettings.localMcp}
                   detail={s.dsBotSettings.localMcpDetail}
                   chevron={false}
@@ -314,7 +296,7 @@ export function DsBotImSubpage({
                 <GroupRow
                   key={cid}
                   first={idx === 0}
-                  icon={MessageSquareShare}
+                  icon={DuotoneIcons.MessageSquareShare}
                   label={text(conn.name) || plat?.name || platId}
                   detail={s.dsBotSettings.imRoutesTo(botTarget)}
                   value={online ? s.dsBotSettings.running : s.dsBotSettings.configured}
@@ -339,7 +321,7 @@ export function DsBotImSubpage({
                 <Text style={styles.rowTitle}>{plat.name}</Text>
                 <Text style={styles.rowSub} numberOfLines={1}>{plat.sub}</Text>
               </View>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={s.dsBotSettings.connectName(plat.name)}
                 onPress={() => setSelectedImPlatform(plat)}
@@ -352,7 +334,7 @@ export function DsBotImSubpage({
                 <Text style={[styles.connectBtnText, configuredCount > 0 && { color: colors.primary }]}>
                   {configuredCount > 0 ? s.dsBotSettings.imConnectedCount(configuredCount) : s.dsBotSettings.connect}
                 </Text>
-              </Pressable>
+              </MotionPressable>
             </View>
           )
         })}
@@ -364,19 +346,19 @@ export function DsBotImSubpage({
             <View style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Text style={styles.sheetTitle}>{s.dsBotSettings.connectName(selectedImPlatform.name)}</Text>
-                <IconButton label={s.common.close} icon={X} onPress={() => setSelectedImPlatform(null)} />
+                <IconButton label={s.common.close} icon={DuotoneIcons.X} onPress={() => setSelectedImPlatform(null)} />
               </View>
               <Text style={styles.rowSub}>{selectedImPlatform.sub}</Text>
               <GroupCard>
                 <GroupRow
                   first
-                  icon={KeyRound}
+                  icon={DuotoneIcons.KeyRound}
                   label={s.dsBotSettings.requiredCredentials}
                   value={selectedImPlatform.fieldsHint}
                   chevron={false}
                 />
                 <GroupRow
-                  icon={Monitor}
+                  icon={DuotoneIcons.Monitor}
                   label={s.dsBotSettings.imSetupMethod}
                   detail={s.dsBotSettings.imSetupDetail(selectedImPlatform.name)}
                   chevron={false}
@@ -424,14 +406,14 @@ export function DsBotCapabilitiesSubpage({
         {effectiveState.bots.map(bot => {
           const on = bot.id === targetBot?.id
           return (
-            <Pressable
+            <MotionPressable
               key={bot.id}
               onPress={() => setCapabilityBotId(bot.id)}
               style={[styles.smallPill, on && styles.smallPillActive, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}
             >
               <BotAvatar bot={bot} size={18} />
               <Text style={[styles.smallPillText, on && styles.smallPillTextActive]}>{bot.name}</Text>
-            </Pressable>
+            </MotionPressable>
           )
         })}
       </ScrollView>
@@ -448,13 +430,13 @@ export function DsBotCapabilitiesSubpage({
             <GroupRow
               key={opt.id}
               first={idx === 0}
-              icon={ShieldCheck}
+              icon={DuotoneIcons.ShieldCheck}
               label={opt.label}
               detail={opt.desc}
               selected={chosen}
               chevron={false}
               disabled={!isLiveState || !targetBot}
-              accessory={chosen ? <Check size={18} color={colors.primary} strokeWidth={2.2} /> : undefined}
+              accessory={chosen ? <DuotoneIcons.Check size={18} color={colors.primary} strokeWidth={2.2} /> : undefined}
               onPress={() => {
                 if (targetBot) {
                   void perform('update-bot', { id: targetBot.id, permission: opt.id })
@@ -469,28 +451,28 @@ export function DsBotCapabilitiesSubpage({
       <GroupCard>
         <GroupRow
           first
-          icon={Folder}
+          icon={DuotoneIcons.Folder}
           label={s.dsBotSettings.capWorkspace}
           detail={s.dsBotSettings.capWorkspaceDetail}
           value={s.dsBotSettings.enabled}
           chevron={false}
         />
         <GroupRow
-          icon={Globe}
+          icon={DuotoneIcons.Globe}
           label={s.dsBotSettings.capWeb}
           detail={s.dsBotSettings.capWebDetail}
           value={effectiveState.browser !== false ? s.dsBotSettings.enabled : s.dsBotSettings.disabled}
           chevron={false}
         />
         <GroupRow
-          icon={Users}
+          icon={DuotoneIcons.Users}
           label={s.dsBotSettings.capTeam}
           detail={s.dsBotSettings.capTeamDetail}
           value={targetBot?.private ? s.dsBotSettings.privateIsolated : s.dsBotSettings.enabled}
           chevron={false}
         />
         <GroupRow
-          icon={CalendarClock}
+          icon={DuotoneIcons.CalendarClock}
           label={s.dsBotSettings.capMemory}
           detail={s.dsBotSettings.capMemoryDetail}
           value={effectiveState.memory !== false ? s.dsBotSettings.enabled : s.dsBotSettings.tasksAndSecretsOnly}
@@ -510,7 +492,7 @@ export function DsBotCapabilitiesSubpage({
                 <GroupRow
                   key={cid}
                   first={idx === 0}
-                  icon={Sparkles}
+                  icon={DuotoneIcons.Sparkles}
                   label={text(cap.name) || cid}
                   detail={text(cap.description) || undefined}
                   value={statusText}
@@ -536,7 +518,7 @@ export function DsBotComputerSubpage({
       <GroupCard>
         <GroupRow
           first
-          icon={Monitor}
+          icon={DuotoneIcons.Monitor}
           label={s.dsBotSettings.allowComputerUse}
           detail={s.bots.computerDesc}
           value={effectiveState.computer?.enabled === true ? s.bots.computerIdle : s.dsBotSettings.disabled}
@@ -560,7 +542,7 @@ export function DsBotComputerSubpage({
             <GroupRow
               key={bot.id}
               first={idx === 0}
-              icon={Bot}
+              icon={DuotoneIcons.Bot}
               label={bot.name}
               detail={bot.role || undefined}
               value={levelLabel}
@@ -608,13 +590,13 @@ export function DsBotUsageSubpage({
           const label = s.dsBotSettings.ranges[id]
           const on = usageRange === id
           return (
-            <Pressable
+            <MotionPressable
               key={id}
               onPress={() => onChangeRange(id)}
               style={[styles.smallPill, on && styles.smallPillActive]}
             >
               <Text style={[styles.smallPillText, on && styles.smallPillTextActive]}>{label}</Text>
-            </Pressable>
+            </MotionPressable>
           )
         })}
       </ScrollView>
@@ -679,13 +661,13 @@ export function DsBotUsageSubpage({
                 ] as const).map(([id, label]) => {
                   const on = usageChartGroup === id
                   return (
-                    <Pressable
+                    <MotionPressable
                       key={id}
                       onPress={() => setUsageChartGroup(id)}
                       style={[styles.smallPill, on && styles.smallPillActive]}
                     >
                       <Text style={[styles.smallPillText, on && styles.smallPillTextActive]}>{label}</Text>
-                    </Pressable>
+                    </MotionPressable>
                   )
                 })}
               </View>
@@ -906,7 +888,7 @@ export function DsBotSecretsSubpage({
               <GroupRow
                 key={name}
                 first={idx === 0}
-                icon={KeyRound}
+                icon={DuotoneIcons.KeyRound}
                 label={name}
                 detail={text(sec.purpose) || scopeText}
                 value={scopeText}

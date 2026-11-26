@@ -1,13 +1,11 @@
 import { heartbeatMessageBody } from '../../ui/heartbeat-message'
 import { ChatImageView } from '../../ui/chat-image'
-import { ArrowRightLeft, ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, FilePenLine, FileSearch, HelpCircle, ListTree, RefreshCw, ShieldAlert, Sparkles, Terminal, Wrench, User, X } from 'lucide-react-native'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
   ActivityIndicator,
   Animated,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +23,7 @@ import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
 import { readToolHistoryDetail, useAppStore } from '../../state/store'
 import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
 import { IconChecklistOutline, IconCheckOutline, IconCopyOutline, IconDatabaseOutline } from '../../ui/dsh-icons'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import type { UiArtifact } from '../../state/ui-artifacts'
 import type {
   ApprovalActivity,
@@ -424,26 +423,27 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
       : running ? labels[activeTool === undefined ? 'thinking' : toolActivity(activeTool)].running
         : processSummary(counts)
   const primary = activeTool ? toolActivity(activeTool) : [...counts].sort((a, b) => b[1] - a[1])[0]?.[0]
-  const ActivityIcon = completedSummary ? CircleCheck : primary === 'commands' || primary === 'code' ? Terminal
-    : primary === 'read' || primary === 'search' || primary === 'readImage' ? FileSearch
-      : primary === 'edit' || primary === 'write' ? FilePenLine
-        : primary === 'plan' ? ListTree : tools.length > 0 ? Wrench : Sparkles
+  const ActivityIcon = completedSummary ? DuotoneIcons.CircleCheck : primary === 'commands' || primary === 'code' ? DuotoneIcons.Terminal
+    : primary === 'read' || primary === 'search' || primary === 'readImage' ? DuotoneIcons.FileSearch
+      : primary === 'edit' || primary === 'write' ? DuotoneIcons.FilePenLine
+        : primary === 'plan' ? DuotoneIcons.ListTree : tools.length > 0 ? DuotoneIcons.Wrench : DuotoneIcons.Sparkles
   const detail = latestTool !== undefined ? processDetail(latestTool)
     : runningReasoning && runningReasoning.kind === 'message' ? compactActivityText(runningReasoning.reasoning)?.slice(-160) : undefined
   return <View style={styles.activityGroup}>
-    <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
+    <MotionPressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
       accessibilityState={{ expanded, disabled: pending }} disabled={pending}
       onPress={() => setOpen(value => !value)}
       hitSlop={{ top: 7, bottom: 7 }}
+      scaleTo={0.98}
       style={({ pressed }) => [styles.processHeader, dense && { minHeight: 32 }, pressed && styles.reasoningHeaderPressed]}>
       <View style={styles.processIcon}><ActivityIcon size={15} color={running ? colors.primary : colors.muted} /></View>
       <Text style={styles.processLabel} numberOfLines={1} ellipsizeMode="clip">{label}</Text>
-      {expanded ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />}
-    </Pressable>
+      {expanded ? <DuotoneIcons.ChevronUp size={16} color={colors.muted} /> : <DuotoneIcons.ChevronDown size={16} color={colors.muted} />}
+    </MotionPressable>
     {(latestTool !== undefined || running) && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
       {latestTool === undefined || (!closed && latestTool.state === 'running')
         ? <ReplyStatusDots />
-        : latestTool.state === 'failed' ? <X size={13} color={colors.danger} /> : <CircleCheck size={13} color={colors.muted} />}
+        : latestTool.state === 'failed' ? <DuotoneIcons.X size={13} color={colors.danger} /> : <DuotoneIcons.CircleCheck size={13} color={colors.muted} />}
       <Text style={styles.processCurrentText} numberOfLines={2}>{latestTool ? toolDisplayName(latestTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
     </View>}
     {expanded && <ScrollView ref={body} style={[{ maxHeight: Math.min(400, height / 2) }, styles.processScroll, running && styles.processScrollActive]} nestedScrollEnabled
@@ -519,19 +519,20 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
     } else resend()
   }
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={`${status} · ${zhCN.chat.resend}`}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={retry}
+      scaleTo={0.97}
       style={({ pressed }) => [styles.resendRow, pressed && !disabled && styles.resendRowPressed, disabled && styles.resendRowDisabled]}
     >
-      <RefreshCw size={13} color={disabled ? colors.muted : colors.danger} />
+      <DuotoneIcons.RefreshCw size={13} color={disabled ? colors.muted : colors.danger} />
       <Text style={[styles.resendText, disabled && styles.resendTextMuted, !disabled && styles.resendTextFailed]}>
         {missingImages ? zhCN.chat.resendImageMissing : `${status} · ${zhCN.chat.resend}`}
       </Text>
-    </Pressable>
+    </MotionPressable>
   )
 }
 function HeartbeatMessage({ text, body, searchHighlight }: { text: string; body: string; searchHighlight?: SearchHighlightState }) {
@@ -540,12 +541,12 @@ function HeartbeatMessage({ text, body, searchHighlight }: { text: string; body:
   const styles = useThemedStyles(createStyles)
   return <View>
     <NativeMarkdown text={body} searchHighlight={searchHighlight} />
-    <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
-      onPress={() => setExpanded(value => !value)} style={styles.reasoningHeader}>
-      <Code2 size={16} color={colors.muted} />
+    <MotionPressable accessibilityRole="button" accessibilityState={{ expanded }}
+      onPress={() => setExpanded(value => !value)} scaleTo={0.98} style={styles.reasoningHeader}>
+      <DuotoneIcons.Code2 size={16} color={colors.muted} />
       <Text style={styles.reasoningLabel}>{expanded ? zhCN.chat.heartbeatCollapse : zhCN.chat.heartbeatExpand}</Text>
-      {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
-    </Pressable>
+      {expanded ? <DuotoneIcons.ChevronUp size={17} color={colors.muted} /> : <DuotoneIcons.ChevronDown size={17} color={colors.muted} />}
+    </MotionPressable>
     {expanded && <Text selectable style={styles.toolDetailCode}>{text}</Text>}
   </View>
 }
@@ -623,8 +624,8 @@ function HandoffContextCard({
     ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.12)' : 'rgba(255, 255, 255, 0.18)')
     : isSolid
       ? (darkSolidText ? 'rgba(0, 0, 0, 0.12)' : palette.surfaceStrong)
-      : colors.primarySoft
-  const chipText = userBubble || isSolid ? palette.ink : colors.primary
+      : colors.surfaceStrong
+  const chipText = userBubble || isSolid ? palette.ink : colors.ink
   const bodyBg = userBubble
     ? (scheme === 'dark' ? 'rgba(11, 13, 17, 0.06)' : 'rgba(0, 0, 0, 0.18)')
     : isSolid
@@ -646,15 +647,17 @@ function HandoffContextCard({
         { backgroundColor: cardBg, borderColor: cardBorder },
       ]}
     >
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={expanded ? zhCN.handoff.collapseContext : zhCN.handoff.expandContext}
         accessibilityState={{ expanded }}
         onPress={() => setExpanded(value => !value)}
+        scaleTo={0.98}
+        surfaceColor={cardBg}
         style={styles.handoffCardHeader}
       >
         <View style={styles.handoffCardTitleRow}>
-          <ArrowRightLeft size={14} color={userBubble || isSolid ? palette.ink : palette.primary} />
+          <DuotoneIcons.ArrowRightLeft size={14} color={palette.ink} />
           <Text style={[styles.handoffCardTitle, { color: palette.ink }]} numberOfLines={2}>
             {title}
           </Text>
@@ -674,10 +677,10 @@ function HandoffContextCard({
             {stats}
           </Text>
           {expanded
-            ? <ChevronUp size={15} color={palette.muted} />
-            : <ChevronDown size={15} color={palette.muted} />}
+            ? <DuotoneIcons.ChevronUp size={15} color={palette.muted} />
+            : <DuotoneIcons.ChevronDown size={15} color={palette.muted} />}
         </View>
-      </Pressable>
+      </MotionPressable>
       {expanded && (
         <View style={[styles.handoffCardBody, { borderTopColor: cardBorder, backgroundColor: bodyBg }]}>
           <ScrollView style={styles.handoffCardBodyScroll} nestedScrollEnabled showsVerticalScrollIndicator>
@@ -727,9 +730,9 @@ function PagedUserText({
       {renderPlainSearchRuns(slice, pageHighlight, `paged:${page}`)}
     </Text>
     <View style={styles.userTextPagination}>
-      <IconButton dense label={zhCN.tools.previous} icon={ChevronLeft} tint={tint} disabled={page === 0} onPress={() => setSelectedPage(page - 1)} />
+      <IconButton dense label={zhCN.tools.previous} icon={DuotoneIcons.ChevronLeft} tint={tint} disabled={page === 0} onPress={() => setSelectedPage(page - 1)} />
       <Text style={{ color: tint }}>{page + 1} / {count}</Text>
-      <IconButton dense label={zhCN.tools.next} icon={ChevronRight} tint={tint} disabled={page + 1 === count} onPress={() => setSelectedPage(page + 1)} />
+      <IconButton dense label={zhCN.tools.next} icon={DuotoneIcons.ChevronRight} tint={tint} disabled={page + 1 === count} onPress={() => setSelectedPage(page + 1)} />
     </View>
   </View>
 }
@@ -879,9 +882,9 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
     <View style={[styles.messageRow, user && styles.messageRowUser]}>
       <View style={[styles.avatar, user ? styles.avatarUser : styles.avatarAssistant]}>
         {user ? (
-          <User size={16} color={colors.white} />
+          <DuotoneIcons.User size={16} color={colors.white} />
         ) : (
-          <Bot size={17} color={colors.primary} />
+          <DuotoneIcons.Bot size={17} color={colors.primary} />
         )}
       </View>
       <View style={[styles.messageBody, user && styles.messageBodyUser]}>
@@ -904,24 +907,25 @@ function ReasoningDisclosure({ item }: { item: ChatMessage }) {
   const actionLabel = expanded ? zhCN.chat.reasoningCollapse : zhCN.chat.reasoningExpand
   return (
     <View style={styles.reasoningCard}>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${actionLabel}。${preview}`}
         accessibilityState={{ expanded }}
         hitSlop={{ top: 7, bottom: 7 }}
+        scaleTo={0.98}
         onPress={() => setExpanded(value => !value)}
         style={({ pressed }) => [styles.reasoningHeader, pressed && styles.reasoningHeaderPressed]}
       >
         <View style={styles.processIcon}>
-          <Sparkles size={15} color={active ? colors.accent : colors.muted} />
+          <DuotoneIcons.Sparkles size={15} color={active ? colors.accent : colors.muted} />
         </View>
         <Text style={[styles.reasoningLabel, active && styles.reasoningLabelActive]}>{label}</Text>
         <Text style={styles.activitySeparator}>·</Text>
         <Text style={styles.reasoningPreview} numberOfLines={1}>{preview}</Text>
         {expanded
-          ? <ChevronDown size={16} color={colors.muted} />
-          : <ChevronRight size={16} color={colors.muted} />}
-      </Pressable>
+          ? <DuotoneIcons.ChevronDown size={16} color={colors.muted} />
+          : <DuotoneIcons.ChevronRight size={16} color={colors.muted} />}
+      </MotionPressable>
       {expanded && <View style={styles.reasoningBody}><NativeMarkdown text={item.reasoning ?? ''} /></View>}
     </View>
   )
@@ -956,11 +960,12 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
   const hasDetail = (item.callDetail !== undefined || item.resultDetail !== undefined || item.remoteDetail !== undefined)
   return (
     <View style={[styles.toolCard, expanded && styles.toolCardExpanded]}>
-      <Pressable
+      <MotionPressable
         accessibilityRole={hasDetail ? 'button' : undefined}
         accessibilityLabel={hasDetail ? (expanded ? zhCN.chat.toolCollapse(name) : zhCN.chat.toolExpand(name)) : undefined}
         accessibilityState={hasDetail ? { expanded } : undefined}
         disabled={!hasDetail}
+        scaleTo={0.98}
         onPress={() => {if (!expanded) void loadDetail(); setExpanded(value => !value)}}
         style={({ pressed }) => [styles.toolRow, pressed && hasDetail && styles.toolRowPressed]}
       >
@@ -968,9 +973,9 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
           {item.toolName === 'todo_write' || (item.toolKey ?? '').endsWith('todo_write') ? (
             <IconChecklistOutline size={15} color={colors.primary} />
           ) : /command|bash|shell|命令|终端/i.test(item.toolName) ? (
-            <Terminal size={15} color={colors.muted} />
+            <DuotoneIcons.Terminal size={15} color={colors.muted} />
           ) : (
-            <Code2 size={15} color={colors.muted} />
+            <DuotoneIcons.Code2 size={15} color={colors.muted} />
           )}
         </View>
         <View style={styles.toolCopy}>
@@ -983,19 +988,19 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
         )}
         {item.state === 'failed' && <Text style={styles.toolFailed}>{stateText}</Text>}
         {hasDetail && (expanded
-          ? <ChevronDown size={16} color={colors.muted} />
-          : <ChevronRight size={16} color={colors.muted} />)}
-      </Pressable>
+          ? <DuotoneIcons.ChevronDown size={16} color={colors.muted} />
+          : <DuotoneIcons.ChevronRight size={16} color={colors.muted} />)}
+      </MotionPressable>
       {item.images !== undefined && item.images.length > 0 && <ChatImages images={item.images} tool />}
       {expanded && hasDetail && (
         <View style={styles.toolDetails}>
           {loadingDetail && <Text style={styles.toolDetailLabel}>{zhCN.comfort.toolLoading}</Text>}
           {detailError !== undefined && (
-            <Pressable accessibilityRole="button" style={styles.toolDetailRetry} onPress={() => void loadDetail()}>
+            <MotionPressable accessibilityRole="button" scaleTo={0.97} style={styles.toolDetailRetry} onPress={() => void loadDetail()}>
               <Text style={styles.toolDetailLabel}>
-                {detailError} · <Text style={styles.toolDetailRetryAction}>{zhCN.common.retry}</Text>
+                {detailError} · <Text style={[styles.toolDetailRetryAction, { color: colors.ink }]}>{zhCN.common.retry}</Text>
               </Text>
-            </Pressable>
+            </MotionPressable>
           )}
           {item.callDetail !== undefined && <ToolDetailView label={zhCN.chat.toolCall} detail={item.callDetail} />}
           {item.resultDetail !== undefined && <ToolDetailView label={zhCN.chat.toolResult} detail={item.resultDetail} />}
@@ -1068,7 +1073,7 @@ function ApprovalCard({ item, busy, onRespond }: {
     const handledElsewhere = item.outcome === 'unavailable'
     return (
       <View style={styles.permissionResolved}>
-        {denied && !handledElsewhere ? <X size={18} color={colors.danger} /> : <Check size={18} color={colors.success} />}
+        {denied && !handledElsewhere ? <DuotoneIcons.X size={18} color={colors.danger} /> : <DuotoneIcons.Check size={18} color={colors.success} />}
         <Text style={styles.permissionResolvedText}>{handledElsewhere ? zhCN.chat.approvalHandled : denied ? zhCN.chat.denied : zhCN.chat.allowedOnce}</Text>
       </View>
     )
@@ -1076,7 +1081,7 @@ function ApprovalCard({ item, busy, onRespond }: {
   return (
     <View style={styles.permissionCard} accessibilityRole="alert">
       <View style={styles.permissionHeader}>
-        <View style={styles.permissionIcon}><ShieldAlert size={18} color={colors.ink} strokeWidth={1.9} /></View>
+        <View style={styles.permissionIcon}><DuotoneIcons.ShieldAlert size={18} color={colors.ink} strokeWidth={1.9} /></View>
         <View style={styles.permissionHeaderCopy}>
           <Text style={styles.permissionTitle}>{zhCN.chat.permissionTitle}</Text>
           <Text style={styles.permissionKind}>{zhCN.chat.hostOperation(item.toolName)}</Text>
@@ -1120,7 +1125,7 @@ function QuestionCard({ item, busy, onRespond }: {
   if (item.outcome !== undefined) {
     return (
       <View style={styles.permissionResolved}>
-        <Check size={18} color={colors.success} />
+        <DuotoneIcons.Check size={18} color={colors.success} />
         <Text style={styles.permissionResolvedText}>{item.outcome === 'answered' ? zhCN.chat.answered : item.outcome === 'queued' ? zhCN.chat.questionQueued : zhCN.chat.questionCancelled}</Text>
       </View>
     )
@@ -1145,7 +1150,7 @@ function QuestionCard({ item, busy, onRespond }: {
   return (
     <View style={styles.questionCard} accessibilityRole="alert">
       <View style={styles.permissionHeader}>
-        <View style={styles.permissionIcon}><HelpCircle size={18} color={colors.ink} strokeWidth={1.9} /></View>
+        <View style={styles.permissionIcon}><DuotoneIcons.HelpCircle size={18} color={colors.ink} strokeWidth={1.9} /></View>
         <View style={styles.permissionHeaderCopy}>
           <Text style={styles.permissionTitle}>{zhCN.chat.questionTitle}</Text>
           <Text style={styles.permissionKind}>{item.questionState === 'continued' ? zhCN.chat.questionContinued : remaining === undefined ? zhCN.chat.answerToContinue : zhCN.chat.questionRemaining(remaining)}</Text>
@@ -1158,21 +1163,23 @@ function QuestionCard({ item, busy, onRespond }: {
           {(question.options ?? []).map(option => {
             const chosen = (selected[question.id] ?? []).includes(option.label)
             return (
-              <Pressable
+              <MotionPressable
                 key={option.label}
                 accessibilityRole="button"
                 accessibilityState={{ selected: chosen }}
+                scaleTo={0.98}
+                surfaceColor={chosen ? colors.surfaceStrong : (colors.toolSurface ?? colors.surface)}
                 onPress={() => toggle(question.id, option.label, question.multiSelect === true)}
                 style={[styles.optionRow, chosen && styles.optionChosen]}
               >
-                <View style={[styles.optionDot, chosen && styles.optionDotChosen]}>{chosen && <Check size={11} color={colors.onInverse} strokeWidth={2.5} />}</View>
+                <View style={[styles.optionDot, chosen && styles.optionDotChosen]}>{chosen && <DuotoneIcons.Check size={11} color={colors.onInverse} strokeWidth={2.5} />}</View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.optionLabel}>{option.label}</Text>
                   {option.description !== undefined && option.description.trim().length > 0 && (
                     <Text style={styles.optionDescription}>{option.description}</Text>
                   )}
                 </View>
-              </Pressable>
+              </MotionPressable>
             )
           })}
           <TextInput
@@ -1226,7 +1233,7 @@ export function QueueDock({ items }: { items: { id?: string; rpcId?: string; pre
   return (
     <View style={styles.queueDock} accessibilityRole="summary" accessibilityLabel={zhCN.chat.queueTitle(items.length)}>
       <View style={styles.queueDockHeader}>
-        <ListTree size={14} color={colors.primary} />
+        <DuotoneIcons.ListTree size={14} color={colors.ink} />
         <Text style={styles.queueDockTitle}>{zhCN.chat.queueTitle(items.length)}</Text>
       </View>
       {items.map((item, index) => {
@@ -1236,28 +1243,31 @@ export function QueueDock({ items }: { items: { id?: string; rpcId?: string; pre
         return (
           <View key={itemId ?? `local:${index}`} style={styles.queueDockRow}>
             <Text style={styles.queueDockText} numberOfLines={1}>{item.preview.trim().length > 0 ? item.preview.trim() : zhCN.chat.queuePending}</Text>
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={zhCN.chat.queueSteer}
               accessibilityState={{ disabled: actionDisabled, busy: pendingAction === 'steer' }}
               disabled={actionDisabled}
               hitSlop={4}
+              scaleTo={0.95}
+              surfaceColor={colors.surfaceStrong}
               onPress={() => { if (itemId !== undefined) void handleQueueAction(itemId, 'steer', item.rpcId) }}
               style={({ pressed }) => [
                 styles.queueDockSteerButton,
+                { backgroundColor: colors.surfaceStrong },
                 pressed && !actionDisabled && styles.queueDockSteerPressed,
                 actionDisabled && styles.queueDockSteerDisabled,
               ]}
             >
               {pendingAction === 'steer'
-                ? <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
-                : <ArrowUp size={13} color={colors.primary} strokeWidth={2.4} />}
-              <Text style={styles.queueDockSteerText}>{zhCN.chat.queueSteer}</Text>
-            </Pressable>
+                ? <ActivityIndicator size="small" color={colors.ink} style={{ transform: [{ scale: 0.7 }] }} />
+                : <DuotoneIcons.ArrowUp size={13} color={colors.ink} strokeWidth={2.4} />}
+              <Text style={[styles.queueDockSteerText, { color: colors.ink }]}>{zhCN.chat.queueSteer}</Text>
+            </MotionPressable>
             {itemId !== undefined && (
               <IconButton
                 label={zhCN.chat.queueRemove}
-                icon={X}
+                icon={DuotoneIcons.X}
                 dense
                 disabled={actionDisabled}
                 onPress={() => void handleQueueAction(itemId, 'remove', item.rpcId)}

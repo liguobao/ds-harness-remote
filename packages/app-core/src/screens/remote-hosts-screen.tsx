@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native'
-import { History } from 'lucide-react-native'
+import { DuotoneIcons } from '../ui/duotone-icons'
 import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
 import type { Messages } from '../locales/types'
@@ -98,7 +98,7 @@ export function RemoteHostsScreen({
             <GroupCard>
               <GroupRow
                 first
-                icon={History}
+                icon={DuotoneIcons.History}
                 label={strings.remoteHosts.autoConnectTitle}
                 detail={strings.remoteHosts.autoConnectDetail}
                 chevron={false}

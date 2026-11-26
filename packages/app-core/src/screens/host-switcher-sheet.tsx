@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { Check, RefreshCw, SlidersHorizontal, X } from 'lucide-react-native'
+import { DuotoneIcons } from '../ui/duotone-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
@@ -76,9 +76,9 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
             <Text style={styles.title} numberOfLines={1}>{strings.remoteHosts.switchTitle}</Text>
             <View style={styles.headerActions}>
               {refreshing
-                ? <ActivityIndicator size='small' color={colors.primary} style={{ marginHorizontal: 8 }} />
-                : <IconButton label={strings.common.refresh} icon={RefreshCw} disabled={busy} onPress={() => void refreshDevices()} />}
-              <IconButton label={strings.common.close} icon={X} onPress={dismiss} />
+                ? <ActivityIndicator size='small' color={colors.ink} style={{ marginHorizontal: 8 }} />
+                : <IconButton label={strings.common.refresh} icon={DuotoneIcons.RefreshCw} active={refreshing ? true : undefined} disabled={busy} onPress={() => void refreshDevices()} />}
+              <IconButton label={strings.common.close} icon={DuotoneIcons.X} onPress={dismiss} />
             </View>
           </View>
           {error !== undefined && connectingDevice === undefined && (
@@ -142,7 +142,7 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
                                 <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
                                 <Text numberOfLines={1} style={[styles.statusText, isConnected && { color: colors.primary }]}>{status.label}</Text>
                                 <View style={styles.checkSlot}>
-                                  {isConnected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
+                                  {isConnected ? <DuotoneIcons.Check size={19} color={colors.ink} /> : null}
                                 </View>
                               </View>
                               {device.harnessVersion ? <Text numberOfLines={1} style={styles.version}>{device.harnessVersion}</Text> : null}
@@ -159,7 +159,7 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
             <GroupCard>
               <GroupRow
                 first
-                icon={SlidersHorizontal}
+                icon={DuotoneIcons.SlidersHorizontal}
                 label={strings.remoteHosts.manageAction}
                 onPress={onManageHosts}
                 disabled={busy}

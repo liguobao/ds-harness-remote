@@ -1,9 +1,9 @@
 import type { RefObject } from 'react'
 import { StyleSheet, Text, TextInput, View } from 'react-native'
-import { ChevronDown, ChevronUp, Search, X } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings } from '../../locales/i18n'
 import { IconButton, HeaderBlurBackdrop } from '../../ui/components'
+import { DuotoneIcons } from '../../ui/duotone-icons'
 import { continuousRadius } from '../../ui/platform-style'
 import { floatingShadow, radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
@@ -53,7 +53,7 @@ export function ChatSearchBar({
     >
       <HeaderBlurBackdrop />
       <View style={styles.pill}>
-        <Search size={18} color={colors.muted} strokeWidth={2} />
+        <DuotoneIcons.Search size={18} color={colors.muted} strokeWidth={2} />
         <TextInput
           ref={inputRef}
           value={query}
@@ -80,7 +80,7 @@ export function ChatSearchBar({
         <IconButton
           dense
           label={strings.chat.searchNext}
-          icon={ChevronDown}
+          icon={DuotoneIcons.ChevronDown}
           disabled={navDisabled}
           tint={navDisabled ? colors.subtle : colors.ink}
           onPress={onNext}
@@ -88,7 +88,7 @@ export function ChatSearchBar({
         <IconButton
           dense
           label={strings.chat.searchPrevious}
-          icon={ChevronUp}
+          icon={DuotoneIcons.ChevronUp}
           disabled={navDisabled}
           tint={navDisabled ? colors.subtle : colors.ink}
           onPress={onPrev}
@@ -96,7 +96,7 @@ export function ChatSearchBar({
         <IconButton
           dense
           label={strings.common.close}
-          icon={X}
+          icon={DuotoneIcons.X}
           onPress={onClose}
         />
       </View>

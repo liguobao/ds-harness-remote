@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { AlignJustify, Check, Code2, MessageSquare, MoveHorizontal, Palette, RotateCcw, Type as TypeIcon, X } from 'lucide-react-native'
+import { BackHandler, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { strings as zhCN } from '../locales/i18n'
 import { useAppStore } from '../state/store'
 import { BlurHeaderFrame, GroupCard, GroupRow, IconButton, TopBar } from '../ui/components'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { NativeMarkdown } from '../ui/markdown'
 import { androidRipple, continuousRadius } from '../ui/platform-style'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -206,7 +206,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
             action={(
               <IconButton
                 label={zhCN.settings.chatAppearanceReset}
-                icon={RotateCcw}
+                icon={DuotoneIcons.RotateCcw}
                 dense
                 disabled={isDefault}
                 onPress={() => void resetChatAppearance()}
@@ -262,7 +262,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
             <GroupCard>
               <GroupRow
                 first
-                icon={Palette}
+                icon={DuotoneIcons.Palette}
                 label={zhCN.settings.accentColor}
                 accessory={(
                   <View style={styles.accentValueRow}>
@@ -274,14 +274,14 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                 onPress={() => setActivePicker('accent')}
               />
               <GroupRow
-                icon={MessageSquare}
+                icon={DuotoneIcons.MessageSquare}
                 label={zhCN.settings.bubbleStyle}
                 value={activeBubbleLabel}
                 chevron
                 onPress={() => setActivePicker('bubble')}
               />
               <GroupRow
-                icon={Code2}
+                icon={DuotoneIcons.Code2}
                 label={zhCN.settings.codeTheme}
                 value={activeCodeThemeLabel}
                 chevron
@@ -293,21 +293,21 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
             <GroupCard>
               <GroupRow
                 first
-                icon={TypeIcon}
+                icon={DuotoneIcons.Type}
                 label={zhCN.settings.fontSize}
                 value={activeFontSizeLabel}
                 chevron
                 onPress={() => setActivePicker('fontSize')}
               />
               <GroupRow
-                icon={AlignJustify}
+                icon={DuotoneIcons.AlignJustify}
                 label={zhCN.settings.lineSpacing}
                 value={activeLineSpacingLabel}
                 chevron
                 onPress={() => setActivePicker('lineSpacing')}
               />
               <GroupRow
-                icon={MoveHorizontal}
+                icon={DuotoneIcons.MoveHorizontal}
                 label={zhCN.settings.letterSpacing}
                 value={activeLetterSpacingLabel}
                 chevron
@@ -325,7 +325,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
       >
         <View style={styles.pickerHeader}>
           <Text style={styles.pickerTitle} accessibilityRole="header">{pickerTitle}</Text>
-          <IconButton label={zhCN.common.close} icon={X} onPress={closePicker} />
+          <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={closePicker} />
         </View>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.pickerList}>
           <GroupCard>
@@ -334,12 +334,14 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                   const chosen = option.value === appearance.accent
                   const swatch = CHAT_ACCENT_SWATCHES[option.value][scheme]
                   return (
-                    <Pressable
+                    <MotionPressable
                       key={option.value}
                       accessibilityRole="radio"
                       accessibilityState={{ selected: chosen }}
                       accessibilityLabel={option.label}
                       android_ripple={androidRipple(colors)}
+                      scaleTo={0.98}
+                      surfaceColor={colors.card}
                       onPress={() => {
                         closePicker()
                         update({ accent: option.value })
@@ -356,9 +358,9 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                         >
                           {option.label}
                         </Text>
-                        {chosen && <Check size={19} color={colors.primary} strokeWidth={2.2} />}
+                        {chosen && <DuotoneIcons.Check size={19} color={colors.primary} strokeWidth={2.2} />}
                       </View>
-                    </Pressable>
+                    </MotionPressable>
                   )
                 })
               : pickerListOptions.map((option, index) => (
@@ -368,7 +370,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                     label={option.label}
                     selected={option.chosen}
                     chevron={false}
-                    accessory={option.chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                    accessory={option.chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                     onPress={option.onSelect}
                   />
                 ))}

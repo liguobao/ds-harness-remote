@@ -1,8 +1,7 @@
-import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X, type LucideIcon } from 'lucide-react-native'
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
-import { GroupCard, IconButton } from '../../ui/components'
-import { androidRipple } from '../../ui/platform-style'
+import { GroupCard, IconButton, type UiIconComponent } from '../../ui/components'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { usePickerListMaxHeight } from './modal'
@@ -56,7 +55,7 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   }
   const menuRows: Array<{
     key: string
-    icon: LucideIcon
+    icon: UiIconComponent
     label: string
     accessibilityLabel: string
     value?: string
@@ -67,7 +66,7 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   if (onReferenceChat !== undefined) {
     menuRows.push({
       key: 'reference-chat',
-      icon: MessageSquare,
+      icon: DuotoneIcons.MessageSquare,
       label: strings.chat.referenceChat,
       accessibilityLabel: strings.chat.referenceChat,
       onPress: () => runAction(onReferenceChat),
@@ -75,7 +74,7 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   }
   menuRows.push({
     key: 'workspace',
-    icon: Folder,
+    icon: DuotoneIcons.Folder,
     label: strings.chat.openWorkspaces,
     accessibilityLabel: strings.chat.openWorkspaces,
     value: workspaceLabel,
@@ -84,7 +83,7 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   if (supportsModeSelection) {
     menuRows.push({
       key: 'mode',
-      icon: Layers,
+      icon: DuotoneIcons.Layers,
       label: strings.chat.mode,
       accessibilityLabel: strings.chat.selectMode,
       value: modeLabel,
@@ -96,7 +95,7 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   if (toolsAvailable) {
     menuRows.push({
       key: 'tools',
-      icon: Terminal,
+      icon: DuotoneIcons.Terminal,
       label: strings.chat.toolAccess,
       accessibilityLabel: strings.chat.toolAccess,
       onPress: () => runAction(onOpenTools),
@@ -105,7 +104,7 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   if (permissionsAvailable) {
     menuRows.push({
       key: 'permissions',
-      icon: ShieldAlert,
+      icon: DuotoneIcons.ShieldAlert,
       label: strings.chat.approvalMode,
       accessibilityLabel: strings.chat.approvalMode,
       value: permissionLabel,
@@ -114,68 +113,71 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
       onPress: () => runAction(onOpenPermissions),
     })
   }
-  const ripple = androidRipple(colors)
   return (
     // `sheet` keeps one form on wide windows: `anchor` is deliberately cleared
     // while the IME settles (chat-screen.tsx), and an adaptive promotion would
     // make this menu jump between a full-width sheet and a centered card.
     <SheetModal visible={visible} onClose={onClose} onDismiss={onDismiss} anchor={anchor} presentation="sheet">
-      <View style={styles.modalHeader}><Text style={styles.modalTitle}>{strings.chat.moreActions}</Text><IconButton label={strings.common.close} icon={X} dense onPress={onClose} /></View>
+      <View style={styles.modalHeader}><Text style={styles.modalTitle}>{strings.chat.moreActions}</Text><IconButton label={strings.common.close} icon={DuotoneIcons.X} dense onPress={onClose} /></View>
       <ScrollView
         style={{ maxHeight: plusMenuListMaxHeight }}
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
       >
         <View style={styles.plusCardRow}>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={strings.chat.takePhoto}
             accessibilityState={{ disabled: attachmentPicking }}
             disabled={attachmentPicking}
-            android_ripple={ripple}
             onPress={() => runAction(() => { void takePhoto() })}
+            scaleTo={0.94}
+            surfaceColor={colors.surfaceMuted ?? colors.surfaceStrong}
             style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
           >
-            <Camera size={22} color={colors.ink} strokeWidth={1.8} />
+            <DuotoneIcons.Camera size={22} color={colors.ink} surfaceColor={colors.surfaceMuted ?? colors.surfaceStrong} />
             <Text style={styles.plusCardText}>{strings.chat.takePhoto}</Text>
-          </Pressable>
-          <Pressable
+          </MotionPressable>
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={strings.chat.photos}
             accessibilityState={{ disabled: attachmentPicking }}
             disabled={attachmentPicking}
-            android_ripple={ripple}
             onPress={() => runAction(() => { void pickImages() })}
+            scaleTo={0.94}
+            surfaceColor={colors.surfaceMuted ?? colors.surfaceStrong}
             style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
           >
-            <Images size={22} color={colors.ink} strokeWidth={1.8} />
+            <DuotoneIcons.Images size={22} color={colors.ink} surfaceColor={colors.surfaceMuted ?? colors.surfaceStrong} />
             <Text style={styles.plusCardText}>{strings.chat.photos}</Text>
-          </Pressable>
-          <Pressable
+          </MotionPressable>
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={strings.chat.files}
             accessibilityState={{ disabled: attachmentPicking }}
             disabled={attachmentPicking}
-            android_ripple={ripple}
             onPress={() => runAction(() => { void pickFiles() })}
+            scaleTo={0.94}
+            surfaceColor={colors.surfaceMuted ?? colors.surfaceStrong}
             style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
           >
-            <FileText size={22} color={colors.ink} strokeWidth={1.8} />
+            <DuotoneIcons.FileText size={22} color={colors.ink} surfaceColor={colors.surfaceMuted ?? colors.surfaceStrong} />
             <Text style={styles.plusCardText}>{strings.chat.files}</Text>
-          </Pressable>
+          </MotionPressable>
         </View>
         <GroupCard>
           {menuRows.map((row, index) => {
             const Icon = row.icon
             return (
-              <Pressable
+              <MotionPressable
                 key={row.key}
                 accessibilityRole="button"
                 accessibilityLabel={row.accessibilityLabel}
                 accessibilityState={row.disabled ? { disabled: true } : undefined}
                 disabled={row.disabled}
-                android_ripple={ripple}
                 onPress={row.onPress}
+                scaleTo={0.98}
+                surfaceColor={colors.cardOpaque}
                 style={({ pressed }) => [
                   styles.plusMenuOption,
                   pressed && styles.plusMenuOptionPressed,
@@ -183,7 +185,7 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
                 ]}
               >
                 <View style={styles.plusMenuOptionIcon}>
-                  <Icon size={19} color={colors.ink} strokeWidth={1.8} />
+                  <Icon size={20} color={colors.ink} surfaceColor={colors.cardOpaque} />
                 </View>
                 <View style={[styles.plusMenuOptionBody, index > 0 && styles.plusMenuOptionDivider]}>
                   <Text style={styles.plusMenuOptionText}>{row.label}</Text>
@@ -191,10 +193,10 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
                     {row.loading
                       ? <ActivityIndicator size="small" color={colors.muted} />
                       : row.value !== undefined && <Text style={styles.plusMenuOptionValueText} numberOfLines={1}>{row.value}</Text>}
-                    <ChevronRight size={16} color={colors.subtle} />
+                    <DuotoneIcons.ChevronRight size={16} color={colors.subtle} />
                   </View>
                 </View>
-              </Pressable>
+              </MotionPressable>
             )
           })}
         </GroupCard>

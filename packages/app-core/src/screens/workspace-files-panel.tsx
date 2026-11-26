@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ActivityIndicator, FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native'
+import { ActivityIndicator, FlatList, Platform, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
 import { File as LocalFile } from 'expo-file-system'
 import { randomUUID } from 'expo-crypto'
-import { File, Folder, RefreshCw, Upload } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings as t } from '../locales/i18n'
 import type { WorkspaceDirectory } from '../services/session-tools'
 import { requireConnectionRpc, requireSessionTools, useAppStore } from '../state/store'
 import { Alert } from '../ui/alert'
 import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { elevationStyle } from '../ui/platform-style'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
@@ -243,9 +243,9 @@ export function WorkspaceFilesPanel({
                 {path === '' && (
                   uploading
                     ? <ActivityIndicator accessibilityLabel={t.tools.uploading} color={colors.primary} />
-                    : <IconButton label={t.tools.upload} icon={Upload} onPress={() => void upload()} disabled={loading} />
+                    : <IconButton label={t.tools.upload} icon={DuotoneIcons.Upload} onPress={() => void upload()} disabled={loading} />
                 )}
-                <IconButton label={t.tools.refresh} icon={RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading || uploading} />
+                <IconButton label={t.tools.refresh} icon={DuotoneIcons.RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading || uploading} />
               </>
             }
           />
@@ -278,9 +278,11 @@ export function WorkspaceFilesPanel({
           ListFooterComponent={listing.truncated ? <Text style={[styles.notice, { color: colors.muted }]}>{t.tools.truncated}</Text> : null}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               disabled={item.type === 'other'}
+              scaleTo={0.985}
+              surfaceColor={colors.background}
               style={[styles.row, { borderBottomColor: colors.separator }]}
               onPress={() => {
                 const next = [listing.path, item.name].filter(Boolean).join('/')
@@ -292,9 +294,9 @@ export function WorkspaceFilesPanel({
                 }
               }}
             >
-              {item.type === 'directory' ? <Folder color={colors.primary} size={22} /> : <File color={colors.muted} size={22} />}
+              {item.type === 'directory' ? <DuotoneIcons.Folder color={colors.ink} surfaceColor={colors.background} size={22} /> : <DuotoneIcons.File color={colors.muted} surfaceColor={colors.background} size={22} />}
               <Text style={[styles.path, { color: colors.ink }]}>{item.name}</Text>
-            </Pressable>
+            </MotionPressable>
           )}
         />
       )}

@@ -2,36 +2,18 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Keyboard,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native'
-import {
-  ArrowDown,
-  ArrowUp,
-  Check,
-  CirclePlus,
-  Code2,
-  Eye,
-  EyeOff,
-  Folder,
-  FolderOpen,
-  Pencil,
-  Plus,
-  Sparkles,
-  Star,
-  Trash2,
-  X,
-  type LucideIcon,
-} from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { deviceVersionSubtitle, platformIcon } from '../lib/device-display'
 import { canManageWorkspace, isAbsoluteHostPath } from '../lib/workspace-key'
 import { useAppStore } from '../state/store'
 import type { AgentBackend, DirectoryListing, WorkspaceView } from '../types'
-import { BlurHeaderFrame, Button, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar, type UiIconComponent } from '../ui/components'
 import { radius, spacing, type } from '../ui/theme'
 import { monoFontFamily } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -87,7 +69,7 @@ export function WorkspaceActionsModal({
             <Text style={styles.sheetTitle}>{strings.workspaces.options}</Text>
             {target !== undefined && <Text style={styles.workspaceActionName} numberOfLines={1}>{target.title}</Text>}
           </View>
-          <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+          <IconButton label={strings.common.close} icon={DuotoneIcons.X} onPress={onClose} />
         </View>
         <ScrollView
           style={styles.sheetScroll}
@@ -103,7 +85,7 @@ export function WorkspaceActionsModal({
               {onNewSession !== undefined && (
                 <GroupRow
                   first
-                  icon={Plus}
+                  icon={DuotoneIcons.Plus}
                   label={strings.sessions.newSession}
                   detail={strings.workspaces.newSessionIn(target.title)}
                   disabled={busy}
@@ -113,7 +95,7 @@ export function WorkspaceActionsModal({
               {onToggleFavorite !== undefined && (
                 <GroupRow
                   first={onNewSession === undefined}
-                  icon={Star}
+                  icon={DuotoneIcons.Star}
                   label={favorited ? strings.comfort.unstar : strings.devices.favorites}
                   detail={favorited ? strings.workspaces.removeFavorite(target.title) : strings.workspaces.addFavorite(target.title)}
                   disabled={busy}
@@ -123,7 +105,7 @@ export function WorkspaceActionsModal({
               {canManage && (
                 <GroupRow
                   first={onNewSession === undefined && onToggleFavorite === undefined}
-                  icon={Pencil}
+                  icon={DuotoneIcons.Pencil}
                   label={strings.workspaces.rename}
                   disabled={busy}
                   onPress={onRename}
@@ -131,7 +113,7 @@ export function WorkspaceActionsModal({
               )}
               {canManage && (
                 <GroupRow
-                  icon={ArrowUp}
+                  icon={DuotoneIcons.ArrowUp}
                   label={strings.workspaces.moveUp}
                   disabled={busy || !canMoveUp}
                   onPress={onMoveUp}
@@ -139,7 +121,7 @@ export function WorkspaceActionsModal({
               )}
               {canManage && (
                 <GroupRow
-                  icon={ArrowDown}
+                  icon={DuotoneIcons.ArrowDown}
                   label={strings.workspaces.moveDown}
                   disabled={busy || !canMoveDown}
                   onPress={onMoveDown}
@@ -151,7 +133,7 @@ export function WorkspaceActionsModal({
             <GroupCard>
               <GroupRow
                 first
-                icon={Trash2}
+                icon={DuotoneIcons.Trash2}
                 label={strings.workspaces.delete}
                 danger
                 chevron={false}
@@ -255,16 +237,16 @@ export function CreateWorkspaceModal({
     setBrowseOpen(true)
   }
 
-  const backendItems: Array<{ value: AgentBackend; label: string; detail: string; icon: LucideIcon }> = [
-    { value: 'harness', label: strings.workspaces.dsh, detail: strings.devices.harness, icon: FolderOpen },
-    ...(codexAvailable ? [{ value: 'codex' as const, label: strings.workspaces.codex, detail: 'OpenAI Codex', icon: Code2 }] : []),
-    ...(claudeAvailable ? [{ value: 'claude' as const, label: strings.workspaces.claude, detail: 'Anthropic Claude', icon: Sparkles }] : []),
-    ...(hermesAvailable ? [{ value: 'hermes' as const, label: strings.workspaces.hermes, detail: 'Nous Research Hermes', icon: Sparkles }] : []),
-    ...(cursorAvailable ? [{ value: 'cursor' as const, label: strings.workspaces.cursor, detail: 'Cursor ACP', icon: Sparkles }] : []),
-    ...(antigravityAvailable ? [{ value: 'antigravity' as const, label: strings.workspaces.antigravity, detail: 'Antigravity ACP', icon: Sparkles }] : []),
-    ...(opencodeAvailable ? [{ value: 'opencode' as const, label: strings.workspaces.opencode, detail: 'OpenCode ACP', icon: Sparkles }] : []),
-    ...(piAvailable ? [{ value: 'pi' as const, label: strings.workspaces.pi, detail: 'Pi ACP', icon: Sparkles }] : []),
-    ...customAcpBackends.map(id => ({ value: id as AgentBackend, label: id, detail: 'Custom ACP', icon: Sparkles })),
+  const backendItems: Array<{ value: AgentBackend; label: string; detail: string; icon: UiIconComponent }> = [
+    { value: 'harness', label: strings.workspaces.dsh, detail: strings.devices.harness, icon: DuotoneIcons.FolderOpen },
+    ...(codexAvailable ? [{ value: 'codex' as const, label: strings.workspaces.codex, detail: 'OpenAI Codex', icon: DuotoneIcons.Code2 }] : []),
+    ...(claudeAvailable ? [{ value: 'claude' as const, label: strings.workspaces.claude, detail: 'Anthropic Claude', icon: DuotoneIcons.Sparkles }] : []),
+    ...(hermesAvailable ? [{ value: 'hermes' as const, label: strings.workspaces.hermes, detail: 'Nous Research Hermes', icon: DuotoneIcons.Sparkles }] : []),
+    ...(cursorAvailable ? [{ value: 'cursor' as const, label: strings.workspaces.cursor, detail: 'Cursor ACP', icon: DuotoneIcons.Sparkles }] : []),
+    ...(antigravityAvailable ? [{ value: 'antigravity' as const, label: strings.workspaces.antigravity, detail: 'Antigravity ACP', icon: DuotoneIcons.Sparkles }] : []),
+    ...(opencodeAvailable ? [{ value: 'opencode' as const, label: strings.workspaces.opencode, detail: 'OpenCode ACP', icon: DuotoneIcons.Sparkles }] : []),
+    ...(piAvailable ? [{ value: 'pi' as const, label: strings.workspaces.pi, detail: 'Pi ACP', icon: DuotoneIcons.Sparkles }] : []),
+    ...customAcpBackends.map(id => ({ value: id as AgentBackend, label: id, detail: 'Custom ACP', icon: DuotoneIcons.Sparkles })),
   ]
 
   const directoryHint = backend === 'codex'
@@ -283,7 +265,7 @@ export function CreateWorkspaceModal({
                 ? strings.workspaces.hermesDirectoryHint
                 : strings.workspaces.directoryHint
 
-  const HostIcon = selectedDevice ? platformIcon(selectedDevice.platform) : FolderOpen
+  const HostIcon = selectedDevice ? platformIcon(selectedDevice.platform) : DuotoneIcons.FolderOpen
   const hostOnline = connectionPhase === 'connected'
   const hostConnecting = connectionPhase === 'connecting' || connectionPhase === 'reconnecting'
   const hostStatusDot = hostOnline ? colors.success : hostConnecting ? colors.warning : colors.disabled
@@ -329,7 +311,7 @@ export function CreateWorkspaceModal({
               <GroupCard>
                 <View style={styles.createPathRow}>
                   <View style={styles.createPathIcon}>
-                    <FolderOpen size={21} color={colors.primary} strokeWidth={1.8} />
+                    <DuotoneIcons.FolderOpen size={21} color={colors.ink} surfaceColor={colors.cardOpaque} strokeWidth={1.8} />
                   </View>
                   <View style={styles.createPathBody}>
                     <TextInput
@@ -345,20 +327,22 @@ export function CreateWorkspaceModal({
                       returnKeyType="done"
                     />
                     {path.length > 0 && !busy && (
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="button"
                         accessibilityLabel={strings.workspaces.clearSearch}
                         hitSlop={8}
+                        scaleTo={0.92}
+                        surfaceColor={colors.cardOpaque}
                         onPress={() => setPath('')}
                         style={({ pressed }) => [styles.clearSearch, pressed && styles.workspaceRowPressed]}
                       >
-                        <X size={17} color={colors.muted} />
-                      </Pressable>
+                        <DuotoneIcons.X size={17} color={colors.muted} />
+                      </MotionPressable>
                     )}
                   </View>
                 </View>
                 <GroupRow
-                  icon={Folder}
+                  icon={DuotoneIcons.Folder}
                   label={strings.workspaces.browse}
                   detail={strings.workspaces.chooseFolder}
                   disabled={busy}
@@ -385,7 +369,7 @@ export function CreateWorkspaceModal({
                         onPress={() => setBackend(option.value)}
                         accessory={
                           <View style={styles.createCheckSlot}>
-                            {chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
+                            {chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : null}
                           </View>
                         }
                       />
@@ -397,7 +381,7 @@ export function CreateWorkspaceModal({
               <View style={styles.createPrimaryArea}>
                 <Button
                   label={strings.workspaces.create}
-                  icon={CirclePlus}
+                  icon={DuotoneIcons.CirclePlus}
                   onPress={() => void create()}
                   loading={busy}
                   disabled={path.trim().length === 0}
@@ -451,7 +435,7 @@ export function RenameWorkspaceModal({
     >
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.renameTitle}</Text>
-          <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+          <IconButton label={strings.common.close} icon={DuotoneIcons.X} onPress={onClose} />
         </View>
         <ScrollView
           style={styles.sheetScroll}
@@ -541,11 +525,11 @@ export function DirectoryBrowserModal({
     >
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.chooseFolder}</Text>
-          <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+          <IconButton label={strings.common.close} icon={DuotoneIcons.X} onPress={onClose} />
         </View>
         <GroupCard style={styles.browserPathCard}>
           <View style={styles.browserPath}>
-            <FolderOpen size={18} color={colors.primary} strokeWidth={1.8} />
+            <DuotoneIcons.FolderOpen size={18} color={colors.ink} surfaceColor={colors.cardOpaque} strokeWidth={1.8} />
             <TextInput
               accessibilityLabel={strings.workspaces.deviceDirectory}
               style={styles.browserPathText}
@@ -564,11 +548,11 @@ export function DirectoryBrowserModal({
         </GroupCard>
         <View style={styles.crumbRow}>
           {(listing?.crumbs ?? []).map((crumb, index, all) => (
-            <Pressable key={`${crumb.path}-${index}`} onPress={() => void open(crumb.path)}>
+            <MotionPressable key={`${crumb.path}-${index}`} accessibilityRole="button" scaleTo={0.96} onPress={() => void open(crumb.path)}>
               <Text style={styles.crumbText}>
                 {crumb.name}{index < all.length - 1 ? ' / ' : ''}
               </Text>
-            </Pressable>
+            </MotionPressable>
           ))}
         </View>
         {error !== undefined && <Text style={styles.errorText}>{error}</Text>}
@@ -583,7 +567,7 @@ export function DirectoryBrowserModal({
                     <GroupRow
                       key={entry.path}
                       first={index === 0}
-                      icon={Folder}
+                      icon={DuotoneIcons.Folder}
                       label={entry.name}
                       onPress={() => void open(entry.path)}
                     />
@@ -594,7 +578,7 @@ export function DirectoryBrowserModal({
         <View style={styles.browserFooter}>
           <Button
             label={showHidden ? strings.workspaces.hideHidden : strings.workspaces.showHidden}
-            icon={showHidden ? EyeOff : Eye}
+            icon={showHidden ? DuotoneIcons.EyeOff : DuotoneIcons.Eye}
             variant="quiet"
             onPress={() => setShowHidden(current => !current)}
           />

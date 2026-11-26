@@ -3,7 +3,6 @@ import {
   Animated,
   Easing,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,8 +10,8 @@ import {
   View,
 } from 'react-native'
 import Svg, { Circle, Path } from 'react-native-svg'
-import { ChevronDown, ChevronUp } from 'lucide-react-native'
 import { IconChecklistOutline } from '../../ui/dsh-icons'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ThemeColors } from '../../ui/theme'
 import { useTheme } from '../../ui/theme-context'
@@ -208,11 +207,13 @@ export const TaskProgressChecklist = memo(function TaskProgressChecklist({
 
   return (
     <View style={styles.card} testID={testID}>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${copy.taskChecklist || copy.todos} · ${progressText}`}
         accessibilityState={{ expanded: isOpen }}
         onPress={handleToggle}
+        scaleTo={0.98}
+        surfaceColor={colors.card}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
         testID={`${testID}-header`}
       >
@@ -229,12 +230,12 @@ export const TaskProgressChecklist = memo(function TaskProgressChecklist({
         </View>
         <View style={styles.chevron}>
           {isOpen ? (
-            <ChevronUp size={16} color={colors.muted} />
+            <DuotoneIcons.ChevronUp size={16} color={colors.muted} />
           ) : (
-            <ChevronDown size={16} color={colors.muted} />
+            <DuotoneIcons.ChevronDown size={16} color={colors.muted} />
           )}
         </View>
-      </Pressable>
+      </MotionPressable>
 
       {isOpen && (
         <View style={styles.contentWrap} testID={`${testID}-content`}>

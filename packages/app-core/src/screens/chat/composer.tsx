@@ -1,6 +1,6 @@
-import { ArrowUp, CircleStop, Plus, X, Zap } from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { useMemo, useState, type ReactNode, type RefObject } from 'react'
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Text, TextInput, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { MentionPopover, splitDraftSegments, type MentionGroup } from '../../ui/mention-popover'
@@ -134,20 +134,22 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, headerSlot
             {hasQuotes && (
               <View style={styles.composerQuotesWrap}>
                 {quotes.map((quoteText, index) => (
-                  <Pressable
+                  <MotionPressable
                     key={`inline-quote-${index}`}
                     accessibilityRole="button"
                     accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
                     onPress={() => onRemoveQuote?.(index)}
                     hitSlop={4}
+                    scaleTo={0.94}
+                    surfaceColor={colors.surfaceStrong}
                     style={styles.composerQuotePill}
                   >
-                    <QuoteMarkIcon size={12} color={colors.primary} />
+                    <QuoteMarkIcon size={12} color={colors.ink} />
                     <Text numberOfLines={1} style={styles.composerQuotePillText}>
                       “{formatQuoteDraftSnippet(quoteText, 18)}”
                     </Text>
-                    <X size={12} color={colors.primary} />
-                  </Pressable>
+                    <DuotoneIcons.X size={12} color={colors.ink} surfaceColor={colors.surfaceStrong} />
+                  </MotionPressable>
                 ))}
               </View>
             )}
@@ -198,7 +200,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, headerSlot
             />
           </View>
           <View pointerEvents="box-none" style={isStacked ? styles.composerActionsRow : styles.composerActionsOverlay}>
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.moreActions}
               accessibilityState={{ disabled: composerDisabled }}
@@ -208,13 +210,15 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, headerSlot
                 onOpenActions()
               }}
               hitSlop={6}
-              style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
+              scaleTo={0.9}
+              surfaceColor={colors.elevated}
+              style={({ pressed }) => [styles.plusButton, pressed && !composerDisabled && styles.plusPressed]}
             >
-              <Plus size={20} color={!composerDisabled ? colors.ink : colors.disabled} />
-            </Pressable>
+              <DuotoneIcons.Plus size={20} color={!composerDisabled ? colors.ink : colors.disabled} surfaceColor={colors.elevated} />
+            </MotionPressable>
             <View style={styles.composerTrailing}>
               {showPromptsButton && (
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.chat.quickPrompts}
                   accessibilityState={{ disabled: composerDisabled }}
@@ -224,13 +228,15 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, headerSlot
                     onOpenPrompts()
                   }}
                   hitSlop={6}
-                  style={({ pressed }) => [styles.composerShortcutButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
+                  scaleTo={0.9}
+                  surfaceColor={colors.elevated}
+                  style={({ pressed }) => [styles.composerShortcutButton, pressed && !composerDisabled && styles.plusPressed]}
                 >
-                  <Zap size={19} color={!composerDisabled ? colors.ink : colors.disabled} />
-                </Pressable>
+                  <DuotoneIcons.Zap size={19} color={!composerDisabled ? colors.ink : colors.disabled} surfaceColor={colors.elevated} />
+                </MotionPressable>
               )}
               {(replyActive || commandRunning) && !hasComposerContent
-                ? <Pressable
+                ? <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.chat.stop}
                   accessibilityState={{ disabled: stopping, busy: stopping }}
@@ -240,19 +246,22 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, headerSlot
                     onStop()
                   }}
                   hitSlop={6}
+                  inverse
+                  surfaceColor={colors.inverse}
+                  scaleTo={0.9}
                   style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
                 >
                   {stopping
                     ? <ActivityIndicator size="small" color={colors.onInverse} />
-                    : <CircleStop size={18} color={colors.onInverse} />}
-                </Pressable>
+                    : <DuotoneIcons.CircleStop size={18} color={colors.onInverse} inverse surfaceColor={colors.inverse} />}
+                </MotionPressable>
                 : <>
                   {/* With text in the composer the primary action is the send
                     (queueing) button — tapping where Send lives must never stop
                     the running task (official InputBar behaviour). Stop stays
                     available as its own secondary button. */}
                   {(replyActive || commandRunning) && (
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="button"
                       accessibilityLabel={strings.chat.stop}
                       accessibilityState={{ disabled: stopping, busy: stopping }}
@@ -262,39 +271,46 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, headerSlot
                         onStop()
                       }}
                       hitSlop={6}
+                      inverse
+                      surfaceColor={colors.inverse}
+                      scaleTo={0.9}
                       style={({ pressed }) => [styles.stopButtonSmall, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
                     >
                       {stopping
                         ? <ActivityIndicator size="small" color={colors.onInverse} />
-                        : <CircleStop size={16} color={colors.onInverse} />}
-                    </Pressable>
+                        : <DuotoneIcons.CircleStop size={16} color={colors.onInverse} inverse surfaceColor={colors.inverse} />}
+                    </MotionPressable>
                   )}
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     accessibilityLabel={strings.chat.send}
                     accessibilityState={{ disabled: sendDisabled, busy: sending }}
                     disabled={sendDisabled}
                     onPress={onSubmit}
                     hitSlop={6}
+                    inverse={!sendDisabled}
+                    surfaceColor={sendDisabled ? colors.surfaceStrong : colors.inverse}
+                    scaleTo={0.9}
                     style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, !sending && sendDisabled && styles.sendDisabled]}
                   >
                     {sending
                       ? <ActivityIndicator size="small" color={colors.onInverse ?? colors.white} />
-                      : <ArrowUp size={18} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} strokeWidth={2.4} />}
-                  </Pressable>
+                      : <DuotoneIcons.ArrowUp size={18} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} inverse={!sendDisabled} surfaceColor={sendDisabled ? colors.surfaceStrong : colors.inverse} />}
+                  </MotionPressable>
                 </>}
             </View>
           </View>
           {showExpand && (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.expandComposer}
               onPress={onOpenExpand}
               hitSlop={6}
+              scaleTo={0.9}
               style={({ pressed }) => [styles.composerExpandCorner, pressed && styles.plusPressed]}
             >
               <ExpandCornerIcon size={15} color={colors.muted} />
-            </Pressable>
+            </MotionPressable>
           )}
         </View>
       </View>

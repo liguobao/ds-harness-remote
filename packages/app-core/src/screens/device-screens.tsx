@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native'
 import { Alert } from '../ui/alert'
-import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronUp, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
+import { DuotoneIcons } from '../ui/duotone-icons'
+import { type UiIconComponent } from '../ui/components'
 import { requireConnectionRpc, useAppStore } from '../state/store'
 import { DshWebScreen } from './dsh-web-screen'
 import { shouldPollSessionStatus } from '../state/session-catalog-commands'
@@ -181,7 +182,7 @@ export function ConnectionScreen({ device, onBack, onConnected, embedded = false
     <View style={styles.flex}>
       {showBack && !embedded && (
         <View style={[styles.connectionBack, { top: insets.top + spacing.xs }]}>
-          <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={cancel} />
+          <IconButton label={zhCN.common.back} icon={DuotoneIcons.ArrowLeft} onPress={cancel} />
         </View>
       )}
       <Screen fill>
@@ -224,9 +225,9 @@ export function ConnectionScreen({ device, onBack, onConnected, embedded = false
                 <View style={styles.stepMarker}>
                   <View style={[styles.stepCircle, done && styles.stepCircleComplete, active && styles.stepCircleActive, stepFailed && styles.stepCircleFailed]}>
                     {done
-                      ? <Check size={18} color={colors.white} />
+                      ? <DuotoneIcons.Check size={18} color={colors.onInverse} inverse surfaceColor={colors.inverse} />
                       : active
-                        ? <ActivityIndicator size="small" color={colors.primary} />
+                        ? <ActivityIndicator size="small" color={colors.ink} />
                         : <View style={[styles.stepDot, stepFailed && styles.stepDotFailed]} />}
                   </View>
                   {index < connectionStages.length - 1 && <View style={[styles.stepConnector, done && styles.stepConnectorComplete]} />}
@@ -238,7 +239,7 @@ export function ConnectionScreen({ device, onBack, onConnected, embedded = false
                     <View style={styles.progressRoute}>
                       {connectionProbeOrder.map((transport, probeIndex) => (
                         <View key={`${transport}:${probeIndex}`} style={styles.progressRouteSegment}>
-                          {probeIndex > 0 && <ChevronRight size={12} color={colors.subtle} />}
+                          {probeIndex > 0 && <DuotoneIcons.ChevronRight size={12} color={colors.subtle} />}
                           <Text style={[styles.progressRouteLabel, selectedProbe === transport && styles.progressRouteLabelActive]}>
                             {probeTransportDiagnosticLabel(transport)}
                           </Text>
@@ -313,10 +314,10 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces, on
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
             <View style={styles.deviceHero}>
-              <View style={styles.deviceIcon}>{(() => { const PlatformIcon = platformIcon(device.platform); return <PlatformIcon size={28} color={colors.primary} strokeWidth={1.8} /> })()}</View>
+              <View style={styles.deviceIcon}>{(() => { const PlatformIcon = platformIcon(device.platform); return <PlatformIcon size={28} color={colors.ink} surfaceColor={colors.surfaceStrong} /> })()}</View>
               <View style={styles.deviceHeroCopy}>
                 <Text style={styles.deviceName}>{device.name}</Text>
-                <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={Pencil} tint={colors.primary} dense onPress={() => setRenaming(true)} />
+                <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={DuotoneIcons.Pencil} dense onPress={() => setRenaming(true)} />
               </View>
             </View>
 
@@ -329,13 +330,13 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces, on
             )}
 
             <View style={styles.membershipAction}>
-              <Button variant="secondary" icon={ShieldCheck} label={zhCN.settings.membership.plan} onPress={onOpenMembershipPlan} />
+              <Button variant="secondary" icon={DuotoneIcons.ShieldCheck} label={zhCN.settings.membership.plan} onPress={onOpenMembershipPlan} />
             </View>
 
             {!device.trusted
               ? <View style={styles.connectArea}>
                   <View style={styles.trustHeader}>
-                    <View style={styles.trustIcon}><ShieldCheck size={22} color={colors.primary} /></View>
+                    <View style={styles.trustIcon}><DuotoneIcons.ShieldCheck size={22} color={colors.ink} surfaceColor={colors.surfaceStrong} /></View>
                     <View style={styles.trustCopy}>
                       <Text style={styles.connectCopy}>{zhCN.devices.trustExplanation}</Text>
                       {device.fingerprint !== undefined && <Text selectable style={styles.fingerprint}>{device.fingerprint}</Text>}
@@ -352,7 +353,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces, on
                     {(onWorkspaces !== undefined || webAvailable) && (
                       <View style={styles.quickActions}>
                         {onWorkspaces !== undefined && (
-                          <Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} />
+                          <Button label={zhCN.devices.viewWorkspaces} icon={DuotoneIcons.MessageSquareText} onPress={onWorkspaces} />
                         )}
                         {webAvailable && (
                           <Button
@@ -383,13 +384,13 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces, on
                       <GroupCard>
                         <GroupRow
                           first
-                          icon={ShieldCheck}
+                          icon={DuotoneIcons.ShieldCheck}
                           label={zhCN.devices.networkDetails}
                           value={connectionPath(connection.stats.mode === 'P2P' && networkDetails?.sameLinkIpv6 ? 'LAN' : connection.stats.mode)}
                           chevron={false}
                           accessory={connectionExpanded
-                            ? <ChevronUp size={18} color={colors.subtle} />
-                            : <ChevronDown size={18} color={colors.subtle} />}
+                            ? <DuotoneIcons.ChevronUp size={18} color={colors.subtle} />
+                            : <DuotoneIcons.ChevronDown size={18} color={colors.subtle} />}
                           onPress={() => setConnectionExpanded(prev => !prev)}
                         />
                       </GroupCard>
@@ -401,7 +402,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces, on
               <GroupCard>
                 <GroupRow
                   first
-                  icon={Trash2}
+                  icon={DuotoneIcons.Trash2}
                   label={zhCN.devices.forget}
                   danger
                   chevron={false}
@@ -491,10 +492,10 @@ function platformName(platform: string): string {
   return names[platform] ?? platform
 }
 
-function platformIcon(platform: string): LucideIcon {
-  if (platform === 'win32') return Monitor
-  if (platform === 'linux') return Server
-  return Laptop
+function platformIcon(platform: string): UiIconComponent {
+  if (platform === 'win32') return DuotoneIcons.Monitor
+  if (platform === 'linux') return DuotoneIcons.Server
+  return DuotoneIcons.Laptop
 }
 
 function connectionPath(mode: string | undefined): string {
@@ -644,13 +645,13 @@ function createStyles(colors: ThemeColors) {
   connectionStep: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.sm },
   stepMarker: { width: 30, alignItems: 'center' },
   stepCircle: { width: 30, height: 30, borderRadius: radius.pill, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
-  stepCircleActive: { backgroundColor: colors.primarySoft },
-  stepCircleComplete: { backgroundColor: colors.primary },
+  stepCircleActive: { backgroundColor: colors.surfaceStrong },
+  stepCircleComplete: { backgroundColor: colors.inverse },
   stepCircleFailed: { backgroundColor: colors.dangerSoft },
   stepDot: { width: 7, height: 7, borderRadius: radius.pill, backgroundColor: colors.subtle },
   stepDotFailed: { backgroundColor: colors.danger },
   stepConnector: { width: 2, flex: 1, minHeight: spacing.xxl, marginVertical: spacing.xs, borderRadius: radius.pill, backgroundColor: colors.separator },
-  stepConnectorComplete: { backgroundColor: colors.primary },
+  stepConnectorComplete: { backgroundColor: colors.inverse },
   stepCopy: { flex: 1, paddingBottom: spacing.xl },
   stepTitle: { ...type.bodyStrong, color: colors.muted },
   stepTitleCurrent: { color: colors.ink },
@@ -661,13 +662,13 @@ function createStyles(colors: ThemeColors) {
   progressRouteLabel: { ...type.small, color: colors.muted },
   progressRouteLabelActive: { ...type.smallStrong, color: colors.success },
   deviceHero: { paddingVertical: spacing.xxl, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  deviceIcon: { width: 56, height: 56, borderRadius: radius.xl, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  deviceIcon: { width: 56, height: 56, borderRadius: radius.xl, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
   deviceHeroCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
   deviceName: { ...type.title, color: colors.ink, flexShrink: 1 },
   connectArea: { marginTop: spacing.lg, padding: spacing.lg, borderRadius: radius.xl, backgroundColor: colors.card, gap: spacing.lg },
   connectCopy: { ...type.body, color: colors.muted },
   trustHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
-  trustIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  trustIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.surfaceStrong, alignItems: 'center', justifyContent: 'center' },
   trustCopy: { flex: 1 },
   fingerprint: { ...type.caption, color: colors.primary, fontFamily: monoFontFamily, marginTop: spacing.xs },
   connectionError: { padding: spacing.md, borderRadius: radius.xl, backgroundColor: colors.dangerSoft, gap: spacing.sm },

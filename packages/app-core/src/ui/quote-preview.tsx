@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import {
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -8,7 +7,7 @@ import {
   type ViewStyle,
 } from 'react-native'
 import Svg, { G, Path } from 'react-native-svg'
-import { X } from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from './duotone-icons'
 import { useTheme } from './theme-context'
 import { strings } from '../locales/i18n'
 import {
@@ -76,11 +75,13 @@ export function QuotePreview({ text, removal, compact = true, style }: QuotePrev
 
   return (
     <View style={[styles.container, { backgroundColor: colors.surfaceStrong, borderColor: colors.border }, style]}>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={text}
         accessibilityState={{ expanded }}
         accessibilityHint={isCompact ? '点击展开引用原文' : '点击收起引用原文'}
+        scaleTo={0.98}
+        surfaceColor={colors.surfaceStrong}
         style={styles.contentPressable}
         onPress={() => setExpanded(prev => !prev)}
       >
@@ -94,17 +95,19 @@ export function QuotePreview({ text, removal, compact = true, style }: QuotePrev
         >
           {text}
         </Text>
-      </Pressable>
+      </MotionPressable>
       {removal !== undefined && (
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={removal.label}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          scaleTo={0.9}
+          surfaceColor={colors.surfaceStrong}
           style={styles.removeButton}
           onPress={removal.onRemove}
         >
-          <X size={14} color={colors.muted} />
-        </Pressable>
+          <DuotoneIcons.X size={14} color={colors.muted} />
+        </MotionPressable>
       )}
     </View>
   )
@@ -180,15 +183,16 @@ export function InlineQuotePreview({
         </Text>
       </View>
       {onRemove !== undefined && (
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={removalLabel ?? strings.chat.removeQuote}
           hitSlop={8}
+          scaleTo={0.9}
           onPress={onRemove}
           style={inlineStyles.closeButton}
         >
-          <X size={13} color={colors.primary} />
-        </Pressable>
+          <DuotoneIcons.X size={13} color={colors.ink} />
+        </MotionPressable>
       )}
     </View>
   )

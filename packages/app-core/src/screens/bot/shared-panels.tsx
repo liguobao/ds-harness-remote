@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,23 +9,6 @@ import {
   View,
 } from 'react-native'
 import { WebView } from 'react-native-webview'
-import {
-  ArrowUp,
-  CalendarClock,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  FileText,
-  Folder,
-  Globe,
-  Lock,
-  Plus,
-  RotateCw,
-  Shield,
-  Trash2,
-  X,
-} from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import {
   object,
@@ -41,6 +23,7 @@ import {
 import { useAppStore } from '../../state/store'
 import type { ScheduleCreateRequest } from '../../types'
 import { Button } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { radius } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -208,7 +191,7 @@ export function BotBrowserPane({
           {tabs.map(tab => {
             const active = tab.id === activeTab.id
             return (
-              <Pressable
+              <MotionPressable
                 key={tab.id}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
@@ -218,19 +201,19 @@ export function BotBrowserPane({
                 }}
                 style={[styles.browserTabChip, active && styles.browserTabChipActive]}
               >
-                <Globe size={13} color={active ? colors.ink : colors.muted} />
+                <DuotoneIcons.Globe size={13} color={active ? colors.ink : colors.muted} />
                 <Text numberOfLines={1} style={[styles.browserTabTitle, active && styles.browserTabTitleActive]}>
                   {shortBrowserLabel(tab)}
                 </Text>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   hitSlop={8}
                   onPress={() => closeTab(tab.id)}
                   style={styles.browserTabClose}
                 >
-                  <X size={12} color={colors.muted} />
-                </Pressable>
-              </Pressable>
+                  <DuotoneIcons.X size={12} color={colors.muted} />
+                </MotionPressable>
+              </MotionPressable>
             )
           })}
         </ScrollView>
@@ -243,29 +226,29 @@ export function BotBrowserPane({
         </Text>
         <View style={styles.browserBannerActions}>
           {userHeld ? (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               onPress={() => void handleGiveBack()}
               style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
             >
               <Text style={styles.browserBannerBtnText}>{s.bots.browserGiveBack}</Text>
-            </Pressable>
+            </MotionPressable>
           ) : (
             <>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 onPress={() => void handleTakeover()}
                 style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
               >
                 <Text style={styles.browserBannerBtnText}>{s.bots.browserTakeover}</Text>
-              </Pressable>
-              <Pressable
+              </MotionPressable>
+              <MotionPressable
                 accessibilityRole="button"
                 onPress={() => void handleStop()}
                 style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
               >
                 <Text style={styles.browserBannerBtnText}>{s.bots.stop}</Text>
-              </Pressable>
+              </MotionPressable>
             </>
           )}
         </View>
@@ -273,33 +256,33 @@ export function BotBrowserPane({
 
       {/* Navigation & Address Bar (matches Figure 2) */}
       <View style={styles.browserNavRow}>
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           disabled={!activeTab.canGoBack || isBlank}
           onPress={() => webViewRef.current?.goBack()}
           style={[styles.browserNavIconBtn, (!activeTab.canGoBack || isBlank) && { opacity: 0.35 }]}
         >
-          <ChevronLeft size={18} color={colors.ink} />
-        </Pressable>
-        <Pressable
+          <DuotoneIcons.ChevronLeft size={18} color={colors.ink} />
+        </MotionPressable>
+        <MotionPressable
           accessibilityRole="button"
           disabled={!activeTab.canGoForward || isBlank}
           onPress={() => webViewRef.current?.goForward()}
           style={[styles.browserNavIconBtn, (!activeTab.canGoForward || isBlank) && { opacity: 0.35 }]}
         >
-          <ChevronRight size={18} color={colors.ink} />
-        </Pressable>
-        <Pressable
+          <DuotoneIcons.ChevronRight size={18} color={colors.ink} />
+        </MotionPressable>
+        <MotionPressable
           accessibilityRole="button"
           disabled={isBlank}
           onPress={() => (activeTab.loading ? webViewRef.current?.stopLoading() : webViewRef.current?.reload())}
           style={[styles.browserNavIconBtn, isBlank && { opacity: 0.45 }]}
         >
-          {activeTab.loading ? <X size={16} color={colors.ink} /> : <RotateCw size={15} color={colors.ink} />}
-        </Pressable>
+          {activeTab.loading ? <DuotoneIcons.X size={16} color={colors.ink} /> : <DuotoneIcons.RotateCw size={15} color={colors.ink} />}
+        </MotionPressable>
 
         <View style={styles.browserAddressBox}>
-          {isSecure ? <Lock size={13} color={colors.muted} /> : <Globe size={14} color={colors.muted} />}
+          {isSecure ? <DuotoneIcons.Lock size={13} color={colors.muted} /> : <DuotoneIcons.Globe size={14} color={colors.muted} />}
           <TextInput
             value={editingAddress ? addressDraft : isBlank ? '' : activeTab.url}
             onFocus={() => {
@@ -318,22 +301,22 @@ export function BotBrowserPane({
           />
         </View>
 
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={s.bots.browserNewTab}
           onPress={addNewTab}
           style={styles.browserNavIconBtn}
         >
-          <Plus size={18} color={colors.ink} />
-        </Pressable>
-        <Pressable
+          <DuotoneIcons.Plus size={18} color={colors.ink} />
+        </MotionPressable>
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={s.bots.browserGrants}
           onPress={() => setGrantsOpen(true)}
           style={styles.browserNavIconBtn}
         >
-          <Download size={16} color={grantCount > 0 ? colors.primary : colors.ink} />
-        </Pressable>
+          <DuotoneIcons.Download size={16} color={grantCount > 0 ? colors.primary : colors.ink} />
+        </MotionPressable>
       </View>
 
       {/* Viewport Area */}
@@ -365,12 +348,12 @@ export function BotBrowserPane({
             <View style={{ gap: 14 }}>
               <View style={styles.sheetHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Shield size={18} color={colors.primary} />
+                  <DuotoneIcons.Shield size={18} color={colors.primary} />
                   <Text style={styles.sheetTitle}>{s.bots.browserGrants}</Text>
                 </View>
-                <Pressable onPress={() => setGrantsOpen(false)} hitSlop={8}>
-                  <X size={20} color={colors.muted} />
-                </Pressable>
+                <MotionPressable onPress={() => setGrantsOpen(false)} hitSlop={8}>
+                  <DuotoneIcons.X size={20} color={colors.muted} />
+                </MotionPressable>
               </View>
               <ScrollView style={{ maxHeight: 460 }} showsVerticalScrollIndicator={false}>
                 <BotBrowserGrantsSection bots={[bot]} fixedBot={bot} perform={perform} />
@@ -508,9 +491,9 @@ export function BotBrowserGrantsSection({
                       {[acts.join('、'), untilText].filter(Boolean).join(' · ')}
                     </Text>
                   </View>
-                  <Pressable onPress={() => void removeGrant(row.bot, siteText)} hitSlop={8} style={styles.iconHit}>
-                    <Trash2 size={16} color={colors.danger} />
-                  </Pressable>
+                  <MotionPressable onPress={() => void removeGrant(row.bot, siteText)} hitSlop={8} style={styles.iconHit}>
+                    <DuotoneIcons.Trash2 size={16} color={colors.danger} />
+                  </MotionPressable>
                 </View>
               </View>
             )
@@ -525,7 +508,7 @@ export function BotBrowserGrantsSection({
           <View style={{ gap: 8 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <Text style={[styles.rowSub, { width: 44, marginTop: 0 }]}>Bot</Text>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 onPress={() => setBotPickerOpen((v: boolean) => !v)}
                 style={[
@@ -543,19 +526,17 @@ export function BotBrowserGrantsSection({
                   <BotAvatar bot={targetBot} size={22} />
                   <Text style={styles.rowTitle} numberOfLines={1}>{targetBot.name}</Text>
                 </View>
-                <ChevronRight
-                  size={16}
-                  color={colors.muted}
-                  style={{ transform: [{ rotate: botPickerOpen ? '90deg' : '0deg' }] }}
-                />
-              </Pressable>
+                <View style={{ transform: [{ rotate: botPickerOpen ? '90deg' : '0deg' }] }}>
+                  <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+                </View>
+              </MotionPressable>
             </View>
             {botPickerOpen && bots.length > 1 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingLeft: 56 }}>
                 {bots.map(b => {
                   const on = b.id === targetBot.id
                   return (
-                    <Pressable
+                    <MotionPressable
                       key={b.id}
                       onPress={() => {
                         setPickedBotId(b.id)
@@ -564,7 +545,7 @@ export function BotBrowserGrantsSection({
                       style={[styles.choicePill, on && styles.choicePillActive]}
                     >
                       <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{b.name}</Text>
-                    </Pressable>
+                    </MotionPressable>
                   )
                 })}
               </ScrollView>
@@ -591,13 +572,13 @@ export function BotBrowserGrantsSection({
             {(['post', 'upload', 'download', 'delete'] as const).map(act => {
               const on = actions.includes(act)
               return (
-                <Pressable
+                <MotionPressable
                   key={act}
                   onPress={() => toggleAction(act)}
                   style={[styles.choicePill, on && styles.choicePillActive]}
                 >
                   <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{actionLabels[act]}</Text>
-                </Pressable>
+                </MotionPressable>
               )
             })}
           </View>
@@ -614,13 +595,13 @@ export function BotBrowserGrantsSection({
             ] as const).map(([id, label]) => {
               const on = duration === id
               return (
-                <Pressable
+                <MotionPressable
                   key={id}
                   onPress={() => setDuration(id)}
                   style={[styles.choicePill, on && styles.choicePillActive]}
                 >
                   <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{label}</Text>
-                </Pressable>
+                </MotionPressable>
               )
             })}
           </View>
@@ -849,14 +830,14 @@ export function BotSchedulesPanel({
 
       {!creating && available && (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             onPress={() => setCreating(true)}
             style={({ pressed }) => [styles.softActionBtn, pressed && { opacity: 0.8 }]}
           >
-            <Plus size={15} color={colors.ink} />
+            <DuotoneIcons.Plus size={15} color={colors.ink} />
             <Text style={styles.softActionBtnText}>{s.bots.newScheduledTask}</Text>
-          </Pressable>
+          </MotionPressable>
         </View>
       )}
 
@@ -878,17 +859,17 @@ export function BotSchedulesPanel({
                 {state.bots.map(b => {
                   const on = targetId === b.id
                   return (
-                    <Pressable key={b.id} onPress={() => setTargetId(b.id)} style={[styles.choicePill, on && styles.choicePillActive]}>
+                    <MotionPressable key={b.id} onPress={() => setTargetId(b.id)} style={[styles.choicePill, on && styles.choicePillActive]}>
                       <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{b.name}</Text>
-                    </Pressable>
+                    </MotionPressable>
                   )
                 })}
                 {state.rooms.map(r => {
                   const on = targetId === r.id
                   return (
-                    <Pressable key={r.id} onPress={() => setTargetId(r.id)} style={[styles.choicePill, on && styles.choicePillActive]}>
+                    <MotionPressable key={r.id} onPress={() => setTargetId(r.id)} style={[styles.choicePill, on && styles.choicePillActive]}>
                       <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{r.name}</Text>
-                    </Pressable>
+                    </MotionPressable>
                   )
                 })}
               </ScrollView>
@@ -918,9 +899,9 @@ export function BotSchedulesPanel({
               ] as const).map(([id, label]) => {
                 const on = kind === id
                 return (
-                  <Pressable key={id} onPress={() => setKind(id)} style={[styles.choicePill, on && styles.choicePillActive]}>
+                  <MotionPressable key={id} onPress={() => setKind(id)} style={[styles.choicePill, on && styles.choicePillActive]}>
                     <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{label}</Text>
-                  </Pressable>
+                  </MotionPressable>
                 )
               })}
             </View>
@@ -931,9 +912,9 @@ export function BotSchedulesPanel({
                   const d = i + 1
                   const on = weekdays.includes(d)
                   return (
-                    <Pressable key={d} onPress={() => toggleDay(d)} style={[styles.choicePill, on && styles.choicePillActive]}>
+                    <MotionPressable key={d} onPress={() => toggleDay(d)} style={[styles.choicePill, on && styles.choicePillActive]}>
                       <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{label}</Text>
-                    </Pressable>
+                    </MotionPressable>
                   )
                 })}
               </View>
@@ -991,7 +972,7 @@ export function BotSchedulesPanel({
               <View key={key}>
                 {idx > 0 && <View style={styles.divider} />}
                 <View style={styles.listRow}>
-                  <CalendarClock size={18} color={colors.primary} />
+                  <DuotoneIcons.CalendarClock size={18} color={colors.primary} />
                   <View style={{ flex: 1, gap: 2 }}>
                     <Text style={styles.rowTitle}>
                       {text(task.title) || text(task.prompt) || id}
@@ -1000,7 +981,7 @@ export function BotSchedulesPanel({
                       {[owner, formatScheduleSummary(task), text(task.prompt)].filter(Boolean).join(' · ')}
                     </Text>
                   </View>
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     onPress={() => void handleDelete(task)}
                     style={[styles.iconHit, confirming && styles.dangerConfirmPill]}
@@ -1008,9 +989,9 @@ export function BotSchedulesPanel({
                     {confirming ? (
                       <Text style={{ fontSize: 12, fontWeight: '600', color: colors.danger }}>{s.bots.delete}</Text>
                     ) : (
-                      <Trash2 size={16} color={colors.danger} />
+                      <DuotoneIcons.Trash2 size={16} color={colors.danger} />
                     )}
-                  </Pressable>
+                  </MotionPressable>
                 </View>
               </View>
             )
@@ -1113,9 +1094,9 @@ export function BotMemoryPanel({
           ] as const).map(([id, label]) => {
             const on = tab === id
             return (
-              <Pressable key={id} onPress={() => setTab(id)} style={[styles.choicePill, on && styles.choicePillActive]}>
+              <MotionPressable key={id} onPress={() => setTab(id)} style={[styles.choicePill, on && styles.choicePillActive]}>
                 <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{label}</Text>
-              </Pressable>
+              </MotionPressable>
             )
           })}
         </View>
@@ -1132,7 +1113,7 @@ export function BotMemoryPanel({
           </View>
         ) : entries.length === 0 ? (
           <View style={[styles.groupCard, { padding: 22, alignItems: 'center', gap: 8 }]}>
-            <FileText size={26} color={colors.muted} />
+            <DuotoneIcons.FileText size={26} color={colors.muted} />
             <Text style={styles.rowTitle}>{s.bots.memoryEmpty}</Text>
             <Text style={[styles.rowSub, { textAlign: 'center' }]}>{ownerName}</Text>
           </View>
@@ -1156,9 +1137,9 @@ export function BotMemoryPanel({
                         .join(' · ')}
                     </Text>
                   </View>
-                  <Pressable onPress={() => void removeEntry(entry)} hitSlop={8} style={styles.iconHit}>
-                    <Trash2 size={16} color={colors.danger} />
-                  </Pressable>
+                  <MotionPressable onPress={() => void removeEntry(entry)} hitSlop={8} style={styles.iconHit}>
+                    <DuotoneIcons.Trash2 size={16} color={colors.danger} />
+                  </MotionPressable>
                 </View>
               </View>
             ))}
@@ -1175,14 +1156,14 @@ export function BotMemoryPanel({
           onSubmitEditing={() => void submitAsk()}
           style={[styles.input, { flex: 1, borderRadius: 999 }]}
         />
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           disabled={!askDraft.trim() || asking}
           onPress={() => void submitAsk()}
           style={[styles.sendCircleBtn, (!askDraft.trim() || asking) && { opacity: 0.4 }]}
         >
-          {asking ? <ActivityIndicator size="small" color={colors.surface} /> : <ArrowUp size={18} color={colors.surface} />}
-        </Pressable>
+          {asking ? <ActivityIndicator size="small" color={colors.surface} /> : <DuotoneIcons.ArrowUp size={18} color={colors.surface} />}
+        </MotionPressable>
       </View>
     </View>
   )
@@ -1259,28 +1240,28 @@ export function BotFolderPickerModal({
         <View style={{ gap: 14 }}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{teamMode ? s.bots.teamWorkspace : s.bots.workingFolder}</Text>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <X size={20} color={colors.muted} />
-            </Pressable>
+            <MotionPressable onPress={onClose} hitSlop={8}>
+              <DuotoneIcons.X size={20} color={colors.muted} />
+            </MotionPressable>
           </View>
 
           {mode === 'list' && (
             <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ gap: 8 }}>
               {!teamMode && (
-                <Pressable
+                <MotionPressable
                   onPress={() => {
                     onPick('')
                     onClose()
                   }}
                   style={styles.listRow}
                 >
-                  <Folder size={18} color={colors.primary} />
+                  <DuotoneIcons.Folder size={18} color={colors.primary} />
                   <Text style={[styles.rowTitle, { flex: 1 }]}>{s.bots.teamWorkspace}</Text>
-                  {!value && <Check size={18} color={colors.primary} />}
-                </Pressable>
+                  {!value && <DuotoneIcons.Check size={18} color={colors.primary} />}
+                </MotionPressable>
               )}
               {knownFolders.map(folder => (
-                <Pressable
+                <MotionPressable
                   key={folder.path}
                   onPress={() => {
                     onPick(folder.path)
@@ -1288,25 +1269,25 @@ export function BotFolderPickerModal({
                   }}
                   style={styles.listRow}
                 >
-                  <Folder size={18} color={colors.muted} />
+                  <DuotoneIcons.Folder size={18} color={colors.muted} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowTitle}>{folder.title}</Text>
                     <Text style={styles.rowSub} numberOfLines={1}>{folder.path}</Text>
                   </View>
-                  {value === folder.path && <Check size={18} color={colors.primary} />}
-                </Pressable>
+                  {value === folder.path && <DuotoneIcons.Check size={18} color={colors.primary} />}
+                </MotionPressable>
               ))}
               <View style={styles.divider} />
-              <Pressable onPress={() => void loadBrowse(value)} style={styles.listRow}>
-                <Folder size={18} color={colors.ink} />
+              <MotionPressable onPress={() => void loadBrowse(value)} style={styles.listRow}>
+                <DuotoneIcons.Folder size={18} color={colors.ink} />
                 <Text style={[styles.rowTitle, { flex: 1 }]}>{s.bots.browseFolders}</Text>
-                <ChevronRight size={16} color={colors.muted} />
-              </Pressable>
-              <Pressable onPress={() => setMode('type')} style={styles.listRow}>
-                <FileText size={18} color={colors.ink} />
+                <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+              </MotionPressable>
+              <MotionPressable onPress={() => setMode('type')} style={styles.listRow}>
+                <DuotoneIcons.FileText size={18} color={colors.ink} />
                 <Text style={[styles.rowTitle, { flex: 1 }]}>{s.bots.enterPath}</Text>
-                <ChevronRight size={16} color={colors.muted} />
-              </Pressable>
+                <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+              </MotionPressable>
             </ScrollView>
           )}
 
@@ -1315,17 +1296,17 @@ export function BotFolderPickerModal({
               <Text style={styles.rowSub} numberOfLines={1}>{browsePath}</Text>
               <ScrollView style={{ maxHeight: 280 }}>
                 {browseParent ? (
-                  <Pressable onPress={() => void loadBrowse(browseParent)} style={styles.listRow}>
-                    <ChevronLeft size={16} color={colors.muted} />
+                  <MotionPressable onPress={() => void loadBrowse(browseParent)} style={styles.listRow}>
+                    <DuotoneIcons.ChevronLeft size={16} color={colors.muted} />
                     <Text style={styles.rowTitle}>..</Text>
-                  </Pressable>
+                  </MotionPressable>
                 ) : null}
                 {browseEntries.map(entry => (
-                  <Pressable key={entry.path} onPress={() => void loadBrowse(entry.path)} style={styles.listRow}>
-                    <Folder size={17} color={colors.primary} />
+                  <MotionPressable key={entry.path} onPress={() => void loadBrowse(entry.path)} style={styles.listRow}>
+                    <DuotoneIcons.Folder size={17} color={colors.primary} />
                     <Text style={[styles.rowTitle, { flex: 1 }]}>{entry.name}</Text>
-                    <ChevronRight size={16} color={colors.muted} />
-                  </Pressable>
+                    <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+                  </MotionPressable>
                 ))}
               </ScrollView>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>

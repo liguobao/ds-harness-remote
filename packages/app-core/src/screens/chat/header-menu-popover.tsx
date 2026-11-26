@@ -11,28 +11,11 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native'
-import {
-  Archive,
-  ArchiveRestore,
-  ArrowRightLeft,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Folder,
-  FolderCog,
-  FolderPlus,
-  Info,
-  ListTree,
-  MessageSquare,
-  Pin,
-  PinOff,
-  Search,
-  X,
-  type LucideIcon,
-} from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings } from '../../locales/i18n'
 import type { WorkspaceView } from '../../types'
+import type { UiIconComponent } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { continuousRadius } from '../../ui/platform-style'
 import { floatingShadow, spacing } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
@@ -43,7 +26,7 @@ export type HeaderPopoverView = 'menu' | 'workspace-from-menu' | 'workspace-stan
 
 interface MenuRowItem {
   key: string
-  icon: LucideIcon
+  icon: UiIconComponent
   label: string
   accessibilityLabel?: string
   trailingChevron?: boolean
@@ -197,14 +180,14 @@ export function ChatHeaderMenuPopover({
   const menuRows: MenuRowItem[] = [
     {
       key: 'add-to-workspace',
-      icon: FolderPlus,
+      icon: DuotoneIcons.FolderPlus,
       label: strings.chat.addToWorkspace,
       trailingChevron: true,
       onPress: () => onChangeView('workspace-from-menu'),
     },
     {
       key: 'search-in-chat',
-      icon: Search,
+      icon: DuotoneIcons.Search,
       label: strings.chat.searchInChat,
       disabled: !canSearch,
       onPress: () => runAfterClose(onSearchInChat),
@@ -213,7 +196,7 @@ export function ChatHeaderMenuPopover({
   if (canPin) {
     menuRows.push({
       key: 'pin',
-      icon: isPinned ? PinOff : Pin,
+      icon: isPinned ? DuotoneIcons.PinOff : DuotoneIcons.Pin,
       label: isPinned ? strings.sessions.unpinSession : strings.sessions.pinSession,
       disabled: !connected || busy !== undefined,
       onPress: () => runAfterClose(onTogglePin),
@@ -221,28 +204,28 @@ export function ChatHeaderMenuPopover({
   }
   menuRows.push({
     key: 'trajectory',
-    icon: trajectory ? MessageSquare : ListTree,
+    icon: trajectory ? DuotoneIcons.MessageSquare : DuotoneIcons.ListTree,
     label: trajectory ? strings.trajectory.close : strings.trajectory.open,
     onPress: () => runAfterClose(onToggleTrajectory),
   })
   if (canHandoff) {
     menuRows.push({
       key: 'handoff',
-      icon: ArrowRightLeft,
+      icon: DuotoneIcons.ArrowRightLeft,
       label: strings.handoff.action,
       onPress: () => runAfterClose(onHandoff),
     })
   }
   menuRows.push({
     key: 'session-info',
-    icon: Info,
+    icon: DuotoneIcons.Info,
     label: strings.sessionInfo.title,
     onPress: () => runAfterClose(onOpenSessionInfo),
   })
   if (canArchive) {
     menuRows.push({
       key: 'archive',
-      icon: archived ? ArchiveRestore : Archive,
+      icon: archived ? DuotoneIcons.ArchiveRestore : DuotoneIcons.Archive,
       label: archived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession,
       danger: !archived,
       disabled: !connected || busy !== undefined,
@@ -304,12 +287,14 @@ export function ChatHeaderMenuPopover({
                   return (
                     <View key={row.key}>
                       {row.dividerBefore && <View style={styles.divider} />}
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="menuitem"
                         accessibilityLabel={row.accessibilityLabel ?? row.label}
                         accessibilityState={{ disabled: row.disabled }}
                         disabled={row.disabled}
                         onPress={row.onPress}
+                        scaleTo={0.98}
+                        surfaceColor={colors.elevated}
                         style={({ pressed }) => [
                           styles.row,
                           pressed && !row.disabled && styles.rowPressed,
@@ -325,9 +310,9 @@ export function ChatHeaderMenuPopover({
                           {row.label}
                         </Text>
                         {row.trailingChevron && (
-                          <ChevronRight size={17} color={colors.muted} strokeWidth={1.9} />
+                          <DuotoneIcons.ChevronRight size={17} color={colors.muted} strokeWidth={1.9} />
                         )}
-                      </Pressable>
+                      </MotionPressable>
                     </View>
                   )
                 })}
@@ -337,29 +322,33 @@ export function ChatHeaderMenuPopover({
             <>
               <View style={styles.subviewHeader}>
                 {view === 'workspace-from-menu' && (
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     accessibilityLabel={strings.common.back}
                     hitSlop={8}
+                    scaleTo={0.92}
+                    surfaceColor={colors.elevated}
                     onPress={() => onChangeView('menu')}
                     style={({ pressed }) => [styles.headerIconBtn, pressed && styles.rowPressed]}
                   >
-                    <ChevronLeft size={19} color={colors.ink} strokeWidth={2} />
-                  </Pressable>
+                    <DuotoneIcons.ChevronLeft size={19} color={colors.ink} strokeWidth={2} />
+                  </MotionPressable>
                 )}
                 <Text numberOfLines={1} style={styles.subviewTitle}>
                   {view === 'workspace-from-menu' ? strings.chat.addToWorkspace : strings.chat.selectWorkspace}
                 </Text>
                 {view === 'workspace-standalone' && (
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     accessibilityLabel={strings.common.close}
                     hitSlop={8}
+                    scaleTo={0.92}
+                    surfaceColor={colors.elevated}
                     onPress={() => onChangeView(null)}
                     style={({ pressed }) => [styles.headerIconBtn, pressed && styles.rowPressed]}
                   >
-                    <X size={17} color={colors.muted} strokeWidth={2} />
-                  </Pressable>
+                    <DuotoneIcons.X size={17} color={colors.muted} strokeWidth={2} />
+                  </MotionPressable>
                 )}
               </View>
               <View style={styles.divider} />
@@ -380,12 +369,14 @@ export function ChatHeaderMenuPopover({
                     const displayTitle = workspace.title?.trim() || workspace.path
                     const showPath = workspace.path.length > 0 && workspace.path !== displayTitle
                     return (
-                      <Pressable
+                      <MotionPressable
                         key={workspace.workspaceId}
                         accessibilityRole="menuitem"
                         accessibilityLabel={displayTitle}
                         accessibilityState={{ selected: isCurrent, disabled }}
                         disabled={disabled}
+                        scaleTo={0.98}
+                        surfaceColor={isCurrent ? colors.surfaceStrong : colors.elevated}
                         onPress={() => runAfterClose(() => onPickWorkspace(workspace))}
                         style={({ pressed }) => [
                           styles.wsRow,
@@ -394,9 +385,9 @@ export function ChatHeaderMenuPopover({
                           disabled && styles.rowDisabled,
                         ]}
                       >
-                        <Folder
+                        <DuotoneIcons.Folder
                           size={18}
-                          color={isCurrent ? colors.primary : colors.muted}
+                          color={isCurrent ? colors.ink : colors.muted}
                           strokeWidth={1.9}
                         />
                         <View style={styles.wsCopy}>
@@ -413,24 +404,26 @@ export function ChatHeaderMenuPopover({
                             </Text>
                           )}
                         </View>
-                        {isCurrent && <Check size={17} color={colors.primary} strokeWidth={2.2} />}
-                      </Pressable>
+                        {isCurrent && <DuotoneIcons.Check size={17} color={colors.ink} strokeWidth={2.2} />}
+                      </MotionPressable>
                     )
                   })
                 )}
               </ScrollView>
               <View style={styles.divider} />
-              <Pressable
+              <MotionPressable
                 accessibilityRole="menuitem"
                 accessibilityLabel={strings.chat.manageWorkspaces}
+                scaleTo={0.98}
+                surfaceColor={colors.elevated}
                 onPress={() => runAfterClose(onManageWorkspaces)}
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               >
-                <FolderCog size={19} color={colors.ink} strokeWidth={1.9} />
+                <DuotoneIcons.FolderCog size={19} color={colors.ink} strokeWidth={1.9} />
                 <Text numberOfLines={1} style={styles.rowLabel}>
                   {strings.chat.manageWorkspaces}
                 </Text>
-              </Pressable>
+              </MotionPressable>
             </>
           )}
         </Animated.View>
@@ -538,7 +531,7 @@ const createStyles = (colors: ThemeColors) =>
       ...continuousRadius(16),
     },
     wsRowSelected: {
-      backgroundColor: colors.primarySoft,
+      backgroundColor: colors.surfaceStrong,
     },
     wsCopy: {
       flex: 1,
@@ -551,7 +544,7 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.ink,
     },
     wsTitleSelected: {
-      color: colors.primary,
+      color: colors.ink,
       fontWeight: '600',
     },
     wsPath: {

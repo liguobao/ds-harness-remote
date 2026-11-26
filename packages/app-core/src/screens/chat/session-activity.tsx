@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
-import { ChevronDown, ChevronUp, Flag, Layers, PauseCircle, Users, X } from 'lucide-react-native'
 import type { RemoteGatewayStream } from '@dsh-remote/client-core'
 import type { BackgroundJob } from '../../services/session-tools'
 import type { RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
 import { IconChecklistOutline, IconJobOutline } from '../../ui/dsh-icons'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { requireSessionTools, useAppStore } from '../../state/store'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ActivityDockMode, type ThemeColors } from '../../ui/theme'
@@ -200,7 +200,7 @@ export function SessionActivityDock({
       />
     )}
     {effectiveMode !== 'compact' && goal && <Disclosure title={`${copy.goal} · ${goal.objective}`} trailing={<Text style={styles.status}>{phase(goal.phase)}</Text>}
-      icon={goal.phase === 'paused' ? <PauseCircle size={18} color={colors.muted} /> : <Flag size={18} color={colors.muted} />}
+      icon={goal.phase === 'paused' ? <DuotoneIcons.PauseCircle size={18} color={colors.muted} /> : <DuotoneIcons.Flag size={18} color={colors.muted} />}
       open={expanded === 'goal'} onPress={() => toggle('goal')}>
       <ScrollView style={[styles.details, { maxHeight: detailsHeight }]} nestedScrollEnabled>
         <Text selectable style={styles.detailText}>{String(goal.objective)}</Text>
@@ -219,10 +219,12 @@ export function SessionActivityDock({
         testID="activity-pill-bar"
       >
         {hasTodos && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={`${todosTitle} · ${todoStats.progressText}`}
             onPress={() => setActiveModal('todos')}
+            scaleTo={0.96}
+            surfaceColor={isTodosActive ? colors.surfaceStrong : (colors.surfaceMuted ?? colors.card)}
             style={({ pressed }) => [
               styles.pill,
               isTodosActive && styles.pillActive,
@@ -241,14 +243,16 @@ export function SessionActivityDock({
             <Text style={[styles.pillBadge, isTodosActive && styles.pillBadgeActive]} testID="activity-pill-todos-badge">
               {todoStats.progressText}
             </Text>
-          </Pressable>
+          </MotionPressable>
         )}
 
         {hasGoal && goal && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={`${copy.goal} · ${String(goal.objective)}`}
             onPress={() => setActiveModal('goal')}
+            scaleTo={0.96}
+            surfaceColor={isGoalActive ? colors.surfaceStrong : (colors.surfaceMuted ?? colors.card)}
             style={({ pressed }) => [
               styles.pill,
               isGoalActive && styles.pillActive,
@@ -257,9 +261,9 @@ export function SessionActivityDock({
             testID="activity-pill-goal"
           >
             {goal.phase === 'paused' ? (
-              <PauseCircle size={14} color={colors.muted} />
+              <DuotoneIcons.PauseCircle size={14} color={colors.muted} />
             ) : (
-              <Flag size={14} color={isGoalActive ? colors.primary : colors.muted} />
+              <DuotoneIcons.Flag size={14} color={isGoalActive ? colors.ink : colors.muted} />
             )}
             <Text style={[styles.pillText, isGoalActive && styles.pillTextActive]} numberOfLines={1}>
               {copy.goal}
@@ -267,14 +271,16 @@ export function SessionActivityDock({
             <Text style={[styles.pillBadge, isGoalActive && styles.pillBadgeActive]} testID="activity-pill-goal-badge">
               {phase(goal.phase)}
             </Text>
-          </Pressable>
+          </MotionPressable>
         )}
 
         {hasJobs && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={`${jobsTitle} · ${jobStats.statsText}`}
             onPress={() => setActiveModal('jobs')}
+            scaleTo={0.96}
+            surfaceColor={isJobsActive ? colors.surfaceStrong : (colors.surfaceMuted ?? colors.card)}
             style={({ pressed }) => [
               styles.pill,
               isJobsActive && styles.pillActive,
@@ -293,14 +299,16 @@ export function SessionActivityDock({
             <Text style={[styles.pillBadge, isJobsActive && styles.pillBadgeActive]} testID="activity-pill-jobs-badge">
               {jobStats.statsText}
             </Text>
-          </Pressable>
+          </MotionPressable>
         )}
 
         {hasSubagents && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={`${subagentsTitle} · ${subagentStats.statsText}`}
             onPress={() => setActiveModal('subagents')}
+            scaleTo={0.96}
+            surfaceColor={isSubagentsActive ? colors.surfaceStrong : (colors.surfaceMuted ?? colors.card)}
             style={({ pressed }) => [
               styles.pill,
               isSubagentsActive && styles.pillActive,
@@ -311,7 +319,7 @@ export function SessionActivityDock({
             {isSubagentsActive ? (
               <AgentStatusGlyph status="running" colors={colors} size={14} />
             ) : (
-              <Layers size={14} color={colors.muted} />
+              <DuotoneIcons.Layers size={14} color={colors.muted} />
             )}
             <Text style={[styles.pillText, isSubagentsActive && styles.pillTextActive]} numberOfLines={1}>
               {subagentsTitle}
@@ -319,14 +327,16 @@ export function SessionActivityDock({
             <Text style={[styles.pillBadge, isSubagentsActive && styles.pillBadgeActive]} testID="activity-pill-subagents-badge">
               {subagentStats.statsText}
             </Text>
-          </Pressable>
+          </MotionPressable>
         )}
 
         {hasTeam && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={`${teamTitle} · ${teamStats.statsText}`}
             onPress={() => setActiveModal('team')}
+            scaleTo={0.96}
+            surfaceColor={isTeamActive ? colors.surfaceStrong : (colors.surfaceMuted ?? colors.card)}
             style={({ pressed }) => [
               styles.pill,
               isTeamActive && styles.pillActive,
@@ -337,7 +347,7 @@ export function SessionActivityDock({
             {isTeamActive ? (
               <AgentStatusGlyph status={teamActiveGlyphStatus} colors={colors} size={14} />
             ) : (
-              <Users size={14} color={colors.muted} />
+              <DuotoneIcons.Users size={14} color={colors.muted} />
             )}
             <Text style={[styles.pillText, isTeamActive && styles.pillTextActive]} numberOfLines={1}>
               {teamTitle}
@@ -345,7 +355,7 @@ export function SessionActivityDock({
             <Text style={[styles.pillBadge, isTeamActive && styles.pillBadgeActive]} testID="activity-pill-team-badge">
               {teamStats.statsText}
             </Text>
-          </Pressable>
+          </MotionPressable>
         )}
       </ScrollView>
     )}
@@ -397,15 +407,16 @@ export function SessionActivityDock({
         <View style={styles.sheetBody} testID="activity-todos-sheet">
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{todosTitle}</Text>
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.common.close}
               hitSlop={8}
+              scaleTo={0.92}
               onPress={() => setActiveModal(undefined)}
               style={({ pressed }) => [styles.sheetClose, pressed && styles.pressed]}
             >
-              <X size={18} color={colors.muted} />
-            </Pressable>
+              <DuotoneIcons.X size={18} color={colors.muted} />
+            </MotionPressable>
           </View>
           <TaskProgressChecklist
             todos={todos}
@@ -419,18 +430,19 @@ export function SessionActivityDock({
         <View style={styles.sheetBody} testID="activity-goal-sheet">
           <View style={styles.sheetHeader}>
             <View style={styles.sheetTitleGroup}>
-              {goal.phase === 'paused' ? <PauseCircle size={18} color={colors.muted} /> : <Flag size={18} color={colors.primary} />}
+              {goal.phase === 'paused' ? <DuotoneIcons.PauseCircle size={18} color={colors.muted} /> : <DuotoneIcons.Flag size={18} color={colors.ink} />}
               <Text style={styles.sheetTitle}>{copy.goal}</Text>
             </View>
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.common.close}
               hitSlop={8}
+              scaleTo={0.92}
               onPress={() => setActiveModal(undefined)}
               style={({ pressed }) => [styles.sheetClose, pressed && styles.pressed]}
             >
-              <X size={18} color={colors.muted} />
-            </Pressable>
+              <DuotoneIcons.X size={18} color={colors.muted} />
+            </MotionPressable>
           </View>
           <ScrollView style={{ maxHeight: modalDetailsHeight }} nestedScrollEnabled>
             <Text selectable style={styles.goalObjective}>{String(goal.objective)}</Text>
@@ -515,11 +527,12 @@ function Disclosure({ title, icon, open, onPress, children, trailing }: { traili
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return <View style={styles.group}>
-    <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} onPress={onPress}
+    <MotionPressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} onPress={onPress}
+      scaleTo={0.98} surfaceColor={colors.card}
       style={({ pressed }) => [styles.header, pressed && styles.pressed]}>
       {icon}<Text numberOfLines={1} style={styles.summary}>{title}</Text>{trailing}
-      {open ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />}
-    </Pressable>
+      {open ? <DuotoneIcons.ChevronUp size={16} color={colors.muted} /> : <DuotoneIcons.ChevronDown size={16} color={colors.muted} />}
+    </MotionPressable>
     {open && children}
   </View>
 }
@@ -541,8 +554,8 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     gap: 6,
   },
   pillActive: {
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
+    backgroundColor: colors.surfaceStrong,
+    borderColor: colors.ink,
   },
   pillText: {
     ...typography.caption,
@@ -550,7 +563,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontWeight: '600',
   },
   pillTextActive: {
-    color: colors.primary,
+    color: colors.ink,
   },
   pillBadge: {
     ...typography.caption,
@@ -558,7 +571,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   pillBadgeActive: {
-    color: colors.primary,
+    color: colors.ink,
     fontWeight: '600',
   },
   sheetBody: {
@@ -638,5 +651,5 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   empty: { ...typography.small, color: colors.muted, padding: spacing.sm },
   jobActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   retry: { minHeight: 44, paddingHorizontal: spacing.sm, justifyContent: 'center' },
-  retryText: { ...typography.small, color: colors.primary },
+  retryText: { ...typography.small, color: colors.ink },
 })

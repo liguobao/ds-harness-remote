@@ -24,29 +24,7 @@ import { Alert } from '../ui/alert'
 import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
 import Svg, { Path } from 'react-native-svg'
-import {
-  ArrowLeft,
-  ArrowRightLeft,
-  Bot,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  ChevronsUpDown,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  Laptop,
-  LayoutGrid,
-  Monitor,
-  Plus,
-  MoreVertical,
-  Search,
-  Server,
-  Settings,
-  Sliders,
-  Star,
-  X,
-} from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
 import { selectCustomAcpBackends, selectKnownMember } from '../state/store-state'
@@ -315,10 +293,12 @@ const SessionListRow = memo(function SessionListRow({
   const accessibilityLabel = [displayTitle, handoffLabel, status?.label, isPinned ? strings.sessions.pinned : undefined].filter(Boolean).join(', ')
 
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ selected: isSelected }}
+      scaleTo={0.985}
+      surfaceColor={isSelected ? colors.primarySoft : colors.card}
       onPress={() => onPress(item, isSelected)}
       onLongPress={() => onLongPress(item, sectionId, accountKey, index, isPinned)}
       delayLongPress={300}
@@ -362,10 +342,11 @@ const SessionListRow = memo(function SessionListRow({
           <OfficialMenuIcons.pinFill size={13} color={colors.ink} />
         </View>
       )}
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={strings.sessions.moreActions}
         hitSlop={8}
+        scaleTo={0.9}
         onPress={e => {
           e.stopPropagation()
           onMorePress(item)
@@ -373,8 +354,8 @@ const SessionListRow = memo(function SessionListRow({
         style={styles.moreActionBtn}
       >
         <OfficialMenuIcons.ellipsis size={16} color={colors.muted} />
-      </Pressable>
-    </Pressable>
+      </MotionPressable>
+    </MotionPressable>
   )
 })
 
@@ -410,10 +391,12 @@ const WorkspaceSectionHeader = memo(function WorkspaceSectionHeader({
   onCreateSession,
 }: WorkspaceSectionHeaderProps) {
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityHint={workspace ? strings.workspaces.options : undefined}
       android_ripple={androidRipple(colors)}
+      scaleTo={0.985}
+      surfaceColor={colors.card}
       onPress={() => onToggle(sectionId)}
       onLongPress={() => {
         if (workspace) onLongPress(workspace)
@@ -427,8 +410,8 @@ const WorkspaceSectionHeader = memo(function WorkspaceSectionHeader({
     >
       <View style={styles.workspaceRowLeft}>
         {expanded
-          ? <FolderOpen size={18} color={colors.primary} strokeWidth={1.8} />
-          : <Folder size={18} color={colors.muted} strokeWidth={1.8} />}
+          ? <DuotoneIcons.FolderOpen size={18} color={colors.ink} surfaceColor={colors.card} strokeWidth={1.8} />
+          : <DuotoneIcons.Folder size={18} color={colors.muted} surfaceColor={colors.card} strokeWidth={1.8} />}
         <Text style={styles.workspaceRowTitle} numberOfLines={1}>
           {title}
         </Text>
@@ -438,23 +421,25 @@ const WorkspaceSectionHeader = memo(function WorkspaceSectionHeader({
       </View>
       <View style={styles.workspaceRowRight}>
         {workspace !== undefined && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={strings.workspaces.newSessionIn(title)}
             android_ripple={androidRipple(colors, true)}
             hitSlop={8}
+            scaleTo={0.9}
+            surfaceColor={colors.card}
             onPress={e => {
               e.stopPropagation()
               onCreateSession(workspace)
             }}
             style={({ pressed }) => [styles.workspaceSmallBtn, pressed && styles.pressedBg]}
           >
-            <Plus size={16} color={colors.muted} strokeWidth={2} />
-          </Pressable>
+            <DuotoneIcons.Plus size={16} color={colors.muted} strokeWidth={2} />
+          </MotionPressable>
         )}
-        {expanded ? <ChevronDown size={16} color={colors.subtle} /> : <ChevronRight size={16} color={colors.subtle} />}
+        {expanded ? <DuotoneIcons.ChevronDown size={16} color={colors.subtle} /> : <DuotoneIcons.ChevronRight size={16} color={colors.subtle} />}
       </View>
-    </Pressable>
+    </MotionPressable>
   )
 })
 
@@ -476,8 +461,9 @@ const WorkspaceSectionFooter = memo(function WorkspaceSectionFooter({
   onShowMore,
 }: WorkspaceSectionFooterProps) {
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
+      scaleTo={0.985}
       onPress={() => onShowMore(countKey)}
       style={[
         styles.showMoreRow,
@@ -485,7 +471,7 @@ const WorkspaceSectionFooter = memo(function WorkspaceSectionFooter({
       ]}
     >
       <Text style={styles.showMoreText}>{strings.sessions.showMoreSessions(remaining)}</Text>
-    </Pressable>
+    </MotionPressable>
   )
 })
 
@@ -524,7 +510,7 @@ const HarnessPickerModal = memo(function HarnessPickerModal({
         <View style={[styles.harnessDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
           <View style={styles.harnessHeader}>
             <Text style={styles.harnessTitle} accessibilityRole="header">{strings.sessions.switchHarness}</Text>
-            <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+            <IconButton label={strings.common.close} icon={DuotoneIcons.X} onPress={onClose} />
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.harnessList}>
             <GroupCard>
@@ -542,7 +528,7 @@ const HarnessPickerModal = memo(function HarnessPickerModal({
                     detail={descriptionMap[option.value] ?? strings.sessions.customAcpDescription}
                     selected={chosen}
                     chevron={false}
-                    accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                    accessory={chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                     onPress={() => onSelect(option.value)}
                   />
                 )
@@ -1634,23 +1620,24 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
               <GroupRow
                 key={fav.key}
                 first={idx === 0}
-                icon={Star}
+                icon={DuotoneIcons.Star}
                 label={fav.title}
                 detail={fav.path || undefined}
                 onPress={() => void listCtxRef.current.handleOpenFavorite(fav.workspaceId, fav.backend)}
                 accessory={
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     accessibilityLabel={strings.devices.removeFavorite(fav.title)}
                     hitSlop={8}
+                    scaleTo={0.9}
                     onPress={e => {
                       e.stopPropagation()
                       void listCtxRef.current.removeFavoriteWorkspace(fav.deviceId, fav.key)
                     }}
                     style={styles.workspaceSmallBtn}
                   >
-                    <X size={14} color={colors.muted} />
-                  </Pressable>
+                    <DuotoneIcons.X size={14} color={colors.muted} />
+                  </MotionPressable>
                 }
               />
             ))}
@@ -1823,46 +1810,46 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
       ]}
     >
       <Text style={styles.modalSectionLabel}>{strings.sessions.groupBy}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('workspace'); closeConfig() }}>
+      <MotionPressable accessibilityRole="button" surfaceColor={colors.surface} scaleTo={0.97} style={styles.modalItem} onPress={() => { updateGroupBy('workspace'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspace}</Text>
-        {groupBy === 'workspace' && <Check size={14} color={colors.ink} />}
-      </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('workspace-tree'); closeConfig() }}>
+        {groupBy === 'workspace' && <DuotoneIcons.Check size={14} color={colors.ink} />}
+      </MotionPressable>
+      <MotionPressable accessibilityRole="button" surfaceColor={colors.surface} scaleTo={0.97} style={styles.modalItem} onPress={() => { updateGroupBy('workspace-tree'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspaceTree}</Text>
-        {groupBy === 'workspace-tree' && <Check size={14} color={colors.ink} />}
-      </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('list'); closeConfig() }}>
+        {groupBy === 'workspace-tree' && <DuotoneIcons.Check size={14} color={colors.ink} />}
+      </MotionPressable>
+      <MotionPressable accessibilityRole="button" surfaceColor={colors.surface} scaleTo={0.97} style={styles.modalItem} onPress={() => { updateGroupBy('list'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByList}</Text>
-        {groupBy === 'list' && <Check size={14} color={colors.ink} />}
-      </Pressable>
+        {groupBy === 'list' && <DuotoneIcons.Check size={14} color={colors.ink} />}
+      </MotionPressable>
 
       <View style={styles.modalDivider} />
 
       <Text style={styles.modalSectionLabel}>{strings.sessions.orderBy}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { updateOrderBy('manual'); closeConfig() }}>
+      <MotionPressable accessibilityRole="button" surfaceColor={colors.surface} scaleTo={0.97} style={styles.modalItem} onPress={() => { updateOrderBy('manual'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.orderManual}</Text>
-        {orderBy === 'manual' && <Check size={14} color={colors.ink} />}
-      </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { updateOrderBy('updated'); closeConfig() }}>
+        {orderBy === 'manual' && <DuotoneIcons.Check size={14} color={colors.ink} />}
+      </MotionPressable>
+      <MotionPressable accessibilityRole="button" surfaceColor={colors.surface} scaleTo={0.97} style={styles.modalItem} onPress={() => { updateOrderBy('updated'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.orderUpdated}</Text>
-        {orderBy === 'updated' && <Check size={14} color={colors.ink} />}
-      </Pressable>
+        {orderBy === 'updated' && <DuotoneIcons.Check size={14} color={colors.ink} />}
+      </MotionPressable>
 
       <View style={styles.modalDivider} />
 
       <Text style={styles.modalSectionLabel}>{strings.sessions.filterSessions}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('hideArchived'); closeConfig() }}>
+      <MotionPressable accessibilityRole="button" surfaceColor={colors.surface} scaleTo={0.97} style={styles.modalItem} onPress={() => { updateFilterMode('hideArchived'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterHideArchived}</Text>
-        {filterMode === 'hideArchived' && <Check size={14} color={colors.ink} />}
-      </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('all'); closeConfig() }}>
+        {filterMode === 'hideArchived' && <DuotoneIcons.Check size={14} color={colors.ink} />}
+      </MotionPressable>
+      <MotionPressable accessibilityRole="button" surfaceColor={colors.surface} scaleTo={0.97} style={styles.modalItem} onPress={() => { updateFilterMode('all'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterAll}</Text>
-        {filterMode === 'all' && <Check size={14} color={colors.ink} />}
-      </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('archivedOnly'); closeConfig() }}>
+        {filterMode === 'all' && <DuotoneIcons.Check size={14} color={colors.ink} />}
+      </MotionPressable>
+      <MotionPressable accessibilityRole="button" surfaceColor={colors.surface} scaleTo={0.97} style={styles.modalItem} onPress={() => { updateFilterMode('archivedOnly'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterArchivedOnly}</Text>
-        {filterMode === 'archivedOnly' && <Check size={14} color={colors.ink} />}
-      </Pressable>
+        {filterMode === 'archivedOnly' && <DuotoneIcons.Check size={14} color={colors.ink} />}
+      </MotionPressable>
     </Animated.View>
   )
 
@@ -1876,14 +1863,16 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
     : connectionPhase === 'connecting' || connectionPhase === 'reconnecting'
       ? strings.status.waiting
       : strings.status.offline
-  const FooterHostIcon = platform === 'win32' ? Monitor : platform === 'linux' ? Server : Laptop
+  const FooterHostIcon = platform === 'win32' ? DuotoneIcons.Monitor : platform === 'linux' ? DuotoneIcons.Server : DuotoneIcons.Laptop
   const hostFooterDeviceInfo = (
     <>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.devices.openInfo}`}
         disabled={connectionPhase !== 'connected' || onOpenDeviceInfo === undefined}
         android_ripple={androidRipple(colors)}
+        surfaceColor={colors.card}
+        scaleTo={0.92}
         onPress={() => {
           Keyboard.dismiss()
           onOpenDeviceInfo?.()
@@ -1892,12 +1881,14 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
         style={({ pressed }) => [styles.hostFooterIcon, pressed && styles.pressedBg]}
       >
         <FooterHostIcon size={17} color={colors.ink} strokeWidth={1.8} />
-      </Pressable>
-      <Pressable
+      </MotionPressable>
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
         disabled={onOpenHostSwitcher === undefined}
         android_ripple={androidRipple(colors)}
+        surfaceColor={colors.card}
+        scaleTo={0.97}
         onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher?.() }}
         hitSlop={4}
         style={({ pressed }) => [styles.hostFooterInfo, pressed && styles.pressedBg]}
@@ -1909,8 +1900,8 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
           <View style={[styles.hostFooterDot, { backgroundColor: hostStatusDotColor }]} />
           <Text numberOfLines={1} style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
         </View>
-        {onOpenHostSwitcher !== undefined && <ChevronsUpDown size={13} color={colors.muted} strokeWidth={1.8} />}
-      </Pressable>
+        {onOpenHostSwitcher !== undefined && <DuotoneIcons.ChevronsUpDown size={13} color={colors.muted} strokeWidth={1.8} />}
+      </MotionPressable>
     </>
   )
 
@@ -1920,10 +1911,11 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
       {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
         <View style={styles.brandGroup}>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
             disabled={onOpenAbout === undefined}
+            scaleTo={0.97}
             onPress={() => {
               Keyboard.dismiss()
               onOpenAbout?.()
@@ -1940,35 +1932,36 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
               <Path d={FISH_LOGO_PATH} fill={colors.ink} />
             </Svg>
             <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
-          </Pressable>
+          </MotionPressable>
           {!membershipLinkHidden && <>
             <Pressable accessibilityRole="link" onPress={() => void openMembershipPlan()}
               style={({ pressed }) => [styles.membershipLink, pressed && styles.pressedFade]}>
               <Text numberOfLines={1} style={styles.membershipText}>{strings.settings.membership.plan}</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel={strings.settings.membership.hideLink}
+            <MotionPressable accessibilityRole="button" accessibilityLabel={strings.settings.membership.hideLink} scaleTo={0.9}
               onPress={() => void useAppStore.getState().hideMembershipLink().catch(() => setGroupStorageError(strings.comfort.cacheSaveFailed))}
               style={({ pressed }) => [styles.dismissMembership, pressed && styles.pressedFade]}>
-              <X size={13} color={colors.muted} />
-            </Pressable>
+              <DuotoneIcons.X size={13} color={colors.muted} />
+            </MotionPressable>
           </>}
         </View>
         <View style={styles.brandRight}>
           {onOpenSettings !== undefined && (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.settings.more}
+              scaleTo={0.92}
               onPress={() => { Keyboard.dismiss(); setAppMenuOpen(true) }}
               hitSlop={8}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.pressedFade]}
             >
-              <MoreVertical size={18} color={colors.ink} strokeWidth={1.9} />
-            </Pressable>
+              <DuotoneIcons.MoreVertical size={18} color={colors.ink} strokeWidth={1.9} />
+            </MotionPressable>
           )}
           {showBackButton && (
-            <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? strings.chat.backToChat} onPress={onHeaderBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
-              <ArrowLeft size={18} color={colors.ink} strokeWidth={1.9} />
-            </Pressable>
+            <MotionPressable accessibilityRole="button" accessibilityLabel={backLabel ?? strings.chat.backToChat} surfaceColor={colors.elevated} scaleTo={0.92} onPress={onHeaderBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
+              <DuotoneIcons.ArrowLeft size={18} color={colors.ink} strokeWidth={1.9} />
+            </MotionPressable>
           )}
         </View>
       </View>
@@ -2005,36 +1998,38 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
             <View style={styles.modeSwitcherIndicatorBar} />
           </Animated.View>
         )}
-        <Pressable
+        <MotionPressable
           accessibilityRole="tab"
           accessibilityState={{ selected: drawerMode === 'agent' }}
           accessibilityLabel={strings.sessions.agentsTab}
+          scaleTo={0.96}
           onPress={() => handleSwitchMode('agent')}
           style={({ pressed }) => [
             styles.modeSwitcherTab,
             pressed && styles.pressedFade,
           ]}
         >
-          <LayoutGrid size={15} color={drawerMode === 'agent' ? colors.ink : colors.muted} strokeWidth={2} />
+          <DuotoneIcons.LayoutGrid size={15} color={drawerMode === 'agent' ? colors.ink : colors.muted} strokeWidth={2} />
           <Text style={[styles.modeSwitcherText, drawerMode === 'agent' && styles.modeSwitcherTextActive]}>
             {strings.sessions.agentsTab}
           </Text>
-        </Pressable>
-        <Pressable
+        </MotionPressable>
+        <MotionPressable
           accessibilityRole="tab"
           accessibilityState={{ selected: drawerMode === 'bot' }}
           accessibilityLabel="DS-Bot"
+          scaleTo={0.96}
           onPress={() => handleSwitchMode('bot')}
           style={({ pressed }) => [
             styles.modeSwitcherTab,
             pressed && styles.pressedFade,
           ]}
         >
-          <Bot size={15} color={drawerMode === 'bot' ? colors.ink : colors.muted} strokeWidth={2} />
+          <DuotoneIcons.Bot size={15} color={drawerMode === 'bot' ? colors.ink : colors.muted} strokeWidth={2} />
           <Text style={[styles.modeSwitcherText, drawerMode === 'bot' && styles.modeSwitcherTextActive]}>
             DS-Bot
           </Text>
-        </Pressable>
+        </MotionPressable>
       </View>
 
       {drawerMode === 'bot' ? (
@@ -2064,10 +2059,12 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
             <View style={styles.workspacesToolbar}>
               <View style={styles.workspacesTitleGroup}>
                 <Text style={styles.workspacesTitle} numberOfLines={1}>{strings.sessions.workspaces}</Text>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={`${strings.sessions.agentPlatform} · ${harnessDisplayName(backend)}`}
                   hitSlop={6}
+                  surfaceColor={colors.surfaceStrong}
+                  scaleTo={0.95}
                   onPress={() => {
                     setHarnessPickerEverOpened(true)
                     setHarnessPickerOpen(true)
@@ -2075,40 +2072,43 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                   style={({ pressed }) => [styles.platformChip, pressed && styles.pressedFade]}
                 >
                   <Text style={styles.platformChipText} numberOfLines={1}>{harnessDisplayName(backend)}</Text>
-                  <ChevronDown size={13} color={colors.muted} strokeWidth={2.1} />
-                </Pressable>
+                  <DuotoneIcons.ChevronDown size={13} color={colors.muted} strokeWidth={2.1} />
+                </MotionPressable>
               </View>
               <View style={styles.toolbarActions}>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.comfort.search}
                   hitSlop={6}
+                  scaleTo={0.92}
                   onPress={() => setShowSearch(prev => !prev)}
                   style={styles.iconBtn}
                 >
-                  <Search size={17} color={showSearch ? colors.ink : colors.muted} />
-                </Pressable>
-                <Pressable
+                  <DuotoneIcons.Search size={17} color={showSearch ? colors.ink : colors.muted} />
+                </MotionPressable>
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.sessions.viewOptions}
                   hitSlop={6}
+                  scaleTo={0.92}
                   onPress={() => setShowConfigModal(prev => !prev)}
                   style={styles.iconBtn}
                 >
-                  <Sliders size={17} color={showConfigModal ? colors.ink : colors.muted} />
-                </Pressable>
-                <Pressable
+                  <DuotoneIcons.Sliders size={17} color={showConfigModal ? colors.ink : colors.muted} />
+                </MotionPressable>
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.sessions.addWorkspace}
                   hitSlop={6}
+                  scaleTo={0.92}
                   onPress={() => {
                     setCreateWorkspaceEverOpened(true)
                     setCreateWorkspaceOpen(true)
                   }}
                   style={styles.iconBtn}
                 >
-                  <FolderPlus size={17} color={colors.muted} />
-                </Pressable>
+                  <DuotoneIcons.FolderPlus size={17} color={colors.muted} />
+                </MotionPressable>
               </View>
             </View>
           </View>
@@ -2121,7 +2121,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                 transform: [{ translateY: searchMotion.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) }],
               }]}
             >
-              <Search size={16} color={colors.muted} />
+              <DuotoneIcons.Search size={16} color={colors.muted} />
               <TextInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -2168,10 +2168,12 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
               />
             )}
             {onOpenSettings !== undefined && (
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={strings.settings.title}
                 android_ripple={androidRipple(colors, true)}
+                surfaceColor={colors.card}
+                scaleTo={0.92}
                 onPress={() => {
                   Keyboard.dismiss()
                   onOpenSettings()
@@ -2179,8 +2181,8 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                 hitSlop={8}
                 style={({ pressed }) => [styles.footerSettingsBtn, pressed && styles.pressedBg]}
               >
-                <Settings size={17} color={colors.ink} strokeWidth={1.9} />
-              </Pressable>
+                <DuotoneIcons.Settings size={17} color={colors.ink} strokeWidth={1.9} />
+              </MotionPressable>
             )}
           </View>
         )}
@@ -2205,9 +2207,11 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
               </View>
 
               {canPinSession && (
-                <Pressable
+                <MotionPressable
                   accessibilityRole="menuitem"
                   accessibilityLabel={menuIsPinned ? strings.sessions.unpinSession : strings.sessions.pinSession}
+                  surfaceColor={colors.surface}
+                  scaleTo={0.98}
                   style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
                   onPress={async () => {
                     const sid = menuSession.sessionId
@@ -2230,13 +2234,15 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                   <Text style={styles.menuItemText}>
                     {menuIsPinned ? strings.sessions.unpinSession : strings.sessions.pinSession}
                   </Text>
-                </Pressable>
+                </MotionPressable>
               )}
 
               {canUseHarnessActions && (
-                <Pressable
+                <MotionPressable
                   accessibilityRole="menuitem"
                   accessibilityLabel={strings.sessions.renameSession}
+                  surfaceColor={colors.surface}
+                  scaleTo={0.98}
                   style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
                   onPress={() => {
                     const target = {
@@ -2251,13 +2257,15 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                 >
                   <OfficialMenuIcons.edit size={16} color={colors.ink} />
                   <Text style={styles.menuItemText}>{strings.sessions.renameSession}</Text>
-                </Pressable>
+                </MotionPressable>
               )}
 
               {menuSession && (
-                <Pressable
+                <MotionPressable
                   accessibilityRole="menuitem"
                   accessibilityLabel={strings.sessions.forkSession}
+                  surfaceColor={colors.surface}
+                  scaleTo={0.98}
                   style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
                   onPress={async () => {
                     const sid = menuSession.sessionId
@@ -2271,13 +2279,15 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                 >
                   <OfficialMenuIcons.fork size={16} color={colors.ink} />
                   <Text style={styles.menuItemText}>{strings.sessions.forkSession}</Text>
-                </Pressable>
+                </MotionPressable>
               )}
 
               {connected && onHandoffSession !== undefined && !isSubagentSession(menuSession) && menuSession.blank !== true && (
-                <Pressable
+                <MotionPressable
                   accessibilityRole="menuitem"
                   accessibilityLabel={strings.handoff.action}
+                  surfaceColor={colors.surface}
+                  scaleTo={0.98}
                   style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
                   onPress={() => {
                     const targetSession = menuSession
@@ -2294,15 +2304,17 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                     }
                   }}
                 >
-                  <ArrowRightLeft size={16} color={colors.ink} />
+                  <DuotoneIcons.ArrowRightLeft size={16} color={colors.ink} surfaceColor={colors.surface} />
                   <Text style={styles.menuItemText}>{strings.handoff.action}</Text>
-                </Pressable>
+                </MotionPressable>
               )}
 
               {canUseHarnessActions && (
-                <Pressable
+                <MotionPressable
                   accessibilityRole="menuitem"
                   accessibilityLabel={menuIsArchived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession}
+                  surfaceColor={colors.surface}
+                  scaleTo={0.98}
                   style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
                   onPress={async () => {
                     const sid = menuSession.sessionId
@@ -2330,13 +2342,15 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                   <Text style={styles.menuItemText}>
                     {menuIsArchived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession}
                   </Text>
-                </Pressable>
+                </MotionPressable>
               )}
 
               {/* 复制 Session ID 对所有会话可用 */}
-              <Pressable
+              <MotionPressable
                 accessibilityRole="menuitem"
                 accessibilityLabel={strings.sessions.copySessionId}
+                surfaceColor={colors.surface}
+                scaleTo={0.98}
                 style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
                 onPress={async () => {
                   const sid = menuSession.sessionId
@@ -2352,7 +2366,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
               >
                 <OfficialMenuIcons.copy size={16} color={colors.ink} />
                 <Text style={styles.menuItemText}>{strings.sessions.copySessionId}</Text>
-              </Pressable>
+              </MotionPressable>
             </View>
           </Pressable>
         </Modal>
@@ -2398,10 +2412,12 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                 </Text>
               ) : null}
               <View style={styles.renameButtonRow}>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.common.cancel}
                   disabled={renaming}
+                  surfaceColor={colors.surfaceStrong}
+                  scaleTo={0.97}
                   onPress={() => {
                     setRenameTarget(null)
                     setRenameError(null)
@@ -2409,11 +2425,14 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                   style={({ pressed }) => [styles.renameCancelBtn, pressed && styles.pressedBg]}
                 >
                   <Text style={styles.renameCancelText}>{strings.common.cancel}</Text>
-                </Pressable>
-                <Pressable
+                </MotionPressable>
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.sessions.renameSession}
                   disabled={renaming || !renameDraft.trim()}
+                  inverse
+                  surfaceColor={colors.inverse}
+                  scaleTo={0.97}
                   onPress={async () => {
                     if (renaming || !renameDraft.trim() || !renameTarget) return
                     const target = renameTarget
@@ -2438,11 +2457,11 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
                   ]}
                 >
                   {renaming ? (
-                    <ActivityIndicator size="small" color={colors.surface} />
+                    <ActivityIndicator size="small" color={colors.onInverse} />
                   ) : (
                     <Text style={styles.renameConfirmText}>{strings.sessions.renameSession}</Text>
                   )}
-                </Pressable>
+                </MotionPressable>
               </View>
             </View>
           </KeyboardAvoidingView>
@@ -3384,7 +3403,7 @@ const createStyles = (colors: ThemeColors) =>
       borderBottomRightRadius: radius.xl,
       ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     },
-    showMoreText: { ...type.caption, color: colors.primary, fontWeight: '500' },
+    showMoreText: { ...type.caption, color: colors.ink, fontWeight: '500' },
 
     pressedBg: { backgroundColor: colors.surfaceStrong },
     pressedFade: { opacity: 0.72 },
@@ -3528,11 +3547,11 @@ const createStyles = (colors: ThemeColors) =>
       paddingVertical: 10,
       paddingHorizontal: spacing.lg,
       borderRadius: radius.pill,
-      backgroundColor: colors.primary,
+      backgroundColor: colors.inverse,
     },
     renameConfirmText: {
       ...type.small,
-      color: colors.white,
+      color: colors.onInverse,
       fontWeight: '600',
     },
     btnDisabled: {

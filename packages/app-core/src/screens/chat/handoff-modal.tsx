@@ -2,28 +2,13 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import {
-  AlertCircle,
-  ArrowLeft,
-  ArrowRightLeft,
-  Check,
-  Eye,
-  FileCode2,
-  Folder,
-  FolderPlus,
-  History,
-  MessageSquare,
-  MoreHorizontal,
-  Plus,
-  X,
-} from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { useGatedStore } from '../../lib/gated-store'
 import {
   buildHandoffPacket,
@@ -600,7 +585,7 @@ export const HandoffModal = memo(function HandoffModal({
         {subView !== 'main' && (
           <IconButton
             label={strings.common.back}
-            icon={ArrowLeft}
+            icon={DuotoneIcons.ArrowLeft}
             dense
             disabled={submitting}
             onPress={() => setSubView('main')}
@@ -616,7 +601,7 @@ export const HandoffModal = memo(function HandoffModal({
         </View>
         <IconButton
           label={strings.common.close}
-          icon={X}
+          icon={DuotoneIcons.X}
           dense
           disabled={submitting}
           onPress={handleClose}
@@ -637,7 +622,7 @@ export const HandoffModal = memo(function HandoffModal({
           <>
             {liveSourceRunning && (
               <View style={styles.warningBanner}>
-                <AlertCircle size={16} color={colors.warning} />
+                <DuotoneIcons.AlertCircle size={16} color={colors.warning} />
                 <Text style={styles.warningText}>{strings.handoff.sourceRunningHint}</Text>
               </View>
             )}
@@ -645,7 +630,7 @@ export const HandoffModal = memo(function HandoffModal({
             <GroupCard>
               <GroupRow
                 first
-                icon={ArrowRightLeft}
+                icon={DuotoneIcons.ArrowRightLeft}
                 label={strings.handoff.targetAgent}
                 value={targetRowValue}
                 chevron={targets.length > 0}
@@ -654,7 +639,7 @@ export const HandoffModal = memo(function HandoffModal({
               />
               {targetBackend !== undefined && (
                 <GroupRow
-                  icon={workspaceChoice?.mode === 'register' ? FolderPlus : Folder}
+                  icon={workspaceChoice?.mode === 'register' ? DuotoneIcons.FolderPlus : DuotoneIcons.Folder}
                   label={strings.handoff.targetWorkspace}
                   detail={workspaceRowInfo.detail}
                   value={refreshingTargetWorkspaces ? undefined : workspaceRowInfo.value}
@@ -668,7 +653,7 @@ export const HandoffModal = memo(function HandoffModal({
               )}
               {targetBackend !== undefined && hasValidWorkspace && (
                 <GroupRow
-                  icon={selectedTargetOption?.isOrigin ? History : MessageSquare}
+                  icon={selectedTargetOption?.isOrigin ? DuotoneIcons.History : DuotoneIcons.MessageSquare}
                   label={strings.handoff.targetSession}
                   value={sessionRowInfo.value}
                   detail={sessionRowInfo.detail}
@@ -709,7 +694,7 @@ export const HandoffModal = memo(function HandoffModal({
                 <GroupCard>
                   <GroupRow
                     first
-                    icon={FileCode2}
+                    icon={DuotoneIcons.FileCode2}
                     label={strings.handoff.emptyHistory}
                     chevron={false}
                   />
@@ -724,7 +709,7 @@ export const HandoffModal = memo(function HandoffModal({
                           <GroupRow
                             key={file}
                             first={index === 0}
-                            icon={FileCode2}
+                            icon={DuotoneIcons.FileCode2}
                             label={name}
                             detail={dir}
                             chevron={false}
@@ -733,7 +718,7 @@ export const HandoffModal = memo(function HandoffModal({
                       })}
                       {packet.editedFiles.length > VISIBLE_EDITED_FILES_CAP && (
                         <GroupRow
-                          icon={MoreHorizontal}
+                          icon={DuotoneIcons.MoreHorizontal}
                           label={strings.handoff.moreEditedFiles(packet.editedFiles.length)}
                           chevron
                           onPress={() => setSubView('preview')}
@@ -743,14 +728,14 @@ export const HandoffModal = memo(function HandoffModal({
                   ) : (
                     <GroupRow
                       first
-                      icon={Folder}
+                      icon={DuotoneIcons.Folder}
                       label={strings.handoff.noEditedFiles}
                       detail={strings.handoff.workspaceFullAccessHint}
                       chevron={false}
                     />
                   )}
                   <GroupRow
-                    icon={Eye}
+                    icon={DuotoneIcons.Eye}
                     label={strings.handoff.previewToggle}
                     detail={packet.meta.omittedTurns > 0
                       ? strings.handoff.omittedTurnsNote(packet.meta.omittedTurns)
@@ -777,7 +762,7 @@ export const HandoffModal = memo(function HandoffModal({
                   detail={sameBackend ? strings.handoff.sameBackendHint : undefined}
                   selected={selected}
                   chevron={false}
-                  accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                  accessory={selected ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                   onPress={() => handleSelectTarget(backend)}
                 />
               )
@@ -798,12 +783,12 @@ export const HandoffModal = memo(function HandoffModal({
                   <GroupCard>
                     <GroupRow
                       first
-                      icon={Folder}
+                      icon={DuotoneIcons.Folder}
                       label={matched.title || maskedPath}
                       detail={maskedPath}
                       selected={selected}
                       chevron={false}
-                      accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      accessory={selected ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         workspaceTouchedRef.current = true
                         sessionTouchedRef.current = false
@@ -824,12 +809,12 @@ export const HandoffModal = memo(function HandoffModal({
                   <GroupCard>
                     <GroupRow
                       first
-                      icon={FolderPlus}
+                      icon={DuotoneIcons.FolderPlus}
                       label={strings.handoff.registerSameCwd}
                       detail={strings.handoff.registerSameCwdHint(maskedSourceCwd)}
                       selected={selected}
                       chevron={false}
-                      accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      accessory={selected ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         workspaceTouchedRef.current = true
                         sessionTouchedRef.current = false
@@ -854,12 +839,12 @@ export const HandoffModal = memo(function HandoffModal({
                       <GroupRow
                         key={workspace.workspaceId}
                         first={index === 0}
-                        icon={Folder}
+                        icon={DuotoneIcons.Folder}
                         label={workspace.title || maskedPath}
                         detail={maskedPath}
                         selected={selected}
                         chevron={false}
-                        accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                        accessory={selected ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                         onPress={() => {
                           workspaceTouchedRef.current = true
                           sessionTouchedRef.current = false
@@ -887,12 +872,12 @@ export const HandoffModal = memo(function HandoffModal({
                   <GroupCard>
                     <GroupRow
                       first
-                      icon={History}
+                      icon={DuotoneIcons.History}
                       label={sessionTitle(origin)}
                       detail={strings.handoff.originSessionHint}
                       selected={selected}
                       chevron={false}
-                      accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      accessory={selected ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         sessionTouchedRef.current = true
                         setSessionChoice({ mode: 'existing', sessionId: origin.sessionId })
@@ -908,12 +893,12 @@ export const HandoffModal = memo(function HandoffModal({
               <GroupCard>
                 <GroupRow
                   first
-                  icon={Plus}
+                  icon={DuotoneIcons.Plus}
                   label={strings.handoff.newSessionTag}
                   detail={strings.handoff.newSessionDetail}
                   selected={sessionChoice.mode === 'new'}
                   chevron={false}
-                  accessory={sessionChoice.mode === 'new' ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                  accessory={sessionChoice.mode === 'new' ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                   onPress={() => {
                     sessionTouchedRef.current = true
                     setSessionChoice({ mode: 'new' })
@@ -937,11 +922,11 @@ export const HandoffModal = memo(function HandoffModal({
                         <GroupRow
                           key={option.session.sessionId}
                           first={index === 0}
-                          icon={MessageSquare}
+                          icon={DuotoneIcons.MessageSquare}
                           label={sessionTitle(option.session)}
                           selected={selected}
                           chevron={false}
-                          accessory={selected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                          accessory={selected ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                           onPress={() => {
                             sessionTouchedRef.current = true
                             setSessionChoice({ mode: 'existing', sessionId: option.session.sessionId })
@@ -971,7 +956,7 @@ export const HandoffModal = memo(function HandoffModal({
                       <GroupRow
                         key={file}
                         first={index === 0}
-                        icon={FileCode2}
+                        icon={DuotoneIcons.FileCode2}
                         label={name}
                         detail={dir}
                         chevron={false}
@@ -998,15 +983,18 @@ export const HandoffModal = memo(function HandoffModal({
         <View style={[styles.footer, { paddingBottom: insets.bottom > 0 ? spacing.xxs : 0 }]}>
           {submitError !== undefined && (
             <View accessibilityRole="alert" style={styles.submitErrorBanner}>
-              <AlertCircle size={16} color={colors.danger} />
+              <DuotoneIcons.AlertCircle size={16} color={colors.danger} />
               <Text style={styles.submitErrorText}>{submitError}</Text>
             </View>
           )}
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={submitLabel}
             accessibilityState={{ disabled: !canSubmit, busy: submitting }}
             disabled={!canSubmit}
+            inverse
+            surfaceColor={colors.inverse}
+            scaleTo={0.97}
             onPress={() => void handleSubmit()}
             style={({ pressed }) => [
               styles.submitButton,
@@ -1015,12 +1003,12 @@ export const HandoffModal = memo(function HandoffModal({
             ]}
           >
             {submitting && (
-              <ActivityIndicator size="small" color={colors.onPrimary ?? colors.white} />
+              <ActivityIndicator size="small" color={colors.onInverse} />
             )}
             <Text numberOfLines={1} style={styles.submitButtonText}>
               {submitLabel}
             </Text>
-          </Pressable>
+          </MotionPressable>
         </View>
       )}
     </SheetModal>
@@ -1062,7 +1050,7 @@ export const HandoffDraftPreviewModal = memo(function HandoffDraftPreviewModal({
             </Text>
           )}
         </View>
-        <IconButton label={strings.common.close} icon={X} dense onPress={onClose} />
+        <IconButton label={strings.common.close} icon={DuotoneIcons.X} dense onPress={onClose} />
       </View>
       <ScrollView
         style={{ flexShrink: 1, maxHeight: Math.max(160, listMaxHeight - 24) }}
@@ -1137,7 +1125,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     minHeight: 50,
     paddingHorizontal: spacing.xl,
     ...continuousRadius(radius.md),
-    backgroundColor: colors.primary,
+    backgroundColor: colors.inverse,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1147,11 +1135,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     opacity: 0.52,
   },
   submitButtonPressed: {
-    backgroundColor: colors.primaryPressed,
+    opacity: 0.8,
   },
   submitButtonText: {
     ...type.bodyStrong,
-    color: colors.onPrimary ?? colors.white,
+    color: colors.onInverse,
   },
   submitErrorBanner: {
     flexDirection: 'row',

@@ -7,24 +7,7 @@ import {
   Text,
   View,
 } from 'react-native'
-import {
-  Activity,
-  AlertCircle,
-  ArrowRightLeft,
-  Bell,
-  Bot,
-  Check,
-  CheckCheck,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  Clock,
-  HelpCircle,
-  Inbox,
-  ShieldAlert,
-  X,
-} from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { AttentionItem, AttentionStatus } from '@dsh-remote/protocol'
 import {
@@ -42,7 +25,7 @@ import {
 } from '../state/attention-store'
 import { useAppStore } from '../state/store'
 import type { RemoteDevice } from '../types'
-import { IconButton } from '../ui/components'
+import { IconButton, type UiIconComponent } from '../ui/components'
 import { androidRipple, continuousRadius, elevationStyle } from '../ui/platform-style'
 import { DIALOG_SHEET_MAX_WIDTH, useResponsiveLayout } from '../ui/responsive'
 import { SheetModal } from '../ui/sheet'
@@ -173,7 +156,7 @@ export function attentionStatusVisual(
   bg: string
   border: string
   dot: string
-  Icon: typeof ShieldAlert
+  Icon: UiIconComponent
 } {
   const palette = attentionSurfacePalette(colors, scheme)
   switch (status) {
@@ -181,31 +164,31 @@ export function attentionStatusVisual(
       return {
         label: strings.attention.statusApproval,
         ...palette.approval,
-        Icon: ShieldAlert,
+        Icon: DuotoneIcons.ShieldAlert,
       }
     case 'waiting_question':
       return {
         label: strings.attention.statusQuestion,
         ...palette.question,
-        Icon: HelpCircle,
+        Icon: DuotoneIcons.HelpCircle,
       }
     case 'failed_unread':
       return {
         label: strings.attention.statusFailed,
         ...palette.failed,
-        Icon: AlertCircle,
+        Icon: DuotoneIcons.AlertCircle,
       }
     case 'completed_unread':
       return {
         label: strings.attention.statusCompleted,
         ...palette.completed,
-        Icon: CheckCircle2,
+        Icon: DuotoneIcons.CheckCircle2,
       }
     case 'running':
       return {
         label: strings.attention.statusRunning,
         ...palette.running,
-        Icon: Activity,
+        Icon: DuotoneIcons.Activity,
       }
   }
 }
@@ -484,7 +467,7 @@ export function AttentionInboxSheet({
         </View>
         <View style={styles.headerActions}>
           {hasUnread && (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.attention.markAllRead}
               onPress={() => {
@@ -492,15 +475,17 @@ export function AttentionInboxSheet({
                 void ackAllUnread()
               }}
               hitSlop={6}
+              scaleTo={0.95}
+              surfaceColor={colors.surfaceStrong}
               style={({ pressed }) => [styles.markReadBtn, pressed && styles.pressed]}
             >
-              <CheckCheck size={14} color={colors.muted} strokeWidth={2.1} />
+              <DuotoneIcons.CheckCheck size={14} color={colors.muted} strokeWidth={2.1} />
               <Text style={styles.markReadText} numberOfLines={1}>{strings.attention.markAllRead}</Text>
-            </Pressable>
+            </MotionPressable>
           )}
           <IconButton
             label={strings.common.close}
-            icon={X}
+            icon={DuotoneIcons.X}
             onPress={() => {
               setOpenDropdown(null)
               onClose()
@@ -511,7 +496,7 @@ export function AttentionInboxSheet({
 
       {hostEntries.length > 0 && inspectedHost !== undefined && (
         <View style={styles.dropdownBar}>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityState={{ expanded: openDropdown === 'host' }}
             accessibilityLabel={[
@@ -520,6 +505,8 @@ export function AttentionInboxSheet({
               inspectedTotal > 0 ? String(inspectedTotal) : undefined,
             ].filter(Boolean).join(', ')}
             onPress={() => setOpenDropdown(prev => (prev === 'host' ? null : 'host'))}
+            scaleTo={0.97}
+            surfaceColor={openDropdown === 'host' ? colors.elevated : colors.surfaceStrong}
             style={({ pressed }) => [
               styles.dropdownTrigger,
               styles.dropdownTriggerHost,
@@ -544,11 +531,11 @@ export function AttentionInboxSheet({
               </View>
             )}
             {openDropdown === 'host'
-              ? <ChevronUp size={14} color={colors.ink} strokeWidth={2.2} />
-              : <ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />}
-          </Pressable>
+              ? <DuotoneIcons.ChevronUp size={14} color={colors.ink} strokeWidth={2.2} />
+              : <DuotoneIcons.ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />}
+          </MotionPressable>
 
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityState={{ expanded: openDropdown === 'backend', disabled: backendSelectorDisabled }}
             accessibilityLabel={
@@ -558,6 +545,8 @@ export function AttentionInboxSheet({
             }
             disabled={backendSelectorDisabled}
             onPress={() => setOpenDropdown(prev => (prev === 'backend' ? null : 'backend'))}
+            scaleTo={0.97}
+            surfaceColor={openDropdown === 'backend' ? colors.elevated : colors.surfaceStrong}
             style={({ pressed }) => [
               styles.dropdownTrigger,
               openDropdown === 'backend' && styles.dropdownTriggerOpen,
@@ -573,7 +562,7 @@ export function AttentionInboxSheet({
               />
             ) : (
               <View style={styles.platformAllGlyph}>
-                <Bot size={12.5} color={backendSelectorDisabled ? colors.muted : colors.ink} strokeWidth={2} />
+                <DuotoneIcons.Bot size={12.5} color={backendSelectorDisabled ? colors.muted : colors.ink} strokeWidth={2} />
               </View>
             )}
             <Text
@@ -593,9 +582,9 @@ export function AttentionInboxSheet({
               </View>
             )}
             {openDropdown === 'backend'
-              ? <ChevronUp size={14} color={colors.ink} strokeWidth={2.2} />
-              : <ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />}
-          </Pressable>
+              ? <DuotoneIcons.ChevronUp size={14} color={colors.ink} strokeWidth={2.2} />
+              : <DuotoneIcons.ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />}
+          </MotionPressable>
         </View>
       )}
 
@@ -623,29 +612,34 @@ export function AttentionInboxSheet({
                   </Text>
                 </View>
                 {canSwitchToInspected && (
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     accessibilityLabel={strings.attention.hostSwitch}
+                    inverse
+                    surfaceColor={colors.inverse}
+                    scaleTo={0.96}
                     onPress={() => onSwitchHost?.(inspectedHost)}
                     style={({ pressed }) => [styles.switchHostBtn, pressed && styles.pressed]}
                   >
-                    <ArrowRightLeft size={13} color={colors.onInverse} strokeWidth={2.2} />
+                    <DuotoneIcons.ArrowRightLeft size={13} color={colors.onInverse} inverse surfaceColor={colors.inverse} strokeWidth={2.2} />
                     <Text style={styles.switchHostBtnText} numberOfLines={1}>
                       {strings.attention.hostSwitch}
                     </Text>
-                  </Pressable>
+                  </MotionPressable>
                 )}
                 {!inspectedHost.trusted && onOpenRemoteHosts !== undefined && (
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     accessibilityLabel={strings.attention.hostManage}
+                    surfaceColor={colors.surfaceStrong}
+                    scaleTo={0.96}
                     onPress={onOpenRemoteHosts}
                     style={({ pressed }) => [styles.switchHostSecondaryBtn, pressed && styles.pressed]}
                   >
                     <Text style={styles.switchHostSecondaryText} numberOfLines={1}>
                       {strings.attention.hostManage}
                     </Text>
-                  </Pressable>
+                  </MotionPressable>
                 )}
               </View>
 
@@ -695,7 +689,7 @@ export function AttentionInboxSheet({
         ) : sections.length === 0 ? (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconWrap}>
-              <Inbox size={24} color={colors.muted} strokeWidth={1.8} />
+              <DuotoneIcons.Inbox size={24} color={colors.muted} surfaceColor={colors.surfaceStrong} strokeWidth={1.8} />
             </View>
             <Text style={styles.emptyTitle}>{strings.attention.emptyTitle}</Text>
             <Text style={styles.emptyBody}>{strings.attention.emptyBody}</Text>
@@ -765,7 +759,7 @@ export function AttentionInboxSheet({
                           ? strings.attention.hostOffline
                           : strings.attention.hostOnlineDigest
                     return (
-                      <Pressable
+                      <MotionPressable
                         key={entry.device.deviceId}
                         accessibilityRole="menuitem"
                         accessibilityState={{ selected }}
@@ -774,6 +768,8 @@ export function AttentionInboxSheet({
                           entry.overview.isConnectedHost ? strings.attention.hostCurrent : statusDetail,
                           total > 0 ? String(total) : undefined,
                         ].filter(Boolean).join(', ')}
+                        scaleTo={0.985}
+                        surfaceColor={selected ? colors.surfaceStrong : colors.elevated}
                         onPress={() => {
                           setInspectedHostId(entry.device.deviceId)
                           setBackendFilter('all')
@@ -822,17 +818,19 @@ export function AttentionInboxSheet({
                           </View>
                         )}
                         <View style={styles.dropdownCheckSlot}>
-                          {selected && <Check size={16} color={colors.primary} strokeWidth={2.3} />}
+                          {selected && <DuotoneIcons.Check size={16} color={colors.ink} strokeWidth={2.3} />}
                         </View>
-                      </Pressable>
+                      </MotionPressable>
                     )
                   })
                 ) : (
                   <>
-                    <Pressable
+                    <MotionPressable
                       accessibilityRole="menuitem"
                       accessibilityState={{ selected: backendFilter === 'all' }}
                       accessibilityLabel={`${strings.attention.filterAllPlatforms}, ${displayItems.length}`}
+                      scaleTo={0.985}
+                      surfaceColor={backendFilter === 'all' ? colors.surfaceStrong : colors.elevated}
                       onPress={() => {
                         setBackendFilter('all')
                         setOpenDropdown(null)
@@ -844,7 +842,7 @@ export function AttentionInboxSheet({
                       ]}
                     >
                       <View style={styles.platformAllGlyphMd}>
-                        <Bot size={13.5} color={colors.ink} strokeWidth={2} />
+                        <DuotoneIcons.Bot size={13.5} color={colors.ink} strokeWidth={2} />
                       </View>
                       <View style={styles.dropdownOptionTextCol}>
                         <Text
@@ -863,18 +861,20 @@ export function AttentionInboxSheet({
                         </Text>
                       </View>
                       <View style={styles.dropdownCheckSlot}>
-                        {backendFilter === 'all' && <Check size={16} color={colors.primary} strokeWidth={2.3} />}
+                        {backendFilter === 'all' && <DuotoneIcons.Check size={16} color={colors.ink} strokeWidth={2.3} />}
                       </View>
-                    </Pressable>
+                    </MotionPressable>
                     {backendFilters.map(option => {
                       const selected = backendFilter === option.key
                       const accent = scheme === 'dark' ? option.accentDark : option.accentLight
                       return (
-                        <Pressable
+                        <MotionPressable
                           key={option.key}
                           accessibilityRole="menuitem"
                           accessibilityState={{ selected }}
                           accessibilityLabel={`${option.label}, ${option.count}`}
+                          scaleTo={0.985}
+                          surfaceColor={selected ? colors.surfaceStrong : colors.elevated}
                           onPress={() => {
                             setBackendFilter(option.key)
                             setOpenDropdown(null)
@@ -906,9 +906,9 @@ export function AttentionInboxSheet({
                             </Text>
                           </View>
                           <View style={styles.dropdownCheckSlot}>
-                            {selected && <Check size={16} color={colors.primary} strokeWidth={2.3} />}
+                            {selected && <DuotoneIcons.Check size={16} color={colors.ink} strokeWidth={2.3} />}
                           </View>
-                        </Pressable>
+                        </MotionPressable>
                       )
                     })}
                   </>
@@ -966,7 +966,7 @@ function DetachedCountdownChip({
         { backgroundColor: tone.bg, borderColor: tone.border },
       ]}
     >
-      <Clock size={11} color={tone.fg} strokeWidth={2.0} />
+      <DuotoneIcons.Clock size={11} color={tone.fg} strokeWidth={2.0} />
       <Text style={[styles.countdownText, { color: tone.fg }]}>
         {strings.attention.expiresIn(countdown)}
       </Text>
@@ -1044,11 +1044,13 @@ function AttentionInboxItemRow({
   ].filter(Boolean).join(', ')
 
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
       disabled={disabled}
       onPress={onPress}
+      scaleTo={0.985}
+      surfaceColor={colors.grouped}
       style={({ pressed }) => [
         styles.row,
         !first && styles.rowBorder,
@@ -1090,8 +1092,8 @@ function AttentionInboxItemRow({
           <Text style={styles.rowSummary} numberOfLines={2}>{item.summary}</Text>
         ) : null}
       </View>
-      {!disabled && <ChevronRight size={16} color={colors.subtle} />}
-    </Pressable>
+      {!disabled && <DuotoneIcons.ChevronRight size={16} color={colors.subtle} />}
+    </MotionPressable>
   )
 }
 
@@ -1147,15 +1149,17 @@ export function AttentionInboxPill({
         ? palette.failed.border
         : colors.border
 
-  const Icon = hasApproval ? ShieldAlert : hasQuestion ? HelpCircle : Bell
+  const Icon = hasApproval ? DuotoneIcons.ShieldAlert : hasQuestion ? DuotoneIcons.HelpCircle : DuotoneIcons.Bell
 
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={strings.attention.pillA11y(counts.totalUrgent, counts.totalActive)}
       android_ripple={androidRipple(colors)}
       onPress={onPress}
       hitSlop={6}
+      scaleTo={0.94}
+      surfaceColor={hasAny ? colors.elevated : colors.card}
       style={({ pressed }) => [
         styles.inboxPill,
         hasAny && [
@@ -1171,7 +1175,7 @@ export function AttentionInboxPill({
           {displayCount > 99 ? '99+' : displayCount}
         </Text>
       )}
-    </Pressable>
+    </MotionPressable>
   )
 }
 

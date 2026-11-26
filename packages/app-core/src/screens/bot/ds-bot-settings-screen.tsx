@@ -2,37 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native'
 import { Alert } from '../../ui/alert'
-import {
-  Bot,
-  CalendarClock,
-  ChartNoAxesColumn,
-  Check,
-  ChevronRight,
-  CircleAlert,
-  Cpu,
-  Folder,
-  Globe,
-  KeyRound,
-  MessageSquareShare,
-  Monitor,
-  Plug,
-  Plus,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  Terminal,
-  Trash2,
-  Users,
-  X,
-  type LucideIcon,
-} from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import {
   canDeleteBot,
@@ -62,7 +37,9 @@ import {
   Screen,
   SectionTitle,
   TopBar,
+  type UiIconComponent,
 } from '../../ui/components'
+import { DuotoneIcons, MotionPressable } from '../../ui/duotone-icons'
 import { useResponsiveLayout } from '../../ui/responsive'
 import { androidRipple } from '../../ui/platform-style'
 import { radius, spacing, type } from '../../ui/theme'
@@ -118,7 +95,7 @@ interface TabItem {
   id: DsBotSettingsTab
   label: string
   detail: string
-  icon: LucideIcon
+  icon: UiIconComponent
 }
 
 const KNOWN_LOCAL_AGENTS = [
@@ -302,19 +279,19 @@ export function DsBotSettingsModal({
 
   const tabs: TabItem[] = useMemo(
     () => [
-      { id: 'general', label: s.bots.tabGeneral, detail: s.dsBotSettings.tabDetail.general, icon: SlidersHorizontal },
-      { id: 'models', label: s.bots.tabModels, detail: s.dsBotSettings.tabDetail.models, icon: Cpu },
-      { id: 'local-agents', label: s.bots.tabLocalAgents, detail: s.dsBotSettings.tabDetail.localAgents, icon: Terminal },
-      { id: 'bots', label: s.bots.tabBots, detail: s.dsBotSettings.tabDetail.bots, icon: Bot },
-      { id: 'groups', label: s.bots.tabGroups, detail: s.dsBotSettings.tabDetail.groups, icon: Users },
-      { id: 'connectors', label: s.bots.tabConnectors, detail: s.dsBotSettings.tabDetail.connectors, icon: Plug },
-      { id: 'im', label: s.bots.tabIm, detail: s.dsBotSettings.tabDetail.im, icon: MessageSquareShare },
-      { id: 'capabilities', label: s.bots.tabCapabilities, detail: s.dsBotSettings.tabDetail.capabilities, icon: Sparkles },
-      { id: 'browser', label: s.bots.tabBrowser, detail: s.dsBotSettings.tabDetail.browser, icon: Globe },
-      { id: 'computer', label: s.bots.tabComputer, detail: s.dsBotSettings.tabDetail.computer, icon: Monitor },
-      { id: 'schedules', label: s.bots.tabSchedules, detail: s.dsBotSettings.tabDetail.schedules, icon: CalendarClock },
-      { id: 'usage', label: s.bots.tabUsage, detail: s.dsBotSettings.tabDetail.usage, icon: ChartNoAxesColumn },
-      { id: 'secrets', label: s.bots.tabSecrets, detail: s.dsBotSettings.tabDetail.secrets, icon: KeyRound },
+      { id: 'general', label: s.bots.tabGeneral, detail: s.dsBotSettings.tabDetail.general, icon: DuotoneIcons.SlidersHorizontal },
+      { id: 'models', label: s.bots.tabModels, detail: s.dsBotSettings.tabDetail.models, icon: DuotoneIcons.Cpu },
+      { id: 'local-agents', label: s.bots.tabLocalAgents, detail: s.dsBotSettings.tabDetail.localAgents, icon: DuotoneIcons.Terminal },
+      { id: 'bots', label: s.bots.tabBots, detail: s.dsBotSettings.tabDetail.bots, icon: DuotoneIcons.Bot },
+      { id: 'groups', label: s.bots.tabGroups, detail: s.dsBotSettings.tabDetail.groups, icon: DuotoneIcons.Users },
+      { id: 'connectors', label: s.bots.tabConnectors, detail: s.dsBotSettings.tabDetail.connectors, icon: DuotoneIcons.Plug },
+      { id: 'im', label: s.bots.tabIm, detail: s.dsBotSettings.tabDetail.im, icon: DuotoneIcons.MessageSquareShare },
+      { id: 'capabilities', label: s.bots.tabCapabilities, detail: s.dsBotSettings.tabDetail.capabilities, icon: DuotoneIcons.Sparkles },
+      { id: 'browser', label: s.bots.tabBrowser, detail: s.dsBotSettings.tabDetail.browser, icon: DuotoneIcons.Globe },
+      { id: 'computer', label: s.bots.tabComputer, detail: s.dsBotSettings.tabDetail.computer, icon: DuotoneIcons.Monitor },
+      { id: 'schedules', label: s.bots.tabSchedules, detail: s.dsBotSettings.tabDetail.schedules, icon: DuotoneIcons.CalendarClock },
+      { id: 'usage', label: s.bots.tabUsage, detail: s.dsBotSettings.tabDetail.usage, icon: DuotoneIcons.ChartNoAxesColumn },
+      { id: 'secrets', label: s.bots.tabSecrets, detail: s.dsBotSettings.tabDetail.secrets, icon: DuotoneIcons.KeyRound },
     ],
     [language],
   )
@@ -440,7 +417,7 @@ export function DsBotSettingsModal({
           <GroupCard>
             <GroupRow
               first
-              icon={CircleAlert}
+              icon={DuotoneIcons.CircleAlert}
               label={s.dsBotSettings.hostNotConnected}
               detail={
                 selectedDevice
@@ -462,19 +439,19 @@ export function DsBotSettingsModal({
           <GroupCard>
             <GroupRow
               first
-              icon={CircleAlert}
+              icon={DuotoneIcons.CircleAlert}
               label={s.dsBotSettings.pluginDisabled}
               detail={s.dsBotSettings.pluginDisabledDetail}
               chevron={false}
             />
             <GroupRow
-              icon={Sparkles}
+              icon={DuotoneIcons.Sparkles}
               label={enablingPlugin ? s.dsBotSettings.enablingPlugin : s.dsBotSettings.enablePlugin}
               disabled={enablingPlugin}
               onPress={() => void handleEnableDsBot()}
             />
             <GroupRow
-              icon={Plug}
+              icon={DuotoneIcons.Plug}
               label={s.dsBotSettings.openPluginManager}
               onPress={() => setPluginsModalOpen(true)}
             />
@@ -505,7 +482,7 @@ export function DsBotSettingsModal({
           <GroupCard>
             <GroupRow
               first
-              icon={Plug}
+              icon={DuotoneIcons.Plug}
               label={s.dsBotSettings.checkPluginManager}
               detail={s.dsBotSettings.checkPluginManagerDetail}
               onPress={() => setPluginsModalOpen(true)}
@@ -580,7 +557,7 @@ export function DsBotSettingsModal({
                 <GroupCard>
                   <GroupRow
                     first
-                    icon={CircleAlert}
+                    icon={DuotoneIcons.CircleAlert}
                     label={connected ? s.dsBotSettings.previewPluginMissing : s.dsBotSettings.previewNoHost}
                     detail={s.dsBotSettings.previewDetail}
                     chevron={false}
@@ -595,7 +572,7 @@ export function DsBotSettingsModal({
                   <GroupCard>
                     <GroupRow
                       first
-                      icon={Cpu}
+                      icon={DuotoneIcons.Cpu}
                       label={s.bots.defaultModel}
                       detail={s.dsBotSettings.defaultModelDetail}
                       value={defaultBotModel ? defaultBotModel.split('/').pop() : s.dsBotSettings.defaultValue}
@@ -603,7 +580,7 @@ export function DsBotSettingsModal({
                       onPress={() => setDefaultModelPickerOpen(true)}
                     />
                     <GroupRow
-                      icon={Sparkles}
+                      icon={DuotoneIcons.Sparkles}
                       label={s.bots.showThinking}
                       detail={s.dsBotSettings.showThinkingDetail}
                       chevron={false}
@@ -618,7 +595,7 @@ export function DsBotSettingsModal({
                       }
                     />
                     <GroupRow
-                      icon={MessageSquareShare}
+                      icon={DuotoneIcons.MessageSquareShare}
                       label={s.bots.enterToSend}
                       detail={s.dsBotSettings.enterToSendDetail}
                       chevron={false}
@@ -638,7 +615,7 @@ export function DsBotSettingsModal({
                   <GroupCard>
                     <GroupRow
                       first
-                      icon={Folder}
+                      icon={DuotoneIcons.Folder}
                       label={s.bots.teamWorkspace}
                       detail={s.dsBotSettings.teamWorkspaceDetail}
                       value={effectiveState.workspaceId ? folderBasename(effectiveState.workspaceId) : s.dsBotSettings.defaultValue}
@@ -654,7 +631,7 @@ export function DsBotSettingsModal({
                       <GroupRow
                         key={bot.id}
                         first={idx === 0}
-                        icon={Folder}
+                        icon={DuotoneIcons.Folder}
                         label={bot.name}
                         detail={bot.workDir ? folderBasename(bot.workDir) : s.dsBotSettings.followTeamWorkspace}
                         value={bot.private ? s.bots.privateBot : undefined}
@@ -673,7 +650,7 @@ export function DsBotSettingsModal({
                           <GroupRow
                             key={text(arc.id) || `arc-${idx}`}
                             first={idx === 0}
-                            icon={ShieldCheck}
+                            icon={DuotoneIcons.ShieldCheck}
                             label={text(arc.name) || s.dsBotSettings.deletedPrivateBot}
                             detail={s.dsBotSettings.protectedArchiveDetail}
                             chevron={false}
@@ -714,7 +691,7 @@ export function DsBotSettingsModal({
                         <GroupCard>
                           <GroupRow
                             first
-                            icon={Cpu}
+                            icon={DuotoneIcons.Cpu}
                             label={s.bots.noModel}
                             detail={s.dsBotSettings.noProviderDetail}
                             chevron={false}
@@ -765,7 +742,7 @@ export function DsBotSettingsModal({
                         <GroupRow
                           key={prov.id}
                           first={idx === 0}
-                          icon={Cpu}
+                          icon={DuotoneIcons.Cpu}
                           label={prov.name}
                           detail={prov.desc}
                           value={isConfigured ? s.dsBotSettings.ready : s.dsBotSettings.configureOnComputer}
@@ -781,7 +758,7 @@ export function DsBotSettingsModal({
                       <GroupRow
                         key={srv.id}
                         first={idx === 0}
-                        icon={Terminal}
+                        icon={DuotoneIcons.Terminal}
                         label={srv.name}
                         detail={srv.endpoint}
                         value={s.dsBotSettings.localEndpoint}
@@ -803,7 +780,7 @@ export function DsBotSettingsModal({
                   <GroupCard>
                     <GroupRow
                       first
-                      icon={Bot}
+                      icon={DuotoneIcons.Bot}
                       label="DSH Agent"
                       detail={s.dsBotSettings.dshAgentDetail}
                       value={effectiveState.agents.length > 0 ? s.dsBotSettings.added : s.dsBotSettings.notAdded}
@@ -832,7 +809,7 @@ export function DsBotSettingsModal({
                         <GroupRow
                           key={agent.id}
                           first={idx === 0}
-                          icon={Terminal}
+                          icon={DuotoneIcons.Terminal}
                           label={agent.name}
                           detail={ver ? `${agent.desc} · ${ver}` : `${agent.desc} (${text(matched?.command) || agent.cmd})`}
                           value={ready ? s.dsBotSettings.ready : s.dsBotSettings.notDetected}
@@ -850,7 +827,7 @@ export function DsBotSettingsModal({
                   <GroupCard>
                     <GroupRow
                       first
-                      icon={Bot}
+                      icon={DuotoneIcons.Bot}
                       label={s.dsBotSettings.mainBot}
                       detail={s.dsBotSettings.mainBotDetail}
                       value={mainBotName}
@@ -874,14 +851,14 @@ export function DsBotSettingsModal({
                         ] as const).map(([id, label]) => {
                           const on = motion === id
                           return (
-                            <Pressable
+                            <MotionPressable
                               key={id}
                               disabled={!isLiveState}
                               onPress={() => void setPref({ motion: id })}
                               style={[styles.smallPill, on && styles.smallPillActive]}
                             >
                               <Text style={[styles.smallPillText, on && styles.smallPillTextActive]}>{label}</Text>
-                            </Pressable>
+                            </MotionPressable>
                           )
                         })}
                       </View>
@@ -890,7 +867,7 @@ export function DsBotSettingsModal({
 
                   <SectionTitle
                     action={
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="button"
                         disabled={!isLiveState}
                         onPress={() => setEditorTarget({ kind: 'bot' })}
@@ -900,9 +877,9 @@ export function DsBotSettingsModal({
                           pressed && { opacity: 0.75 },
                         ]}
                       >
-                        <Plus size={15} color={colors.ink} />
+                        <DuotoneIcons.Plus size={15} color={colors.ink} />
                         <Text style={styles.inlineCreateBtnText}>{s.bots.newBot}</Text>
-                      </Pressable>
+                      </MotionPressable>
                     }
                   >
                     {`Bot · ${effectiveState.bots.length}`}
@@ -917,7 +894,7 @@ export function DsBotSettingsModal({
                           idx > 0 && styles.topHairline,
                         ]}
                       >
-                        <Pressable
+                        <MotionPressable
                           disabled={!isLiveState}
                           android_ripple={androidRipple(colors)}
                           onPress={() => setEditorTarget({ kind: 'bot', bot })}
@@ -953,12 +930,12 @@ export function DsBotSettingsModal({
                               {bot.instructions || (bot.model || effectiveState.defaultModel) || s.dsBotSettings.botCardHint}
                             </Text>
                           </View>
-                          <ChevronRight size={18} color={colors.subtle} />
-                        </Pressable>
+                          <DuotoneIcons.ChevronRight size={18} color={colors.subtle} />
+                        </MotionPressable>
                         {isLiveState && canDeleteBot(effectiveState, bot) && (
                           <View style={styles.rowActionWrap}>
                             <View style={styles.rowActionDivider} />
-                            <Pressable
+                            <MotionPressable
                               accessibilityRole="button"
                               accessibilityLabel={`${s.bots.delete} ${bot.name}`}
                               disabled={busy}
@@ -980,8 +957,8 @@ export function DsBotSettingsModal({
                                 busy && { opacity: 0.4 },
                               ]}
                             >
-                              <Trash2 size={16} color={colors.muted} strokeWidth={1.8} />
-                            </Pressable>
+                              <DuotoneIcons.Trash2 size={16} color={colors.muted} strokeWidth={1.8} />
+                            </MotionPressable>
                           </View>
                         )}
                       </View>
@@ -995,7 +972,7 @@ export function DsBotSettingsModal({
                 <>
                   <SectionTitle
                     action={
-                      <Pressable
+                      <MotionPressable
                         accessibilityRole="button"
                         disabled={!isLiveState || effectiveState.bots.length < 2}
                         onPress={() => setEditorTarget({ kind: 'room' })}
@@ -1005,9 +982,9 @@ export function DsBotSettingsModal({
                           pressed && { opacity: 0.75 },
                         ]}
                       >
-                        <Plus size={15} color={colors.ink} />
+                        <DuotoneIcons.Plus size={15} color={colors.ink} />
                         <Text style={styles.inlineCreateBtnText}>{s.bots.newGroup}</Text>
-                      </Pressable>
+                      </MotionPressable>
                     }
                   >
                     {s.dsBotSettings.groupsTitle(effectiveState.rooms.length)}
@@ -1032,7 +1009,7 @@ export function DsBotSettingsModal({
                               idx > 0 && styles.topHairline,
                             ]}
                           >
-                            <Pressable
+                            <MotionPressable
                               disabled={!isLiveState}
                               android_ripple={androidRipple(colors)}
                               onPress={() => setEditorTarget({ kind: 'room', room })}
@@ -1041,7 +1018,7 @@ export function DsBotSettingsModal({
                                 pressed && { opacity: 0.75 },
                               ]}
                             >
-                              <Users size={20} color={colors.ink} />
+                              <DuotoneIcons.Users size={20} color={colors.ink} />
                               <View style={{ flex: 1, minWidth: 0 }}>
                                 <Text style={styles.rowTitle} numberOfLines={1}>{room.name}</Text>
                                 <Text style={styles.rowSub} numberOfLines={1}>
@@ -1049,12 +1026,12 @@ export function DsBotSettingsModal({
                                 </Text>
                               </View>
                               <Text style={styles.rowSub}>{s.dsBotSettings.membersCount(room.members.length)}</Text>
-                              <ChevronRight size={18} color={colors.subtle} />
-                            </Pressable>
+                              <DuotoneIcons.ChevronRight size={18} color={colors.subtle} />
+                            </MotionPressable>
                             {isLiveState && !effectiveState.readOnly && (
                               <View style={styles.rowActionWrap}>
                                 <View style={styles.rowActionDivider} />
-                                <Pressable
+                                <MotionPressable
                                   accessibilityRole="button"
                                   accessibilityLabel={`${s.bots.delete} ${room.name}`}
                                   disabled={busy}
@@ -1076,8 +1053,8 @@ export function DsBotSettingsModal({
                                     busy && { opacity: 0.4 },
                                   ]}
                                 >
-                                  <Trash2 size={16} color={colors.muted} strokeWidth={1.8} />
-                                </Pressable>
+                                  <DuotoneIcons.Trash2 size={16} color={colors.muted} strokeWidth={1.8} />
+                                </MotionPressable>
                               </View>
                             )}
                           </View>
@@ -1150,7 +1127,7 @@ export function DsBotSettingsModal({
               <View style={{ gap: 10 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={styles.sheetTitle}>{s.dsBotSettings.chooseMainBot}</Text>
-                  <IconButton label={s.common.close} icon={X} onPress={() => setMainBotPickerOpen(false)} />
+                  <IconButton label={s.common.close} icon={DuotoneIcons.X} onPress={() => setMainBotPickerOpen(false)} />
                 </View>
                 <GroupCard>
                   {effectiveState.bots
@@ -1161,12 +1138,12 @@ export function DsBotSettingsModal({
                         <GroupRow
                           key={bot.id}
                           first={idx === 0}
-                          icon={Bot}
+                          icon={DuotoneIcons.Bot}
                           label={bot.name}
                           detail={bot.role || undefined}
                           selected={on}
                           chevron={false}
-                          accessory={on ? <Check size={18} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                          accessory={on ? <DuotoneIcons.Check size={18} color={colors.primary} strokeWidth={2.2} /> : undefined}
                           onPress={() => {
                             setMainBotPickerOpen(false)
                             if (bot.id !== mainBot?.id) {
@@ -1194,7 +1171,7 @@ export function DsBotSettingsModal({
               <View style={{ gap: 10 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={styles.sheetTitle}>{s.bots.defaultModel}</Text>
-                  <IconButton label={s.common.close} icon={X} onPress={() => setDefaultModelPickerOpen(false)} />
+                  <IconButton label={s.common.close} icon={DuotoneIcons.X} onPress={() => setDefaultModelPickerOpen(false)} />
                 </View>
                 <ScrollView style={{ maxHeight: 380 }}>
                   <GroupCard>
@@ -1204,7 +1181,7 @@ export function DsBotSettingsModal({
                         label={defaultBotModel || 'deepseek/deepseek-chat'}
                         selected
                         chevron={false}
-                        accessory={<Check size={18} color={colors.primary} />}
+                        accessory={<DuotoneIcons.Check size={18} color={colors.primary} />}
                         onPress={() => setDefaultModelPickerOpen(false)}
                       />
                     ) : (
@@ -1220,7 +1197,7 @@ export function DsBotSettingsModal({
                             detail={ref}
                             selected={on}
                             chevron={false}
-                            accessory={on ? <Check size={18} color={colors.primary} /> : undefined}
+                            accessory={on ? <DuotoneIcons.Check size={18} color={colors.primary} /> : undefined}
                             onPress={() => {
                               setDefaultModelPickerOpen(false)
                               void setPref({ defaultBotModel: ref })

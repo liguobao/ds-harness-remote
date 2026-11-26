@@ -1,6 +1,5 @@
 import { useAttentionStore } from '../state/attention-store'
 import * as Haptics from 'expo-haptics'
-import { ArrowDown, ArrowLeft, ArrowRightLeft, FileText, Film, Menu, MessageSquare, MoreHorizontal, RefreshCw, X } from 'lucide-react-native'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 import {
   AccessibilityInfo,
@@ -50,6 +49,7 @@ import type {
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { ChatImageProvider } from '../ui/chat-image'
 import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, openSafeExternalUrl, parseMarkdownBlocks } from '../ui/markdown'
 import { NavigationFocusProvider, useNavigationFocused } from '../ui/mention-popover'
@@ -1324,7 +1324,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
         titleLines={1}
         titleAlign="between"
         onBack={splitNav ? undefined : onOpenSessionsDrawer}
-        backIcon={Menu}
+        backIcon={DuotoneIcons.Menu}
         backLabel={strings.chat.openHostSessions}
         action={
           <>
@@ -1338,7 +1338,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
             {!connected && (
               <IconButton
                 label={strings.chat.reconnect}
-                icon={RefreshCw}
+                icon={DuotoneIcons.RefreshCw}
                 dense
                 onPress={() => {
                   if (onOpenHostSwitcher) onOpenHostSwitcher()
@@ -1908,33 +1908,37 @@ const ChatConversationPane = memo(function ChatConversationPane({
     <>
       {pendingHandoff !== undefined && (
         <View style={styles.handoffDraftRow}>
-          <View style={styles.handoffDraftChip}>
-            <Pressable
+          <View style={[styles.handoffDraftChip, { backgroundColor: colors.surfaceStrong, borderColor: colors.border }]}>
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.handoff.pendingChipTitle(
                 harnessDisplayName(pendingHandoff.meta.sourceBackend),
                 harnessDisplayName(pendingHandoff.meta.targetBackend),
               )}
+              scaleTo={0.97}
+              surfaceColor={colors.surfaceStrong}
               onPress={() => setPendingHandoffPreviewOpen(true)}
               style={styles.handoffDraftChipTrigger}
             >
-              <ArrowRightLeft size={14} color={colors.primary} />
-              <Text numberOfLines={1} style={styles.handoffDraftChipText}>
+              <DuotoneIcons.ArrowRightLeft size={14} color={colors.ink} />
+              <Text numberOfLines={1} style={[styles.handoffDraftChipText, { color: colors.ink }]}>
                 {strings.handoff.pendingChipTitle(
                   harnessDisplayName(pendingHandoff.meta.sourceBackend),
                   harnessDisplayName(pendingHandoff.meta.targetBackend),
                 )}
               </Text>
-            </Pressable>
-            <Pressable
+            </MotionPressable>
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.handoff.removePendingHandoff}
               hitSlop={8}
+              scaleTo={0.9}
+              surfaceColor={colors.surfaceStrong}
               onPress={() => setPendingHandoff(undefined)}
               style={styles.handoffDraftChipRemove}
             >
-              <X size={13} color={colors.primary} />
-            </Pressable>
+              <DuotoneIcons.X size={13} color={colors.ink} />
+            </MotionPressable>
           </View>
         </View>
       )}
@@ -1943,14 +1947,17 @@ const ChatConversationPane = memo(function ChatConversationPane({
           {images.map((image, index) => (
             <View key={`${image.uri}:${index}`} style={styles.imagePreviewWrap}>
               <Image source={{ uri: image.uri }} style={styles.imagePreview} resizeMode="cover" />
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={strings.chat.removeImage(image.name ?? `${index + 1}`)}
+                scaleTo={0.9}
+                inverse
+                surfaceColor={colors.ink}
                 onPress={() => setImages(current => current.filter((_, imageIndex) => imageIndex !== index))}
                 style={styles.removeImageButton}
               >
-                <X size={12} color={colors.white} />
-              </Pressable>
+                <DuotoneIcons.X size={12} color={colors.white} />
+              </MotionPressable>
             </View>
           ))}
         </ScrollView>
@@ -1964,20 +1971,22 @@ const ChatConversationPane = memo(function ChatConversationPane({
               : formatFileBytes(file.size)
             return (
               <View key={`${file.id}:${index}`} style={styles.fileCard}>
-                {video ? <Film size={16} color={colors.primary} /> : <FileText size={16} color={colors.primary} />}
+                {video ? <DuotoneIcons.Film size={16} color={colors.ink} /> : <DuotoneIcons.FileText size={16} color={colors.ink} />}
                 <View style={styles.fileCardMeta}>
                   <Text style={styles.fileCardName} numberOfLines={1}>{file.name}</Text>
                   <Text style={styles.fileCardSize}>{sizeLine}</Text>
                 </View>
-                <Pressable
+                <MotionPressable
                   accessibilityRole="button"
                   accessibilityLabel={file.name ? strings.chat.removeFile(file.name) : strings.chat.unnamedFile}
                   hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  scaleTo={0.9}
+                  surfaceColor={colors.surfaceStrong}
                   onPress={() => setStagedFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}
                   style={styles.removeFileButton}
                 >
-                  <X size={13} color={colors.muted} />
-                </Pressable>
+                  <DuotoneIcons.X size={13} color={colors.muted} />
+                </MotionPressable>
               </View>
             )
           })}
@@ -1995,17 +2004,18 @@ const ChatConversationPane = memo(function ChatConversationPane({
                 )
               : strings.chat.uploadingFile(uploadProgress?.fileName ?? stagedFiles[0]?.name ?? '')}
           </Text>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={strings.chat.cancelUpload}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            scaleTo={0.95}
             onPress={() => {
               triggerLightHaptic()
               uploadControllerRef.current?.abort()
             }}
           >
-            <Text style={[styles.fileCardSize, { color: colors.primary, fontWeight: '600' }]}>{strings.chat.cancelUpload}</Text>
-          </Pressable>
+            <Text style={[styles.fileCardSize, { color: colors.ink, fontWeight: '600' }]}>{strings.chat.cancelUpload}</Text>
+          </MotionPressable>
         </View>
       )}
       <ReferencedChatPills
@@ -2047,16 +2057,16 @@ const ChatConversationPane = memo(function ChatConversationPane({
           titleLines={1}
           titleAlign="between"
           onBack={trajectory ? handleBack : (splitNav ? undefined : onOpenSessionsDrawer)}
-          backIcon={trajectory ? ArrowLeft : Menu}
+          backIcon={trajectory ? DuotoneIcons.ArrowLeft : DuotoneIcons.Menu}
           backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
           action={<>
             {trajectory
               ? (
                 <IconButton
                   label={strings.trajectory.close}
-                  icon={MessageSquare}
+                  icon={DuotoneIcons.MessageSquare}
                   dense
-                  tint={colors.primary}
+                  tint={colors.ink}
                   onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(false) }}
                 />
               )
@@ -2071,7 +2081,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
               )}
             <IconButton
               label={strings.sessions.moreActions}
-              icon={MoreHorizontal}
+              icon={DuotoneIcons.MoreHorizontal}
               dense
               onPress={() => { Keyboard.dismiss(); setMentionType(null); setHeaderPopoverView('menu') }}
             />
@@ -2079,16 +2089,18 @@ const ChatConversationPane = memo(function ChatConversationPane({
         />
       )}
       {!connected && (
-        <Pressable style={styles.connectionBanner} accessibilityRole="button"
+        <MotionPressable style={styles.connectionBanner} accessibilityRole="button"
           accessibilityLabel={connectionRetrying ? strings.chat.reconnecting : strings.chat.offline}
           accessibilityState={{ disabled: connectionRetrying, busy: connectionRetrying }}
           accessibilityLiveRegion="polite" disabled={connectionRetrying}
+          scaleTo={0.97}
+          surfaceColor={colors.surfaceStrong}
           onPress={() => void reconnectCurrentSession()}>
           <View style={styles.connectionDot} />
           <Text style={styles.connectionBannerText} numberOfLines={1}>
             {connectionRetrying ? <>{strings.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : strings.chat.offline}
           </Text>
-        </Pressable>
+        </MotionPressable>
       )}
       {acpReadOnly && (
         <View style={styles.errorBanner} accessibilityRole="alert">
@@ -2097,18 +2109,20 @@ const ChatConversationPane = memo(function ChatConversationPane({
         </View>
       )}
       {storeError !== undefined && (
-        <Pressable
+        <MotionPressable
           style={styles.errorBanner}
           accessibilityRole="alert"
           accessibilityLabel={storeError}
+          scaleTo={0.97}
+          surfaceColor={colors.dangerSoft}
           onPress={clearError}
         >
           <View style={styles.errorDot} />
           <Text style={styles.errorBannerText} numberOfLines={2}>
             {storeError}
           </Text>
-          <X size={14} color={colors.danger} />
-        </Pressable>
+          <DuotoneIcons.X size={14} color={colors.danger} />
+        </MotionPressable>
       )}
       {memoryError !== undefined && (
         <View style={styles.errorBanner} accessibilityRole="alert">
@@ -2171,32 +2185,35 @@ const ChatConversationPane = memo(function ChatConversationPane({
             />
           ) : undefined}
           ListHeaderComponent={historyHasMore ? (
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.older}
               disabled={historyLoadingOlder}
+              scaleTo={0.97}
               onPress={() => void loadOlderHistory()}
               style={styles.olderButton}
             >
               {historyLoadingOlder
                 ? <ActivityIndicator size="small" color={colors.primary} />
-                : <Text style={styles.olderText}>{strings.chat.older}</Text>}
-            </Pressable>
+                : <Text style={[styles.olderText, { color: colors.ink }]}>{strings.chat.older}</Text>}
+            </MotionPressable>
           ) : undefined}
         />
         {/* Floats over the last row only while an older turn owns the viewport. */}
         {awayFromLatest && (
           <View pointerEvents="box-none" style={styles.latestTurnLayer}>
             <View pointerEvents="box-none" style={[readableColumn, styles.latestTurnColumn]}>
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={newContent ? strings.comfort.newContent : strings.chat.jumpToLatest}
                 onPress={jumpToLatest}
                 hitSlop={6}
+                scaleTo={0.92}
+                surfaceColor={colors.elevated}
                 style={({ pressed }) => [styles.latestTurnButton, pressed && styles.latestTurnButtonPressed]}
               >
-                <ArrowDown size={20} color={colors.primary} strokeWidth={2.4} />
-              </Pressable>
+                <DuotoneIcons.ArrowDown size={20} color={colors.ink} strokeWidth={2.4} />
+              </MotionPressable>
             </View>
           </View>
         )}
@@ -2477,15 +2494,18 @@ const ChatConversationPane = memo(function ChatConversationPane({
               }]}
               resizeMode="contain"
             />
-            <Pressable
+            <MotionPressable
               style={styles.lightboxClose}
               onPress={() => setPreviewImageUri(undefined)}
               accessibilityRole="button"
               accessibilityLabel={strings.common.close}
               hitSlop={12}
+              scaleTo={0.9}
+              inverse
+              surfaceColor="#000000"
             >
-              <X size={24} color="#ffffff" />
-            </Pressable>
+              <DuotoneIcons.X size={24} color="#ffffff" />
+            </MotionPressable>
           </View>
         </Modal>
       )}

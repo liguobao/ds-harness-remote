@@ -1,6 +1,6 @@
 import React, { memo, useState } from 'react'
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
-import { ChevronDown, ChevronRight, Files } from 'lucide-react-native'
+import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native'
+import { DuotoneIcons, MotionPressable } from './duotone-icons'
 import { strings } from '../locales/i18n'
 import type { ChatFile } from '../types'
 import { formatSubmittedFileMeta } from '../screens/chat/submitted-files'
@@ -38,10 +38,12 @@ export const PresentedFileCard = memo(function PresentedFileCard({ file, onFileP
   }
 
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={`${actionLabel} ${filename} · ${metaText}`}
       onPress={() => onFilePress?.(file.path)}
+      scaleTo={0.98}
+      surfaceColor={colors.surface}
       style={({ pressed }) => [
         styles.card,
         {
@@ -63,8 +65,8 @@ export const PresentedFileCard = memo(function PresentedFileCard({ file, onFileP
           {metaText}
         </Text>
       </View>
-      <ChevronRight size={16} color={colors.muted} />
-    </Pressable>
+      <DuotoneIcons.ChevronRight size={16} color={colors.muted} />
+    </MotionPressable>
   )
 })
 
@@ -118,15 +120,16 @@ export const PresentedFileGroup = memo(function PresentedFileGroup({ files, onFi
   if (files.length === 0) return null
   const label = `${strings.sessionActivity.relatedFiles} · ${files.length}`
   return <View>
-    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded }}
+    <MotionPressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ expanded }}
+      scaleTo={0.98}
       onPress={() => setExpanded(value => !value)} style={({ pressed }) => ({
         minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8,
         paddingHorizontal: 6, borderRadius: 8, backgroundColor: pressed ? colors.surfaceStrong : 'transparent',
       })}>
-      <Files size={17} color={colors.muted} />
+      <DuotoneIcons.Files size={17} color={colors.muted} />
       <Text style={{ flex: 1, fontSize: 13, lineHeight: 18, color: colors.muted }} numberOfLines={1}>{label}</Text>
-      {expanded ? <ChevronDown size={16} color={colors.muted} /> : <ChevronRight size={16} color={colors.muted} />}
-    </Pressable>
+      {expanded ? <DuotoneIcons.ChevronDown size={16} color={colors.muted} /> : <DuotoneIcons.ChevronRight size={16} color={colors.muted} />}
+    </MotionPressable>
     {expanded && files.map(file => <PresentedFileCard key={file.path} file={file} onFilePress={onFilePress} />)}
   </View>
 })
@@ -147,11 +150,13 @@ export const SubmittedFileCard = memo(function SubmittedFileCard({
   const meta = formatSubmittedFileMeta(file.path, resolvedBytes ?? file.bytes)
 
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={`${filename} · ${meta.fullLabel}`}
       disabled={onPress === undefined}
       onPress={() => onPress?.(file.path)}
+      scaleTo={0.98}
+      surfaceColor={colors.surface}
       style={({ pressed }) => [
         submittedStyles.card,
         {
@@ -173,7 +178,7 @@ export const SubmittedFileCard = memo(function SubmittedFileCard({
           {meta.fullLabel}
         </Text>
       </View>
-    </Pressable>
+    </MotionPressable>
   )
 })
 

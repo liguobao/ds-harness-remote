@@ -50,14 +50,15 @@ vi.mock('react-native-svg', () => {
   }
 })
 
-vi.mock('lucide-react-native', () => {
+vi.mock('../src/ui/duotone-icons', () => {
   const React = require('react')
+  const iconProxy = new Proxy({}, {
+    get: (_target, prop) => (props: any) => React.createElement(String(prop), props),
+  })
   return {
-    ChevronDown: (props: any) => React.createElement('ChevronDown', props),
-    ChevronUp: (props: any) => React.createElement('ChevronUp', props),
-    RefreshCw: (props: any) => React.createElement('RefreshCw', props),
-    Square: (props: any) => React.createElement('Square', props),
-    Terminal: (props: any) => React.createElement('Terminal', props),
+    DuotoneIcons: iconProxy,
+    DuotoneIcon: (props: any) => React.createElement('DuotoneIcon', props),
+    MotionPressable: (props: any) => React.createElement('Pressable', props, typeof props.children === 'function' ? props.children({ pressed: false, longPressed: false }) : props.children),
   }
 })
 

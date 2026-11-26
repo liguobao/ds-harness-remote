@@ -1,4 +1,5 @@
-import { Laptop, Monitor, Server, type LucideIcon } from 'lucide-react-native'
+import { DuotoneIcons } from '../ui/duotone-icons'
+import type { UiIconComponent } from '../ui/components'
 import type { Messages } from '../locales/types'
 import type { LoginMethod, RemoteDevice } from '../types'
 
@@ -14,11 +15,11 @@ export function platformName(platform: string): string {
   return platformNames[platform] ?? platform
 }
 
-/** Line icon that matches the Host's operating system. */
-export function platformIcon(platform: string): LucideIcon {
-  if (platform === 'win32') return Monitor
-  if (platform === 'linux') return Server
-  return Laptop
+/** Two-tone Duotone icon that matches the Host's operating system. */
+export function platformIcon(platform: string): UiIconComponent {
+  if (platform === 'win32') return DuotoneIcons.Monitor
+  if (platform === 'linux') return DuotoneIcons.Server
+  return DuotoneIcons.Laptop
 }
 
 /** Two-line list subtitle: OS plus the installed Harness version. */

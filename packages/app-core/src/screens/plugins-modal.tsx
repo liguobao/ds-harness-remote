@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Image,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,7 +11,7 @@ import {
 } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { ArrowLeft, Check, ChevronRight, Copy, Download, Puzzle, RefreshCw, Smartphone, X } from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { SvgXml } from 'react-native-svg'
 import * as Clipboard from 'expo-clipboard'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -95,26 +94,30 @@ export function PluginsModal({ visible, onClose }: PluginsModalProps) {
 
   const header = (
     <View style={styles.header}>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={bundle === undefined ? strings.common.close : strings.common.back}
         onPress={() => bundle === undefined ? onClose() : setSelected(undefined)}
         hitSlop={8}
+        scaleTo={0.92}
+        surfaceColor={colors.elevated}
         style={styles.headerBtn}
       >
-        {bundle === undefined ? <X size={20} color={colors.ink} /> : <ArrowLeft size={20} color={colors.ink} />}
-      </Pressable>
+        {bundle === undefined ? <DuotoneIcons.X size={20} color={colors.ink} /> : <DuotoneIcons.ArrowLeft size={20} color={colors.ink} />}
+      </MotionPressable>
       <Text style={styles.headerTitle} numberOfLines={1}>{bundle?.title ?? strings.plugins.title}</Text>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={strings.plugins.retry}
         onPress={() => void reload()}
         disabled={loading}
         hitSlop={8}
+        scaleTo={0.92}
+        surfaceColor={colors.elevated}
         style={styles.headerBtn}
       >
-        {loading ? <ActivityIndicator size="small" color={colors.muted} /> : <RefreshCw size={18} color={colors.ink} />}
-      </Pressable>
+        {loading ? <ActivityIndicator size="small" color={colors.muted} /> : <DuotoneIcons.RefreshCw size={18} color={colors.ink} />}
+      </MotionPressable>
     </View>
   )
 
@@ -130,9 +133,15 @@ export function PluginsModal({ visible, onClose }: PluginsModalProps) {
         ) : (
           <>
             <Text style={styles.errorText}>{error}</Text>
-            <Pressable accessibilityRole="button" onPress={() => void reload()} style={styles.outlineBtn}>
+            <MotionPressable
+              accessibilityRole="button"
+              onPress={() => void reload()}
+              scaleTo={0.97}
+              surfaceColor={colors.surfaceStrong}
+              style={styles.outlineBtn}
+            >
               <Text style={styles.outlineBtnText}>{strings.plugins.retry}</Text>
-            </Pressable>
+            </MotionPressable>
           </>
         )}
       </View>
@@ -225,7 +234,7 @@ function PluginIcon({ icon, remote }: { icon?: string; remote: boolean }) {
   let glyph
   if (svg !== undefined) glyph = <SvgXml xml={svg} width={26} height={26} />
   else if (icon !== undefined && !icon.startsWith('data:image/svg')) glyph = <Image source={{ uri: icon }} style={styles.iconImage} />
-  else glyph = remote ? <Smartphone size={20} color={colors.primary} /> : <Puzzle size={20} color={colors.primary} />
+  else glyph = remote ? <DuotoneIcons.Smartphone size={20} color={colors.ink} surfaceColor={colors.surfaceStrong} /> : <DuotoneIcons.Puzzle size={20} color={colors.ink} surfaceColor={colors.surfaceStrong} />
   return <View style={styles.icon}>{glyph}</View>
 }
 
@@ -250,12 +259,14 @@ function BundleCard({ bundle, busy, first, onToggle, onOpen }: {
   ].filter(Boolean).join(' · ')
   return (
     <View style={[styles.item, first !== true && styles.itemDivider]}>
-      <Pressable
+      <MotionPressable
         accessibilityRole={detail ? undefined : 'button'}
         accessibilityLabel={bundle.title}
         android_ripple={detail ? undefined : androidRipple(colors)}
         onPress={onOpen}
         disabled={detail}
+        scaleTo={0.985}
+        surfaceColor={colors.card}
         style={({ pressed }) => [styles.itemMain, pressed && !detail && styles.pressed]}
       >
         <PluginIcon icon={bundle.icon} remote={bundle.category === 'remote'} />
@@ -270,7 +281,7 @@ function BundleCard({ bundle, busy, first, onToggle, onOpen }: {
           )}
           {detail && bundle.remoteFeature !== undefined && (
             <View style={styles.featureBox}>
-              <Smartphone size={14} color={colors.primary} />
+              <DuotoneIcons.Smartphone size={14} color={colors.ink} surfaceColor={colors.surfaceStrong} />
               <Text style={styles.featureText}>{bundle.remoteFeature}</Text>
             </View>
           )}
@@ -281,7 +292,7 @@ function BundleCard({ bundle, busy, first, onToggle, onOpen }: {
           )}
           {bundle.error !== undefined && <Text style={styles.errorText} numberOfLines={detail ? undefined : 1}>{bundle.error}</Text>}
         </View>
-      </Pressable>
+      </MotionPressable>
       <View style={styles.itemAction}>
         {busy ? <ActivityIndicator size="small" color={colors.muted} /> : (
           <Toggle
@@ -294,17 +305,18 @@ function BundleCard({ bundle, busy, first, onToggle, onOpen }: {
           />
         )}
         {!detail && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={bundle.title}
             accessibilityElementsHidden
             importantForAccessibility="no"
             onPress={onOpen}
             hitSlop={8}
+            scaleTo={0.92}
             style={({ pressed }) => [styles.itemChevron, pressed && styles.pressed]}
           >
-            <ChevronRight size={16} color={colors.subtle} />
-          </Pressable>
+            <DuotoneIcons.ChevronRight size={16} color={colors.subtle} />
+          </MotionPressable>
         )}
       </View>
     </View>
@@ -327,7 +339,7 @@ function InstallHint({ bundle }: { bundle: PluginBundleView }) {
   return (
     <View style={[styles.card, styles.hintCard]}>
       <View style={styles.titleRow}>
-        <Download size={16} color={colors.primary} />
+        <DuotoneIcons.Download size={16} color={colors.ink} surfaceColor={colors.surfaceStrong} />
         <Text style={styles.cardTitle}>{upgrade ? strings.plugins.upgradeTitle : strings.plugins.installTitle}</Text>
       </View>
       <Text style={styles.cardDescription}>
@@ -350,15 +362,17 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.copyRow}>
       <Text style={styles.fieldHint}>{label}</Text>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${strings.plugins.copy}: ${value}`}
+        scaleTo={0.98}
+        surfaceColor={colors.surface}
         onPress={() => void Clipboard.setStringAsync(value).then(() => setCopied(true)).catch(() => undefined)}
         style={({ pressed }) => [styles.codeBox, pressed && styles.pressed]}
       >
         <Text style={styles.codeText} selectable>{value}</Text>
-        {copied ? <Check size={16} color={colors.success} /> : <Copy size={16} color={colors.muted} />}
-      </Pressable>
+        {copied ? <DuotoneIcons.Check size={16} color={colors.success} /> : <DuotoneIcons.Copy size={16} color={colors.muted} />}
+      </MotionPressable>
     </View>
   )
 }
@@ -557,24 +571,28 @@ function SettingsForm({ settings, writable, onSaved }: {
         )
       })}
       {writable && (
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           disabled={!dirty || saving}
+          inverse={dirty && !saving}
+          surfaceColor={(!dirty || saving) ? colors.disabled : colors.inverse}
+          scaleTo={0.97}
           onPress={() => void save()}
           style={({ pressed }) => [styles.saveBtn, (!dirty || saving) && styles.saveBtnDisabled, pressed && styles.pressed]}
         >
           <Text style={styles.saveBtnText}>{saving ? strings.plugins.saving : strings.plugins.save}</Text>
-        </Pressable>
+        </MotionPressable>
       )}
       {writable && overridden.length > 0 && !dirty && (
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           disabled={saving}
+          scaleTo={0.97}
           onPress={reset}
           style={({ pressed }) => [styles.resetBtn, pressed && styles.pressed]}
         >
           <Text style={styles.resetBtnText}>{strings.plugins.reset}</Text>
-        </Pressable>
+        </MotionPressable>
       )}
     </View>
   )
@@ -615,7 +633,7 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       gap: spacing.xs,
       alignItems: 'flex-start',
-      backgroundColor: colors.primarySoft,
+      backgroundColor: colors.surfaceStrong,
       borderRadius: radius.lg,
       padding: spacing.md,
       marginTop: spacing.xs,
@@ -624,7 +642,7 @@ function createStyles(colors: ThemeColors) {
     metaWarning: { color: colors.warning },
     fieldLabel: { ...type.smallStrong, fontSize: 15, lineHeight: 20, fontWeight: '600', color: colors.ink },
     resetBtn: { alignItems: 'center', paddingVertical: spacing.sm },
-    hintCard: { backgroundColor: colors.primarySoft, borderColor: colors.primarySoft },
+    hintCard: { backgroundColor: colors.surfaceStrong, borderColor: colors.border },
     copyRow: { gap: 4 },
     codeBox: {
       flexDirection: 'row',
@@ -663,7 +681,7 @@ function createStyles(colors: ThemeColors) {
       width: 42,
       height: 42,
       borderRadius: radius.md,
-      backgroundColor: colors.primarySoft,
+      backgroundColor: colors.surfaceStrong,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -708,13 +726,13 @@ function createStyles(colors: ThemeColors) {
     inputMultiline: { minHeight: 80, textAlignVertical: 'top' },
     inputInvalid: { borderColor: colors.danger },
     saveBtn: {
-      backgroundColor: colors.primary,
+      backgroundColor: colors.inverse,
       borderRadius: radius.pill,
       paddingVertical: spacing.sm + 2,
       alignItems: 'center',
       marginTop: spacing.xs,
     },
     saveBtnDisabled: { backgroundColor: colors.disabled },
-    saveBtnText: { ...type.bodyStrong, color: colors.white },
+    saveBtnText: { ...type.bodyStrong, color: colors.onInverse },
   })
 }

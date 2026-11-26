@@ -116,14 +116,21 @@ vi.mock('expo-localization', () => ({
   getLocales: () => [{ languageTag: 'zh-CN', languageCode: 'zh' }],
 }))
 
-vi.mock('lucide-react-native', () => new Proxy({}, {
-  get: (_target, prop) => {
-    if (prop === '__esModule') return true
-    if (prop === 'then') return undefined
-    return String(prop)
-  },
-  has: (_target, prop) => prop !== 'then',
-}))
+vi.mock('../src/ui/duotone-icons', () => {
+  const iconProxy = new Proxy({}, {
+    get: (_target, prop) => {
+      if (prop === '__esModule') return true
+      if (prop === 'then') return undefined
+      return String(prop)
+    },
+    has: (_target, prop) => prop !== 'then',
+  })
+  return {
+    DuotoneIcons: iconProxy,
+    DuotoneIcon: 'DuotoneIcon',
+    MotionPressable: 'Pressable',
+  }
+})
 
 vi.mock('../src/ui/mermaid/mermaid-block', () => ({
   MermaidBlock: 'MermaidBlock',

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View, type ViewToken } from 'react-native'
-import { PanelLeft } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { pdfHtml } from '../generated/pdf-html'
 import { strings as t } from '../locales/i18n'
 import { MAX_PDF_PREVIEW_BYTES } from '../services/workspace-file-preview'
 import { Button } from '../ui/components'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { continuousRadius } from '../ui/platform-style'
 import { floatingShadow, spacing, type } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
@@ -360,10 +360,11 @@ export function PdfPreview({
                 const selected = pageNum === page
                 const thumbUri = thumbs[pageNum]
                 return (
-                  <Pressable
+                  <MotionPressable
                     accessibilityRole="button"
                     accessibilityLabel={t.tools.pdfPageNumber(pageNum)}
                     accessibilityState={{ selected }}
+                    scaleTo={0.96}
                     onPress={() => {
                       setPage(pageNum)
                       send(`window.scrollToPage(${pageNum})`)
@@ -377,7 +378,7 @@ export function PdfPreview({
                       style={[
                         styles.thumbCard,
                         {
-                          borderColor: selected ? colors.primary : colors.border,
+                          borderColor: selected ? colors.ink : colors.border,
                           borderWidth: selected ? 2 : 1,
                         },
                       ]}
@@ -397,7 +398,7 @@ export function PdfPreview({
                         </View>
                       )}
                     </View>
-                  </Pressable>
+                  </MotionPressable>
                 )
               }}
             />
@@ -405,10 +406,12 @@ export function PdfPreview({
         )}
 
         {showOverlays && (
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={`${t.tools.pdfThumbnails} · ${t.tools.pdfPage(page, pages)}`}
             accessibilityState={{ expanded: railOpen }}
+            scaleTo={0.96}
+            surfaceColor={colors.elevated}
             onPress={() => setRailOpen(value => !value)}
             style={({ pressed }) => [
               styles.pagePill,
@@ -422,11 +425,11 @@ export function PdfPreview({
               },
             ]}
           >
-            <PanelLeft size={16} color={colors.ink} strokeWidth={1.9} />
+            <DuotoneIcons.PanelLeft size={16} color={colors.ink} strokeWidth={1.9} />
             <Text style={[styles.pagePillText, { color: colors.ink }]}>
               {`${page}/${pages}`}
             </Text>
-          </Pressable>
+          </MotionPressable>
         )}
 
         {(busy || error !== undefined) && (

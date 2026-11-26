@@ -1,8 +1,8 @@
 import { useId, useState } from 'react'
 import { Image, StyleSheet, View } from 'react-native'
-import { Star } from 'lucide-react-native'
 import Svg, { Defs, G, LinearGradient, Mask, Path, Rect, Stop } from 'react-native-svg'
 import type { BotEntry } from '../../services/bot-catalog'
+import { DuotoneIcons } from '../../ui/duotone-icons'
 import { useTheme } from '../../ui/theme-context'
 import { badgeOf, BotAgentAvatar, engineOfModel } from './agent-badge'
 import assets from './assets/characters.json'
@@ -100,7 +100,7 @@ export function BotAvatarWithBadge({
             },
           ]}
         >
-          <Star size={starSize} color="#FFFFFF" fill="#FFFFFF" strokeWidth={1.8} />
+          <DuotoneIcons.Star size={starSize} color="#FFFFFF" surfaceColor="#0F0F0F" />
         </View>
       ) : statusColor !== undefined ? (
         <View

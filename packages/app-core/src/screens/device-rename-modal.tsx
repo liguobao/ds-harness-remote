@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react'
 import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
-import { X } from 'lucide-react-native'
 import { MAX_DEVICE_NAME_LENGTH } from '@dsh-remote/protocol'
 import { strings } from '../locales/i18n'
 import { useAppStore } from '../state/store'
 import type { RemoteDevice } from '../types'
 import { Button, IconButton } from '../ui/components'
+import { DuotoneIcons } from '../ui/duotone-icons'
 import { useResponsiveLayout } from '../ui/responsive'
 import { radius, spacing, type, type ThemeColors } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
@@ -51,7 +51,7 @@ export function DeviceRenameModal({ device, onClose }: { device: RemoteDevice; o
         <View style={[styles.sheet, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
           <View style={styles.header}>
             <Text style={styles.title}>{strings.devices.renameTitle}</Text>
-            <IconButton label={strings.common.close} icon={X} onPress={close} disabled={busy} />
+            <IconButton label={strings.common.close} icon={DuotoneIcons.X} onPress={close} disabled={busy} />
           </View>
           <ScrollView
             style={styles.sheetScroll}

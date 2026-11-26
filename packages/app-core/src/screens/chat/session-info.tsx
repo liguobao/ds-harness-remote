@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { ArrowRightLeft, ChevronDown, ChevronUp, Folder, Wifi, X } from 'lucide-react-native'
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { harnessDisplayName, type SessionHandoffOrigin } from '../../lib/handoff-preview'
@@ -7,6 +6,7 @@ import { strings } from '../../locales/i18n'
 import { useAppStore } from '../../state/store'
 import type { RemoteSession, WorkspaceView } from '../../types'
 import { GroupCard, GroupRow, IconButton, StatusBadge } from '../../ui/components'
+import { DuotoneIcons } from '../../ui/duotone-icons'
 import { monoFontFamily } from '../../ui/platform-style'
 import { spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
@@ -77,7 +77,7 @@ export function SessionInfo({
   return <SheetModal visible={visible} onClose={onClose} onDismiss={onDismiss}>
       <View style={styles.header}>
         <Text accessibilityRole="header" style={styles.title}>{strings.sessionInfo.title}</Text>
-        <IconButton label={strings.common.close} icon={X} dense onPress={onClose} />
+        <IconButton label={strings.common.close} icon={DuotoneIcons.X} dense onPress={onClose} />
       </View>
       <ScrollView
         style={{ flexShrink: 1, maxHeight }}
@@ -101,7 +101,7 @@ export function SessionInfo({
           <GroupCard>
             <GroupRow
               first
-              icon={ArrowRightLeft}
+              icon={DuotoneIcons.ArrowRightLeft}
               label={strings.handoff.title}
               value={handoffDirection}
               detail={handoffSourceTitle !== undefined ? strings.handoff.originSessionDetail(handoffSourceTitle) : undefined}
@@ -118,7 +118,7 @@ export function SessionInfo({
         <GroupCard>
           <GroupRow
             first
-            icon={Folder}
+            icon={DuotoneIcons.Folder}
             label={strings.workspaces.title}
             value={workspace?.title ?? strings.chat.workspaceNone}
             onPress={() => runAction(onOpenWorkspace)}
@@ -128,13 +128,13 @@ export function SessionInfo({
         <GroupCard>
           <GroupRow
             first
-            icon={Wifi}
+            icon={DuotoneIcons.Wifi}
             label={strings.devices.networkDetails}
             value={device?.name}
             chevron={false}
             accessory={networkExpanded
-              ? <ChevronUp size={18} color={colors.muted} />
-              : <ChevronDown size={18} color={colors.muted} />}
+              ? <DuotoneIcons.ChevronUp size={18} color={colors.muted} />
+              : <DuotoneIcons.ChevronDown size={18} color={colors.muted} />}
             onPress={() => setNetworkExpanded(value => !value)}
           />
           {networkExpanded && (

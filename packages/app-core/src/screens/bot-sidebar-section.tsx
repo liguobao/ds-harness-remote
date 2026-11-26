@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Modal,
-  Pressable,
   ScrollView,
   RefreshControl,
   StyleSheet,
@@ -12,28 +11,6 @@ import {
 } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
-import {
-  AlignLeft,
-  ArrowLeftRight,
-  Bot,
-  Check,
-  ChevronDown,
-  CircleAlert,
-  Copy,
-  CopyPlus,
-  Download,
-  Pencil,
-  Pin,
-  PinOff,
-  Plus,
-  RefreshCw,
-  Search,
-  Sparkles,
-  Square,
-  Trash2,
-  Users,
-  X,
-} from 'lucide-react-native'
 import { isVisibleSession } from '../lib/session-visibility'
 import { strings as s } from '../locales/i18n'
 import { browseScope } from '../services/browse-memory'
@@ -50,6 +27,7 @@ import {
 import { requireBotClient, useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
 import { Button, EmptyState, GroupCard, GroupRow, IconButton } from '../ui/components'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -236,21 +214,21 @@ export function BotSidebarSection({
   const filterActions: BotPopoverAction[] = [
     {
       key: 'all',
-      icon: Bot,
+      icon: DuotoneIcons.Bot,
       label: s.bots.filterAll,
       selected: filter === 'all',
       onPress: () => setFilter('all'),
     },
     {
       key: 'bots',
-      icon: Bot,
+      icon: DuotoneIcons.Bot,
       label: `${s.bots.all} (${state?.bots.length ?? 0})`,
       selected: filter === 'bots',
       onPress: () => setFilter('bots'),
     },
     {
       key: 'rooms',
-      icon: Users,
+      icon: DuotoneIcons.Users,
       label: `${s.bots.groups} (${state?.rooms.length ?? 0})`,
       selected: filter === 'rooms',
       onPress: () => setFilter('rooms'),
@@ -259,7 +237,7 @@ export function BotSidebarSection({
       ? [
           {
             key: 'agents',
-            icon: Sparkles,
+            icon: DuotoneIcons.Sparkles,
             label: 'DSH Agent',
             selected: filter === 'agents',
             onPress: () => setFilter('agents'),
@@ -271,21 +249,21 @@ export function BotSidebarSection({
   const createActions: BotPopoverAction[] = [
     {
       key: 'new-bot',
-      icon: Plus,
+      icon: DuotoneIcons.Plus,
       label: s.bots.newBot,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => setEditor({ kind: 'bot' }),
     },
     {
       key: 'new-room',
-      icon: Users,
+      icon: DuotoneIcons.Users,
       label: s.bots.newGroup,
       disabled: busy || Boolean(state?.readOnly) || (state?.bots.length ?? 0) < 2,
       onPress: () => setEditor({ kind: 'room' }),
     },
     {
       key: 'new-agent',
-      icon: Sparkles,
+      icon: DuotoneIcons.Sparkles,
       label: agents.length > 0 ? `DSH Agent · ${s.sessions.newSession}` : 'DSH Agent',
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => {
@@ -306,7 +284,7 @@ export function BotSidebarSection({
     <View style={styles.container}>
       {state !== undefined && (
         <View style={styles.topActionRow}>
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={filterLabel}
             onPress={() => setFilterMenuOpen(true)}
@@ -317,11 +295,11 @@ export function BotSidebarSection({
             ]}
           >
             <Text style={styles.filterPillText}>{filterLabel}</Text>
-            <ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />
-          </Pressable>
+            <DuotoneIcons.ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />
+          </MotionPressable>
 
           <View style={[styles.topSearchCapsule, { backgroundColor: filterPillBg }]}>
-            <Search size={15} color={colors.muted} strokeWidth={2} />
+            <DuotoneIcons.Search size={15} color={colors.muted} strokeWidth={2} />
             <TextInput
               value={searchQuery}
               onChangeText={onSearchChange}
@@ -331,18 +309,18 @@ export function BotSidebarSection({
               returnKeyType="search"
             />
             {searchQuery.length > 0 && (
-              <Pressable
+              <MotionPressable
                 accessibilityRole="button"
                 accessibilityLabel={s.common.close}
                 hitSlop={8}
                 onPress={() => onSearchChange('')}
               >
-                <X size={14} color={colors.muted} />
-              </Pressable>
+                <DuotoneIcons.X size={14} color={colors.muted} />
+              </MotionPressable>
             )}
           </View>
 
-          <Pressable
+          <MotionPressable
             accessibilityRole="button"
             accessibilityLabel={s.bots.add}
             disabled={busy || Boolean(state.readOnly)}
@@ -354,8 +332,8 @@ export function BotSidebarSection({
               (busy || Boolean(state.readOnly)) && styles.disabled,
             ]}
           >
-            <Plus size={19} color={colors.ink} strokeWidth={2.1} />
-          </Pressable>
+            <DuotoneIcons.Plus size={19} color={colors.ink} strokeWidth={2.1} />
+          </MotionPressable>
         </View>
       )}
 
@@ -372,15 +350,15 @@ export function BotSidebarSection({
         {visibleError !== undefined && state !== undefined && (
           <View style={styles.errorBanner}>
             <Text accessibilityRole="alert" style={styles.errorText}>{visibleError}</Text>
-            <Pressable
+            <MotionPressable
               accessibilityRole="button"
               accessibilityLabel={s.bots.retry}
               onPress={() => void refresh(true)}
               style={({ pressed }) => [styles.retryPill, pressed && styles.pressedFade]}
             >
-              <RefreshCw size={13} color={colors.primary} />
+              <DuotoneIcons.RefreshCw size={13} color={colors.primary} />
               <Text style={styles.retryPillText}>{s.bots.retry}</Text>
-            </Pressable>
+            </MotionPressable>
           </View>
         )}
 
@@ -403,7 +381,7 @@ export function BotSidebarSection({
         {state !== undefined && state.bots.length === 0 && state.rooms.length === 0 && (
           <View style={styles.emptyWrap}>
             <EmptyState
-              icon={Bot}
+              icon={DuotoneIcons.Bot}
               title={s.bots.empty}
               body={s.bots.emptyHint}
               action={
@@ -433,7 +411,7 @@ export function BotSidebarSection({
           const timeStr = formatBotListTimestamp(sessionMap.get(entry.sessionId)?.updatedAt)
 
           return (
-            <Pressable
+            <MotionPressable
               key={entry.id}
               accessibilityRole="button"
               accessibilityLabel={entry.main ? `${entry.name}, ${s.bots.main}` : entry.name}
@@ -471,7 +449,9 @@ export function BotSidebarSection({
 
                 <View style={styles.rowSnippetLine}>
                   {hasSnippetIcon && (
-                    <AlignLeft size={13} color={colors.muted} strokeWidth={1.8} style={styles.snippetIcon} />
+                    <View style={styles.snippetIcon}>
+                      <DuotoneIcons.AlignLeft size={13} color={colors.muted} strokeWidth={1.8} />
+                    </View>
                   )}
                   <Text
                     numberOfLines={1}
@@ -485,7 +465,7 @@ export function BotSidebarSection({
                   </Text>
                 </View>
               </View>
-            </Pressable>
+            </MotionPressable>
           )
         })}
 
@@ -495,7 +475,7 @@ export function BotSidebarSection({
           const timeStr = formatBotListTimestamp(sessionMap.get(entry.sessionId || entry.id)?.updatedAt)
 
           return (
-            <Pressable
+            <MotionPressable
               key={entry.id}
               accessibilityRole="button"
               accessibilityLabel={entry.name}
@@ -520,7 +500,7 @@ export function BotSidebarSection({
                     </View>
                   ) : null
                 })}
-                {entry.members.length === 0 && <Users color={colors.muted} size={22} />}
+                {entry.members.length === 0 && <DuotoneIcons.Users color={colors.muted} size={22} />}
               </View>
 
               <View style={styles.rowBody}>
@@ -535,7 +515,9 @@ export function BotSidebarSection({
                 </View>
 
                 <View style={styles.rowSnippetLine}>
-                  <Users size={13} color={colors.muted} strokeWidth={1.8} style={styles.snippetIcon} />
+                  <View style={styles.snippetIcon}>
+                    <DuotoneIcons.Users size={13} color={colors.muted} strokeWidth={1.8} />
+                  </View>
                   <Text
                     numberOfLines={1}
                     style={[
@@ -548,7 +530,7 @@ export function BotSidebarSection({
                   </Text>
                 </View>
               </View>
-            </Pressable>
+            </MotionPressable>
           )
         })}
 
@@ -568,7 +550,7 @@ export function BotSidebarSection({
               const isSelected = selectedId === sid
               const timeStr = formatBotListTimestamp(matched?.updatedAt)
               return (
-                <Pressable
+                <MotionPressable
                   key={sid}
                   accessibilityRole="button"
                   accessibilityLabel={title}
@@ -585,7 +567,7 @@ export function BotSidebarSection({
                   ]}
                 >
                   <View style={[styles.groupAvatarBox, { backgroundColor: filterPillBg }]}>
-                    <Sparkles size={22} color={colors.primary} />
+                    <DuotoneIcons.Sparkles size={22} color={colors.primary} />
                   </View>
                   <View style={styles.rowBody}>
                     <View style={styles.rowTopLine}>
@@ -598,7 +580,7 @@ export function BotSidebarSection({
                       DSH Agent
                     </Text>
                   </View>
-                </Pressable>
+                </MotionPressable>
               )
             }),
         )}
@@ -689,7 +671,7 @@ export function BotModalsHost({
   if (menuBot && !menuBot.tile) {
     contextActions.push({
       key: 'pin',
-      icon: Pin,
+      icon: DuotoneIcons.Pin,
       label: menuBot.pinned ? s.sessions.unpinSession : s.sessions.pinSession,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => void perform('set-flags', { id: menuBot.id, pinned: !menuBot.pinned }),
@@ -698,7 +680,7 @@ export function BotModalsHost({
   if (menuRoom) {
     contextActions.push({
       key: 'pin',
-      icon: Pin,
+      icon: DuotoneIcons.Pin,
       label: menuRoom.pinned ? s.sessions.unpinSession : s.sessions.pinSession,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => void perform('set-flags', { id: menuRoom.id, pinned: !menuRoom.pinned }),
@@ -707,7 +689,7 @@ export function BotModalsHost({
   if (menuBot || menuRoom) {
     contextActions.push({
       key: 'edit',
-      icon: Pencil,
+      icon: DuotoneIcons.Pencil,
       label: s.bots.edit,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () =>
@@ -720,7 +702,7 @@ export function BotModalsHost({
   if (menuBot && (!menuBot.main || mainCount > 1)) {
     contextActions.push({
       key: 'main',
-      icon: ArrowLeftRight,
+      icon: DuotoneIcons.ArrowLeftRight,
       label: menuBot.main ? s.bots.removeMain : s.bots.replaceMain,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => void perform('set-main', { id: menuBot.id, main: !menuBot.main }),
@@ -729,7 +711,7 @@ export function BotModalsHost({
   if (menuBot) {
     contextActions.push({
       key: 'duplicate',
-      icon: CopyPlus,
+      icon: DuotoneIcons.CopyPlus,
       label: s.bots.duplicate,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => void perform('duplicate-bot', { id: menuBot.id }),
@@ -738,7 +720,7 @@ export function BotModalsHost({
   if (menuRoom) {
     contextActions.push({
       key: 'stop',
-      icon: Square,
+      icon: DuotoneIcons.Square,
       label: s.bots.stop,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => void perform('stop-room-work', { roomId: menuRoom.id }),
@@ -747,7 +729,7 @@ export function BotModalsHost({
   if (menuBot || menuRoom) {
     contextActions.push({
       key: 'copy-id',
-      icon: Copy,
+      icon: DuotoneIcons.Copy,
       label: s.bots.copyId,
       onPress: () => {
         const targetId = menuBot?.id ?? menuRoom?.id ?? ''
@@ -758,7 +740,7 @@ export function BotModalsHost({
   if (menuAgent) {
     contextActions.push({
       key: 'new-agent-session',
-      icon: Plus,
+      icon: DuotoneIcons.Plus,
       label: s.sessions.newSession,
       disabled: busy || Boolean(state?.readOnly),
       onPress: () => void perform('agent-session', { agentId: menuAgent.id }),
@@ -767,7 +749,7 @@ export function BotModalsHost({
   if (canDeleteBot(state, menuBot) || menuRoom || menuAgent) {
     contextActions.push({
       key: 'delete',
-      icon: Trash2,
+      icon: DuotoneIcons.Trash2,
       label: s.bots.delete,
       danger: true,
       disabled: busy || Boolean(state?.readOnly),
@@ -832,7 +814,7 @@ export function BotModalsHost({
           <ModalSurface onClose={() => setReport(undefined)}>
             <View style={styles.sheetHeader}>
               <Text style={[styles.sheetTitle, styles.grow]}>{report.title}</Text>
-              <IconButton label={s.common.close} icon={X} onPress={() => setReport(undefined)} />
+              <IconButton label={s.common.close} icon={DuotoneIcons.X} onPress={() => setReport(undefined)} />
             </View>
             <ScrollView style={{ maxHeight: sheetMaxHeight }} contentContainerStyle={styles.sheetBody}>
               <BotReportView kind={report.kind} state={state} value={report.value} />
@@ -924,7 +906,7 @@ export function DsBotInstallCard({ error, loading = false, onRetry }: { error?: 
         <View style={styles.installCardBody}>
           <View style={styles.installHeaderRow}>
             <View style={styles.installIconBadge}>
-              <Download size={18} color={colors.primary} />
+              <DuotoneIcons.Download size={18} color={colors.primary} />
             </View>
             <View style={styles.grow}>
               <Text style={styles.installTitle}>{s.plugins.installTitle}</Text>
@@ -939,7 +921,7 @@ export function DsBotInstallCard({ error, loading = false, onRetry }: { error?: 
           </View>
         </View>
         <GroupRow
-          icon={RefreshCw}
+          icon={DuotoneIcons.RefreshCw}
           label={s.bots.retry}
           detail={s.plugins.installOnDesktop}
           onPress={onRetry}
@@ -963,7 +945,7 @@ function DsBotInstallCopyRow({ label, value }: { label: string; value: string })
   return (
     <View style={styles.installCopyRow}>
       <Text style={styles.installCopyLabel}>{label}</Text>
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={`${s.plugins.copy}: ${value}`}
         onPress={() => {
@@ -974,10 +956,10 @@ function DsBotInstallCopyRow({ label, value }: { label: string; value: string })
       >
         <Text style={styles.installCodeText} selectable>{value}</Text>
         <View style={styles.installCopyAction}>
-          {copied ? <Check size={15} color={colors.success} /> : <Copy size={15} color={colors.primary} />}
+          {copied ? <DuotoneIcons.Check size={15} color={colors.success} /> : <DuotoneIcons.Copy size={15} color={colors.primary} />}
           {!copied && <Text style={styles.installCopyActionText}>{s.plugins.copy}</Text>}
         </View>
-      </Pressable>
+      </MotionPressable>
     </View>
   )
 }

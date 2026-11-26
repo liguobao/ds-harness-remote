@@ -10,7 +10,7 @@ import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronDown, ChevronUp, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LogOut, Mail, MoreVertical, Network, Palette, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import appPackage from '../../package.json'
 import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
@@ -21,7 +21,7 @@ import { SOURCE_CODE_URL } from '../lib/links'
 import { foregroundService } from '../services/foreground-service'
 import { serverSession } from '../services/server-session'
 import type { AccountMembership, OAuthProviderInfo } from '../services/api'
-import { BlurHeaderFrame, Button, Field, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, Field, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar, type UiIconComponent } from '../ui/components'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { transportPreferenceOptions } from '../types'
 import type { DefaultPermissionPreset, DeviceIdentity, LoginMethod } from '../types'
@@ -412,16 +412,18 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
       {qrMethods.length > 1 && (
         <View style={styles.segmentRow} accessibilityRole="tablist">
           {qrMethods.map(method => (
-            <Pressable
+            <MotionPressable
               key={method}
               accessibilityRole="tab"
               accessibilityState={{ selected: loginMethod === method }}
+              surfaceColor={loginMethod === method ? colors.surface : colors.surfaceStrong}
+              scaleTo={0.96}
               onPress={() => chooseLoginMethod(method)}
               style={[styles.qrSegment, loginMethod === method && styles.segmentButtonActive]}
             >
               {providerIcon(method, 16)}
               <Text style={[styles.segmentButtonText, loginMethod === method && styles.segmentButtonTextActive]}>{providerShortName(method)}</Text>
-            </Pressable>
+            </MotionPressable>
           ))}
         </View>
       )}
@@ -434,17 +436,18 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
       </View>
       <Text style={styles.qrHint}>{zhCN.setup.qrScanHint}</Text>
       <View style={styles.qrActions}>
-        <Pressable accessibilityRole="button" onPress={closeQr} style={styles.textLink}>
+        <MotionPressable accessibilityRole="button" scaleTo={0.96} onPress={closeQr} style={styles.textLink}>
           <Text style={styles.textLinkLabel}>{zhCN.common.back}</Text>
-        </Pressable>
-        <Pressable
+        </MotionPressable>
+        <MotionPressable
           accessibilityRole="button"
           disabled={busy || serverDirty || qrPhase === 'loading'}
+          scaleTo={0.96}
           onPress={() => void refreshQr()}
           style={styles.textLink}
         >
           <Text style={[styles.textLinkLabel, qrPhase === 'loading' && styles.textLinkDisabled]}>{zhCN.setup.qrRefresh}</Text>
-        </Pressable>
+        </MotionPressable>
       </View>
     </View>
   )
@@ -491,22 +494,25 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
         placeholderTextColor={colors.muted}
         accessibilityLabel={zhCN.setup.twoFactorCode}
       />}
-      <Pressable
+      <MotionPressable
         accessibilityRole="button"
         accessibilityLabel={zhCN.setup.title}
         accessibilityState={{ disabled: !canSubmit || serverDirty || busy, busy }}
         disabled={!canSubmit || serverDirty || busy}
+        inverse={canSubmit}
+        surfaceColor={canSubmit ? colors.inverse : colors.surfaceStrong}
+        scaleTo={0.97}
         onPress={() => void submit()}
         style={({ pressed }) => [styles.emailSubmit, canSubmit && styles.emailSubmitReady, pressed && styles.providerButtonPressed]}
       >
         {busy
-          ? <ActivityIndicator color={colors.onPrimary ?? colors.white} />
+          ? <ActivityIndicator color={colors.onInverse} />
           : <Text style={[styles.emailSubmitText, canSubmit && styles.emailSubmitTextReady]}>{zhCN.setup.title}</Text>}
-      </Pressable>
+      </MotionPressable>
       {challenge === undefined ? <Text style={styles.passwordHint}>{zhCN.setup.passwordHint}</Text> :
-        <Pressable accessibilityRole="button" disabled={busy} onPress={clearVerification} style={styles.textLink}>
+        <MotionPressable accessibilityRole="button" disabled={busy} scaleTo={0.96} onPress={clearVerification} style={styles.textLink}>
           <Text style={styles.textLinkLabel}>{zhCN.setup.twoFactorRestart}</Text>
-        </Pressable>}
+        </MotionPressable>}
     </View>
   )
 
@@ -514,7 +520,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
 
   return (
     <View style={styles.flex}>
-      <BlurHeaderFrame header={<TopBar title="" onBack={onBack} action={<IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />} />}>
+      <BlurHeaderFrame header={<TopBar title="" onBack={onBack} action={<IconButton label={zhCN.settings.more} icon={DuotoneIcons.MoreVertical} onPress={onMore} />} />}>
         <Screen fill refreshing={providersPhase === 'loading'} onRefresh={() => setProviderReload(value => value + 1)}>
           <View style={styles.hero}>
             <Svg
@@ -540,12 +546,14 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                     {providersPhase === 'ready' && oauthMethods.map(method => {
                       const preparing = oauthBusy && loginMethod === method
                       return (
-                        <Pressable
+                        <MotionPressable
                           key={method}
                           accessibilityRole="button"
                           accessibilityLabel={providerLabel(method)}
                           accessibilityState={{ disabled: controlsDisabled, busy: preparing }}
                           disabled={controlsDisabled}
+                          surfaceColor={colors.surface}
+                          scaleTo={0.97}
                           onPress={() => signInWithProvider(method)}
                           style={({ pressed }) => [styles.providerButton, pressed && styles.providerButtonPressed, controlsDisabled && !preparing && styles.providerButtonDisabled]}
                         >
@@ -553,7 +561,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                             {preparing ? <ActivityIndicator size="small" color={colors.muted} /> : providerIcon(method)}
                           </View>
                           <Text style={styles.providerButtonText} numberOfLines={1}>{providerLabel(method)}</Text>
-                        </Pressable>
+                        </MotionPressable>
                       )
                     })}
                     {providersPhase === 'ready' && oauthMethods.length > 0 && (
@@ -573,23 +581,27 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                     {((largeScreen && qrMethods.length > 0) || providersPhase === 'failed' || oauthMethods.length > 0) && (
                       <View style={styles.altRow}>
                         {largeScreen && qrMethods.length > 0 && (
-                          <Pressable
+                          <MotionPressable
                             accessibilityRole="button"
                             accessibilityLabel={zhCN.setup.qr}
                             accessibilityHint={zhCN.setup.qrEntryHint}
                             disabled={controlsDisabled}
+                            surfaceColor={colors.surfaceStrong}
+                            scaleTo={0.97}
                             onPress={openQr}
                             style={({ pressed }) => [styles.altButton, pressed && styles.providerButtonPressed]}
                           >
-                            <QrCodeIcon size={18} color={colors.ink} />
+                            <DuotoneIcons.QrCode size={18} color={colors.ink} surfaceColor={colors.surfaceStrong} />
                             <Text style={styles.altButtonText}>{zhCN.setup.qr}</Text>
-                          </Pressable>
+                          </MotionPressable>
                         )}
                         {(providersPhase === 'failed' || oauthMethods.length > 0) && (
-                          <Pressable
+                          <MotionPressable
                             accessibilityRole="button"
                             accessibilityLabel={emailVisible ? zhCN.setup.emailSignInCollapse : zhCN.setup.emailSignIn}
                             disabled={busy}
+                            surfaceColor={colors.surfaceStrong}
+                            scaleTo={0.97}
                             onPress={() => {
                               if (emailVisible) {
                                 clearVerification()
@@ -601,11 +613,11 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                             }}
                             style={({ pressed }) => [styles.altButton, pressed && styles.providerButtonPressed]}
                           >
-                            <Mail size={18} color={colors.ink} />
+                            <DuotoneIcons.Mail size={18} color={colors.ink} surfaceColor={colors.surfaceStrong} />
                             <Text style={styles.altButtonText}>
                               {emailVisible ? zhCN.setup.emailSignInCollapse : zhCN.setup.emailSignIn}
                             </Text>
-                          </Pressable>
+                          </MotionPressable>
                         )}
                       </View>
                     )}
@@ -614,12 +626,13 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
 
 
           <View style={styles.loginFooter}>
-            <Pressable accessibilityRole="link" accessibilityLabel="GitHub/liguobao"
+            <MotionPressable accessibilityRole="link" accessibilityLabel="GitHub/liguobao"
+              scaleTo={0.97}
               onPress={() => void Linking.openURL('https://github.com/liguobao').catch(() => {
                 Alert.alert(zhCN.settings.linkFailedTitle, zhCN.settings.linkFailedBody)
               })} style={styles.loginCreditLink}>
               <Text style={styles.loginCredit}>Powered by <Text style={styles.loginCreditName}>GitHub/liguobao</Text></Text>
-            </Pressable>
+            </MotionPressable>
           </View>
         </Screen>
       </BlurHeaderFrame>
@@ -710,14 +723,14 @@ function AccountMembershipRows({ active, baseUrl, identity }: { active: boolean;
   const value = membership === undefined ? labels.loading : membership === null ? zhCN.common.unavailable : labels[membership.status]
   return <>
     <GroupRow
-      icon={ShieldCheck}
+      icon={DuotoneIcons.ShieldCheck}
       label={labels.title}
       value={value}
       accessibilityLabel={`${labels.title} · ${value}`}
       onPress={() => void openMembershipPlan()}
     />
     {membership?.expiresAt !== undefined && (
-      <GroupRow icon={Clock} label={labels.expiresAt} value={new Date(membership.expiresAt).toLocaleDateString(language)} />
+      <GroupRow icon={DuotoneIcons.Clock} label={labels.expiresAt} value={new Date(membership.expiresAt).toLocaleDateString(language)} />
     )}
   </>
 }
@@ -965,7 +978,7 @@ export function SettingsScreen({
             <GroupCard style={styles.settingsGap}>
               <GroupRow
                 first
-                icon={Palette}
+                icon={DuotoneIcons.Palette}
                 label={zhCN.settings.chatAppearance}
                 value={chatAppearanceSummary}
                 chevron
@@ -975,28 +988,28 @@ export function SettingsScreen({
                 }}
               />
               <GroupRow
-                icon={Languages}
+                icon={DuotoneIcons.Languages}
                 label={zhCN.settings.language}
                 value={currentLanguageLabel}
                 chevron
                 onPress={() => setLanguagePickerOpen(true)}
               />
               <GroupRow
-                icon={Layers}
+                icon={DuotoneIcons.Layers}
                 label={zhCN.settings.activityDockMode}
                 value={currentActivityDockLabel}
                 chevron
                 onPress={() => setActivityDockPickerOpen(true)}
               />
               <GroupRow
-                icon={Zap}
+                icon={DuotoneIcons.Zap}
                 label={zhCN.settings.quickPromptActionMode}
                 value={currentQuickPromptActionLabel}
                 chevron
                 onPress={() => setQuickPromptActionPickerOpen(true)}
               />
               <GroupRow
-                icon={ArrowUp}
+                icon={DuotoneIcons.ArrowUp}
                 label={zhCN.settings.busySendMode}
                 value={currentBusySendLabel}
                 chevron
@@ -1004,7 +1017,7 @@ export function SettingsScreen({
               />
               {Platform.OS === 'android' && (
                 <GroupRow
-                  icon={PanelTop}
+                  icon={DuotoneIcons.PanelTop}
                   label={zhCN.settings.statusBar}
                   accessory={<Toggle accessibilityLabel={zhCN.settings.statusBar} value={statusBarVisible} disabled={statusBarSaving}
                     onValueChange={visible => void toggleStatusBar(visible)} {...switchColors} />}
@@ -1016,37 +1029,37 @@ export function SettingsScreen({
             <GroupCard>
               <GroupRow
                 first
-                icon={History}
+                icon={DuotoneIcons.History}
                 label={zhCN.comfort.resume}
                 accessory={<Toggle accessibilityLabel={zhCN.comfort.resume} value={comfort.resume}
                   onValueChange={resume => browsePreference({ resume })} {...switchColors} />}
               />
               <GroupRow
-                icon={ListCollapse}
+                icon={DuotoneIcons.ListCollapse}
                 label={zhCN.settings.compactHistory}
                 detail={zhCN.settings.compactHistoryNote}
                 accessory={<Toggle accessibilityLabel={zhCN.settings.compactHistory} value={compactHistory}
                   disabled={compactSaving} onValueChange={value => void toggleCompactHistory(value)} {...switchColors} />}
               />
               <GroupRow
-                icon={Bell}
+                icon={DuotoneIcons.Bell}
                 label={zhCN.comfort.notifications}
                 detail={zhCN.comfort.notificationsNote}
                 accessory={<Toggle accessibilityLabel={zhCN.comfort.notifications} value={comfort.notifications}
                   onValueChange={notifications => browsePreference({ notifications })} {...switchColors} />}
               />
               <GroupRow
-                icon={BellRing}
+                icon={DuotoneIcons.BellRing}
                 label={zhCN.comfort.systemNotifications}
-                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                accessory={<DuotoneIcons.ExternalLink size={17} color={colors.subtle} />}
                 onPress={() => void openNotificationSettings()}
               />
               {Platform.OS === 'android' && (
                 <GroupRow
-                  icon={BatteryCharging}
+                  icon={DuotoneIcons.BatteryCharging}
                   label={zhCN.comfort.batteryOptimization}
                   detail={zhCN.comfort.batteryOptimizationDescription}
-                  accessory={<ExternalLink size={17} color={colors.subtle} />}
+                  accessory={<DuotoneIcons.ExternalLink size={17} color={colors.subtle} />}
                   onPress={async () => {
                     const ok = await foregroundService.requestIgnoreBatteryOptimizations()
                     if (!ok) {
@@ -1059,7 +1072,7 @@ export function SettingsScreen({
                 />
               )}
               <GroupRow
-                icon={Bot}
+                icon={DuotoneIcons.Bot}
                 label={zhCN.bots.dsBotSettings}
                 detail={
                   botTeamState
@@ -1076,10 +1089,10 @@ export function SettingsScreen({
             <GroupCard>
               <View accessibilityRole="radiogroup">
                 {([
-                  { value: 'default', name: zhCN.settings.defaultPermissionHost, description: zhCN.settings.defaultPermissionHostDescription, icon: ShieldCheck },
-                  { value: 'workspace-write', name: zhCN.chat.permissionWorkspaceWrite, description: zhCN.chat.permissionWorkspaceWriteDescription, icon: FolderPen },
-                  { value: 'danger-full-access', name: zhCN.chat.permissionFullAccess, description: zhCN.chat.permissionFullAccessDescription, icon: ShieldAlert },
-                ] satisfies Array<{ value: DefaultPermissionPreset; name: string; description: string; icon: LucideIcon }>).map((option, index) => {
+                  { value: 'default', name: zhCN.settings.defaultPermissionHost, description: zhCN.settings.defaultPermissionHostDescription, icon: DuotoneIcons.ShieldCheck },
+                  { value: 'workspace-write', name: zhCN.chat.permissionWorkspaceWrite, description: zhCN.chat.permissionWorkspaceWriteDescription, icon: DuotoneIcons.FolderPen },
+                  { value: 'danger-full-access', name: zhCN.chat.permissionFullAccess, description: zhCN.chat.permissionFullAccessDescription, icon: DuotoneIcons.ShieldAlert },
+                ] satisfies Array<{ value: DefaultPermissionPreset; name: string; description: string; icon: UiIconComponent }>).map((option, index) => {
                   const chosen = option.value === defaultPermission
                   return (
                     <GroupRow
@@ -1091,7 +1104,7 @@ export function SettingsScreen({
                       selected={chosen}
                       chevron={false}
                       disabled={permissionSaving}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      accessory={chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                       onPress={() => pickDefaultPermission(option.value)}
                     />
                   )
@@ -1104,17 +1117,17 @@ export function SettingsScreen({
             <GroupCard>
               <GroupRow
                 first
-                icon={Network}
+                icon={DuotoneIcons.Network}
                 label={zhCN.devices.networkDetails}
                 value={currentTransportLabel}
                 chevron={false}
                 accessory={networkDetailsExpanded
-                  ? <ChevronUp size={18} color={colors.subtle} />
-                  : <ChevronDown size={18} color={colors.subtle} />}
+                  ? <DuotoneIcons.ChevronUp size={18} color={colors.subtle} />
+                  : <DuotoneIcons.ChevronDown size={18} color={colors.subtle} />}
                 onPress={() => setNetworkDetailsExpanded(prev => !prev)}
               />
               <GroupRow
-                icon={Terminal}
+                icon={DuotoneIcons.Terminal}
                 label={zhCN.settings.connectionLog}
                 detail={zhCN.settings.diagnosticsLead}
                 value={zhCN.settings.logLineCount(logCount)}
@@ -1135,12 +1148,12 @@ export function SettingsScreen({
                       <GroupRow
                         key={option.value}
                         first={index === 0}
-                        icon={option.value === 'auto' ? Route : option.value === 'turn' ? Network : Server}
+                        icon={option.value === 'auto' ? DuotoneIcons.Route : option.value === 'turn' ? DuotoneIcons.Network : DuotoneIcons.Server}
                         label={option.name}
                         detail={option.description}
                         selected={chosen}
                         chevron={false}
-                        accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                        accessory={chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                         onPress={() => void setPreference(option.value)}
                       />
                     )
@@ -1150,9 +1163,9 @@ export function SettingsScreen({
 
                 <Text style={styles.subSectionLabel}>{zhCN.settings.identity}</Text>
                 <GroupCard>
-                  <GroupRow first icon={Smartphone} label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} onPress={() => showIdentity(zhCN.settings.thisPhone, identity?.name)} disabled={!identity?.name} />
-                  <GroupRow icon={Hash} label={zhCN.settings.deviceId} value={identity?.deviceId ?? zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.deviceId, identity?.deviceId)} disabled={!identity?.deviceId} />
-                  <GroupRow icon={Fingerprint} label={zhCN.settings.publicKey} value={identity?.publicKey || zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.publicKey, identity?.publicKey)} disabled={!identity?.publicKey} />
+                  <GroupRow first icon={DuotoneIcons.Smartphone} label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} onPress={() => showIdentity(zhCN.settings.thisPhone, identity?.name)} disabled={!identity?.name} />
+                  <GroupRow icon={DuotoneIcons.Hash} label={zhCN.settings.deviceId} value={identity?.deviceId ?? zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.deviceId, identity?.deviceId)} disabled={!identity?.deviceId} />
+                  <GroupRow icon={DuotoneIcons.Fingerprint} label={zhCN.settings.publicKey} value={identity?.publicKey || zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.publicKey, identity?.publicKey)} disabled={!identity?.publicKey} />
                 </GroupCard>
                 <Text style={styles.preferenceNote}>{zhCN.settings.identityHint}</Text>
                 <Text style={styles.preferenceNote}>{zhCN.settings.keyNote}</Text>
@@ -1163,30 +1176,30 @@ export function SettingsScreen({
             <GroupCard>
               <GroupRow
                 first
-                icon={Globe}
+                icon={DuotoneIcons.Globe}
                 label={zhCN.settings.server}
                 value={config?.baseUrl.replace(/^https?:\/\//, '') ?? zhCN.settings.notConfigured}
                 onPress={config === undefined ? undefined : () => void openSettingsUrl(config.baseUrl)}
               />
               <GroupRow
-                icon={UserRound}
+                icon={DuotoneIcons.UserRound}
                 label={zhCN.settings.account}
                 value={account ?? zhCN.settings.notSignedIn}
                 accessibilityLabel={account === undefined ? undefined : `${zhCN.settings.account} · ${zhCN.settings.copyIdentity}`}
-                accessory={account === undefined ? undefined : <Copy size={18} color={colors.muted} />}
+                accessory={account === undefined ? undefined : <DuotoneIcons.Copy size={18} color={colors.muted} />}
                 onPress={account === undefined ? undefined : () => copySettingsValue(account)}
               />
               {account !== undefined && config !== undefined && identity !== undefined && (
                 <AccountMembershipRows key={JSON.stringify([config.baseUrl, account, identity.deviceId])} active={active} baseUrl={config.baseUrl} identity={identity} />
               )}
-              <GroupRow icon={KeyRound} label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} />
-              <GroupRow icon={Cable} label={zhCN.settings.protocol} value="DSH Remote v1" />
+              <GroupRow icon={DuotoneIcons.KeyRound} label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} />
+              <GroupRow icon={DuotoneIcons.Cable} label={zhCN.settings.protocol} value="DSH Remote v1" />
             </GroupCard>
 
             <GroupCard style={styles.settingsGap}>
               <GroupRow
                 first
-                icon={Download}
+                icon={DuotoneIcons.Download}
                 label={zhCN.settings.checkUpdates}
                 detail={
                   updatePhase === 'checking'
@@ -1206,7 +1219,7 @@ export function SettingsScreen({
                 onPress={() => void checkForUpdates()}
               />
               <GroupRow
-                icon={Info}
+                icon={DuotoneIcons.Info}
                 label={zhCN.settings.about}
                 detail={zhCN.settings.aboutLead}
                 chevron
@@ -1218,8 +1231,8 @@ export function SettingsScreen({
             </GroupCard>
 
             <GroupCard style={styles.signOutCard}>
-              <GroupRow first icon={LogOut} label={zhCN.settings.signOut} danger chevron={false} disabled={signingOut} onPress={confirmSignOut} />
-              <GroupRow icon={RotateCcw} label={zhCN.settings.resetLocal} danger chevron={false} disabled={signingOut} onPress={confirmReset} />
+              <GroupRow first icon={DuotoneIcons.LogOut} label={zhCN.settings.signOut} danger chevron={false} disabled={signingOut} onPress={confirmSignOut} />
+              <GroupRow icon={DuotoneIcons.RotateCcw} label={zhCN.settings.resetLocal} danger chevron={false} disabled={signingOut} onPress={confirmReset} />
             </GroupCard>
           </View>
         </Screen>
@@ -1231,7 +1244,7 @@ export function SettingsScreen({
       >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.language}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={() => setLanguagePickerOpen(false)} />
+              <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={() => setLanguagePickerOpen(false)} />
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
               <GroupCard>
@@ -1244,7 +1257,7 @@ export function SettingsScreen({
                       label={option.name}
                       selected={chosen}
                       chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      accessory={chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         setLanguagePickerOpen(false)
                         void setLanguagePreference(option.value)
@@ -1263,7 +1276,7 @@ export function SettingsScreen({
       >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.activityDockMode}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={() => setActivityDockPickerOpen(false)} />
+              <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={() => setActivityDockPickerOpen(false)} />
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
               <GroupCard>
@@ -1280,7 +1293,7 @@ export function SettingsScreen({
                       label={option.name}
                       selected={chosen}
                       chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      accessory={chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         setActivityDockPickerOpen(false)
                         void toggleActivityDockMode(option.value)
@@ -1298,7 +1311,7 @@ export function SettingsScreen({
       >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.quickPromptActionMode}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={() => setQuickPromptActionPickerOpen(false)} />
+              <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={() => setQuickPromptActionPickerOpen(false)} />
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
               <GroupCard>
@@ -1314,7 +1327,7 @@ export function SettingsScreen({
                       label={option.name}
                       selected={chosen}
                       chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      accessory={chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         setQuickPromptActionPickerOpen(false)
                         void toggleQuickPromptActionMode(option.value)
@@ -1332,7 +1345,7 @@ export function SettingsScreen({
       >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.busySendMode}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={() => setBusySendPickerOpen(false)} />
+              <IconButton label={zhCN.common.close} icon={DuotoneIcons.X} onPress={() => setBusySendPickerOpen(false)} />
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
               <GroupCard>
@@ -1349,7 +1362,7 @@ export function SettingsScreen({
                       detail={option.detail}
                       selected={chosen}
                       chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      accessory={chosen ? <DuotoneIcons.Check size={19} color={colors.ink} strokeWidth={2.2} /> : undefined}
                       onPress={() => {
                         setBusySendPickerOpen(false)
                         void toggleBusySendMode(option.value)
@@ -1393,10 +1406,11 @@ function ThemeTile({ value, label, selected, onPress }: { value: ThemePreference
     </View>
   )
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="radio"
       accessibilityLabel={label}
       accessibilityState={{ checked: selected }}
+      scaleTo={0.96}
       onPress={onPress}
       style={({ pressed }) => [styles.themeTile, pressed && { opacity: 0.8 }]}
     >
@@ -1413,7 +1427,7 @@ function ThemeTile({ value, label, selected, onPress }: { value: ThemePreference
         </View>
       </View>
       <Text style={[styles.themeTileLabel, selected && styles.themeTileLabelSelected]} numberOfLines={1}>{label}</Text>
-    </Pressable>
+    </MotionPressable>
   )
 }
 
@@ -1487,7 +1501,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
           {onPlugins !== undefined && (
             <HomeMenuRow
-              icon={Puzzle}
+              icon={DuotoneIcons.Puzzle}
               label={zhCN.plugins.nav}
               subtitle={pluginsDisabled ? zhCN.plugins.connectHostFirst : undefined}
               disabled={pluginsDisabled}
@@ -1495,26 +1509,26 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
             />
           )}
           {onAutomationTasks !== undefined && (
-            <HomeMenuRow icon={Clock} label={zhCN.automation.nav} onPress={onAutomationTasks} />
+            <HomeMenuRow icon={DuotoneIcons.Clock} label={zhCN.automation.nav} onPress={onAutomationTasks} />
           )}
           {(onPlugins !== undefined || onAutomationTasks !== undefined) && (
             <View style={styles.homeMenuDivider} />
           )}
           {onDevices !== undefined && (
-            <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
+            <HomeMenuRow icon={DuotoneIcons.Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
           )}
           {onRemoteHosts !== undefined && (
-            <HomeMenuRow icon={SlidersHorizontal} label={zhCN.remoteHosts.title} onPress={onRemoteHosts} />
+            <HomeMenuRow icon={DuotoneIcons.SlidersHorizontal} label={zhCN.remoteHosts.title} onPress={onRemoteHosts} />
           )}
-          {onSwitchServer !== undefined && <HomeMenuRow icon={RotateCcw} label={zhCN.setup.switchServer} onPress={onSwitchServer} />}
-          <HomeMenuRow icon={ShieldCheck} label={zhCN.settings.membership.plan} onPress={() => {
+          {onSwitchServer !== undefined && <HomeMenuRow icon={DuotoneIcons.RotateCcw} label={zhCN.setup.switchServer} onPress={onSwitchServer} />}
+          <HomeMenuRow icon={DuotoneIcons.ShieldCheck} label={zhCN.settings.membership.plan} onPress={() => {
             onClose()
             void openMembershipPlan()
           }} />
-          <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
-          <HomeMenuRow icon={Info} label={zhCN.settings.about} onPress={onAbout} />
+          <HomeMenuRow icon={DuotoneIcons.Settings} label={zhCN.settings.title} onPress={onSettings} />
+          <HomeMenuRow icon={DuotoneIcons.Info} label={zhCN.settings.about} onPress={onAbout} />
           <HomeMenuRow
-            icon={Download}
+            icon={DuotoneIcons.Download}
             label={zhCN.settings.checkUpdates}
             subtitle={phase === 'checking'
               ? zhCN.settings.checkingUpdates
@@ -1647,7 +1661,7 @@ function useUpdateCheck() {
 }
 
 function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, busy = false, last = false }: {
-  icon: LucideIcon
+  icon: UiIconComponent
   label: string
   subtitle?: string
   onPress: () => void
@@ -1658,11 +1672,13 @@ function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, b
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
-    <Pressable
+    <MotionPressable
       accessibilityRole="button"
       accessibilityLabel={subtitle !== undefined ? `${label} · ${subtitle}` : label}
       accessibilityState={{ disabled, busy }}
       disabled={disabled}
+      surfaceColor={colors.surface}
+      scaleTo={0.985}
       onPress={onPress}
       style={({ pressed }) => [
         styles.homeMenuRow,
@@ -1671,7 +1687,7 @@ function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, b
         disabled && styles.homeMenuRowDisabled,
       ]}
     >
-      <View style={styles.homeMenuRowIcon}><Icon size={20} color={disabled ? colors.muted : colors.ink} strokeWidth={1.8} /></View>
+      <View style={styles.homeMenuRowIcon}><Icon size={20} color={disabled ? colors.muted : colors.ink} surfaceColor={colors.surface} strokeWidth={1.8} /></View>
       <View style={styles.homeMenuRowCopy}>
         <Text style={[styles.homeMenuRowLabel, disabled && styles.homeMenuRowLabelDisabled]}>{label}</Text>
         {subtitle !== undefined && <Text style={styles.homeMenuRowSubtitle}>{subtitle}</Text>}
@@ -1679,7 +1695,7 @@ function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, b
       {busy
         ? <ActivityIndicator size="small" color={colors.primary} />
         : null}
-    </Pressable>
+    </MotionPressable>
   )
 }
 
@@ -1779,28 +1795,28 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
             <GroupCard>
               <GroupRow
                 first
-                icon={Globe}
+                icon={DuotoneIcons.Globe}
                 label={zhCN.settings.server}
                 value={config?.baseUrl?.replace(/^https?:\/\//, '') ?? zhCN.settings.notConfigured}
               />
               <GroupRow
-                icon={UserRound}
+                icon={DuotoneIcons.UserRound}
                 label={zhCN.settings.account}
                 value={account ?? zhCN.settings.notSignedIn}
               />
               <GroupRow
-                icon={Laptop}
+                icon={DuotoneIcons.Laptop}
                 label={zhCN.devices.title}
                 value={deviceSummary}
               />
               <GroupRow
-                icon={Route}
+                icon={DuotoneIcons.Route}
                 label={zhCN.settings.transport}
                 value={connection.stats.mode}
               />
               {error !== undefined && (
                 <GroupRow
-                  icon={AlertTriangle}
+                  icon={DuotoneIcons.AlertTriangle}
                   label={zhCN.devices.connectionInterrupted}
                   detail={error}
                   danger
@@ -1848,16 +1864,16 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
             <GroupCard style={styles.settingsGap}>
               <GroupRow
                 first
-                icon={copied ? Check : Copy}
+                icon={copied ? DuotoneIcons.Check : DuotoneIcons.Copy}
                 label={zhCN.settings.copyLog}
                 detail={zhCN.settings.copyLogNote}
                 chevron={!copied}
-                accessory={copied ? <Check size={18} color={colors.success} strokeWidth={2.2} /> : undefined}
+                accessory={copied ? <DuotoneIcons.Check size={18} color={colors.success} strokeWidth={2.2} /> : undefined}
                 onPress={() => void copyLog()}
               />
               {Platform.OS === 'android' && (
                 <GroupRow
-                  icon={Download}
+                  icon={DuotoneIcons.Download}
                   label={exportingLog ? zhCN.settings.logExporting : zhCN.settings.exportLog}
                   detail={zhCN.settings.exportLogNote}
                   disabled={exportingLog}
@@ -1906,7 +1922,7 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
             <GroupCard>
               <GroupRow
                 first
-                icon={Download}
+                icon={DuotoneIcons.Download}
                 label={zhCN.settings.checkUpdates}
                 detail={updateSubtitle}
                 disabled={phase !== 'idle'}
@@ -1915,35 +1931,35 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
                 onPress={() => void checkForUpdates()}
               />
               <GroupRow
-                icon={UserRound}
+                icon={DuotoneIcons.UserRound}
                 label={zhCN.settings.developer}
                 detail={zhCN.settings.developerValue}
                 chevron={false}
-                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                accessory={<DuotoneIcons.ExternalLink size={17} color={colors.subtle} />}
                 onPress={() => void openSettingsUrl(developerUrl)}
               />
               <GroupRow
-                icon={Globe}
+                icon={DuotoneIcons.Globe}
                 label={zhCN.settings.twitter}
                 detail={twitterUrl}
                 chevron={false}
-                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                accessory={<DuotoneIcons.ExternalLink size={17} color={colors.subtle} />}
                 onPress={() => void openSettingsUrl(twitterUrl)}
               />
               <GroupRow
-                icon={Terminal}
+                icon={DuotoneIcons.Terminal}
                 label={zhCN.settings.sourceCodeUrl}
                 detail={SOURCE_CODE_URL}
                 chevron={false}
-                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                accessory={<DuotoneIcons.ExternalLink size={17} color={colors.subtle} />}
                 onPress={() => void openSettingsUrl(SOURCE_CODE_URL)}
               />
               <GroupRow
-                icon={Info}
+                icon={DuotoneIcons.Info}
                 label={zhCN.settings.updateUrl}
                 detail={updateUrl}
                 chevron={false}
-                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                accessory={<DuotoneIcons.ExternalLink size={17} color={colors.subtle} />}
                 onPress={() => void openSettingsUrl(updateUrl)}
               />
             </GroupCard>
@@ -2007,11 +2023,11 @@ function createStyles(colors: ThemeColors) {
   emailForm: { gap: spacing.sm },
   loginInput: { minHeight: 50, borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: colors.surfaceStrong, color: colors.ink, fontSize: 16 },
   emailSubmit: { minHeight: 50, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', marginTop: spacing.xxs, backgroundColor: colors.surfaceStrong },
-  emailSubmitReady: { backgroundColor: colors.primary },
+  emailSubmitReady: { backgroundColor: colors.inverse },
   emailSubmitText: { ...type.smallStrong, fontSize: 16, color: colors.muted },
-  emailSubmitTextReady: { color: colors.onPrimary ?? colors.white },
+  emailSubmitTextReady: { color: colors.onInverse },
   textLink: { minHeight: 40, justifyContent: 'center', paddingHorizontal: spacing.sm },
-  textLinkLabel: { ...type.smallStrong, color: colors.primary },
+  textLinkLabel: { ...type.smallStrong, color: colors.ink },
   textLinkDisabled: { opacity: 0.5 },
   loginFooter: { marginTop: 'auto', paddingTop: spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   loginCredit: { ...type.caption, color: colors.muted },
@@ -2023,7 +2039,7 @@ function createStyles(colors: ThemeColors) {
   methodTab: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   methodTabActive: { backgroundColor: colors.surface },
   methodTabText: { ...type.smallStrong, color: colors.muted },
-  methodTabTextActive: { color: colors.primary },
+  methodTabTextActive: { color: colors.ink },
   serverActions: { flexDirection: 'row', gap: spacing.sm },
   serverBackdrop: { flex: 1, justifyContent: 'center', padding: spacing.lg, backgroundColor: colors.modalBackdrop },
   serverDialog: { width: '100%', maxWidth: 560, alignSelf: 'center', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
@@ -2050,7 +2066,7 @@ function createStyles(colors: ThemeColors) {
   preferenceAction: { minHeight: 48 },
   preferenceActionPressed: { backgroundColor: colors.surfaceStrong },
   preferenceError: { ...type.caption, color: colors.danger },
-  preferenceOptionChosen: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  preferenceOptionChosen: { borderColor: colors.ink, backgroundColor: colors.surfaceStrong },
   permissionOption: { minHeight: 48 },
   preferenceCopy: { flex: 1 },
   preferenceName: { ...type.smallStrong, color: colors.ink },

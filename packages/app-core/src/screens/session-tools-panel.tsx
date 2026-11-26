@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Folder, GitCompareArrows, Terminal } from 'lucide-react-native'
+import { Modal, StyleSheet, Text, View } from 'react-native'
 import { strings as t } from '../locales/i18n'
+import type { UiIconComponent } from '../ui/components'
 import { KeyboardInset } from '../ui/keyboard-inset'
+import { DuotoneIcons, MotionPressable } from '../ui/duotone-icons'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { TerminalPanel } from './terminal-panel'
@@ -40,10 +41,10 @@ export function SessionToolsPanel({
 
   const effectiveMode: SessionToolsMode = activeMode === 'changes' && !changesSupported ? 'files' : activeMode
 
-  const tabs: ReadonlyArray<{ id: SessionToolsMode; label: string; icon: typeof Folder }> = [
-    { id: 'files', label: t.tools.files, icon: Folder },
-    ...(changesSupported ? [{ id: 'changes' as const, label: t.tools.changes, icon: GitCompareArrows }] : []),
-    { id: 'terminal', label: t.tools.terminal, icon: Terminal },
+  const tabs: ReadonlyArray<{ id: SessionToolsMode; label: string; icon: UiIconComponent }> = [
+    { id: 'files', label: t.tools.files, icon: DuotoneIcons.Folder },
+    ...(changesSupported ? [{ id: 'changes' as const, label: t.tools.changes, icon: DuotoneIcons.GitCompareArrows }] : []),
+    { id: 'terminal', label: t.tools.terminal, icon: DuotoneIcons.Terminal },
   ]
 
   const tabBar = showTabs ? (
@@ -53,19 +54,21 @@ export function SessionToolsPanel({
           const Icon = tab.icon
           const selected = effectiveMode === tab.id
           return (
-            <Pressable
+            <MotionPressable
               key={tab.id}
               accessibilityRole="tab"
               accessibilityLabel={tab.label}
               accessibilityState={{ selected }}
               onPress={() => setActiveMode(tab.id)}
+              scaleTo={0.97}
+              surfaceColor={selected ? colors.surface : colors.surfaceStrong}
               style={({ pressed }) => [
                 styles.tabItem,
                 selected && [styles.tabItemSelected, { backgroundColor: colors.surface, borderColor: colors.border }],
                 pressed && !selected && styles.tabPressed,
               ]}
             >
-              <Icon size={15} color={selected ? colors.primary : colors.muted} strokeWidth={selected ? 2.1 : 1.9} />
+              <Icon size={15} color={selected ? colors.ink : colors.muted} strokeWidth={selected ? 2.1 : 1.9} />
               <Text
                 numberOfLines={1}
                 style={[
@@ -76,7 +79,7 @@ export function SessionToolsPanel({
               >
                 {tab.label}
               </Text>
-            </Pressable>
+            </MotionPressable>
           )
         })}
       </View>
