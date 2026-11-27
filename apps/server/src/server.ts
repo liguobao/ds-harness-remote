@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
 import { z } from 'zod'
-import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema, parseWireJson } from '@dsh-remote/protocol'
+import { MAX_DEVICE_NAME_LENGTH, deviceRegistrationRequestSchema, deviceRefreshRequestSchema, parseWireJson } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
 import { AttentionWebhookDispatcher, type AttentionWebhookOptions } from './attention-webhook.js'
@@ -288,6 +288,19 @@ export function createRemoteServer(config: Config) {
       accountAuth(req); json(res, 200, { items: store.list().map(descriptor), serverUrl: url.origin, transport: 'webrtc' }); return
     }
     const accountDeviceMatch = /^\/api\/v1\/account\/devices\/([^/]+)$/.exec(path)
+    if (method === 'PATCH' && accountDeviceMatch) {
+      const targetId = accountDeviceMatch[1]!
+      if ((sessions.get(hash(token(req))) ?? 0) <= Date.now()) {
+        const source = deviceAuth(req)
+        if (source.descriptor.role !== 'client') throw new ApiError('MEMBERSHIP_REQUIRED', 403)
+      }
+      // All registered devices in this store belong to the configured account.
+      if (store.get(targetId).descriptor.role !== 'host') throw new ApiError('MEMBERSHIP_REQUIRED', 403)
+      const { name } = z.object({ name: z.string().trim().min(1)
+        .refine(value => Buffer.byteLength(value) <= MAX_DEVICE_NAME_LENGTH) }).parse(await body(req))
+      store.rename(targetId, name)
+      json(res, 200, { name }); return
+    }
     if (method === 'DELETE' && accountDeviceMatch) {
       accountAuth(req)
       store.revoke(accountDeviceMatch[1]!)

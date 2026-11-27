@@ -476,10 +476,18 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       const trimmed = name.trim()
       if (accountChanges > 0 || config === undefined || identity === undefined || busyAction !== undefined || trimmed.length === 0) return false
       set({ busyAction: `rename-device:${deviceId}`, error: undefined })
+      let authenticated
       try {
-        const authenticated = await exclusive(async () => current()
+        authenticated = await exclusive(async () => current()
           ? serverSession.authenticate(config.baseUrl, identity) : undefined)
-        if (!current() || authenticated === undefined) return false
+      } catch (error) {
+        if (!current()) return false
+        set({ busyAction: undefined, error: friendlyError(error) })
+        if (isSessionAuthError(error)) await get().requireReauth(friendlyError(error))
+        return false
+      }
+      if (!current() || authenticated === undefined) return false
+      try {
         const { api } = authenticated
         const renamed = await api.renameAccountDevice(deviceId, trimmed)
         // Ignore an old account's response after sign-out or server switching.
@@ -508,7 +516,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       } catch (error) {
         if (!current()) return false
         set({ busyAction: undefined, error: friendlyError(error) })
-        if (isSessionAuthError(error)) await get().requireReauth(friendlyError(error))
+        // The rejection can describe the target Host, even when this phone is still authorized.
         return false
       }
     },

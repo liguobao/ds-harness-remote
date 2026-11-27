@@ -463,7 +463,7 @@ Authorization: Bearer <accountToken>
 该接口用于插件登录后的设备恢复/展示，不替代本机私钥。若 Server 返回某个 Host，
 但本机没有对应私钥，插件不能冒充或自动认领该设备，应创建新的 device identity。
 
-完整 hosted Server 的网页管理和 Android 使用以下接口修改账号拥有的 Host 名称：
+托管与自部署 Server 均支持以下接口。网页管理可使用账号凭据，移动端使用已授权的 Client 设备凭据修改本账号的 Host 名称。
 
 ```http
 PATCH /api/v1/account/devices/{deviceId}
@@ -473,11 +473,10 @@ Content-Type: application/json
 {"name":"书房电脑"}
 ```
 
-请求名称去除首尾空白，长度为 1–128 个字符；成功响应包含服务端保存的 `name`。
+请求名称去除首尾空白，UTF-8 长度为 1–128 字节；成功响应包含服务端保存的 `name`。
 Host 在线或离线均可修改名称，设备 ID、身份密钥和 membership 保持原值。
 Android 使用已授权的 Client device token，不保存账号 token 或重新注册 Host；
-服务端仍负责检查账号设备归属。此接口尚未在本仓库的最小自部署 Server 中实现，
-不支持的 Server 会返回错误，Android 保留编辑内容供重试。
+服务端仍负责检查账号设备归属。改名请求失败时，移动端保留登录状态与编辑内容供重试。
 
 ## 10. 最小状态机
 

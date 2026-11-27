@@ -11,6 +11,7 @@ import { WebSocket } from 'ws'
 import { MAX_CONTROL_FRAME_BYTES, createControlFrame } from '@dsh-remote/protocol'
 import { NoiseIkSession, createNoisePrologue, generateKeyPair, toBase64Url, fromBase64Url } from '../../../packages/crypto/src/index.js'
 import { AdaptiveTransport, RelayTransport, stunOnlyIceServers } from '../../../packages/webrtc/src/index.js'
+import { RemoteServerApi } from '../../../packages/app-core/src/services/api'
 import { ClientSecureTransport } from '../../../packages/plugin/src/client-secure-transport.js'
 import { ClientServerApi } from '../../../packages/plugin/src/server-api.js'
 import { IdentityStore } from '../../../packages/plugin/src/identity-store.js'
@@ -189,6 +190,21 @@ const cleanupScenario2 = async () => {
 afterEach(cleanupScenario2)
 
 describe('account and device authorization', () => {
+  it('authorizes mobile and account Host renames and rejects other device roles', async () => {
+    const host = await device('host')
+    const client = await device('client')
+    const path = `/account/devices/${host.deviceId}`
+    const rename = (token?: string) => request(path, 'PATCH', { name: '  书房电脑  ' }, token)
+    expect((await rename()).status).toBe(401)
+    expect((await rename(host.accessToken)).status).toBe(403)
+    expect((await request(`/account/devices/${client.deviceId}`, 'PATCH', { name: 'phone' }, client.accessToken)).status).toBe(403)
+    expect((await request(path, 'PATCH', { name: '中'.repeat(43) }, client.accessToken)).status).toBe(400)
+    expect((await request('/devices', 'GET', undefined, client.accessToken)).data.items[0].name).toBe(host.name)
+    const mobile = new RemoteServerApi(base, client.accessToken)
+    expect(await mobile.renameAccountDevice(host.deviceId, '  书房电脑  ')).toEqual({ name: '书房电脑' })
+    expect((await request('/devices', 'GET', undefined, client.accessToken)).data.items[0].name).toBe('书房电脑')
+    expect((await rename(accountToken)).status).toBe(200)
+  })
   it('rejects duplicate REST fields before authentication or state changes', async () => {
     const d = await device()
     const registration = JSON.stringify({ v: 1, device: {

@@ -93,6 +93,22 @@ beforeEach(prepare)
 afterEach(() => vi.restoreAllMocks())
 
 describe('account directory operation isolation', () => {
+  it('keeps valid phone credentials after a rejected Host rename and only sends it once', async () => {
+    const store = accountFixture()
+    const renameAccountDevice = vi.fn().mockRejectedValue(Object.assign(new Error('denied'), { code: 'DEVICE_OWNERSHIP_REQUIRED' }))
+    mocks.authenticate.mockResolvedValue({ api: { renameAccountDevice } })
+    expect(await store.get().renameDevice('host', 'office')).toBe(false)
+    expect(renameAccountDevice).toHaveBeenCalledTimes(1)
+    expect(store.get().busyAction).toBeUndefined()
+    expect(store.get().error).toBeTruthy()
+    expect(mocks.storage.clearDeviceCredentials).not.toHaveBeenCalled()
+    expect(store.get().disconnect).not.toHaveBeenCalled()
+    mocks.authenticate.mockRejectedValue(authError())
+    expect(await store.get().renameDevice('host', 'office')).toBe(false)
+    expect(store.get().reauthRequired).toBe(true)
+    expect(mocks.storage.clearDeviceCredentials).toHaveBeenCalledTimes(1)
+    expect(renameAccountDevice).toHaveBeenCalledTimes(1)
+  })
   it('uses the persisted replacement identity when refreshing devices after sign-in', async () => {
     const baseUrl = 'https://example.invalid'
     const token = 'account-jwt-token-123456'
