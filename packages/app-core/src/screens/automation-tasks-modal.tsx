@@ -95,6 +95,9 @@ type SchedulePreset = 'daily' | 'workdays' | 'weekly' | 'monthly' | 'hourly' | '
 
 const MONTHLY_CRON = /^([0-5]?\d)\s+([01]?\d|2[0-3])\s+1\s+\*\s+\*$/u
 
+const DEFAULT_CRON_EXPRESSION = '0 9 1 * *'
+const CRON_PLACEHOLDER = '0 9 * * *'
+
 function monthlyCron(time: string): string {
   const [hour, minute] = time.split(':').map(Number)
   return `${minute} ${hour} 1 * *`
@@ -156,7 +159,7 @@ export function AutomationTasksModal({
   const [formIntervalMinutes, setFormIntervalMinutes] = useState(60)
   const [formWeekdays, setFormWeekdays] = useState<number[]>([1, 2, 3, 4, 5])
   const [formDelayMinutes, setFormDelayMinutes] = useState(30)
-  const [formCronExpression, setFormCronExpression] = useState('0 9 1 * *')
+  const [formCronExpression, setFormCronExpression] = useState(DEFAULT_CRON_EXPRESSION)
   const [submitting, setSubmitting] = useState(false)
 
   const formTokenRef = useRef(0)
@@ -540,7 +543,7 @@ export function AutomationTasksModal({
     setFormIntervalMinutes(60)
     setFormWeekdays([1, 2, 3, 4, 5])
     setFormDelayMinutes(30)
-    setFormCronExpression('0 9 1 * *')
+    setFormCronExpression(DEFAULT_CRON_EXPRESSION)
     setEditSnapshot(null)
     setTimingDirty(false)
     setFormMode('create')
@@ -568,6 +571,7 @@ export function AutomationTasksModal({
     setExpandedRow(null)
     setPickerAnchor(null)
     setTimingDirty(false)
+    setFormCronExpression(DEFAULT_CRON_EXPRESSION)
 
     if (task.kind === 'daily') {
       setFormKind('daily')
@@ -586,7 +590,7 @@ export function AutomationTasksModal({
       setFormTime((task.time || '09:00').substring(0, 5))
       setFormWeekdays(days)
     } else if (task.kind === 'cron') {
-      const expression = task.expression || '0 9 1 * *'
+      const expression = task.expression || DEFAULT_CRON_EXPRESSION
       setFormKind('cron')
       setFormCronExpression(expression)
       const match = MONTHLY_CRON.exec(expression.trim())
@@ -1155,7 +1159,7 @@ export function AutomationTasksModal({
                               setTimingDirty(true)
                               setFormCronExpression(value)
                             }}
-                            placeholder="0 9 * * *"
+                            placeholder={CRON_PLACEHOLDER}
                             placeholderTextColor={colors.muted}
                             style={styles.rowValueInput}
                             selectionColor={colors.primary}
