@@ -350,7 +350,14 @@ export class HostPluginRuntime {
       await this.serverApi.loadStoredPolicy()
       this.initializePairing()
       this.serverConnection = this.createServerConnection(this.identity)
-      if (this.config.hostControl?.enabled !== false) this.serverConnection.start()
+      if (this.config.hostControl?.enabled !== false) {
+        this.serverConnection.start()
+      } else if (this.serverApi.pairingHostOnly()) {
+        this.logger.info('pairing host-only policy overrides disabled hostControl; starting server control connection')
+        this.serverConnection.start()
+      } else {
+        this.logger.info('host control disabled; skipping server control connection')
+      }
     } else if (this.localGateway?.supportsCarrier === true && attentionHarnessVersion === undefined) {
       attentionHarnessVersion = await readHarnessDistributionVersion()
     }

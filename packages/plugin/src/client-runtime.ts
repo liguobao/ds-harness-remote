@@ -225,6 +225,10 @@ export class ClientModeRuntime {
     }
   }
 
+  setHostControlEnabled(enabled: boolean): void {
+    this.config.hostControl = { enabled }
+  }
+
   async authorizeHostByDefault(): Promise<void> {
     try {
       if (this.host === undefined) return

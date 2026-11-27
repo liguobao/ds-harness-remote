@@ -1744,6 +1744,46 @@ describe('ClientModeRuntime Host account control', () => {
       await runtime.close()
     }
   })
+
+  it('respects in-process setHostControlEnabled updates in authorizeHostByDefault', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-host-control-'))
+    directories.push(directory)
+    const authenticate = vi.fn(async () => ({ accessToken: 'client-access-token', account: 'user@example.com' }))
+    const authorizeHostAsOwned = vi.fn(async () => ({ method: 'owned_device' }))
+    const host = {
+      hostStatus: vi.fn(() => ({
+        configured: true,
+        online: false,
+        reconnecting: false,
+        authorized: false,
+        accountRequired: false,
+      })),
+      hasStoredAuthorization: vi.fn(async () => false),
+      authorizeHostAsOwned,
+    } as unknown as HostAuthorizationControl
+    const runtime = new ClientModeRuntime(
+      { ...config(), hostControl: { enabled: true } },
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn(), authenticate } as unknown as ClientServerApi,
+      gateway(),
+      logger(),
+      host,
+    )
+    await runtime.start()
+    try {
+      runtime.setHostControlEnabled(false)
+      await runtime.authorizeHostByDefault()
+      expect(authenticate).not.toHaveBeenCalled()
+      expect(authorizeHostAsOwned).not.toHaveBeenCalled()
+
+      runtime.setHostControlEnabled(true)
+      await runtime.authorizeHostByDefault()
+      expect(authenticate).toHaveBeenCalledOnce()
+      expect(authorizeHostAsOwned).toHaveBeenCalledWith('client-access-token', 'user@example.com')
+    } finally {
+      await runtime.close()
+    }
+  })
 })
 
 function config(): ResolvedConfig {
