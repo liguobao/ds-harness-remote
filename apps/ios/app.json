@@ -3,7 +3,7 @@
     "name": "DSH Remote",
     "slug": "dsh-remote",
     "scheme": "dshremote",
-    "version": "0.6.8",
+    "version": "0.6.9",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "io.github.liguobao.dshremote",
-      "buildNumber": "76",
+      "buildNumber": "77",
       "infoPlist": {
         "NSSupportsLiveActivities": true,
         "NSLocalNetworkUsageDescription": "DSH Remote connects to trusted Harness hosts on your local network.",
