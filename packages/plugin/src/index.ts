@@ -1,5 +1,5 @@
 import type { MessageFileAttachment } from './message-file-attachment.js'
-import type { DshWebBrowserAuth } from './dsh-web-host.js'
+import { resolveDshWebRuntime } from './dsh-web-host.js'
 import type { TransferServices } from './session-transfer.js'
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the `ctx.settings` Context merge and the rc.1 forms type.
@@ -407,17 +407,7 @@ async function activate(
           persistence: ctx.get('sessionPersistence', false) as TransferServices['persistence'],
           workspaces: ctx.get('workspaceRegistry', false) as TransferServices['workspaces'],
         }),
-        () => {
-          if (!ctx.get('webApp', false)) return
-          const listener = ctx.get('webServer', false) as { getOrigin?(): string } | undefined
-          const auth = ctx.get('connection', false) as DshWebBrowserAuth | undefined
-          if (typeof listener?.getOrigin !== 'function' || typeof auth?.authenticatedUrl !== 'function'
-            || typeof auth.authorizeIndex !== 'function' || typeof auth.requestRejection !== 'function') return
-          try {
-            const origin = new URL(listener.getOrigin())
-            if (['http:', 'https:'].includes(origin.protocol) && origin.href === origin.origin + '/') return { origin, auth }
-          } catch { /* The listener has not bound, or cannot provide a URL. */ }
-        },
+        () => resolveDshWebRuntime(ctx, rootContext(ctx)),
         undefined,
         ref => {
           const attachments = (safeGetService(ctx, 'attachments') ?? safeGetService(rootContext(ctx), 'attachments')) as
