@@ -47,11 +47,12 @@ export type SpawnCursorAcp = (binary: string) => ChildProcessWithoutNullStreams
 /** Backends that reuse this stdio client and must keep their own failure vocabulary. */
 export type AcpAdapterBackend = string
 
-const ADAPTER_LABELS: Readonly<Record<string, string>> = Object.freeze({
+export const ADAPTER_LABELS: Readonly<Record<string, string>> = Object.freeze({
   cursor: 'Cursor',
   pi: 'Pi',
   claude: 'Claude',
   hermes: 'Hermes',
+  kimi: 'Kimi',
   antigravity: 'Antigravity',
 })
 

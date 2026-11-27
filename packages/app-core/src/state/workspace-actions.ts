@@ -20,6 +20,7 @@ import {
   createOpencodeWorkspace,
   createClaudeWorkspace,
   createHermesWorkspace,
+  createKimiWorkspace,
   createPiWorkspace,
   loadCursorCatalog,
   loadCustomAcpCatalog,
@@ -29,10 +30,12 @@ import {
 import { loadOpencodeCatalog, mergeOpencodeCatalog } from '../services/opencode'
 import { loadClaudeCatalog, mergeClaudeCatalog } from '../services/claude'
 import { loadHermesCatalog, mergeHermesCatalog } from '../services/hermes'
+import { loadKimiCatalog, mergeKimiCatalog } from '../services/kimi'
 import { loadPiCatalog, mergePiCatalog } from '../services/pi'
 import type { AndroidRemoteRuntime } from '../services/remote-runtime'
 import { saveFavoriteWorkspaces, saveRecentWorkspaces } from '../services/storage'
 import type { RemoteSession, WorkspaceView } from '../types'
+import { acpClientForBackend } from './acp-backend-helpers'
 import { loadSavedCodexPermissions, withBestCodexPermission } from './codex-session-state'
 import type { AppState, StoreAccess } from './store-state'
 
@@ -194,6 +197,14 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
               filterOpts,
             )
             break
+          case 'kimi':
+            catalog = mergeKimiCatalog(
+              await loadKimiCatalog(scope.bind(() => connection.requireKimi()), get().workspaces, undefined, filterOpts),
+              get().workspaces,
+              get().sessions,
+              filterOpts,
+            )
+            break
           case 'cursor': {
             const cursorClient = (connection as unknown as { requireCursor?: () => Parameters<typeof loadCursorCatalog>[0] }).requireCursor
             if (typeof cursorClient === 'function') {
@@ -255,6 +266,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
             opencodeAvailable: connection.hasOpencode(),
             claudeAvailable: connection.hasClaude(),
             hermesAvailable: connection.hasHermes(),
+            kimiAvailable: connection.hasKimi(),
             customAcpBackends: connection.customAcpBackends?.() ?? [],
             workspaces: [...state.workspaces.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.workspaces],
             sessions: [...state.sessions.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.sessions],
@@ -527,7 +539,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
                   ? 'create-opencode-workspace'
                   : backend === 'claude'
                     ? 'create-claude-workspace'
-                    : backend === 'hermes' ? 'create-hermes-workspace' : 'create-workspace',
+                    : backend === 'hermes' ? 'create-hermes-workspace' : backend === 'kimi' ? 'create-kimi-workspace' : 'create-workspace',
         error: undefined,
       })
       const scope = beginMutation()
@@ -594,6 +606,14 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
             create: createHermesWorkspace,
             load: loadHermesCatalog,
             merge: mergeHermesCatalog,
+          },
+          kimi: {
+            has: () => connection.hasKimi(),
+            require: () => connection.requireKimi(),
+            unavailable: zhCN.runtime.kimiUnavailable,
+            create: createKimiWorkspace,
+            load: loadKimiCatalog,
+            merge: mergeKimiCatalog,
           },
         } as const
         if (isAcpManagedBackend(backend)) {
@@ -690,13 +710,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
 function acpClientFor(connection: AndroidRemoteRuntime, backend?: string) {
   if (!backend) return undefined
   try {
-    if (backend === 'cursor') return (connection as unknown as { requireCursor?: () => ReturnType<AndroidRemoteRuntime['requireCursor']> }).requireCursor?.()
-    if (backend === 'antigravity') return (connection as unknown as { requireAntigravity?: () => ReturnType<AndroidRemoteRuntime['requireAntigravity']> }).requireAntigravity?.()
-    if (backend === 'pi') return (connection as unknown as { requirePi?: () => ReturnType<AndroidRemoteRuntime['requirePi']> }).requirePi?.()
-    if (backend === 'opencode') return (connection as unknown as { requireOpencode?: () => ReturnType<AndroidRemoteRuntime['requireOpencode']> }).requireOpencode?.()
-    if (backend === 'claude') return (connection as unknown as { requireClaude?: () => ReturnType<AndroidRemoteRuntime['requireClaude']> }).requireClaude?.()
-    if (backend === 'hermes') return (connection as unknown as { requireHermes?: () => ReturnType<AndroidRemoteRuntime['requireHermes']> }).requireHermes?.()
-    return (connection as unknown as { requireAcpBackend?: (b: string) => ReturnType<AndroidRemoteRuntime['requireCursor']> }).requireAcpBackend?.(backend)
+    return acpClientForBackend(connection, backend)
   } catch {
     return undefined
   }

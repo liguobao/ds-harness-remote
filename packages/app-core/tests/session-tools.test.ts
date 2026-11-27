@@ -290,7 +290,7 @@ describe('permission projection versions', () => {
 
 })
 
-it.each(['claude', 'hermes'] as const)('%s uses its own scope for files and terminal operations', async backend => {
+it.each(['claude', 'hermes', 'kimi'] as const)('%s uses its own scope for files and terminal operations', async backend => {
   const workspaceToolCall = vi.fn(async () => ({}))
   const tools = new AcpSessionTools({ workspaceToolCall } as unknown as import('@dsh-remote/client-core').AgentAcpClient, backend)
   await tools.listFiles(`${backend}:saved`, '.')

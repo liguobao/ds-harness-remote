@@ -93,6 +93,7 @@ export interface AppState {
   opencodeAvailable: boolean
   claudeAvailable: boolean
   hermesAvailable: boolean
+  kimiAvailable: boolean
   customAcpBackends?: string[]
   workspaceCatalog?: { backend: AgentBackend; loading: boolean; error?: string }
   workspaces: WorkspaceView[]
@@ -266,7 +267,7 @@ export function selectCustomAcpBackends(state: Pick<AppState, 'customAcpBackends
 }
 
 export function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'hostWorkspaceGit' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'customAcpBackends' | 'workspaceCatalog' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'hostWorkspaceGit' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'kimiAvailable' | 'customAcpBackends' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' | 'agentPresetOptions' | 'agentPresetLoading' | 'agentPresetSelecting' |
   'acpReadOnlySessionId' | 'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
@@ -288,6 +289,7 @@ export function initialData(): Pick<AppState,
     opencodeAvailable: false,
     claudeAvailable: false,
     hermesAvailable: false,
+    kimiAvailable: false,
     customAcpBackends: [],
     workspaceCatalog: undefined,
     workspaces: [],

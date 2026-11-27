@@ -43,6 +43,7 @@ import { strings } from '../src/locales/i18n'
 describe('backendBadge', () => {
   it('maps all supported backends to single letter badges', () => {
     expect(backendBadge('hermes')).toBe('H')
+    expect(backendBadge('kimi')).toBe('K')
     expect(backendBadge('claude')).toBe('C')
     expect(backendBadge('codex')).toBe('X')
     expect(backendBadge('opencode')).toBe('O')
@@ -53,6 +54,7 @@ describe('backendBadge', () => {
 
   it('handles case-insensitivity and whitespace', () => {
     expect(backendBadge('  HERMES  ')).toBe('H')
+    expect(backendBadge('Kimi')).toBe('K')
     expect(backendBadge('Claude')).toBe('C')
     expect(backendBadge('Antigravity')).toBe('A')
     expect(backendBadge('OPENCODE')).toBe('O')

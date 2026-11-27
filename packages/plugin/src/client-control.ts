@@ -1,6 +1,7 @@
 import type { ControlResult } from './control-result.js'
 import { CodexRemoteClient } from '@dsh-remote/client-core'
 import type { PluginRouteCallResult } from '@dsh-remote/protocol'
+import { isValidAcpBackendId } from './acp/method-policy.js'
 import type { AcpVirtualWorkspaceView } from './acp/virtual-harness.js'
 import type { HarnessMode } from './harness-target.js'
 import { probeRemoteHostFeatures } from './client-capabilities.js'
@@ -296,7 +297,7 @@ export class ClientControl {
         return ok(this.context.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...(value.backend === 'codex' || value.backend === 'cursor' || value.backend === 'antigravity' || value.backend === 'pi' || value.backend === 'opencode' || value.backend === 'claude' || value.backend === 'hermes' ? { backend: value.backend } : {}),
+          ...(value.backend === 'codex' || isValidAcpBackendId(value.backend) ? { backend: value.backend } : {}),
           ...(typeof value.sessionId === 'string' ? { sessionId: value.sessionId } : {}),
         }))
       }

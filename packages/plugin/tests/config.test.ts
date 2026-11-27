@@ -49,12 +49,13 @@ describe('plugin config', () => {
     })
   })
 
-  it('uses one CodeX backend setting and drops unimplemented Kimi', () => {
+  it('uses one CodeX backend setting and registers Kimi as an explicitly enabled standard ACP backend', () => {
     const config = resolveConfig({ codex: { enabled: true, binary: '/old/codex' }, acp: {
       enabled: true, backends: [{ id: 'codex', enabled: false, command: '/new/codex' }, { id: 'kimi', enabled: true }],
     } }, {})
     expect(config.codex).toEqual({ enabled: false, binary: '/new/codex' })
-    expect(config.acp?.backends.some(item => item.id === 'kimi')).toBe(false)
+    expect(config.acp?.backends.find(item => item.id === 'kimi')).toMatchObject({ enabled: true, command: 'kimi', args: ['acp'] })
+    expect(resolveConfig({}, {}).acp?.backends.find(item => item.id === 'kimi')).toMatchObject({ enabled: false, command: 'kimi', args: ['acp'] })
     expect(resolveConfig({ acp: { enabled: false, backends: [{ id: 'codex', enabled: true }] } }, {}).codex.enabled).toBe(false)
   })
 

@@ -12,6 +12,7 @@ const KNOWN_LABELS: Readonly<Record<string, string>> = {
   claude: 'Claude',
   opencode: 'OpenCode',
   hermes: 'Hermes',
+  kimi: 'Kimi',
   antigravity: 'Antigravity',
   pi: 'Pi',
 }
@@ -27,8 +28,9 @@ export class AcpSessionModelState {
   private modeConfigId?: string
   private legacy = false
 
-  update(value: unknown): void {
+  update(value: unknown, options: { partial?: boolean } = {}): void {
     if (!record(value)) return
+    const partial = options.partial === true || value.sessionUpdate === 'config_option_update'
     if (record(value.modes) && Array.isArray(value.modes.availableModes)) {
       const availableModes = value.modes.availableModes.flatMap<AcpModeOption>(item => (
         record(item) && typeof item.id === 'string' && typeof item.name === 'string'
@@ -46,10 +48,22 @@ export class AcpSessionModelState {
       this.modeConfigId = undefined
     }
     if (Array.isArray(value.configOptions)) {
-      this.model = readOption(value.configOptions.find(option => record(option) && (option.id === 'model' || option.category === 'model')))
-      this.effort = readOption(value.configOptions.find(option => record(option) && (
+      const prevModelId = this.model?.current
+      const nextModel = readOption(value.configOptions.find(option => record(option) && (option.id === 'model' || option.category === 'model')))
+      const nextEffort = readOption(value.configOptions.find(option => record(option) && (
         option.id === 'effort' || option.id === 'thought_level' || option.category === 'thought_level'
       )))
+      if (!partial) {
+        this.model = nextModel
+        this.effort = nextEffort
+      } else {
+        if (nextModel !== undefined) this.model = nextModel
+        if (nextEffort !== undefined) {
+          this.effort = nextEffort
+        } else if (nextModel !== undefined && nextModel.current !== prevModelId) {
+          this.effort = undefined
+        }
+      }
       const modeOption = value.configOptions.find(option => record(option) && (option.id === 'mode' || option.category === 'mode'))
       if (record(modeOption) && typeof modeOption.id === 'string' && Array.isArray(modeOption.options)) {
         const availableModes = flattenOptions(modeOption.options).flatMap<AcpModeOption>(option => (
@@ -100,7 +114,7 @@ export class AcpSessionModelState {
       throw new Error(`The selected ${this.label} mode is unavailable on this Host.`)
     }
     if (this.modeConfigId !== undefined) {
-      this.update(await request('session/set_config_option', { sessionId, configId: this.modeConfigId, value: modeId }))
+      this.update(await request('session/set_config_option', { sessionId, configId: this.modeConfigId, value: modeId }), { partial: true })
     } else {
       await request('session/set_mode', { sessionId, modeId })
       this.modes = { ...this.modes, currentModeId: modeId }
@@ -144,11 +158,11 @@ export class AcpSessionModelState {
       this.model.current = model
     } else {
       if (model !== this.model.current) {
-        this.update(await request('session/set_config_option', { sessionId, configId: this.model.id, value: model }))
+        this.update(await request('session/set_config_option', { sessionId, configId: this.model.id, value: model }), { partial: true })
         if (this.model?.current !== model) throw new Error(`${this.label} did not confirm the model change.`)
       }
       if (effort !== undefined && this.effort) {
-        this.update(await request('session/set_config_option', { sessionId, configId: this.effort.id, value: effort }))
+        this.update(await request('session/set_config_option', { sessionId, configId: this.effort.id, value: effort }), { partial: true })
         if (this.effort?.current !== effort) throw new Error(`${this.label} did not confirm the effort change.`)
       }
     }

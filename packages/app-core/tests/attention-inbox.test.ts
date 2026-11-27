@@ -906,6 +906,7 @@ describe('attention platform differentiation and cross-host switching state', ()
       { item: makeItem({ id: '2', sessionId: 's2', backend: 'codex', status: 'waiting_approval' }), expectedKey: 'codex', expectedLabel: 'Codex', expectedBadge: 'X' },
       { item: makeItem({ id: '3', sessionId: 's3', backend: 'acp', acpAdapter: 'antigravity', status: 'waiting_question' }), expectedKey: 'antigravity', expectedLabel: 'Antigravity', expectedBadge: 'A' },
       { item: makeItem({ id: '4', sessionId: 's4', backend: 'acp', acpAdapter: 'hermes', status: 'running' }), expectedKey: 'hermes', expectedLabel: 'Hermes', expectedBadge: 'H' },
+      { item: makeItem({ id: '11', sessionId: 's11', backend: 'acp', acpAdapter: 'kimi', status: 'running' }), expectedKey: 'kimi', expectedLabel: 'Kimi', expectedBadge: 'K' },
       { item: makeItem({ id: '5', sessionId: 's5', backend: 'acp', acpAdapter: 'cursor', status: 'completed_unread' }), expectedKey: 'cursor', expectedLabel: 'Cursor', expectedBadge: 'U' },
       { item: makeItem({ id: '6', sessionId: 's6', backend: 'acp', acpAdapter: 'claude', status: 'running' }), expectedKey: 'claude', expectedLabel: 'Claude', expectedBadge: 'C' },
       { item: makeItem({ id: '7', sessionId: 's7', backend: 'acp', acpAdapter: 'opencode', status: 'running' }), expectedKey: 'opencode', expectedLabel: 'OpenCode', expectedBadge: 'O' },
@@ -927,6 +928,7 @@ describe('attention platform differentiation and cross-host switching state', ()
       'Codex',
       'Antigravity',
       'Hermes',
+      'Kimi',
       'Cursor',
       'Claude',
       'OpenCode',
@@ -935,7 +937,8 @@ describe('attention platform differentiation and cross-host switching state', ()
       'My Custom Agent',
     ])
     expect(filterAttentionItemsByBackend(samples.map(s => s.item), 'hermes').map(i => i.id)).toEqual(['4'])
-    expect(filterAttentionItemsByBackend(samples.map(s => s.item), 'all')).toHaveLength(10)
+    expect(filterAttentionItemsByBackend(samples.map(s => s.item), 'kimi').map(i => i.id)).toEqual(['11'])
+    expect(filterAttentionItemsByBackend(samples.map(s => s.item), 'all')).toHaveLength(11)
 
     const foreground: LiveSurfaceForegroundBridge = {
       notifyTask: vi.fn(),

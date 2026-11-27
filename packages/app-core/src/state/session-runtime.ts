@@ -9,10 +9,12 @@ import { cursorNativeId, loadCursorCatalog, loadCustomAcpCatalog, mergeCursorCat
 import { loadOpencodeCatalog, loadOpencodeModels, mergeOpencodeCatalog } from '../services/opencode'
 import { loadClaudeCatalog, loadClaudeModels, mergeClaudeCatalog } from '../services/claude'
 import { loadHermesCatalog, loadHermesModels, mergeHermesCatalog } from '../services/hermes'
+import { loadKimiCatalog, loadKimiModels, mergeKimiCatalog } from '../services/kimi'
 import { loadPiCatalog, loadPiModels, mergePiCatalog } from '../services/pi'
 import { AndroidRemoteRuntime } from '../services/remote-runtime'
 import { saveRecentWorkspaces } from '../services/storage'
 import type { ModelSelection, MuxStreamFrame, RemoteSession, WorkspaceShortcut, WorkspaceView } from '../types'
+import { acpClientForBackend, acpUnavailableMessage } from './acp-backend-helpers'
 import type { StoreAccess } from './store-state'
 
 export interface SessionAccess extends StoreAccess {
@@ -273,6 +275,16 @@ export class SessionRuntime {
     })
   }
 
+  async refreshKimiCatalog(): Promise<void> {
+    return this.refreshAcpCatalog({
+      backend: 'kimi',
+      has: () => this.connection.hasKimi(),
+      require: () => this.connection.requireKimi(),
+      load: loadKimiCatalog,
+      merge: mergeKimiCatalog,
+    })
+  }
+
   async refreshCursorCatalog(): Promise<void> {
     return this.refreshAcpCatalog({
       backend: 'cursor',
@@ -365,15 +377,7 @@ export class SessionRuntime {
     this.activeCursorStream = undefined
     if (previous !== undefined) await previous.close().catch(() => undefined)
     if (!current() || streamGeneration !== this.cursorStreamGeneration) return
-    const client = session.backend === 'claude' ? this.connection.requireClaude()
-      : session.backend === 'hermes' ? this.connection.requireHermes()
-      : session.backend === 'opencode'
-      ? this.connection.requireOpencode()
-      : session.backend === 'pi'
-        ? this.connection.requirePi()
-        : session.backend === 'antigravity' ? this.connection.requireAntigravity()
-        : session.backend === 'cursor' ? this.connection.requireCursor()
-        : this.connection.requireAcpBackend(session.backend ?? 'cursor')
+    const client = acpClientForBackend(this.connection, session.backend ?? 'cursor')
     const nativeId = cursorNativeId(session)
     let openedStream: AcpStream | undefined
     let closedBeforeAssign: { streamId: string; reason: string } | undefined
@@ -409,7 +413,7 @@ export class SessionRuntime {
         selectedSession: state.selectedSession?.sessionId === session.sessionId
           ? { ...state.selectedSession, running: false }
           : state.selectedSession,
-        ...(closed.reason === 'failed' ? { error: session.backend === 'claude' ? zhCN.runtime.claudeUnavailable : session.backend === 'hermes' ? zhCN.runtime.hermesUnavailable : session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
+        ...(closed.reason === 'failed' ? { error: acpUnavailableMessage(session.backend) } : {}),
       }))
       // Transport flaps can close the ACP stream while the secure channel is
       // still up. Re-open with bounded backoff so a downed backend cannot loop.
@@ -553,6 +557,16 @@ export class SessionRuntime {
     const generation = this.connectionGeneration
     try {
       const models = await loadHermesModels(this.connection.requireHermes(), cursorNativeId(session))
+      if (!current() || generation !== this.connectionGeneration) return
+      this.store.set(state => state.selectedSession?.sessionId === session.sessionId
+        ? { sessionModels: models } : {})
+    } catch { /* Optional model discovery must not prevent conversation recovery. */ }
+  }
+
+  async refreshKimiModels(session: RemoteSession, current: () => boolean): Promise<void> {
+    const generation = this.connectionGeneration
+    try {
+      const models = await loadKimiModels(this.connection.requireKimi(), cursorNativeId(session))
       if (!current() || generation !== this.connectionGeneration) return
       this.store.set(state => state.selectedSession?.sessionId === session.sessionId
         ? { sessionModels: models } : {})

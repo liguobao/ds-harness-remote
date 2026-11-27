@@ -53,6 +53,7 @@ const ACP_BACKENDS: readonly AcpManagedBackend[] = [
   'opencode',
   'claude',
   'hermes',
+  'kimi',
 ]
 
 const ALL_BACKENDS = ['harness', 'codex', ...ACP_BACKENDS] as const
@@ -134,12 +135,14 @@ function createStoreHarness(
     hasOpencode: () => true,
     hasClaude: () => true,
     hasHermes: () => true,
+    hasKimi: () => true,
     requireCursor: () => acpClient,
     requireAntigravity: () => acpClient,
     requirePi: () => acpClient,
     requireOpencode: () => acpClient,
     requireClaude: () => acpClient,
     requireHermes: () => acpClient,
+    requireKimi: () => acpClient,
     requireProxy: () => ({
       workspaceCreate: vi.fn(),
       workspaceRename: vi.fn(),
@@ -212,6 +215,8 @@ describe('Issue #447 ACP workspace management and persistence', () => {
     expect(modules.workspaceKey.canManageWorkspace(undefined)).toBe(false)
     expect(modules.cursor.createHermesWorkspace('D:\\proj\\my-hermes-app').title).toBe('my-hermes-app')
     expect(modules.cursor.createHermesWorkspace('/srv/ws-hermes').title).toBe('ws-hermes')
+    expect(modules.cursor.createKimiWorkspace('D:\\proj\\my-kimi-app').title).toBe('my-kimi-app')
+    expect(modules.cursor.createKimiWorkspace('/srv/ws-kimi').title).toBe('ws-kimi')
   })
 
   it('persists ACP favorites and recent shortcuts across storage reloads', async () => {
@@ -306,13 +311,14 @@ describe('Issue #447 ACP workspace management and persistence', () => {
           expect(harness.get().workspaces.some(item => item.backend === backend && item.path === targetPath)).toBe(false)
           expect(harness.get().sessions.some(item => item.backend === backend)).toBe(false)
 
-          if (backend === 'antigravity' || backend === 'pi' || backend === 'opencode' || backend === 'claude' || backend === 'hermes') {
+          if (backend === 'antigravity' || backend === 'pi' || backend === 'opencode' || backend === 'claude' || backend === 'hermes' || backend === 'kimi') {
             const methodMap = {
               antigravity: 'refreshAntigravityCatalog',
               pi: 'refreshPiCatalog',
               opencode: 'refreshOpencodeCatalog',
               claude: 'refreshClaudeCatalog',
               hermes: 'refreshHermesCatalog',
+              kimi: 'refreshKimiCatalog',
             } as const
             const method = methodMap[backend as keyof typeof methodMap]
             await harness.runtime[method]()

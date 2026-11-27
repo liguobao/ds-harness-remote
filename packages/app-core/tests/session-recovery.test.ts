@@ -12,7 +12,7 @@ const { proxy, transport, storage, authenticate, acp, codex, botDispatch, networ
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(), sessionSelectModel: vi.fn(),
     agentPresetList: vi.fn(), agentPresetSelect: vi.fn(), sessionCancel: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), getNetworkDetails: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn(), requireSessionTools: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), getNetworkDetails: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), hasKimi: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn(), requireKimi: vi.fn(), requireSessionTools: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), setMode: vi.fn(), selectPermission: vi.fn(), archiveSession: vi.fn(), createSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn(), subscribe: vi.fn() },
@@ -40,6 +40,7 @@ vi.mock('../src/services/connection', async () => {
     hasOpencode = transport.hasOpencode
     hasClaude = transport.hasClaude
     hasHermes = transport.hasHermes
+    hasKimi = transport.hasKimi
     requireSessionTools = transport.requireSessionTools
     requireCursor() { return acp }
     requireAntigravity() { return acp }
@@ -47,6 +48,7 @@ vi.mock('../src/services/connection', async () => {
     requireOpencode() { return acp }
     requireClaude() { transport.requireClaude(); return acp }
     requireHermes() { transport.requireHermes(); return acp }
+    requireKimi() { transport.requireKimi(); return acp }
     getNetworkDetails = transport.getNetworkDetails
     getStats() { return { mode: 'Relay', connected: true } }
   } }
@@ -80,6 +82,7 @@ const prepareScenario1 = () => {
   transport.hasOpencode.mockReturnValue(false)
   transport.hasClaude.mockReturnValue(false)
   transport.hasHermes.mockReturnValue(false)
+  transport.hasKimi.mockReturnValue(false)
   acp.call.mockResolvedValue([])
   acp.transferCall.mockResolvedValue({ events: [] })
   acp.prompt.mockResolvedValue({ accepted: true, stopReason: 'in_progress' })
@@ -1097,7 +1100,7 @@ describe('session restore state machine', () => {
     ], prepareScenario1)
   })
   it('restores ACP sessions once across overlapping reconnects and respects restoreSession=false', async () => {
-    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const
+    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -1127,6 +1130,7 @@ describe('session restore state machine', () => {
             transport.hasOpencode.mockReturnValue(backend === 'opencode')
             transport.hasClaude.mockReturnValue(backend === 'claude')
             transport.hasHermes.mockReturnValue(backend === 'hermes')
+            transport.hasKimi.mockReturnValue(backend === 'kimi')
             const first = useAppStore.getState().reconnect()
             const second = useAppStore.getState().reconnect()
             expect(await first).toBe(true)
@@ -1304,7 +1308,7 @@ describe('session restore state machine', () => {
   })
 
   it('marks empty Host history for every non-Cursor ACP backend so the first prompt is confirmed instead of duplicated', async () => {
-    await runScenarios((['claude', 'opencode', 'pi', 'hermes'] as const).map(backend => ({
+    await runScenarios((['claude', 'opencode', 'pi', 'hermes', 'kimi'] as const).map(backend => ({
       name: `${backend}: empty history marks the first prompt as having no predecessor`,
       run: async () => {
         const client = acp as typeof acp & Partial<Pick<AgentAcpClient, 'loadSessionDetails'>>
@@ -1502,7 +1506,7 @@ describe('session restore state machine', () => {
   })
 
   it('isolates late ACP prompt subscriptions from the new conversation', async () => {
-    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const
+    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -1622,8 +1626,8 @@ describe('session creation single flight', () => {
 })
 
 describe('ACP session creation targets the workspace backend', () => {
-  it('creates Claude and Hermes sessions through their own backend', async () => {
-    await runScenarios((['claude', 'hermes'] as const).map(backend => ({
+  it('creates Claude, Hermes, and Kimi sessions through their own backend', async () => {
+    await runScenarios((['claude', 'hermes', 'kimi'] as const).map(backend => ({
       name: backend,
       run: async () => {
         vi.resetAllMocks()
@@ -1631,6 +1635,7 @@ describe('ACP session creation targets the workspace backend', () => {
   transport.getNetworkDetails.mockResolvedValue(undefined)
         transport.hasClaude.mockReturnValue(backend === 'claude')
         transport.hasHermes.mockReturnValue(backend === 'hermes')
+        transport.hasKimi.mockReturnValue(backend === 'kimi')
         acp.transferCall.mockResolvedValue({ events: [] })
         acp.openStream.mockResolvedValue({ streamId: 'stream', close: async () => undefined })
         acp.createSession.mockResolvedValue({ sessionId: 'new-1' })
@@ -1647,16 +1652,22 @@ describe('ACP session creation targets the workspace backend', () => {
           workspaceCatalog: { backend, loading: false } as never,
         })
         expect(await useAppStore.getState().createSession(workspace.workspaceId)).toBe(true)
-        // A Hermes workspace must never be created through the Claude client.
+        // Each backend workspace must never be created through another backend's client.
         expect(acp.createSession).toHaveBeenCalledWith('/repo', 'agent', backend)
         // Opening the new session also reads history and opens a stream through the
         // same capability, so only the absence is exact.
         if (backend === 'hermes') {
           expect(transport.requireHermes).toHaveBeenCalled()
           expect(transport.requireClaude).not.toHaveBeenCalled()
+          expect(transport.requireKimi).not.toHaveBeenCalled()
+        } else if (backend === 'kimi') {
+          expect(transport.requireKimi).toHaveBeenCalled()
+          expect(transport.requireClaude).not.toHaveBeenCalled()
+          expect(transport.requireHermes).not.toHaveBeenCalled()
         } else {
           expect(transport.requireClaude).toHaveBeenCalled()
           expect(transport.requireHermes).not.toHaveBeenCalled()
+          expect(transport.requireKimi).not.toHaveBeenCalled()
         }
         expect(useAppStore.getState().sessions.some(item => item.sessionId === `${backend}:new-1`)).toBe(true)
         expect(useAppStore.getState().selectedSession?.sessionId).toBe(`${backend}:new-1`)
@@ -2585,6 +2596,7 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
     transport.requireSessionTools.mockReturnValue({ statFile, readBytes })
     transport.hasAntigravity.mockReturnValue(true)
     transport.hasHermes.mockReturnValue(true)
+    transport.hasKimi.mockReturnValue(true)
     transport.hasClaude.mockReturnValue(true)
     acp.transferCall.mockResolvedValue({
       events: [{
@@ -2649,7 +2661,7 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
     await expect(p2).resolves.toBe(expectedUri)
     expect(acp.transferCall).toHaveBeenCalledTimes(1)
 
-    for (const backend of ['claude', 'hermes'] as const) {
+    for (const backend of ['claude', 'hermes', 'kimi'] as const) {
       const acpSession: RemoteSession = { sessionId: `${backend}:s1`, nativeId: 's1', backend, updatedAt: 1, running: false, blank: false }
       useAppStore.setState({ selectedSession: acpSession, sessions: [acpSession] })
       const loader = sessionChatImageLoader(acpSession)

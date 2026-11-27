@@ -25,6 +25,7 @@ export function harnessDisplayName(value: string): string {
     case 'codex': return 'Codex'
     case 'claude': return 'Claude'
     case 'hermes': return 'Hermes'
+    case 'kimi': return 'Kimi'
     case 'cursor': return 'Cursor'
     case 'antigravity': return 'Antigravity'
     case 'opencode': return 'OpenCode'

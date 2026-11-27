@@ -9,8 +9,9 @@ describe('sessionBackendFromId', () => {
     expect(sessionBackendFromId('pi:abc')).toBe('pi')
     expect(sessionBackendFromId('opencode:abc')).toBe('opencode')
     expect(sessionBackendFromId('claude:abc')).toBe('claude')
-    // A Hermes link must refresh the Hermes catalog, not fall back to Harness.
+    // A Hermes or Kimi link must refresh its own catalog, not fall back to Harness.
     expect(sessionBackendFromId('hermes:local-1')).toBe('hermes')
+    expect(sessionBackendFromId('kimi:local-1')).toBe('kimi')
   })
 
   it('treats an unprefixed id as a Harness session', () => {

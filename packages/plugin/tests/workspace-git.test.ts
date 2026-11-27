@@ -642,7 +642,6 @@ describe('WorkspaceGitHost', { timeout: 30_000 }, () => {
         items: [
           { sessionId: 'native-1', cwd: '/native/workspace' },
           { sessionId: 'harness:h1', cwd: '/harness/workspace' },
-          { sessionId: 'kimi:k1', cwd: '/kimi/workspace' },
         ],
       },
     }))
@@ -654,15 +653,15 @@ describe('WorkspaceGitHost', { timeout: 30_000 }, () => {
     expect(await resolver('my-acp:sess-1', signal)).toBe('/acp/my-acp:sess-1')
     expect(await resolver('acp:sess-2', signal)).toBe('/acp/acp:sess-2')
     expect(await resolver('cursor:sess-3', signal)).toBe('/acp/cursor:sess-3')
-    expect(acpSpy).toHaveBeenCalledTimes(3)
+    expect(await resolver('kimi:k1', signal)).toBe('/acp/kimi:k1')
+    expect(acpSpy).toHaveBeenCalledTimes(4)
 
     expect(await resolver('codex:thread-1', signal)).toBe('/codex/thread-1')
     expect(codexSpy).toHaveBeenCalledWith('thread-1')
 
     expect(await resolver('native-1', signal)).toBe('/native/workspace')
     expect(await resolver('harness:h1', signal)).toBe('/harness/workspace')
-    expect(await resolver('kimi:k1', signal)).toBe('/kimi/workspace')
-    expect(dispatch).toHaveBeenCalledTimes(3)
+    expect(dispatch).toHaveBeenCalledTimes(2)
 
     // Legacy upload wrapper retains UPLOAD_WORKSPACE_UNAVAILABLE
     const uploadResolver = workspaceUploadRootResolver(undefined, () => false, codexSpy, acpSpy)

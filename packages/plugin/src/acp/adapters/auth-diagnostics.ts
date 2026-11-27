@@ -25,6 +25,7 @@ const DEFAULT_LOGIN_COMMANDS: Readonly<Record<string, string>> = {
   opencode: 'opencode auth login',
   claude: 'claude login',
   hermes: 'hermes setup',
+  kimi: 'kimi login',
 }
 
 export function parseInitializeMetadata(result: unknown): AcpInitializeMetadata {

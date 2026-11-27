@@ -26,6 +26,7 @@ import {
   createOpencodeSession,
   createClaudeSession,
   createHermesSession,
+  createKimiSession,
   createPiSession,
   cursorNativeId,
   finalizeAssistantLive,
@@ -35,10 +36,11 @@ import {
   reconcileAcpCachedPrompts,
 } from '../services/cursor'
 import { forkMessage } from '../services/message-actions'
-import { readOpencodeHistory, selectOpencodeModel } from '../services/opencode'
-import { readClaudeHistory, selectClaudeModel } from '../services/claude'
-import { loadHermesCatalog, mergeHermesCatalog, readHermesHistory, selectHermesModel } from '../services/hermes'
-import { readPiHistory, selectPiModel } from '../services/pi'
+import { readOpencodeHistory } from '../services/opencode'
+import { readClaudeHistory } from '../services/claude'
+import { loadHermesCatalog, mergeHermesCatalog, readHermesHistory } from '../services/hermes'
+import { readKimiHistory } from '../services/kimi'
+import { readPiHistory } from '../services/pi'
 import { saveCodexPermissionPreset } from '../services/storage'
 import * as browseMemoryModule from '../services/browse-memory'
 import { browseKey, browseScope, getCachedSessionMessages, recordHandoffOrigin, saveSessionMessagesSnapshot, updateBrowseEntry, useBrowseMemory } from '../services/browse-memory'
@@ -69,25 +71,8 @@ export function storeAcpPagedMessages(
   }
 }
 
-export function hasAcpBackendFor(connection: SessionAccess['runtime']['connection'], backend: string): boolean {
-  if (backend === 'claude') return connection.hasClaude()
-  if (backend === 'hermes') return connection.hasHermes()
-  if (backend === 'opencode') return connection.hasOpencode()
-  if (backend === 'pi') return connection.hasPi()
-  if (backend === 'antigravity') return connection.hasAntigravity()
-  if (backend === 'cursor') return connection.hasCursor()
-  return connection.hasAcpBackend(backend)
-}
-
-export function acpClientForBackend(connection: SessionAccess['runtime']['connection'], backend: string) {
-  if (backend === 'claude') return connection.requireClaude()
-  if (backend === 'hermes') return connection.requireHermes()
-  if (backend === 'opencode') return connection.requireOpencode()
-  if (backend === 'pi') return connection.requirePi()
-  if (backend === 'antigravity') return connection.requireAntigravity()
-  if (backend === 'cursor') return connection.requireCursor()
-  return connection.requireAcpBackend(backend)
-}
+import { acpClientForBackend, hasAcpBackendFor } from './acp-backend-helpers'
+export { acpClientForBackend, hasAcpBackendFor }
 
 /** Session actions use the store's single connection/session runtime. */
 export function createSessionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
@@ -134,6 +119,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     if (backend === 'opencode') return createOpencodeSession({ acpSessionId, cwd })
     if (backend === 'claude') return createClaudeSession({ acpSessionId, cwd })
     if (backend === 'hermes') return createHermesSession({ acpSessionId, cwd })
+    if (backend === 'kimi') return createKimiSession({ acpSessionId, cwd })
     return createAcpSession({ backend, acpSessionId, cwd, title })
   }
 
@@ -827,6 +813,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               }
               const events = acpBackend === 'claude' ? await readClaudeHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'hermes' ? await readHermesHistory(acpClient, cursorNativeId(session))
+                : acpBackend === 'kimi' ? await readKimiHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'opencode' ? await readOpencodeHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'pi' ? await readPiHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'antigravity' ? await readAntigravityHistory(acpClient, cursorNativeId(session), readAbort.signal)
@@ -939,6 +926,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           else if (acpBackend === 'opencode') void runtime.refreshOpencodeModels(enrichedSession, current)
           else if (acpBackend === 'claude') void runtime.refreshClaudeModels(enrichedSession, current)
           else if (acpBackend === 'hermes') void runtime.refreshHermesModels(enrichedSession, current)
+          else if (acpBackend === 'kimi') void runtime.refreshKimiModels(enrichedSession, current)
           else if (acpBackend === 'cursor') void runtime.refreshCursorModels(enrichedSession, current)
           else void runtime.refreshCustomAcpModels(enrichedSession, current)
           return
@@ -1170,6 +1158,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           : {
               events: acpBackend === 'claude' ? await readClaudeHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'hermes' ? await readHermesHistory(acpClient, cursorNativeId(session))
+                : acpBackend === 'kimi' ? await readKimiHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'opencode' ? await readOpencodeHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'pi' ? await readPiHistory(acpClient, cursorNativeId(session))
                 : acpBackend === 'antigravity' ? await readAntigravityHistory(acpClient, cursorNativeId(session))
@@ -1424,13 +1413,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             const client = acpClientForBackend(runtime.connection, effectiveBackend)
             const result = await client.forkSession(cursorNativeId(targetSession), effectiveBackend)
             if (generation !== runtime.connectionGeneration) return undefined
-            forked = effectiveBackend === 'claude' ? createClaudeSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-              : effectiveBackend === 'hermes' ? createHermesSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-              : effectiveBackend === 'opencode' ? createOpencodeSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-              : effectiveBackend === 'pi' ? createPiSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-              : effectiveBackend === 'antigravity' ? createAntigravitySession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-              : effectiveBackend === 'cursor' ? createCursorSession({ acpSessionId: result.sessionId, cwd: targetSession.cwd })
-              : createAcpSession({ backend: effectiveBackend, acpSessionId: result.sessionId, cwd: targetSession.cwd })
+            forked = createAcpSessionForBackend(effectiveBackend, result.sessionId, targetSession.cwd)
           }
           set(state => ({
             sessions: [forked, ...state.sessions.filter(item => item.sessionId !== forked.sessionId)],
@@ -1749,40 +1732,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }))
           return true
         }
-        if (session.backend === 'pi') {
-          const models = await selectPiModel(runtime.connection.requirePi(), cursorNativeId(session), selection)
-          if (!isCurrent()) { releaseIfLatest(); return false }
-          set({ sessionModels: models, modelSelecting: false })
-          return true
-        }
-        if (session.backend === 'opencode') {
-          const models = await selectOpencodeModel(runtime.connection.requireOpencode(), cursorNativeId(session), selection)
-          if (!isCurrent()) { releaseIfLatest(); return false }
-          set({ sessionModels: models, modelSelecting: false })
-          return true
-        }
-        if (session.backend === 'claude' || session.backend === 'hermes') {
-          const models = session.backend === 'hermes'
-            ? await selectHermesModel(runtime.connection.requireHermes(), cursorNativeId(session), selection)
-            : await selectClaudeModel(runtime.connection.requireClaude(), cursorNativeId(session), selection)
-          if (!isCurrent()) { releaseIfLatest(); return false }
-          set({ sessionModels: models, modelSelecting: false })
-          return true
-        }
-        if (session.backend === 'antigravity') {
-          const models = await selectAcpModel(runtime.connection.requireAntigravity(), cursorNativeId(session), 'antigravity', selection)
-          if (!isCurrent()) { releaseIfLatest(); return false }
-          set({ sessionModels: models, modelSelecting: false })
-          return true
-        }
-        if (session.backend === 'cursor') {
-          const models = await selectAcpModel(runtime.connection.requireCursor(), cursorNativeId(session), 'cursor', selection)
-          if (!isCurrent()) { releaseIfLatest(); return false }
-          set({ sessionModels: models, modelSelecting: false })
-          return true
-        }
         if (isAcpManagedBackend(session.backend)) {
-          const models = await selectAcpModel(runtime.connection.requireAcpBackend(session.backend), cursorNativeId(session), session.backend, selection)
+          const models = await selectAcpModel(acpClientForBackend(runtime.connection, session.backend), cursorNativeId(session), session.backend, selection)
           if (!isCurrent()) { releaseIfLatest(); return false }
           set({ sessionModels: models, modelSelecting: false })
           return true

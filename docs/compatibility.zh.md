@@ -29,7 +29,7 @@ Host、随包 Remote Client 和 Android 只使用官方 Typert carrier。缺少 
 
 ## CodeX、ACP 与平台
 
-CodeX 使用独立 App Server 数据面；Cursor、AGY、Pi、OpenCode、Claude、Hermes 使用 ACP gateway。会话目录、模型、工具和历史能力取决于实际 CLI。安装条件见[接入指南](acp-remote.md)，不按 CLI 名称推断协议，也不把失败后端替换成其他后端。
+CodeX 使用独立 App Server 数据面；Cursor、AGY、Pi、OpenCode、Claude、Hermes、Kimi 使用 ACP gateway。会话目录、模型、工具和历史能力取决于实际 CLI。安装条件见[接入指南](acp-remote.md)，不按 CLI 名称推断协议，也不把失败后端替换成其他后端。
 
 OpenCode v1 的原生归档依赖受认证的私有 HTTP API；纯 stdio / v2 构建没有该 API 时返回不可用，不能以删除代替归档。详见[归档设计](acp-remote.md#opencode-与原生归档)。
 

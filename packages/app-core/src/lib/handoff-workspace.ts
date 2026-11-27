@@ -11,6 +11,7 @@ export interface HandoffBackendAvailability {
   opencodeAvailable: boolean
   claudeAvailable: boolean
   hermesAvailable: boolean
+  kimiAvailable: boolean
   customAcpBackends?: readonly string[]
 }
 
@@ -19,6 +20,7 @@ const TARGET_BACKEND_ORDER: readonly AgentBackend[] = [
   'claude',
   'harness',
   'hermes',
+  'kimi',
   'opencode',
   'cursor',
   'antigravity',
@@ -44,6 +46,8 @@ function isBackendAvailable(availability: HandoffBackendAvailability, backend: A
       return availability.claudeAvailable
     case 'hermes':
       return availability.hermesAvailable
+    case 'kimi':
+      return availability.kimiAvailable
     case 'opencode':
       return availability.opencodeAvailable
     case 'cursor':

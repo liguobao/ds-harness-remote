@@ -7,7 +7,7 @@ import { isWindowsExecutablePath, selectWindowsExecutable } from './windows-spaw
 
 const execFileAsync = promisify(execFile)
 
-export type BuiltinAcpBackend = 'codex' | 'cursor' | 'antigravity' | 'pi' | 'claude' | 'opencode' | 'hermes'
+export type BuiltinAcpBackend = 'codex' | 'cursor' | 'antigravity' | 'pi' | 'claude' | 'opencode' | 'hermes' | 'kimi'
 
 export interface BackendInstallSpec {
   id: BuiltinAcpBackend
@@ -63,6 +63,12 @@ export const BUILTIN_ACP_SPECS: Readonly<Record<BuiltinAcpBackend, Readonly<Back
     name: 'Hermes',
     kind: 'desktop_cli',
     downloadUrl: 'https://hermes-agent.nousresearch.com',
+  }),
+  kimi: Object.freeze({
+    id: 'kimi',
+    name: 'Kimi',
+    kind: 'desktop_cli',
+    downloadUrl: 'https://moonshotai.github.io/kimi-code/',
   }),
 })
 
@@ -157,6 +163,14 @@ export function candidateBinaryPaths(id: string, options: CandidateScanOptions =
           pJoin(localAppData, 'Hermes', 'bin', 'hermes.exe'),
           pJoin(home, '.hermes', 'bin', 'hermes.exe'),
           pJoin(home, 'hermes-agent', '.hermes', 'bin', 'hermes.exe'),
+        )
+        break
+      case 'kimi':
+        candidates.push(
+          pJoin(home, '.kimi-code', 'bin', 'kimi.exe'),
+          pJoin(localAppData, 'kimi-code', 'bin', 'kimi.exe'),
+          pJoin(localAppData, 'Programs', 'kimi-code', 'kimi.exe'),
+          pJoin(home, '.local', 'bin', 'kimi.exe'),
         )
         break
       case 'cursor':
@@ -261,6 +275,14 @@ export function candidateBinaryPaths(id: string, options: CandidateScanOptions =
           '/opt/homebrew/bin/hermes',
         )
         break
+      case 'kimi':
+        candidates.push(
+          pJoin(home, '.kimi-code', 'bin', 'kimi'),
+          pJoin(home, '.local', 'bin', 'kimi'),
+          '/usr/local/bin/kimi',
+          '/opt/homebrew/bin/kimi',
+        )
+        break
     }
   }
 
@@ -315,6 +337,7 @@ export function findExistingBinary(id: string, options: CandidateScanOptions = {
     claude: 'claude-agent-acp',
     opencode: 'opencode',
     hermes: 'hermes',
+    kimi: 'kimi',
   }
   const defaultCmd = defaultCommands[id] ?? id
   const fromPath = lookupSystemPath(defaultCmd, platform, check)

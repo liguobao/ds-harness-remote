@@ -45,9 +45,10 @@ const BUILTIN_ACP_LABELS: Record<string, string> = {
   pi: 'Pi',
   opencode: 'OpenCode',
   hermes: 'Hermes',
+  kimi: 'Kimi',
 }
 
-const BUILTIN_ACP_SCAN_ONLY = new Set(['cursor', 'antigravity', 'hermes'])
+const BUILTIN_ACP_SCAN_ONLY = new Set(['cursor', 'antigravity', 'hermes', 'kimi'])
 
 export function createRemotePluginOptions(React: ClientReact) {
   const ServerNotice = createServerNotice(React)
@@ -580,7 +581,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         const view = await props.control<PluginSettingsView>('settings.acp.installOrConfigure', { backend })
         applyView(view)
         if (view.acpInstallResult?.action === 'download_required' && view.acpInstallResult.downloadUrl) {
-          const name = backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'hermes' ? 'Hermes' : backend
+          const name = backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'hermes' ? 'Hermes' : backend === 'kimi' ? 'Kimi' : backend
           setNotice({
             key: 'acpDownloadRequired',
             params: { backend: name, url: view.acpInstallResult.downloadUrl },

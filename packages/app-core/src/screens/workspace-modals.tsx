@@ -174,6 +174,7 @@ export function CreateWorkspaceModal({
   opencodeAvailable,
   claudeAvailable,
   hermesAvailable,
+  kimiAvailable,
   customAcpBackends = EMPTY_STRINGS,
   initialBackend,
   busy,
@@ -189,6 +190,7 @@ export function CreateWorkspaceModal({
   opencodeAvailable: boolean
   claudeAvailable: boolean
   hermesAvailable: boolean
+  kimiAvailable: boolean
   customAcpBackends?: readonly string[]
   initialBackend: AgentBackend
   busy: boolean
@@ -222,9 +224,10 @@ export function CreateWorkspaceModal({
     else if (initialBackend === 'opencode' && opencodeAvailable) setBackend('opencode')
     else if (initialBackend === 'claude' && claudeAvailable) setBackend('claude')
     else if (initialBackend === 'hermes' && hermesAvailable) setBackend('hermes')
+    else if (initialBackend === 'kimi' && kimiAvailable) setBackend('kimi')
     else if (customAcpBackends.includes(initialBackend)) setBackend(initialBackend)
     else setBackend('harness')
-  }, [codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable, hermesAvailable, customAcpBackends, initialBackend, visible])
+  }, [codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable, hermesAvailable, kimiAvailable, customAcpBackends, initialBackend, visible])
 
   const dismissModal = () => {
     requestEpochRef.current += 1
@@ -260,6 +263,7 @@ export function CreateWorkspaceModal({
     ...(codexAvailable ? [{ value: 'codex' as const, label: strings.workspaces.codex, detail: 'OpenAI Codex', icon: Code2 }] : []),
     ...(claudeAvailable ? [{ value: 'claude' as const, label: strings.workspaces.claude, detail: 'Anthropic Claude', icon: Sparkles }] : []),
     ...(hermesAvailable ? [{ value: 'hermes' as const, label: strings.workspaces.hermes, detail: 'Nous Research Hermes', icon: Sparkles }] : []),
+    ...(kimiAvailable ? [{ value: 'kimi' as const, label: strings.workspaces.kimi, detail: 'Moonshot Kimi Code', icon: Sparkles }] : []),
     ...(cursorAvailable ? [{ value: 'cursor' as const, label: strings.workspaces.cursor, detail: 'Cursor ACP', icon: Sparkles }] : []),
     ...(antigravityAvailable ? [{ value: 'antigravity' as const, label: strings.workspaces.antigravity, detail: 'Antigravity ACP', icon: Sparkles }] : []),
     ...(opencodeAvailable ? [{ value: 'opencode' as const, label: strings.workspaces.opencode, detail: 'OpenCode ACP', icon: Sparkles }] : []),
@@ -281,7 +285,9 @@ export function CreateWorkspaceModal({
               ? strings.workspaces.claudeDirectoryHint
               : backend === 'hermes'
                 ? strings.workspaces.hermesDirectoryHint
-                : strings.workspaces.directoryHint
+                : backend === 'kimi'
+                  ? strings.workspaces.kimiDirectoryHint
+                  : strings.workspaces.directoryHint
 
   const HostIcon = selectedDevice ? platformIcon(selectedDevice.platform) : FolderOpen
   const hostOnline = connectionPhase === 'connected'

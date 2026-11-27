@@ -35,8 +35,10 @@ const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() =>
     hasOpencode: vi.fn(),
     hasClaude: vi.fn(),
     hasHermes: vi.fn(),
+    hasKimi: vi.fn(),
     requireClaude: vi.fn(),
     requireHermes: vi.fn(),
+    requireKimi: vi.fn(),
   },
   acp: {
     call: vi.fn(),
@@ -80,12 +82,14 @@ vi.mock('../src/services/connection', () => ({
     hasOpencode = transport.hasOpencode
     hasClaude = transport.hasClaude
     hasHermes = transport.hasHermes
+    hasKimi = transport.hasKimi
     requireCursor() { return acp }
     requireAntigravity() { return acp }
     requirePi() { return acp }
     requireOpencode() { return acp }
     requireClaude() { transport.requireClaude(); return acp }
     requireHermes() { transport.requireHermes(); return acp }
+    requireKimi() { transport.requireKimi(); return acp }
     getNetworkDetails() { return Promise.resolve(undefined) }
     getStats() { return { mode: 'Relay', connected: true } }
   },

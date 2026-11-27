@@ -8,7 +8,7 @@ import {
 } from '../src/screens/chat-images'
 import { foldHistory } from '../src/state/event-reducer'
 import type { RemoteSession } from '../src/types'
-import { createHermesSession } from '../src/services/cursor'
+import { createHermesSession, createKimiSession } from '../src/services/cursor'
 import { HarnessAlphaClient } from '@dsh-remote/client-core'
 import { clearAttachmentCache, resolveAttachmentUri } from '../src/services/attachment-cache'
 
@@ -71,12 +71,16 @@ describe('chat images and attachment preview (Issue #159)', () => {
     expect(limits?.maxImagesPerMessage).toBe(4)
   })
 
-  it('exposes valid imageLimits for Hermes sessions created via createHermesSession', () => {
-    const session = createHermesSession({ acpSessionId: 'hermes-1', cwd: '/work' })
-    const limits = sessionImageLimits(session)
-    expect(limits).toBeDefined()
-    expect(limits?.maxImagesPerMessage).toBe(4)
-    expect(limits?.mediaTypes).toContain('image/png')
+  it('exposes valid imageLimits for Hermes and Kimi sessions', () => {
+    for (const session of [
+      createHermesSession({ acpSessionId: 'hermes-1', cwd: '/work' }),
+      createKimiSession({ acpSessionId: 'kimi-1', cwd: '/work' }),
+    ]) {
+      const limits = sessionImageLimits(session)
+      expect(limits).toBeDefined()
+      expect(limits?.maxImagesPerMessage).toBe(4)
+      expect(limits?.mediaTypes).toContain('image/png')
+    }
   })
 
   it('preserves images in assistant messages in foldHistory', () => {

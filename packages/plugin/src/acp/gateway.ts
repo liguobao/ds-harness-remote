@@ -26,6 +26,7 @@ import {
 } from './adapters/cursor-process.js'
 import { ClaudeAcpClient } from './adapters/claude-process.js'
 import { HermesAcpClient } from './adapters/hermes-process.js'
+import { KimiAcpClient } from './adapters/kimi-process.js'
 import { PiAcpClient } from './adapters/pi-process.js'
 import { AntigravityAcpClient } from './adapters/antigravity-process.js'
 import {
@@ -57,7 +58,7 @@ const DETACHED_ACP_APPROVAL_METHODS: ReadonlySet<string> = new Set([
 const BACKEND_STABLE_MS = 30_000
 
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
-const STRICT_CATALOG_BACKENDS: ReadonlySet<string> = new Set(['pi', 'claude', 'opencode', 'hermes'])
+const STRICT_CATALOG_BACKENDS: ReadonlySet<string> = new Set(['pi', 'claude', 'opencode', 'hermes', 'kimi'])
 const ACP_DIRECTORY_ENTRY_LIMIT = 500
 const MAX_BUFFERED_ACP_FRAMES = 200
 const ACP_FRAME_BUFFER_TTL_MS = 5 * 60_000
@@ -199,6 +200,7 @@ export class AcpRemoteGateway {
       }
       if (backend.id === 'claude') return new ClaudeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       if (backend.id === 'hermes') return new HermesAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
+      if (backend.id === 'kimi') return new KimiAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       if (backend.id === 'pi') return new PiAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd })
       if (backend.id === 'opencode') {
         return new OpencodeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
@@ -216,7 +218,7 @@ export class AcpRemoteGateway {
   enabledBackends(): string[] {
     if (!this.config.enabled) return []
     return this.config.backends
-      .filter(item => item.enabled && item.id !== 'codex' && item.id !== 'kimi' && isValidAcpBackendId(item.id))
+      .filter(item => item.enabled && item.id !== 'codex' && isValidAcpBackendId(item.id))
       .map(item => item.id)
   }
 
@@ -233,7 +235,7 @@ export class AcpRemoteGateway {
       capabilities: Record<string, unknown>
     }> = {}
     for (const backend of this.config.backends) {
-      if (backend.id === 'codex' || backend.id === 'kimi') continue
+      if (backend.id === 'codex') continue
       const inst = this.backendInstances.get(backend.id)
       const ready = this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id) && inst?.client.isReady() === true
       const state: 'disabled' | 'ready' | 'unavailable' = !this.config.enabled || !backend.enabled
@@ -753,6 +755,7 @@ export class AcpRemoteGateway {
       const client = this.requireAcp(requested)
       const supportsImages = requested === 'antigravity'
         || requested === 'hermes'
+        || requested === 'kimi'
         || client.capabilities?.()?.promptCapabilities?.image === true
       if (Array.isArray(call.params.prompt) && call.params.prompt.some(part => isRecord(part) && part.type === 'image') && !supportsImages) {
         throw new RpcError('METHOD_NOT_ALLOWED', 'This ACP backend does not accept image prompts.')
@@ -1128,8 +1131,8 @@ export class AcpRemoteGateway {
         if (this.requireAcp(backend) !== client) {
           throw new RpcError('CURSOR_UNAVAILABLE', 'The ACP backend is not ready.')
         }
-        // Native AGY can stop the isolated reader without touching a live prompt.
-        return backend === 'antigravity' ? history(conversationId, cwd, controller.signal) : history(conversationId, cwd)
+        // Native AGY and Kimi can abort waiting on an isolated/deduplicated history read.
+        return backend === 'antigravity' || backend === 'kimi' ? history(conversationId, cwd, controller.signal) : history(conversationId, cwd)
       }).finally(() => {
         if (this.backendHistoryChains.get(backend) === nextChain) this.backendHistoryChains.delete(backend)
         if (this.pendingHistoryReads.get(key)?.promise === promise) this.pendingHistoryReads.delete(key)
@@ -1363,7 +1366,7 @@ export class AcpRemoteGateway {
     const previous = this.config
     const implemented = (value: ResolvedAcpConfig) => ({
       enabled: value.enabled,
-      backends: value.backends.filter(item => item.id !== 'codex' && item.id !== 'kimi' && isValidAcpBackendId(item.id)),
+      backends: value.backends.filter(item => item.id !== 'codex' && isValidAcpBackendId(item.id)),
     })
     this.config = config
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config)) && this.pendingReconfiguration.size === 0) return
@@ -2046,13 +2049,11 @@ export class AcpRemoteGateway {
   }
 
   private isPerSessionIsolatedBackend(backend: string): boolean {
-    if (backend === 'claude' || backend === 'hermes') return true
     if (backend === 'antigravity') return this.isNativeCatalogBackend('antigravity')
     return !['cursor', 'pi', 'opencode'].includes(backend) && isValidAcpBackendId(backend)
   }
 
   private requiresPrePromptLoad(backend: string): boolean {
-    if (backend === 'pi' || backend === 'claude' || backend === 'hermes') return true
     if (backend === 'antigravity') return this.isNativeCatalogBackend('antigravity')
     return backend !== 'cursor' && backend !== 'opencode' && isValidAcpBackendId(backend)
   }
@@ -2084,6 +2085,7 @@ export class AcpRemoteGateway {
     const authMethods = inst?.client.authMethods?.() ?? []
     const supportsImage = actualBackend === 'antigravity'
       || actualBackend === 'hermes'
+      || actualBackend === 'kimi'
       || caps.promptCapabilities?.image === true
     return {
       protocolVersion: requested,
@@ -2407,7 +2409,7 @@ function parsePublicSessionId(value: string, strictNativeId = false): { prefix: 
   const nativeId = match[2]!
   if (strictNativeId && !/^[A-Za-z0-9_-]{1,240}$/.test(nativeId)) return undefined
   const backend = prefix === 'acp' ? 'antigravity' : prefix
-  if (backend === 'codex' || backend === 'harness' || backend === 'kimi') return undefined
+  if (backend === 'codex' || backend === 'harness') return undefined
   if (!isValidAcpBackendId(backend)) return undefined
   return { prefix, backend, nativeId }
 }
@@ -2454,6 +2456,13 @@ export function cursorBinaryCandidates(configured: string): string[] {
       join(userHome, '.opencode', 'bin', 'opencode'),
       join(userHome, '.local', 'bin', 'opencode'),
       'opencode',
+    ]
+  }
+  if (configured === 'kimi') {
+    return [
+      join(userHome, '.kimi-code', 'bin', 'kimi'),
+      join(userHome, '.local', 'bin', 'kimi'),
+      'kimi',
     ]
   }
   return [configured]

@@ -102,6 +102,8 @@ export class AndroidRemoteRuntime {
   hasClaude() { return this.client.hasClaude() }
   requireHermes() { return this.client.requireHermes() }
   hasHermes() { return this.client.hasHermes() }
+  requireKimi() { return this.client.requireKimi() }
+  hasKimi() { return this.client.hasKimi() }
   acpBackendIds() { return this.client.acpBackendIds?.() ?? [] }
   customAcpBackends() { return this.client.customAcpBackends?.() ?? [] }
   hasAcpBackend(backend: string) { return this.client.hasAcpBackend?.(backend) ?? false }

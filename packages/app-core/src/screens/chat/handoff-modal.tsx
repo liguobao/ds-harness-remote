@@ -128,6 +128,7 @@ export const HandoffModal = memo(function HandoffModal({
   const opencodeAvailable = useGatedStore(useAppStore, state => state.opencodeAvailable, visible)
   const claudeAvailable = useGatedStore(useAppStore, state => state.claudeAvailable, visible)
   const hermesAvailable = useGatedStore(useAppStore, state => state.hermesAvailable, visible)
+  const kimiAvailable = useGatedStore(useAppStore, state => state.kimiAvailable, visible)
   const customAcpBackends = useGatedStore(useAppStore, selectCustomAcpBackends, visible)
   const liveSourceRunning = useGatedStore(useAppStore, state =>
     sourceSession === undefined
@@ -150,6 +151,7 @@ export const HandoffModal = memo(function HandoffModal({
     opencodeAvailable,
     claudeAvailable,
     hermesAvailable,
+    kimiAvailable,
     customAcpBackends,
   }), [
     codexAvailable,
@@ -159,6 +161,7 @@ export const HandoffModal = memo(function HandoffModal({
     opencodeAvailable,
     claudeAvailable,
     hermesAvailable,
+    kimiAvailable,
     customAcpBackends,
   ])
 

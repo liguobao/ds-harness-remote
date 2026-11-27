@@ -7,7 +7,7 @@ export async function loadAcpModels(client: AgentAcpClient, sessionId: string, b
   const result = await client.sessionModels(sessionId, backend as Parameters<AgentAcpClient['sessionModels']>[1])
   if (!record(result) || !record(result.current) || result.current.provider !== backend
     || typeof result.current.model !== 'string' || !Array.isArray(result.groups)) throw new Error('Invalid ACP model catalog.')
-  const labels: Record<string, string> = { cursor: 'Cursor', claude: 'Claude', pi: 'Pi', opencode: 'OpenCode', antigravity: 'Antigravity', hermes: 'Hermes' }
+  const labels: Record<string, string> = { cursor: 'Cursor', claude: 'Claude', pi: 'Pi', opencode: 'OpenCode', antigravity: 'Antigravity', hermes: 'Hermes', kimi: 'Kimi' }
   const groups = result.groups.flatMap(group => {
     if (!record(group) || group.id !== backend || !Array.isArray(group.models)) return []
     const models = group.models.flatMap(model => {

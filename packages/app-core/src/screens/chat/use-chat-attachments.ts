@@ -60,7 +60,7 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
   const [pickingFiles, setPickingFiles] = useState(false)
 
   const canAttachImages = session !== undefined && (sessionImageLimits(session) !== undefined
-    || session.backend === 'antigravity' || session.backend === 'hermes' || session.backend === 'codex')
+    || session.backend === 'antigravity' || session.backend === 'hermes' || session.backend === 'kimi' || session.backend === 'codex')
 
   const pickImage = async (source: 'camera' | 'library') => {
     if (session === undefined) return

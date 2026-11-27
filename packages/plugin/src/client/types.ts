@@ -51,6 +51,7 @@ export interface RemoteStatus {
     opencode?: boolean
     claude?: boolean
     hermes?: boolean
+    kimi?: boolean
     workspaceTypes?: ReadonlyArray<{ id: string; name: string; capability: string; available: boolean }>
   }
   network?: RemoteNetworkDetails

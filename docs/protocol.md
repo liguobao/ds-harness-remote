@@ -1421,7 +1421,7 @@ Host 必须调用 `fileViewerHost` 服务，让被选中的 File Viewer provider
 
 Agent ACP 是现有 Remote Plugin 内部的通用业务面（见 #65），不是第二个 Plugin，也不是
 Codex 专用 API。Host 通过 `acp.enabled` 和 `acp.backends` 独立配置 Cursor / Antigravity / Pi
-以及 OpenCode / Claude / Hermes adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.binary` 仅兼容 Cursor。
+以及 OpenCode / Claude / Hermes / Kimi adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.binary` 仅兼容 Cursor。
 `agent.acp.v1`、`agent.acp.transfer.v1` 与 `agent.acp.<backend>.v1` 表示启用且已实现的协议；
 实际就绪状态见 `workspaceTypes.available`，后台初始化不得阻塞 Harness Remote。
 现有 `harness.api.*` / `harness.remote.*` 和 `codex.app.*` 的线协议、路由与能力不受影响。
@@ -2168,14 +2168,14 @@ allowlist，也不提供文件写入能力。
 ### ACP shared workspace tools and live AGY models
 
 `agent.acp.workspace-files.v1` enables readonly workspace files. `agent.acp.terminal.v1`
-is advertised only while the Host Remote terminal setting is enabled. These shared workspace tools cover the implemented ACP backends, including Cursor, Antigravity, Pi, OpenCode, Claude and Hermes; session scope is supplied by the backend, never a client cwd.
+is advertised only while the Host Remote terminal setting is enabled. These shared workspace tools cover the implemented ACP backends, including Cursor, Antigravity, Pi, OpenCode, Claude, Hermes and Kimi; session scope is supplied by the backend, never a client cwd.
 `agent.acp.antigravity.models.v1` enables the live installed AGY model catalog and
 confirmed per-conversation model/effort selection. Remote versions below `0.5.0`
 continue to ignore `workspaceTypes`; newer clients require these optional capabilities.
 
 - `agent.acp.call` method `dsh/toolCall` takes `{sessionId,backend,endpoint,args}`.
   `sessionId` is the native ID; every scope in `args` must equal its UI ID
-  (the matching backend prefix, such as `cursor:<nativeId>`, `acp:<nativeId>`, `claude:<nativeId>` or `hermes:<nativeId>`). The fixed unary endpoints are
+  (the matching backend prefix, such as `cursor:<nativeId>`, `acp:<nativeId>`, `claude:<nativeId>`, `hermes:<nativeId>` or `kimi:<nativeId>`). The fixed unary endpoints are
   `workspaceFiles/list|stat|read|readBytes|readAll` and
   `terminal/environment|shells|list|create|write|resize|rename|close`.
 - `agent.acp.stream.open` accepts an optional `tool:{backend,endpoint,args}` with
@@ -2211,14 +2211,15 @@ continue to ignore `workspaceTypes`; newer clients require these optional capabi
   earlier replies after a model change. AGY transcripts without model metadata
   must not be assigned a fabricated historical model.
 
-ACP model selection also accepts `backend:"cursor"|"claude"|"pi"|"opencode"|"hermes"` through the same
-`dsh/sessionModels` / `dsh/selectModel` envelope. Pi uses its wrapper's reported
-model/thinking options. Cursor, Claude and OpenCode use the session's `configOptions` (including
+ACP model selection also accepts `backend:"cursor"|"claude"|"pi"|"opencode"|"hermes"|"kimi"` through the same
+`dsh/sessionModels` / `dsh/selectModel` envelope, alongside `dsh/sessionModes` / `dsh/setMode` (using upstream
+`session/set_mode` or `mode` `configOptions`). Pi uses its wrapper's reported
+model/thinking options. Cursor, Claude, OpenCode, Hermes and Kimi use the session's `configOptions` (including
 grouped model choices), or legacy `models.availableModels`; no static catalog
 is advertised. The Host loads saved sessions only with catalog-validated cwd,
 deduplicates live loads, and excludes history replay from live streams.
-Cursor, Claude and OpenCode changes use fixed Host-local `session/set_config_option` keys `model`
-and `effort`, or legacy `session/set_model` when only legacy models are reported.
+Cursor, Claude, OpenCode, Hermes and Kimi changes use upstream `session/set_config_option` keys `model`
+and `effort` / `thinking` (`thought_level` category), or legacy `session/set_model` when only legacy models are reported.
 These upstream methods are not exposed as generic Remote RPC. Selection is
 per session, rejected during prompts/another change, and acknowledged only
 after upstream success; modern config responses/updates must confirm the value.

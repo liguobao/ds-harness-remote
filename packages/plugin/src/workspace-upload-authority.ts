@@ -26,7 +26,6 @@ export function resolveSessionWorkspaceRoot(
         || (
           prefix !== 'codex'
           && prefix !== 'harness'
-          && prefix !== 'kimi'
           && prefix === prefix.trim()
           && isValidAcpBackendId(prefix)
         )

@@ -66853,11 +66853,11 @@ var AgentAcpClient = class {
     const result = await this.call("dsh/workspaceList", {
       ...backend === void 0 ? {} : { backend }
     }, signal).catch((error62) => {
-      if (backend === "pi" || backend === "claude" || backend === "hermes")
+      if (backend === "pi" || backend === "claude" || backend === "hermes" || backend === "kimi")
         throw error62;
       return [];
     });
-    if ((backend === "pi" || backend === "claude" || backend === "hermes") && !Array.isArray(result)) {
+    if ((backend === "pi" || backend === "claude" || backend === "hermes" || backend === "kimi") && !Array.isArray(result)) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP workspace catalog is invalid.");
     }
     return Array.isArray(result) ? result : [];
@@ -66868,11 +66868,11 @@ var AgentAcpClient = class {
       ...backend === void 0 ? {} : { backend },
       ...limit === void 0 ? {} : { limit }
     }, signal).catch((error62) => {
-      if (backend === "pi" || backend === "claude" || backend === "hermes")
+      if (backend === "pi" || backend === "claude" || backend === "hermes" || backend === "kimi")
         throw error62;
       return { items: [] };
     });
-    if ((backend === "pi" || backend === "claude" || backend === "hermes") && (!isRecord2(result) || !Array.isArray(result.items))) {
+    if ((backend === "pi" || backend === "claude" || backend === "hermes" || backend === "kimi") && (!isRecord2(result) || !Array.isArray(result.items))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session catalog is invalid.");
     }
     return isRecord2(result) && Array.isArray(result.items) ? result.items : [];
@@ -66882,7 +66882,7 @@ var AgentAcpClient = class {
     return details2.events;
   }
   async loadSessionDetails(sessionId, backend, signal) {
-    const strictHistoryBackend = backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes" || backend === "antigravity";
+    const strictHistoryBackend = backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes" || backend === "kimi" || backend === "antigravity";
     const result = await this.transferCall("dsh/sessionHistory", {
       sessionId,
       ...backend === void 0 ? {} : { backend }
@@ -70669,7 +70669,7 @@ function acpImageContent(image, attachmentId) {
   return { type: "image", attachment: { attachmentId, mediaType: image.mimeType, bytes: imageByteLength(image.data), ...dimensions2 }, mediaType: image.mimeType, data: image.data };
 }
 function acpImageLimits(backend) {
-  return backend === "antigravity" || backend === "hermes" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
+  return backend === "antigravity" || backend === "hermes" || backend === "kimi" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
 }
 
 // packages/plugin/src/acp/virtual-catalog.ts
@@ -70678,6 +70678,7 @@ var AGY_WORKSPACE_PREFIX = "antigravity:cwd:";
 var OPENCODE_WORKSPACE_PREFIX = "opencode:cwd:";
 var CLAUDE_WORKSPACE_PREFIX = "claude:cwd:";
 var HERMES_WORKSPACE_PREFIX = "hermes:cwd:";
+var KIMI_WORKSPACE_PREFIX = "kimi:cwd:";
 var CURSOR_PROVIDER = "cursor";
 var OPENCODE_PROVIDER = "opencode";
 var WORKSPACE_PREFIXES = {
@@ -70686,7 +70687,8 @@ var WORKSPACE_PREFIXES = {
   pi: "pi:cwd:",
   opencode: OPENCODE_WORKSPACE_PREFIX,
   claude: CLAUDE_WORKSPACE_PREFIX,
-  hermes: HERMES_WORKSPACE_PREFIX
+  hermes: HERMES_WORKSPACE_PREFIX,
+  kimi: KIMI_WORKSPACE_PREFIX
 };
 var BACKEND_LABELS = {
   cursor: "Cursor",
@@ -70694,7 +70696,8 @@ var BACKEND_LABELS = {
   pi: "Pi",
   opencode: "OpenCode",
   claude: "Claude",
-  hermes: "Hermes"
+  hermes: "Hermes",
+  kimi: "Kimi"
 };
 var BACKEND_PROVIDERS = {
   cursor: CURSOR_PROVIDER,
@@ -70702,7 +70705,8 @@ var BACKEND_PROVIDERS = {
   pi: "pi",
   opencode: OPENCODE_PROVIDER,
   claude: "claude",
-  hermes: "hermes"
+  hermes: "hermes",
+  kimi: "kimi"
 };
 function acpWorkspacePrefix(backend) {
   return WORKSPACE_PREFIXES[backend] ?? `${backend}:cwd:`;
@@ -70742,7 +70746,7 @@ async function discoverAcpVirtualWorkspaces(client, backend, signal) {
         });
       }
     } catch (error62) {
-      if (backend === "pi" || backend === "claude" || backend === "hermes") throw error62;
+      if (backend === "pi" || backend === "claude" || backend === "hermes" || backend === "kimi") throw error62;
     }
   }
   return [];
@@ -70795,7 +70799,8 @@ var SESSION_PREFIXES = {
   pi: "pi:",
   opencode: OPENCODE_SESSION_PREFIX,
   claude: "claude:",
-  hermes: "hermes:"
+  hermes: "hermes:",
+  kimi: "kimi:"
 };
 function piStreamOutcome(reason) {
   if (reason === "completed") return { kind: "completed" };
@@ -72576,7 +72581,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     let images;
     try {
       images = array2(request2.content).filter((part) => record2(part).type === "image").map(parseAcpImage);
-      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" && this.backend !== "hermes" || array2(request2.content).some((part) => !["text", "image"].includes(String(record2(part).type)))) throw new Error("Unsupported ACP content.");
+      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" && this.backend !== "hermes" && this.backend !== "kimi" || array2(request2.content).some((part) => !["text", "image"].includes(String(record2(part).type)))) throw new Error("Unsupported ACP content.");
     } catch {
       return failure2("attachment-error", "Invalid or unsupported image attachment.");
     }
@@ -72714,7 +72719,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const requestedId = extractSessionId(request2);
     const attachmentId = string4(request2.attachmentId) ?? string4(record2(request2.attachment).attachmentId);
     const session2 = this.lookupSession(requestedId);
-    if (this.backend !== "antigravity" && this.backend !== "hermes" || session2 === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this Session.");
+    if (this.backend !== "antigravity" && this.backend !== "hermes" && this.backend !== "kimi" || session2 === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this Session.");
     await this.hydrateSession(session2);
     const cached2 = this.imageAttachments.get(attachmentId);
     return cached2?.sessionId === session2.sessionId ? success2({ attachment: cached2.attachment, data: cached2.data }) : failure2("attachment-error", "The image attachment is unavailable or expired.");
@@ -72758,7 +72763,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           this.restoreCachedSession(session2, stale, true);
           return;
         }
-        if (this.backend === "pi" || this.backend === "claude" || this.backend === "opencode" || this.backend === "hermes") throw error62;
+        if (this.backend === "pi" || this.backend === "claude" || this.backend === "opencode" || this.backend === "hermes" || this.backend === "kimi") throw error62;
       }
     } else if (this.client.loadSessionHistory !== void 0) {
       try {
@@ -72769,7 +72774,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           this.restoreCachedSession(session2, stale, true);
           return;
         }
-        if (this.backend === "pi" || this.backend === "claude" || this.backend === "opencode" || this.backend === "hermes") throw error62;
+        if (this.backend === "pi" || this.backend === "claude" || this.backend === "opencode" || this.backend === "hermes" || this.backend === "kimi") throw error62;
       }
     }
     if (events.length > 0) {
@@ -72984,7 +72989,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         try {
           discovered = await this.client.listSessions(workspace2.path, this.backend, 30);
         } catch (error62) {
-          if (this.backend === "pi" || this.backend === "claude" || this.backend === "hermes") throw error62;
+          if (this.backend === "pi" || this.backend === "claude" || this.backend === "hermes" || this.backend === "kimi") throw error62;
         }
       }
       for (const item of discovered) {
@@ -73008,7 +73013,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       this.sortWorkspaceSessions(workspace2);
       workspace2.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     } catch (error62) {
-      if (this.backend === "pi" || this.backend === "claude" || this.backend === "hermes") throw error62;
+      if (this.backend === "pi" || this.backend === "claude" || this.backend === "hermes" || this.backend === "kimi") throw error62;
     }
   }
   attachSessionToWorkspace(cwd2, sessionId) {
@@ -73473,13 +73478,14 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const claude = available("claude", "agent.acp.claude.v1");
   const opencode = available("opencode", "agent.acp.opencode.v1");
   const hermes = available("hermes", "agent.acp.hermes.v1");
+  const kimi = available("kimi", "agent.acp.kimi.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
   }
   const sessionFormat = remoteV3 ? 3 : void 0;
   const remoteGateway = remoteV3 || remoteV1;
   const anyCustomAcp = workspaceTypes?.some((type) => type.available && type.id !== "codex" && type.id !== "harness") || value.capabilities.some((cap) => cap.startsWith("agent.acp.") && cap.endsWith(".v1") && cap !== "agent.acp.v1" && cap !== "agent.acp.transfer.v1" && cap !== "agent.acp.workspace-files.v1" && cap !== "agent.acp.terminal.v1");
-  if (!remoteGateway && !codex && !cursor3 && !antigravity && !pi && !opencode && !claude && !hermes && !anyCustomAcp) {
+  if (!remoteGateway && !codex && !cursor3 && !antigravity && !pi && !opencode && !claude && !hermes && !kimi && !anyCustomAcp) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
@@ -73495,6 +73501,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     opencode,
     claude,
     ...hermes ? { hermes: true } : {},
+    ...kimi ? { kimi: true } : {},
     ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
     ...capabilities.has("agent.acp.opencode.archive.v1") ? { acpOpencodeArchive: true } : {},
     ...workspaceTypes === void 0 ? {} : { workspaceTypes },
@@ -81155,6 +81162,170 @@ function canReconnect(error62) {
   return failure5.retryable !== false;
 }
 
+// packages/plugin/src/acp/method-policy.ts
+var id2 = external_exports.string().min(1).max(256);
+var cwd = external_exports.string().min(1).max(4096);
+var mode = external_exports.enum(["agent", "plan", "ask"]);
+var RESERVED_ACP_BACKENDS = /* @__PURE__ */ new Set([
+  "codex",
+  "harness",
+  "acp",
+  "constructor",
+  "tostring",
+  "valueof",
+  "hasownproperty",
+  "__proto__",
+  "prototype"
+]);
+var backendId = external_exports.string().trim().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/i).refine(
+  (value) => !RESERVED_ACP_BACKENDS.has(value.toLowerCase())
+);
+var textBlock = external_exports.object({
+  type: external_exports.literal("text"),
+  text: external_exports.string().min(1).max(256 * 1024)
+}).strict();
+var imageBlock = external_exports.object({
+  type: external_exports.literal("image"),
+  mimeType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  data: external_exports.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4)
+}).strict().refine((value) => {
+  try {
+    parseAcpImage(value);
+    return true;
+  } catch {
+    return false;
+  }
+});
+var promptBlock = external_exports.union([textBlock, imageBlock]);
+var acpToolStreamSchema = external_exports.object({
+  backend: backendId,
+  endpoint: external_exports.enum(ACP_TOOL_STREAM_ENDPOINTS),
+  args: external_exports.record(external_exports.string(), external_exports.unknown())
+}).strict();
+var schemas = {
+  "dsh/sessionArchive": external_exports.object({ sessionId: id2.regex(/^[A-Za-z0-9_-]+$/), backend: external_exports.literal("opencode") }).strict(),
+  "dsh/toolCall": external_exports.object({
+    sessionId: id2,
+    backend: backendId,
+    endpoint: external_exports.enum(ACP_TOOL_CALL_ENDPOINTS),
+    args: external_exports.record(external_exports.string(), external_exports.unknown())
+  }).strict(),
+  "dsh/sessionModels": external_exports.object({ sessionId: id2, backend: backendId }).strict(),
+  "dsh/selectModel": external_exports.object({
+    sessionId: id2,
+    backend: backendId,
+    model: id2,
+    reasoningEffort: id2.optional()
+  }).strict(),
+  "dsh/sessionModes": external_exports.object({ sessionId: id2, backend: backendId }).strict(),
+  "dsh/sessionCommands": external_exports.object({ sessionId: id2, backend: backendId }).strict(),
+  "dsh/selectPermission": external_exports.object({
+    sessionId: id2,
+    backend: backendId.optional(),
+    preset: external_exports.enum(["workspace-write", "danger-full-access"])
+  }).strict(),
+  "dsh/workspaceCreate": external_exports.object({
+    backend: backendId,
+    path: cwd,
+    title: external_exports.string().trim().min(1).max(256).optional()
+  }).strict(),
+  "dsh/workspaceRename": external_exports.object({
+    backend: backendId,
+    path: cwd,
+    title: external_exports.string().trim().min(1).max(256)
+  }).strict(),
+  "dsh/workspaceDelete": external_exports.object({
+    backend: backendId,
+    path: cwd
+  }).strict(),
+  "dsh/workspaceReorder": external_exports.object({
+    backend: backendId,
+    paths: external_exports.array(cwd).max(200)
+  }).strict(),
+  "dsh/sessionPin": external_exports.object({
+    backend: backendId,
+    sessionId: id2
+  }).strict(),
+  "dsh/sessionUnpin": external_exports.object({
+    backend: backendId,
+    sessionId: id2
+  }).strict(),
+  "initialize": external_exports.object({
+    protocolVersion: external_exports.number().int().positive().optional(),
+    backend: backendId.optional(),
+    clientInfo: external_exports.object({
+      name: external_exports.string().min(1).max(128).optional(),
+      version: external_exports.string().min(1).max(128).optional()
+    }).strict().optional()
+  }).strict(),
+  "session/new": external_exports.object({
+    cwd,
+    backend: backendId.optional(),
+    mcpServers: external_exports.array(external_exports.unknown()).max(0).optional(),
+    mode: mode.optional()
+  }).strict(),
+  "session/load": external_exports.object({
+    sessionId: id2,
+    backend: backendId.optional()
+  }).strict(),
+  "session/fork": external_exports.object({
+    sessionId: id2,
+    backend: backendId.optional()
+  }).strict(),
+  "session/set_mode": external_exports.object({
+    sessionId: id2,
+    backend: backendId.optional(),
+    modeId: id2
+  }).strict(),
+  "session/prompt": external_exports.object({
+    sessionId: id2,
+    backend: backendId.optional(),
+    prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
+  }).strict(),
+  "session/cancel": external_exports.object({
+    sessionId: id2
+  }).strict(),
+  "dsh/directoryList": external_exports.object({
+    path: external_exports.string().min(1).max(4096)
+  }).strict(),
+  "dsh/workspaceList": external_exports.object({
+    backend: backendId.optional()
+  }).strict().optional(),
+  "dsh/sessionList": external_exports.object({
+    path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
+    backend: backendId.optional(),
+    limit: external_exports.number().int().positive().max(100).optional(),
+    prewarm: external_exports.boolean().optional()
+  }).strict(),
+  "dsh/sessionHistory": external_exports.object({
+    sessionId: id2,
+    backend: backendId.optional()
+  }).strict()
+};
+var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas));
+function isValidAcpBackendId(value) {
+  return backendId.safeParse(value).success;
+}
+function parseAcpCall(method, params) {
+  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
+    throw new RpcError("METHOD_NOT_ALLOWED", "The ACP method is not allowlisted for Remote.");
+  }
+  const schema = schemas[method];
+  const parsed = schema.safeParse(params ?? {});
+  if (!parsed.success) {
+    throw new RpcError("INVALID_MESSAGE", "The ACP parameters are invalid.");
+  }
+  return { method, params: parsed.data };
+}
+function sessionIdFromParams(method, params) {
+  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList" || method === "dsh/workspaceList" || method === "dsh/workspaceCreate" || method === "dsh/workspaceRename" || method === "dsh/workspaceDelete" || method === "dsh/workspaceReorder" || method === "dsh/sessionPin" || method === "dsh/sessionUnpin" || method === "dsh/sessionList" || method === "dsh/sessionHistory") return void 0;
+  if (typeof params.sessionId === "string") return params.sessionId;
+  return void 0;
+}
+function isSessionMutation(method) {
+  return method === "session/prompt" || method === "session/cancel" || method === "session/fork" || method === "session/set_mode" || method === "dsh/selectModel" || method === "dsh/selectPermission" || method === "dsh/toolCall";
+}
+
 // packages/plugin/src/loopback-preview.ts
 import { randomBytes as randomBytes6, randomUUID as randomUUID2 } from "node:crypto";
 import { createServer } from "node:http";
@@ -82168,7 +82339,7 @@ var ClientControl = class {
         return ok(this.context.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...value.backend === "codex" || value.backend === "cursor" || value.backend === "antigravity" || value.backend === "pi" || value.backend === "opencode" || value.backend === "claude" || value.backend === "hermes" ? { backend: value.backend } : {},
+          ...value.backend === "codex" || isValidAcpBackendId(value.backend) ? { backend: value.backend } : {},
           ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}
         }));
       }
@@ -86381,16 +86552,16 @@ async function downloadRemoteFile(gateway, sessionId, path, signal, assertCurren
 
 // packages/plugin/src/remote-session-tools.ts
 import { createHash } from "node:crypto";
-var id2 = external_exports.string().min(1).max(256);
+var id3 = external_exports.string().min(1).max(256);
 var presetId = external_exports.string().min(1).max(128).refine((value) => value.trim().length > 0 && !/[\u0000-\u001f\u007f]/u.test(value));
 var MAX_REMOTE_WORKSPACES = 512;
 var MAX_REMOTE_SESSIONS = 2048;
 var MAX_SESSIONS_PER_WORKSPACE = 2048;
 var MAX_REMOTE_PRESETS = 256;
 var sequence = external_exports.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-var hostTarget = external_exports.object({ hostId: id2, backend: external_exports.literal("harness") }).strict();
-var workspace = hostTarget.extend({ workspaceId: id2 });
-var session = workspace.extend({ sessionId: id2 });
+var hostTarget = external_exports.object({ hostId: id3, backend: external_exports.literal("harness") }).strict();
+var workspace = hostTarget.extend({ workspaceId: id3 });
+var session = workspace.extend({ sessionId: id3 });
 var operationId = external_exports.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 var cursor = external_exports.object({ throughSeq: sequence, beforeSeq: sequence }).strict().refine((value) => value.beforeSeq <= value.throughSeq);
 var sessionToolInputs = {
@@ -86400,7 +86571,7 @@ var sessionToolInputs = {
     name: external_exports.string().min(1).refine((value) => Buffer.byteLength(value, "utf8") <= 220 && value !== "." && value !== ".." && !/[\\/:\x00-\x1f\x7f]/u.test(value)).optional()
   }),
   remote_download_file: session.extend({ path: external_exports.string().min(1).max(4096).refine((value) => !value.includes("\0") && !value.startsWith("/") && !value.includes("\\") && !value.includes(":") && value.split("/").every((part) => part !== ".." && part !== "")) }),
-  remote_list_presets: hostTarget.extend({ workspaceId: id2.optional() }),
+  remote_list_presets: hostTarget.extend({ workspaceId: id3.optional() }),
   remote_list_sessions: workspace.extend({ offset: sequence.max(1e5).default(0), limit: external_exports.number().int().min(1).max(100).default(30) }),
   remote_read_session: session.extend({ cursor: cursor.optional(), maxMessages: external_exports.number().int().min(1).max(50).default(20) }),
   remote_create_session: workspace.extend({ operationId, preset: presetId.optional() }),
@@ -86411,7 +86582,7 @@ var sessionToolInputs = {
   remote_get_operation: external_exports.object({ operationId }).strict()
 };
 var rowSchema = external_exports.object({
-  sessionId: id2,
+  sessionId: id3,
   title: external_exports.string().optional(),
   running: external_exports.boolean(),
   blank: external_exports.boolean(),
@@ -86421,7 +86592,7 @@ var rowSchema = external_exports.object({
   agentPreset: external_exports.union([external_exports.string(), external_exports.null()]).optional(),
   projections: external_exports.unknown().optional()
 });
-var workspaceRow = external_exports.object({ workspaceId: id2, path: external_exports.string(), title: external_exports.string(), sessionIds: external_exports.array(id2).max(MAX_SESSIONS_PER_WORKSPACE) });
+var workspaceRow = external_exports.object({ workspaceId: id3, path: external_exports.string(), title: external_exports.string(), sessionIds: external_exports.array(id3).max(MAX_SESSIONS_PER_WORKSPACE) });
 var record7 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 var RemoteSessionToolError = class extends Error {
   constructor(message, explicit = false) {
@@ -86674,7 +86845,7 @@ var RemoteSessionTools = class {
                   entry.receipt = { ...receipt, status: "rejected" };
                   return;
                 }
-                const sessionId2 = id2.parse(record7(fallback.value).sessionId);
+                const sessionId2 = id3.parse(record7(fallback.value).sessionId);
                 receipt.sessionId = sessionId2;
                 entry.receipt = await this.selectPresetOnCreatedSession(gateway, receipt, sessionId2, args.preset, active2);
                 return;
@@ -86687,7 +86858,7 @@ var RemoteSessionTools = class {
               return;
             }
             const value2 = record7(result2.value);
-            const sessionId = id2.parse(value2.sessionId);
+            const sessionId = id3.parse(value2.sessionId);
             receipt.sessionId = sessionId;
             const createdPreset = extractAgentPreset(value2);
             if (args.preset === void 0) {
@@ -88213,15 +88384,15 @@ function resolveConfig(input4 = {}, env = process.env) {
     },
     acp: {
       enabled: acpEnabled,
-      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes", ...parsed.acp?.backends?.filter((item) => item.id !== "kimi").map((item) => item.id) ?? []])].map((id7) => {
+      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes", "kimi", ...parsed.acp?.backends?.map((item) => item.id) ?? []])].map((id7) => {
         const configured = parsed.acp?.backends?.find((item) => item.id === id7);
         const legacy = parsed.acp?.backend === id7 ? parsed.acp : void 0;
-        const defaults = { codex: "codex", cursor: "agent", antigravity: "agy", pi: "pi-acp", claude: "claude-agent-acp", opencode: "opencode", hermes: "hermes" };
+        const defaults = { codex: "codex", cursor: "agent", antigravity: "agy", pi: "pi-acp", claude: "claude-agent-acp", opencode: "opencode", hermes: "hermes", kimi: "kimi" };
         const cursorCommand = id7 === "codex" ? parsed.codex?.binary : id7 === "cursor" ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY : void 0;
         const cwd2 = configured?.cwd ?? legacy?.cwd;
         return {
           id: id7,
-          enabled: configured?.enabled ?? legacy?.enabled ?? (id7 === "codex" ? codexEnabled : id7 === "cursor" ? cursorEnabled : id7 === "pi" ? true : id7 === "claude" ? true : id7 === "opencode" ? true : id7 === "hermes" ? false : parsed.acp !== void 0),
+          enabled: configured?.enabled ?? legacy?.enabled ?? (id7 === "codex" ? codexEnabled : id7 === "cursor" ? cursorEnabled : id7 === "pi" ? true : id7 === "claude" ? true : id7 === "opencode" ? true : id7 === "hermes" || id7 === "kimi" ? false : parsed.acp !== void 0),
           command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id7] ?? id7,
           args: id7 === "codex" ? ["app-server"] : configured?.args ?? legacy?.args ?? (id7 === "pi" || id7 === "claude" ? [] : ["acp"]),
           ...cwd2 === void 0 ? {} : { cwd: cwd2 }
@@ -91198,7 +91369,7 @@ var ClientModeRuntime = class {
       if (remote.features.codex) {
         await read("codex", () => discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), activeSignal));
       }
-      const knownAcpBackends = /* @__PURE__ */ new Set(["cursor", "antigravity", "pi", "opencode", "claude", "hermes"]);
+      const knownAcpBackends = /* @__PURE__ */ new Set(["cursor", "antigravity", "pi", "opencode", "claude", "hermes", "kimi"]);
       for (const wt of remote.features.workspaceTypes ?? []) {
         if (wt.id !== "codex" && wt.id !== "harness" && wt.available) knownAcpBackends.add(wt.id);
       }
@@ -91824,6 +91995,7 @@ function hasAcpFeature(features, backend) {
   if (backend === "opencode") return features.opencode;
   if (backend === "claude") return Boolean(features.claude);
   if (backend === "hermes") return Boolean(features.hermes);
+  if (backend === "kimi") return Boolean(features.kimi);
   return features.workspaceTypes?.some((item) => item.id === backend && item.available) ?? false;
 }
 function remoteAcpCapabilities(features) {
@@ -94702,7 +94874,7 @@ function isRecord13(value) {
 }
 
 // packages/plugin/src/codex/method-policy.ts
-var id3 = external_exports.string().min(1).max(256);
+var id4 = external_exports.string().min(1).max(256);
 var cursor2 = external_exports.string().min(1).max(4096).nullable().optional();
 var textInput = external_exports.object({
   type: external_exports.literal("text"),
@@ -94732,7 +94904,7 @@ var turnWindow = external_exports.union([
     { message: "turnWindow requires minMessages or minTurns." }
   )
 ]);
-var schemas = {
+var schemas2 = {
   "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
   "model/list": external_exports.object({
     cursor: cursor2,
@@ -94761,17 +94933,17 @@ var schemas = {
     useStateDbOnly: external_exports.boolean().optional(),
     searchTerm: external_exports.string().max(1024).optional()
   }).strict(),
-  "thread/read": external_exports.object({ threadId: id3, includeTurns: external_exports.boolean().optional() }).strict(),
+  "thread/read": external_exports.object({ threadId: id4, includeTurns: external_exports.boolean().optional() }).strict(),
   "dsh/sessionHistory": external_exports.object({
-    threadId: id3,
+    threadId: id4,
     beforeSeq: external_exports.number().int().nonnegative().optional(),
     throughSeq: external_exports.number().int().min(-1).optional(),
     maxMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES).optional(),
     turnWindow: turnWindow.optional()
   }).strict(),
   "dsh/sessionAttachment": external_exports.object({
-    threadId: id3,
-    attachmentId: id3
+    threadId: id4,
+    attachmentId: id4
   }).strict(),
   "dsh/directoryList": external_exports.object({
     path: external_exports.string().min(1).max(4096)
@@ -94783,21 +94955,21 @@ var schemas = {
     permissionPreset: permissionPreset.optional()
   }).strict(),
   "thread/resume": external_exports.object({
-    threadId: id3,
+    threadId: id4,
     model: external_exports.string().min(1).max(128).optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
   "thread/fork": external_exports.object({
-    threadId: id3,
-    lastTurnId: id3.optional(),
+    threadId: id4,
+    lastTurnId: id4.optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "thread/name/set": external_exports.object({ threadId: id3, name: external_exports.string().trim().min(1).max(256) }).strict(),
-  "thread/archive": external_exports.object({ threadId: id3 }).strict(),
-  "thread/unarchive": external_exports.object({ threadId: id3 }).strict(),
-  "thread/unsubscribe": external_exports.object({ threadId: id3 }).strict(),
+  "thread/name/set": external_exports.object({ threadId: id4, name: external_exports.string().trim().min(1).max(256) }).strict(),
+  "thread/archive": external_exports.object({ threadId: id4 }).strict(),
+  "thread/unarchive": external_exports.object({ threadId: id4 }).strict(),
+  "thread/unsubscribe": external_exports.object({ threadId: id4 }).strict(),
   "turn/start": external_exports.object({
-    threadId: id3,
+    threadId: id4,
     input: input3,
     model: external_exports.string().min(1).max(128).optional(),
     effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
@@ -94805,15 +94977,15 @@ var schemas = {
     personality: external_exports.string().min(1).max(64).optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "turn/steer": external_exports.object({ threadId: id3, input: input3, expectedTurnId: id3 }).strict(),
-  "turn/interrupt": external_exports.object({ threadId: id3, turnId: id3 }).strict()
+  "turn/steer": external_exports.object({ threadId: id4, input: input3, expectedTurnId: id4 }).strict(),
+  "turn/interrupt": external_exports.object({ threadId: id4, turnId: id4 }).strict()
 };
-var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
+var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas2));
 function parseCodexCall(method, params) {
-  if (!Object.prototype.hasOwnProperty.call(schemas, method)) {
+  if (!Object.prototype.hasOwnProperty.call(schemas2, method)) {
     throw new RpcError("METHOD_NOT_ALLOWED", "The requested Codex method is not available over Remote.");
   }
-  const schema = schemas[method];
+  const schema = schemas2[method];
   const parsed = schema.safeParse(params);
   if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "The CodeX call parameters are invalid.");
   return { method, params: parsed.data };
@@ -97766,7 +97938,8 @@ var DEFAULT_LOGIN_COMMANDS = {
   pi: "pi",
   opencode: "opencode auth login",
   claude: "claude login",
-  hermes: "hermes setup"
+  hermes: "hermes setup",
+  kimi: "kimi login"
 };
 function parseInitializeMetadata(result) {
   if (!isRecord16(result)) {
@@ -97905,6 +98078,7 @@ var KNOWN_LABELS = {
   claude: "Claude",
   opencode: "OpenCode",
   hermes: "Hermes",
+  kimi: "Kimi",
   antigravity: "Antigravity",
   pi: "Pi"
 };
@@ -97920,8 +98094,9 @@ var AcpSessionModelState = class {
   modes = { availableModes: [] };
   modeConfigId;
   legacy = false;
-  update(value) {
+  update(value, options = {}) {
     if (!record8(value)) return;
+    const partial2 = options.partial === true || value.sessionUpdate === "config_option_update";
     if (record8(value.modes) && Array.isArray(value.modes.availableModes)) {
       const availableModes = value.modes.availableModes.flatMap((item) => record8(item) && typeof item.id === "string" && typeof item.name === "string" ? [{
         id: item.id,
@@ -97935,8 +98110,20 @@ var AcpSessionModelState = class {
       this.modeConfigId = void 0;
     }
     if (Array.isArray(value.configOptions)) {
-      this.model = readOption(value.configOptions.find((option) => record8(option) && (option.id === "model" || option.category === "model")));
-      this.effort = readOption(value.configOptions.find((option) => record8(option) && (option.id === "effort" || option.id === "thought_level" || option.category === "thought_level")));
+      const prevModelId = this.model?.current;
+      const nextModel = readOption(value.configOptions.find((option) => record8(option) && (option.id === "model" || option.category === "model")));
+      const nextEffort = readOption(value.configOptions.find((option) => record8(option) && (option.id === "effort" || option.id === "thought_level" || option.category === "thought_level")));
+      if (!partial2) {
+        this.model = nextModel;
+        this.effort = nextEffort;
+      } else {
+        if (nextModel !== void 0) this.model = nextModel;
+        if (nextEffort !== void 0) {
+          this.effort = nextEffort;
+        } else if (nextModel !== void 0 && nextModel.current !== prevModelId) {
+          this.effort = void 0;
+        }
+      }
       const modeOption = value.configOptions.find((option) => record8(option) && (option.id === "mode" || option.category === "mode"));
       if (record8(modeOption) && typeof modeOption.id === "string" && Array.isArray(modeOption.options)) {
         const availableModes = flattenOptions(modeOption.options).flatMap((option) => record8(option) && typeof option.value === "string" && typeof option.name === "string" ? [{
@@ -97980,7 +98167,7 @@ var AcpSessionModelState = class {
       throw new Error(`The selected ${this.label} mode is unavailable on this Host.`);
     }
     if (this.modeConfigId !== void 0) {
-      this.update(await request2("session/set_config_option", { sessionId, configId: this.modeConfigId, value: modeId }));
+      this.update(await request2("session/set_config_option", { sessionId, configId: this.modeConfigId, value: modeId }), { partial: true });
     } else {
       await request2("session/set_mode", { sessionId, modeId });
       this.modes = { ...this.modes, currentModeId: modeId };
@@ -98021,11 +98208,11 @@ var AcpSessionModelState = class {
       this.model.current = model;
     } else {
       if (model !== this.model.current) {
-        this.update(await request2("session/set_config_option", { sessionId, configId: this.model.id, value: model }));
+        this.update(await request2("session/set_config_option", { sessionId, configId: this.model.id, value: model }), { partial: true });
         if (this.model?.current !== model) throw new Error(`${this.label} did not confirm the model change.`);
       }
       if (effort !== void 0 && this.effort) {
-        this.update(await request2("session/set_config_option", { sessionId, configId: this.effort.id, value: effort }));
+        this.update(await request2("session/set_config_option", { sessionId, configId: this.effort.id, value: effort }), { partial: true });
         if (this.effort?.current !== effort) throw new Error(`${this.label} did not confirm the effort change.`);
       }
     }
@@ -98060,6 +98247,7 @@ var ADAPTER_LABELS = Object.freeze({
   pi: "Pi",
   claude: "Claude",
   hermes: "Hermes",
+  kimi: "Kimi",
   antigravity: "Antigravity"
 });
 var CursorAcpError = class extends Error {
@@ -99940,8 +100128,8 @@ var TERMINAL_CALLS = /* @__PURE__ */ new Set([
   "terminal/close"
 ]);
 var TERMINAL_STREAMS = /* @__PURE__ */ new Set(["terminal/follow", "terminal/retain", "terminal/watch"]);
-var id4 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
-var rosterPayload = external_exports.object({ args: external_exports.object({ sessionId: id4 }).strict() }).strict();
+var id5 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
+var rosterPayload = external_exports.object({ args: external_exports.object({ sessionId: id5 }).strict() }).strict();
 var TerminalPolicy = class _TerminalPolicy {
   constructor(enabled, deviceId, owners) {
     this.enabled = enabled;
@@ -99970,12 +100158,12 @@ var TerminalPolicy = class _TerminalPolicy {
     for (const [key2, attachment] of this.attachments) if (this.owners.get(key2) !== this.deviceId || this.claims.get(key2) !== attachment.claim) this.attachments.delete(key2);
     const args = external_exports.object({ args: external_exports.record(external_exports.string(), external_exports.unknown()) }).strict().parse(payload).args;
     const rawSessionId = args.agentId ?? args.sessionId;
-    const sessionId = id4.parse(rawSessionId);
+    const sessionId = id5.parse(rawSessionId);
     const codexSession = parseCodexSessionId(sessionId);
     void codexSession;
     if (endpoint === "terminal/environment" || endpoint === "terminal/shells" || endpoint === "terminal/list") return {};
-    const request2 = endpoint === "terminal/create" ? external_exports.object({ id: id4 }).passthrough().parse(args.request) : void 0;
-    const terminalId = id4.parse(request2?.id ?? args.id);
+    const request2 = endpoint === "terminal/create" ? external_exports.object({ id: id5 }).passthrough().parse(args.request) : void 0;
+    const terminalId = id5.parse(request2?.id ?? args.id);
     const key = `${sessionId}/${terminalId}`;
     if (endpoint === "terminal/create") {
       if (this.owners.has(key) && this.owners.get(key) !== this.deviceId) this.deny();
@@ -99986,9 +100174,9 @@ var TerminalPolicy = class _TerminalPolicy {
       return { key, created, claim: this.claims.get(key) };
     }
     if (this.owners.get(key) !== this.deviceId) this.deny();
-    if (endpoint === "terminal/follow") this.attachments.set(key, { id: id4.parse(args.attachmentId), claim: this.claims.get(key) });
+    if (endpoint === "terminal/follow") this.attachments.set(key, { id: id5.parse(args.attachmentId), claim: this.claims.get(key) });
     if (endpoint === "terminal/write" || endpoint === "terminal/resize") {
-      if (this.attachments.get(key)?.id !== id4.parse(args.attachmentId)) this.deny();
+      if (this.attachments.get(key)?.id !== id5.parse(args.attachmentId)) this.deny();
     }
     return { key, claim: this.claims.get(key) };
   }
@@ -100080,6 +100268,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   loads = /* @__PURE__ */ new Map();
   claudeInboundHandlers = /* @__PURE__ */ new Set();
   loadSuppressions = /* @__PURE__ */ new Map();
+  liveHistoryCollectors = /* @__PURE__ */ new Map();
   loadGen = 0;
   pendingNew = 0;
   historyStop;
@@ -100095,12 +100284,15 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     super.onUnavailable(() => {
       this.live.clear();
       this.clearAllLoadSuppressions();
+      this.liveHistoryCollectors.clear();
     });
     super.onInbound((message) => {
       const id7 = isRecord19(message.params) && typeof message.params.sessionId === "string" ? message.params.sessionId : void 0;
       if (id7 && this.loadSuppressions.has(id7)) {
         if (message.kind === "request") {
           void (message.method === "session/request_permission" ? this.respond(message.id, { outcome: { outcome: "cancelled" } }) : this.respondError(message.id, -32600, `${this.label} session is not loaded.`)).catch(() => void 0);
+        } else if (message.kind === "notification" && message.method === "session/update") {
+          this.liveHistoryCollectors.get(id7)?.(message);
         }
         return;
       }
@@ -100110,7 +100302,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   /** History events and model catalogs are labelled with the backend that produced them. */
   modelLabel;
   get label() {
-    return this.modelLabel === "hermes" ? "Hermes" : this.modelLabel === "antigravity" ? "Antigravity" : this.modelLabel === "claude" ? "Claude" : this.modelLabel;
+    return ADAPTER_LABELS[this.modelLabel] ?? this.modelLabel;
   }
   onInbound(handler) {
     this.claudeInboundHandlers.add(handler);
@@ -100120,7 +100312,10 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
     const id7 = params?.sessionId;
     if (method === "session/load" && typeof id7 === "string") {
-      if (this.live.has(id7)) return this.live.get(id7);
+      if (this.live.has(id7)) {
+        if (!this.liveHistoryCollectors.has(id7)) this.clearLoadSuppression(id7);
+        return this.live.get(id7);
+      }
       const pending = this.loads.get(id7);
       if (pending) return pending;
       this.checkSessionLimit();
@@ -100162,6 +100357,9 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       } finally {
         this.pendingNew--;
       }
+    }
+    if (method === "session/prompt" && typeof id7 === "string" && !this.liveHistoryCollectors.has(id7)) {
+      this.clearLoadSuppression(id7);
     }
     if ((method === "dsh/selectModel" || method === "session/set_mode") && typeof id7 === "string") {
       this.historyMetadata.delete(id7);
@@ -100228,11 +100426,87 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   isSessionLoaded(sessionId) {
     return this.live.has(sessionId);
   }
+  pendingSessionLoad(sessionId) {
+    return this.loads.get(sessionId);
+  }
   invalidateHistoryMetadata(sessionId) {
     this.historyMetadata.delete(sessionId);
   }
   lastHistoryMetadata(sessionId) {
     return this.historyMetadata.get(sessionId);
+  }
+  filterHistoryUpdates(updates) {
+    return updates;
+  }
+  /**
+   * Reload history via a suppressed `session/load` on the active process instead of
+   * spawning a second process, for backends that enforce an exclusive per-session lock.
+   */
+  async readLiveHistory(sessionId, cwd2, signal) {
+    signal?.throwIfAborted();
+    if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
+    if (this.historyReading) throw new CursorAcpError("ACP_PROCESS_LIMIT", `A ${this.label} history read is already in progress.`);
+    this.historyReading = true;
+    const updates = [];
+    let bytes = 0;
+    let count = 0;
+    let overflow = false;
+    let responded = false;
+    const gen = this.beginLoadSuppression(sessionId);
+    this.liveHistoryCollectors.set(sessionId, (message) => {
+      if (overflow) return;
+      bytes += Buffer6.byteLength(JSON.stringify(message));
+      count++;
+      if (bytes > 8 * 1024 * 1024 || count > 1e4) overflow = true;
+      else updates.push(message);
+    });
+    try {
+      const result = await super.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      responded = true;
+      this.assertLoaded(result, sessionId);
+      this.live.set(sessionId, result);
+      this.clearLoadSuppression(sessionId, gen);
+      signal?.throwIfAborted();
+      if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
+      await this.populateHistoryMetadata(sessionId, (method, params) => super.call(method, params), signal);
+      return acpHistoryEvents(this.filterHistoryUpdates(updates), sessionId, this.modelLabel);
+    } catch (error62) {
+      if (!responded && !this.shuttingDown && this.isReady()) {
+        this.armLoadTombstone(sessionId, gen);
+      } else {
+        this.clearLoadSuppression(sessionId, gen);
+      }
+      signal?.throwIfAborted();
+      if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
+      throw error62;
+    } finally {
+      this.liveHistoryCollectors.delete(sessionId);
+      this.historyReading = false;
+    }
+  }
+  async populateHistoryMetadata(sessionId, callMetadata, signal) {
+    const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
+      callMetadata("dsh/sessionModels", { sessionId }).catch(() => void 0),
+      callMetadata("dsh/sessionModes", { sessionId }).catch(() => void 0),
+      callMetadata("dsh/sessionCommands", { sessionId }).catch(() => void 0)
+    ]);
+    signal?.throwIfAborted();
+    const models = isRecord19(modelsRaw) ? modelsRaw : void 0;
+    const modes = isRecord19(modesRaw) && Array.isArray(modesRaw.availableModes) ? modesRaw : void 0;
+    const commands = isRecord19(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0 ? commandsRaw.commands : void 0;
+    if (models !== void 0 || modes !== void 0 || commands !== void 0) {
+      this.historyMetadata.delete(sessionId);
+      this.historyMetadata.set(sessionId, {
+        ...models !== void 0 ? { models } : {},
+        ...modes !== void 0 ? { modes } : {},
+        ...commands !== void 0 ? { commands } : {}
+      });
+      while (this.historyMetadata.size > MAX_HISTORY_METADATA) {
+        const oldest = this.historyMetadata.keys().next().value;
+        if (oldest === void 0) break;
+        this.historyMetadata.delete(oldest);
+      }
+    }
   }
   /** One temporary process, separate from all live sessions (including active prompts). */
   async history(sessionId, cwd2, signal) {
@@ -100273,29 +100547,8 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       signal?.throwIfAborted();
       this.assertLoaded(result, sessionId);
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
-      const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
-        client.call("dsh/sessionModels", { sessionId }).catch(() => void 0),
-        client.call("dsh/sessionModes", { sessionId }).catch(() => void 0),
-        client.call("dsh/sessionCommands", { sessionId }).catch(() => void 0)
-      ]);
-      signal?.throwIfAborted();
-      const models = isRecord19(modelsRaw) ? modelsRaw : void 0;
-      const modes = isRecord19(modesRaw) && Array.isArray(modesRaw.availableModes) ? modesRaw : void 0;
-      const commands = isRecord19(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0 ? commandsRaw.commands : void 0;
-      if (models !== void 0 || modes !== void 0 || commands !== void 0) {
-        this.historyMetadata.delete(sessionId);
-        this.historyMetadata.set(sessionId, {
-          ...models !== void 0 ? { models } : {},
-          ...modes !== void 0 ? { modes } : {},
-          ...commands !== void 0 ? { commands } : {}
-        });
-        while (this.historyMetadata.size > MAX_HISTORY_METADATA) {
-          const oldest = this.historyMetadata.keys().next().value;
-          if (oldest === void 0) break;
-          this.historyMetadata.delete(oldest);
-        }
-      }
-      return acpHistoryEvents(updates, sessionId, this.modelLabel);
+      await this.populateHistoryMetadata(sessionId, (method, params) => client.call(method, params), signal);
+      return acpHistoryEvents(this.filterHistoryUpdates(updates), sessionId, this.modelLabel);
     } catch (error62) {
       signal?.throwIfAborted();
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
@@ -100313,6 +100566,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   async close() {
     this.shuttingDown = true;
     this.clearAllLoadSuppressions();
+    this.liveHistoryCollectors.clear();
     this.historyMetadata.clear();
     await Promise.all([super.close(), this.historyStop?.()]);
     this.live.clear();
@@ -100330,6 +100584,190 @@ var HermesAcpClient = class extends ClaudeAcpClient {
     super(binary, logger2, spawnAcp, { ...options, args: options.args ?? [...HERMES_ACP_ARGS] }, "hermes");
   }
 };
+
+// packages/plugin/src/acp/adapters/kimi-process.ts
+var KIMI_ACP_COMMAND = "kimi";
+var KIMI_ACP_ARGS = ["acp"];
+var MAX_CACHED_HISTORIES = 32;
+var KIMI_SYSTEM_REMINDER_RE = /^\s*<system-reminder>(?:(?!<\/system-reminder>)[\s\S])*<\/system-reminder>\s*$/;
+var TURN_RESET_UPDATES = /* @__PURE__ */ new Set([
+  "agent_message",
+  "agent_message_chunk",
+  "agent_thought",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update"
+]);
+var KimiAcpClient = class extends ClaudeAcpClient {
+  activePromptCounts = /* @__PURE__ */ new Map();
+  liveHistoryPromises = /* @__PURE__ */ new Map();
+  unloadedHistoryPromises = /* @__PURE__ */ new Map();
+  lastKnownHistory = /* @__PURE__ */ new Map();
+  constructor(binary = KIMI_ACP_COMMAND, logger2, spawnAcp, options = {}) {
+    super(binary, logger2, spawnAcp, { ...options, args: options.args ?? [...KIMI_ACP_ARGS] }, "kimi");
+    super.onUnavailable(() => {
+      this.activePromptCounts.clear();
+      this.lastKnownHistory.clear();
+    });
+  }
+  async call(method, params, timeoutMs) {
+    const id7 = isRecord20(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
+    if (method === "session/prompt" && id7 !== void 0) {
+      while (this.liveHistoryPromises.has(id7) || this.unloadedHistoryPromises.has(id7)) {
+        await (this.liveHistoryPromises.get(id7) ?? this.unloadedHistoryPromises.get(id7))?.catch(() => void 0);
+      }
+      this.activePromptCounts.set(id7, (this.activePromptCounts.get(id7) ?? 0) + 1);
+      try {
+        return await super.call(method, params, timeoutMs);
+      } finally {
+        const remaining = (this.activePromptCounts.get(id7) ?? 1) - 1;
+        if (remaining <= 0) this.activePromptCounts.delete(id7);
+        else this.activePromptCounts.set(id7, remaining);
+      }
+    }
+    if (method === "session/load" && id7 !== void 0) {
+      while (this.unloadedHistoryPromises.has(id7)) {
+        await this.unloadedHistoryPromises.get(id7)?.catch(() => void 0);
+      }
+      return super.call(method, params, timeoutMs);
+    }
+    const result = await super.call(method, params, timeoutMs);
+    if (method === "session/delete" && id7 !== void 0) {
+      this.lastKnownHistory.delete(id7);
+    }
+    return result;
+  }
+  /**
+   * Kimi holds an exclusive per-session lock inside the active `kimi acp` process: spawning
+   * a second process to `session/load` fails while the session is already loaded here.
+   * Replay via suppressed `session/load` on the live process when idle, serialize with
+   * initial/unloaded `session/load`, or return the last known snapshot during streaming prompts.
+   */
+  async history(sessionId, cwd2, signal) {
+    signal?.throwIfAborted();
+    while (true) {
+      if ((this.activePromptCounts.get(sessionId) ?? 0) > 0) {
+        return [...this.lastKnownHistory.get(sessionId) ?? []];
+      }
+      const pendingLoad = this.pendingSessionLoad(sessionId);
+      if (pendingLoad) {
+        await raceAbortSignal(pendingLoad.catch(() => void 0), signal);
+        continue;
+      }
+      const inFlightLive = this.liveHistoryPromises.get(sessionId);
+      if (inFlightLive) {
+        return [...await raceAbortSignal(inFlightLive, signal)];
+      }
+      if (this.isSessionLoaded(sessionId)) {
+        const read2 = this.startHistoryRead(
+          this.liveHistoryPromises,
+          sessionId,
+          () => this.readLiveHistory(sessionId, cwd2)
+        );
+        return [...await raceAbortSignal(read2, signal)];
+      }
+      const inFlightUnloaded = this.unloadedHistoryPromises.get(sessionId);
+      if (inFlightUnloaded) {
+        return [...await raceAbortSignal(inFlightUnloaded, signal)];
+      }
+      const read = this.startHistoryRead(
+        this.unloadedHistoryPromises,
+        sessionId,
+        () => super.history(sessionId, cwd2)
+      );
+      return [...await raceAbortSignal(read, signal)];
+    }
+  }
+  async close() {
+    this.activePromptCounts.clear();
+    this.lastKnownHistory.clear();
+    await super.close();
+  }
+  startHistoryRead(registry2, sessionId, run2) {
+    const read = run2().then((events) => {
+      this.rememberHistory(sessionId, events);
+      return events;
+    }).finally(() => {
+      if (registry2.get(sessionId) === read) registry2.delete(sessionId);
+    });
+    void read.catch(() => void 0);
+    registry2.set(sessionId, read);
+    return read;
+  }
+  rememberHistory(sessionId, events) {
+    this.lastKnownHistory.delete(sessionId);
+    this.lastKnownHistory.set(sessionId, [...events]);
+    while (this.lastKnownHistory.size > MAX_CACHED_HISTORIES) {
+      const oldest = this.lastKnownHistory.keys().next().value;
+      if (oldest === void 0) break;
+      this.lastKnownHistory.delete(oldest);
+    }
+  }
+  /**
+   * During `session/load` replay, Kimi emits a synthetic trailing `user_message_chunk`
+   * containing `<system-reminder>...</system-reminder>` after the user's message chunks.
+   * Strip that injected reminder only when preceded by user content in the same turn so a
+   * literal `<system-reminder>` pasted as the sole user prompt is preserved.
+   */
+  filterHistoryUpdates(updates) {
+    const filtered = [];
+    let hasUserChunkInTurn = false;
+    for (const message of updates) {
+      if (message.kind !== "notification" || message.method !== "session/update" || !isRecord20(message.params)) {
+        filtered.push(message);
+        continue;
+      }
+      const update = isRecord20(message.params.update) ? message.params.update : void 0;
+      const kind = typeof update?.sessionUpdate === "string" ? update.sessionUpdate : void 0;
+      if (kind === "user_message_chunk") {
+        const content = isRecord20(update?.content) ? update.content : void 0;
+        const isText = content?.type === "text" && typeof content.text === "string";
+        const hasNonEmptyText = isText && content.text.trim().length > 0;
+        const isImage = content?.type === "image" && typeof content.mimeType === "string" && typeof content.data === "string";
+        if (isText && hasUserChunkInTurn && KIMI_SYSTEM_REMINDER_RE.test(content.text)) {
+          continue;
+        }
+        if (hasNonEmptyText || isImage) hasUserChunkInTurn = true;
+        filtered.push(message);
+        continue;
+      }
+      if (kind !== void 0 && TURN_RESET_UPDATES.has(kind)) {
+        hasUserChunkInTurn = false;
+      }
+      filtered.push(message);
+    }
+    return filtered;
+  }
+};
+function raceAbortSignal(promise2, signal) {
+  if (!signal) return promise2;
+  if (signal.aborted) return Promise.reject(abortReasonError(signal));
+  return new Promise((resolve11, reject) => {
+    const onAbort = () => reject(abortReasonError(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise2.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve11(value);
+      },
+      (error62) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error62);
+      }
+    );
+  });
+}
+function abortReasonError(signal) {
+  try {
+    signal.throwIfAborted();
+  } catch (error62) {
+    return error62;
+  }
+  return new Error("Aborted");
+}
+function isRecord20(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 // packages/plugin/src/acp/adapters/pi-process.ts
 var PiAcpClient = class extends IsolatedAcpClient {
@@ -101705,7 +102143,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   busy = /* @__PURE__ */ new Set();
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new OpencodeAcpError("OPENCODE_UNAVAILABLE", "OpenCode ACP is not ready.");
-    const p = isRecord20(params) ? params : {};
+    const p = isRecord21(params) ? params : {};
     const id7 = typeof p.sessionId === "string" ? p.sessionId : void 0;
     if (id7 && this.archivingSessions.has(id7)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
     if (id7 && this.archivedSessions.has(id7) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
@@ -101775,11 +102213,11 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     }
     const result = await this.request(method, params, budget);
     const nativeApi = this.nativeApi;
-    if (method === "session/list" && nativeApi && isRecord20(result) && Array.isArray(result.sessions)) {
+    if (method === "session/list" && nativeApi && isRecord21(result) && Array.isArray(result.sessions)) {
       const rawItems = result.sessions;
       const items = rawItems.length > MAX_OPENCODE_SESSION_LIST ? [...rawItems].sort((a, b) => {
-        const ta = isRecord20(a) && typeof a.updatedAt === "string" ? Date.parse(a.updatedAt) || 0 : 0;
-        const tb = isRecord20(b) && typeof b.updatedAt === "string" ? Date.parse(b.updatedAt) || 0 : 0;
+        const ta = isRecord21(a) && typeof a.updatedAt === "string" ? Date.parse(a.updatedAt) || 0 : 0;
+        const tb = isRecord21(b) && typeof b.updatedAt === "string" ? Date.parse(b.updatedAt) || 0 : 0;
         return tb - ta;
       }).slice(0, MAX_OPENCODE_SESSION_LIST) : rawItems;
       const realpathCache = /* @__PURE__ */ new Map();
@@ -101798,7 +102236,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
           const index = nextItem++;
           if (index >= items.length) return;
           const item = items[index];
-          if (!isRecord20(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+          if (!isRecord21(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
           const cwd2 = await resolveCwd(item.cwd);
           if (cwd2) resolved[index] = { index, sessionId: item.sessionId, cwd: cwd2 };
         }
@@ -101849,7 +102287,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   async loadSession(method, params, budget, sessionId) {
     const result = await this.request(method, params, budget);
-    const returnedId = isRecord20(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+    const returnedId = isRecord21(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
     const id7 = sessionId ?? returnedId;
     if (!this.ready || !id7 || sessionId && returnedId && returnedId !== sessionId) {
       throw new OpencodeAcpError("ACP_INVALID_SESSION", "OpenCode returned an invalid session.");
@@ -102042,7 +102480,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord20(value)) {
+    if (!isRecord21(value)) {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted an invalid message."));
       return;
     }
@@ -102064,13 +102502,13 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
     const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    if (inbound.kind === "request" && isRecord20(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
+    if (inbound.kind === "request" && isRecord21(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
       void this.respondError(inbound.id, -32600, "OpenCode session is not loaded.").catch(() => void 0);
       return;
     }
-    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord20(params) && typeof params.sessionId === "string") {
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord21(params) && typeof params.sessionId === "string") {
       this.models.get(params.sessionId)?.update(params.update);
-      if (isRecord20(params.update) && params.update.sessionUpdate === "available_commands_update") {
+      if (isRecord21(params.update) && params.update.sessionUpdate === "available_commands_update") {
         this.sessionCommands.set(params.sessionId, parseAvailableCommands(params.update));
       }
       if (this.loads.has(params.sessionId) && !this.options.historyReader) return;
@@ -102107,7 +102545,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
 };
 function safeUpstreamError3(value) {
-  if (!isRecord20(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
+  if (!isRecord21(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "OpenCode ACP authentication failed.";
@@ -102115,173 +102553,8 @@ function safeUpstreamError3(value) {
   if (message.includes("not initialized")) return "OpenCode ACP is not initialized.";
   return "OpenCode ACP rejected the request.";
 }
-function isRecord20(value) {
+function isRecord21(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// packages/plugin/src/acp/method-policy.ts
-var id5 = external_exports.string().min(1).max(256);
-var cwd = external_exports.string().min(1).max(4096);
-var mode = external_exports.enum(["agent", "plan", "ask"]);
-var RESERVED_ACP_BACKENDS = /* @__PURE__ */ new Set([
-  "codex",
-  "harness",
-  "kimi",
-  "acp",
-  "constructor",
-  "tostring",
-  "valueof",
-  "hasownproperty",
-  "__proto__",
-  "prototype"
-]);
-var backendId = external_exports.string().trim().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/i).refine(
-  (value) => !RESERVED_ACP_BACKENDS.has(value.toLowerCase())
-);
-var textBlock = external_exports.object({
-  type: external_exports.literal("text"),
-  text: external_exports.string().min(1).max(256 * 1024)
-}).strict();
-var imageBlock = external_exports.object({
-  type: external_exports.literal("image"),
-  mimeType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
-  data: external_exports.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4)
-}).strict().refine((value) => {
-  try {
-    parseAcpImage(value);
-    return true;
-  } catch {
-    return false;
-  }
-});
-var promptBlock = external_exports.union([textBlock, imageBlock]);
-var acpToolStreamSchema = external_exports.object({
-  backend: backendId,
-  endpoint: external_exports.enum(ACP_TOOL_STREAM_ENDPOINTS),
-  args: external_exports.record(external_exports.string(), external_exports.unknown())
-}).strict();
-var schemas2 = {
-  "dsh/sessionArchive": external_exports.object({ sessionId: id5.regex(/^[A-Za-z0-9_-]+$/), backend: external_exports.literal("opencode") }).strict(),
-  "dsh/toolCall": external_exports.object({
-    sessionId: id5,
-    backend: backendId,
-    endpoint: external_exports.enum(ACP_TOOL_CALL_ENDPOINTS),
-    args: external_exports.record(external_exports.string(), external_exports.unknown())
-  }).strict(),
-  "dsh/sessionModels": external_exports.object({ sessionId: id5, backend: backendId }).strict(),
-  "dsh/selectModel": external_exports.object({
-    sessionId: id5,
-    backend: backendId,
-    model: id5,
-    reasoningEffort: id5.optional()
-  }).strict(),
-  "dsh/sessionModes": external_exports.object({ sessionId: id5, backend: backendId }).strict(),
-  "dsh/sessionCommands": external_exports.object({ sessionId: id5, backend: backendId }).strict(),
-  "dsh/selectPermission": external_exports.object({
-    sessionId: id5,
-    backend: backendId.optional(),
-    preset: external_exports.enum(["workspace-write", "danger-full-access"])
-  }).strict(),
-  "dsh/workspaceCreate": external_exports.object({
-    backend: backendId,
-    path: cwd,
-    title: external_exports.string().trim().min(1).max(256).optional()
-  }).strict(),
-  "dsh/workspaceRename": external_exports.object({
-    backend: backendId,
-    path: cwd,
-    title: external_exports.string().trim().min(1).max(256)
-  }).strict(),
-  "dsh/workspaceDelete": external_exports.object({
-    backend: backendId,
-    path: cwd
-  }).strict(),
-  "dsh/workspaceReorder": external_exports.object({
-    backend: backendId,
-    paths: external_exports.array(cwd).max(200)
-  }).strict(),
-  "dsh/sessionPin": external_exports.object({
-    backend: backendId,
-    sessionId: id5
-  }).strict(),
-  "dsh/sessionUnpin": external_exports.object({
-    backend: backendId,
-    sessionId: id5
-  }).strict(),
-  "initialize": external_exports.object({
-    protocolVersion: external_exports.number().int().positive().optional(),
-    backend: backendId.optional(),
-    clientInfo: external_exports.object({
-      name: external_exports.string().min(1).max(128).optional(),
-      version: external_exports.string().min(1).max(128).optional()
-    }).strict().optional()
-  }).strict(),
-  "session/new": external_exports.object({
-    cwd,
-    backend: backendId.optional(),
-    mcpServers: external_exports.array(external_exports.unknown()).max(0).optional(),
-    mode: mode.optional()
-  }).strict(),
-  "session/load": external_exports.object({
-    sessionId: id5,
-    backend: backendId.optional()
-  }).strict(),
-  "session/fork": external_exports.object({
-    sessionId: id5,
-    backend: backendId.optional()
-  }).strict(),
-  "session/set_mode": external_exports.object({
-    sessionId: id5,
-    backend: backendId.optional(),
-    modeId: id5
-  }).strict(),
-  "session/prompt": external_exports.object({
-    sessionId: id5,
-    backend: backendId.optional(),
-    prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
-  }).strict(),
-  "session/cancel": external_exports.object({
-    sessionId: id5
-  }).strict(),
-  "dsh/directoryList": external_exports.object({
-    path: external_exports.string().min(1).max(4096)
-  }).strict(),
-  "dsh/workspaceList": external_exports.object({
-    backend: backendId.optional()
-  }).strict().optional(),
-  "dsh/sessionList": external_exports.object({
-    path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
-    backend: backendId.optional(),
-    limit: external_exports.number().int().positive().max(100).optional(),
-    prewarm: external_exports.boolean().optional()
-  }).strict(),
-  "dsh/sessionHistory": external_exports.object({
-    sessionId: id5,
-    backend: backendId.optional()
-  }).strict()
-};
-var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
-function isValidAcpBackendId(value) {
-  return backendId.safeParse(value).success;
-}
-function parseAcpCall(method, params) {
-  if (!Object.prototype.hasOwnProperty.call(schemas2, method)) {
-    throw new RpcError("METHOD_NOT_ALLOWED", "The ACP method is not allowlisted for Remote.");
-  }
-  const schema = schemas2[method];
-  const parsed = schema.safeParse(params ?? {});
-  if (!parsed.success) {
-    throw new RpcError("INVALID_MESSAGE", "The ACP parameters are invalid.");
-  }
-  return { method, params: parsed.data };
-}
-function sessionIdFromParams(method, params) {
-  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList" || method === "dsh/workspaceList" || method === "dsh/workspaceCreate" || method === "dsh/workspaceRename" || method === "dsh/workspaceDelete" || method === "dsh/workspaceReorder" || method === "dsh/sessionPin" || method === "dsh/sessionUnpin" || method === "dsh/sessionList" || method === "dsh/sessionHistory") return void 0;
-  if (typeof params.sessionId === "string") return params.sessionId;
-  return void 0;
-}
-function isSessionMutation(method) {
-  return method === "session/prompt" || method === "session/cancel" || method === "session/fork" || method === "session/set_mode" || method === "dsh/selectModel" || method === "dsh/selectPermission" || method === "dsh/toolCall";
 }
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-loader.ts
@@ -103086,15 +103359,15 @@ function decodeCanonicalBase642(value) {
   }
   return decoded;
 }
-function isRecord21(value) {
+function isRecord22(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode3(error62) {
-  if (isRecord21(error62) && typeof error62.code === "string") return error62.code;
+  if (isRecord22(error62) && typeof error62.code === "string") return error62.code;
   return "UNKNOWN";
 }
 function safeMethod2(input4) {
-  return isRecord21(input4) && typeof input4.method === "string" ? input4.method : "invalid";
+  return isRecord22(input4) && typeof input4.method === "string" ? input4.method : "invalid";
 }
 function concatChunks2(chunks, totalBytes) {
   const output2 = new Uint8Array(totalBytes);
@@ -103296,12 +103569,12 @@ var AcpWorkspaceStore = class _AcpWorkspaceStore {
   }
 };
 function normalizeStore(value) {
-  if (!isRecord22(value) || value.version !== 1) return createEmptyStore();
+  if (!isRecord23(value) || value.version !== 1) return createEmptyStore();
   const backends = emptyBackends();
-  if (isRecord22(value.backends)) {
+  if (isRecord23(value.backends)) {
     for (const [key, raw] of Object.entries(value.backends)) {
-      if (PROTOTYPE_KEYS.has(key) || !isRecord22(raw)) continue;
-      const workspaces = Array.isArray(raw.workspaces) ? raw.workspaces.flatMap((item) => isRecord22(item) && typeof item.path === "string" && item.path.length > 0 ? [{
+      if (PROTOTYPE_KEYS.has(key) || !isRecord23(raw)) continue;
+      const workspaces = Array.isArray(raw.workspaces) ? raw.workspaces.flatMap((item) => isRecord23(item) && typeof item.path === "string" && item.path.length > 0 ? [{
         path: item.path,
         ...typeof item.title === "string" && item.title.trim() ? { title: item.title.trim() } : {},
         updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : (/* @__PURE__ */ new Date(0)).toISOString()
@@ -103312,7 +103585,7 @@ function normalizeStore(value) {
     }
   }
   const sessionPermissions = emptyPermissions();
-  if (isRecord22(value.sessionPermissions)) {
+  if (isRecord23(value.sessionPermissions)) {
     for (const [key, preset] of Object.entries(value.sessionPermissions)) {
       if (!PROTOTYPE_KEYS.has(key) && (preset === "workspace-write" || preset === "danger-full-access")) {
         sessionPermissions[key] = preset;
@@ -103321,7 +103594,7 @@ function normalizeStore(value) {
   }
   return { version: 1, backends, sessionPermissions };
 }
-function isRecord22(value) {
+function isRecord23(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -103334,7 +103607,7 @@ var DETACHED_ACP_APPROVAL_METHODS = /* @__PURE__ */ new Set([
 ]);
 var BACKEND_STABLE_MS = 3e4;
 var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
-var STRICT_CATALOG_BACKENDS = /* @__PURE__ */ new Set(["pi", "claude", "opencode", "hermes"]);
+var STRICT_CATALOG_BACKENDS = /* @__PURE__ */ new Set(["pi", "claude", "opencode", "hermes", "kimi"]);
 var ACP_DIRECTORY_ENTRY_LIMIT = 500;
 var MAX_BUFFERED_ACP_FRAMES = 200;
 var ACP_FRAME_BUFFER_TTL_MS = 5 * 6e4;
@@ -103369,6 +103642,7 @@ var AcpRemoteGateway = class {
       }
       if (backend.id === "claude") return new ClaudeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
       if (backend.id === "hermes") return new HermesAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+      if (backend.id === "kimi") return new KimiAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
       if (backend.id === "pi") return new PiAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd });
       if (backend.id === "opencode") {
         return new OpencodeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
@@ -103427,12 +103701,12 @@ var AcpRemoteGateway = class {
   /** Allow all valid enabled ACP adapters, including custom `settings.acp.add` backends. */
   enabledBackends() {
     if (!this.config.enabled) return [];
-    return this.config.backends.filter((item) => item.enabled && item.id !== "codex" && item.id !== "kimi" && isValidAcpBackendId(item.id)).map((item) => item.id);
+    return this.config.backends.filter((item) => item.enabled && item.id !== "codex" && isValidAcpBackendId(item.id)).map((item) => item.id);
   }
   diagnostics() {
     const result = {};
     for (const backend of this.config.backends) {
-      if (backend.id === "codex" || backend.id === "kimi") continue;
+      if (backend.id === "codex") continue;
       const inst = this.backendInstances.get(backend.id);
       const ready = this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id) && inst?.client.isReady() === true;
       const state2 = !this.config.enabled || !backend.enabled ? "disabled" : ready ? "ready" : "unavailable";
@@ -103883,8 +104157,8 @@ var AcpRemoteGateway = class {
       const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
       if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       const client = this.requireAcp(requested);
-      const supportsImages = requested === "antigravity" || requested === "hermes" || client.capabilities?.()?.promptCapabilities?.image === true;
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord23(part) && part.type === "image") && !supportsImages) {
+      const supportsImages = requested === "antigravity" || requested === "hermes" || requested === "kimi" || client.capabilities?.()?.promptCapabilities?.image === true;
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord24(part) && part.type === "image") && !supportsImages) {
         throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
       }
       if (sessionId !== void 0 && !this.sessionPermissions.has(sessionId)) {
@@ -104115,8 +104389,8 @@ var AcpRemoteGateway = class {
       const result = await task.client.call("session/prompt", params);
       await this.inboundChain;
       if (!current()) return;
-      const stopReason = isRecord23(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
-      const usage = isRecord23(result) ? sanitizeUsage(result.usage) : void 0;
+      const stopReason = isRecord24(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const usage = isRecord24(result) ? sanitizeUsage(result.usage) : void 0;
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       this.logger.info("ACP prompt finished", {
         sessionId: shortSessionId(sessionId),
@@ -104208,7 +104482,7 @@ var AcpRemoteGateway = class {
         if (this.requireAcp(backend) !== client) {
           throw new RpcError("CURSOR_UNAVAILABLE", "The ACP backend is not ready.");
         }
-        return backend === "antigravity" ? history2(conversationId, cwd2, controller2.signal) : history2(conversationId, cwd2);
+        return backend === "antigravity" || backend === "kimi" ? history2(conversationId, cwd2, controller2.signal) : history2(conversationId, cwd2);
       }).finally(() => {
         if (this.backendHistoryChains.get(backend) === nextChain) this.backendHistoryChains.delete(backend);
         if (this.pendingHistoryReads.get(key)?.promise === promise3) this.pendingHistoryReads.delete(key);
@@ -104423,7 +104697,7 @@ var AcpRemoteGateway = class {
     const previous = this.config;
     const implemented = (value) => ({
       enabled: value.enabled,
-      backends: value.backends.filter((item) => item.id !== "codex" && item.id !== "kimi" && isValidAcpBackendId(item.id))
+      backends: value.backends.filter((item) => item.id !== "codex" && isValidAcpBackendId(item.id))
     });
     this.config = config2;
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config2)) && this.pendingReconfiguration.size === 0) return;
@@ -104824,8 +105098,8 @@ var AcpRemoteGateway = class {
   recordTurnCatchUp(sessionId, frame) {
     const list2 = this.turnCatchUp.get(sessionId);
     if (list2 === void 0 || frame.method !== "session/update") return;
-    const params = isRecord23(frame.params) ? frame.params : void 0;
-    const update = params !== void 0 && isRecord23(params.update) ? params.update : params;
+    const params = isRecord24(frame.params) ? frame.params : void 0;
+    const update = params !== void 0 && isRecord24(params.update) ? params.update : params;
     const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
     if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
     list2.push({ method: frame.method, params: frame.params });
@@ -105034,12 +105308,10 @@ var AcpRemoteGateway = class {
     return backend !== "cursor" && isValidAcpBackendId(backend);
   }
   isPerSessionIsolatedBackend(backend) {
-    if (backend === "claude" || backend === "hermes") return true;
     if (backend === "antigravity") return this.isNativeCatalogBackend("antigravity");
     return !["cursor", "pi", "opencode"].includes(backend) && isValidAcpBackendId(backend);
   }
   requiresPrePromptLoad(backend) {
-    if (backend === "pi" || backend === "claude" || backend === "hermes") return true;
     if (backend === "antigravity") return this.isNativeCatalogBackend("antigravity");
     return backend !== "cursor" && backend !== "opencode" && isValidAcpBackendId(backend);
   }
@@ -105047,11 +105319,11 @@ var AcpRemoteGateway = class {
     const client = this.backendInstances.get(backend)?.client;
     if (!client) return;
     const modes = await client.call("dsh/sessionModes", { sessionId }).catch(() => void 0);
-    if (!isRecord23(modes) || !Array.isArray(modes.availableModes)) return;
+    if (!isRecord24(modes) || !Array.isArray(modes.availableModes)) return;
     const current = typeof modes.currentModeId === "string" ? modes.currentModeId : void 0;
     const permissionModes = /* @__PURE__ */ new Set(["default", "accept-edits", "auto", "acceptEdits", "bypassPermissions", "dontAsk", "yolo", "full-auto"]);
     if (current && !permissionModes.has(current)) return;
-    const ids = modes.availableModes.filter((item) => isRecord23(item) && typeof item.id === "string").map((item) => item.id);
+    const ids = modes.availableModes.filter((item) => isRecord24(item) && typeof item.id === "string").map((item) => item.id);
     const target3 = preset === "danger-full-access" ? ["auto", "bypassPermissions", "yolo", "full-auto", "accept-edits", "acceptEdits"].find((id7) => ids.includes(id7)) : ids.find((id7) => id7 === "default");
     if (target3 && target3 !== current) {
       await client.call("session/set_mode", { sessionId, modeId: target3 });
@@ -105063,7 +105335,7 @@ var AcpRemoteGateway = class {
     const inst = this.backendInstances.get(actualBackend);
     const caps = inst?.client.capabilities?.() ?? {};
     const authMethods = inst?.client.authMethods?.() ?? [];
-    const supportsImage = actualBackend === "antigravity" || actualBackend === "hermes" || caps.promptCapabilities?.image === true;
+    const supportsImage = actualBackend === "antigravity" || actualBackend === "hermes" || actualBackend === "kimi" || caps.promptCapabilities?.image === true;
     return {
       protocolVersion: requested,
       agentInfo: {
@@ -105136,10 +105408,10 @@ var AcpRemoteGateway = class {
         throw error62;
       }
       assertCurrent();
-      if (backend === "cursor" && isRecord23(result) && result.sessions === void 0 && Object.keys(result).length === 0) {
+      if (backend === "cursor" && isRecord24(result) && result.sessions === void 0 && Object.keys(result).length === 0) {
         return items;
       }
-      if (!isRecord23(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
+      if (!isRecord24(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session catalog response is invalid.");
       }
       if (process.platform === "win32" && backend === "antigravity" && queryCwd !== void 0 && page === 0 && result.sessions.length === 0 && result.nextCursor == null) {
@@ -105148,7 +105420,7 @@ var AcpRemoteGateway = class {
         continue;
       }
       for (const item of result.sessions) {
-        if (!isRecord23(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+        if (!isRecord24(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
         const canonical = await this.resolveCatalogCwd(item.cwd, assertCurrent);
         if (!canonical || cwd2 && canonical !== cwd2) continue;
         if (this.sessionBackends.has(item.sessionId) && this.sessionBackends.get(item.sessionId) !== backend) continue;
@@ -105245,24 +105517,24 @@ var AcpRemoteGateway = class {
   }
 };
 function parseCallEnvelope2(input4) {
-  if (!isRecord23(input4) || typeof input4.method !== "string") {
+  if (!isRecord24(input4) || typeof input4.method !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
   }
   return { method: input4.method, params: input4.params ?? {} };
 }
 function parseRespondEnvelope(input4) {
-  if (!isRecord23(input4) || typeof input4.requestHandle !== "string" || input4.requestHandle.length === 0 || Object.keys(input4).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input4.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input4.decision)) {
+  if (!isRecord24(input4) || typeof input4.requestHandle !== "string" || input4.requestHandle.length === 0 || Object.keys(input4).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input4.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input4.decision)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP respond envelope is invalid.");
   }
   return input4;
 }
 function permissionOptions(params) {
-  if (!isRecord23(params) || !Array.isArray(params.options) || params.options.length === 0) {
+  if (!isRecord24(params) || !Array.isArray(params.options) || params.options.length === 0) {
     throw new Error("Missing permission options");
   }
   const ids = /* @__PURE__ */ new Set();
   const options = params.options.map((option) => {
-    if (!isRecord23(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
+    if (!isRecord24(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
     ids.add(option.optionId);
     return { kind: option.kind, optionId: option.optionId };
   });
@@ -105283,8 +105555,8 @@ function mapPermissionDecision(params, pending) {
   }
   if (pending.method === "cursor/ask_question" && params.decision === "allow-once") {
     if (params.result === void 0) return { outcome: { outcome: "answered" } };
-    if (!isRecord23(params.result)) throw invalid();
-    const outcomeRecord = isRecord23(params.result.outcome) ? params.result.outcome : params.result;
+    if (!isRecord24(params.result)) throw invalid();
+    const outcomeRecord = isRecord24(params.result.outcome) ? params.result.outcome : params.result;
     const outcomeKind = typeof outcomeRecord.outcome === "string" ? outcomeRecord.outcome : "answered";
     if (outcomeKind !== "answered" && outcomeKind !== "selected") throw invalid();
     const allowedKeys = /* @__PURE__ */ new Set(["outcome", "answers", "selectedOptionIds", "response"]);
@@ -105300,21 +105572,21 @@ function mapPermissionDecision(params, pending) {
   }
   const outcome = pending.method === "cursor/create_plan" ? params.decision === "allow-once" ? "accepted" : params.decision === "cancel" ? "cancelled" : "rejected" : "cancelled";
   if (params.result !== void 0) {
-    if (!isRecord23(params.result) || Object.keys(params.result).length !== 1 || !isRecord23(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
+    if (!isRecord24(params.result) || Object.keys(params.result).length !== 1 || !isRecord24(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
   }
   return { outcome: { outcome } };
 }
 function readSessionId(value) {
-  if (!isRecord23(value)) return void 0;
+  if (!isRecord24(value)) return void 0;
   return typeof value.sessionId === "string" ? value.sessionId : void 0;
 }
 function readNestedSessionId(value) {
-  if (!isRecord23(value)) return void 0;
-  if (isRecord23(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
+  if (!isRecord24(value)) return void 0;
+  if (isRecord24(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
   return void 0;
 }
 function sanitizeSessionResult(value) {
-  if (!isRecord23(value)) return value;
+  if (!isRecord24(value)) return value;
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key === "sessionId" || key === "stopReason" || key === "mode" || key === "currentModeId" || key === "modes") {
@@ -105324,7 +105596,7 @@ function sanitizeSessionResult(value) {
   return Object.keys(next).length > 0 ? next : value;
 }
 function sanitizeUsage(value) {
-  if (!isRecord23(value)) return void 0;
+  if (!isRecord24(value)) return void 0;
   const fields = ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "cachedReadTokens", "cachedWriteTokens", "reasoningTokens", "thoughtTokens", "totalTokens"];
   const normalized = {};
   for (const field of fields) {
@@ -105345,7 +105617,7 @@ function parsePublicSessionId(value, strictNativeId = false) {
   const nativeId = match[2];
   if (strictNativeId && !/^[A-Za-z0-9_-]{1,240}$/.test(nativeId)) return void 0;
   const backend = prefix === "acp" ? "antigravity" : prefix;
-  if (backend === "codex" || backend === "harness" || backend === "kimi") return void 0;
+  if (backend === "codex" || backend === "harness") return void 0;
   if (!isValidAcpBackendId(backend)) return void 0;
   return { prefix, backend, nativeId };
 }
@@ -105386,6 +105658,13 @@ function cursorBinaryCandidates(configured) {
       join13(userHome, ".opencode", "bin", "opencode"),
       join13(userHome, ".local", "bin", "opencode"),
       "opencode"
+    ];
+  }
+  if (configured === "kimi") {
+    return [
+      join13(userHome, ".kimi-code", "bin", "kimi"),
+      join13(userHome, ".local", "bin", "kimi"),
+      "kimi"
     ];
   }
   return [configured];
@@ -105462,14 +105741,14 @@ function isResponseTooLarge(error62) {
   let current = error62;
   while (current !== void 0 && current !== null && !seen.has(current) && seen.size < 8) {
     seen.add(current);
-    if (isRecord23(current) && typeof current.code === "string" && OVERSIZED_FRAME_ERROR_CODES.has(current.code)) {
+    if (isRecord24(current) && typeof current.code === "string" && OVERSIZED_FRAME_ERROR_CODES.has(current.code)) {
       return true;
     }
-    const message = current instanceof Error ? current.message : isRecord23(current) && typeof current.message === "string" ? current.message : void 0;
+    const message = current instanceof Error ? current.message : isRecord24(current) && typeof current.message === "string" ? current.message : void 0;
     if (message !== void 0 && /secure message exceeds the reassembly limit|exceeds the secure channel limit/i.test(message)) {
       return true;
     }
-    current = current instanceof Error ? current.cause : isRecord23(current) ? current.cause : void 0;
+    current = current instanceof Error ? current.cause : isRecord24(current) ? current.cause : void 0;
   }
   return false;
 }
@@ -105481,20 +105760,20 @@ function takeTurnCatchUp(turnCatchUp, sessionId) {
   turnCatchUp.delete(sessionId);
   return list2;
 }
-function isRecord23(value) {
+function isRecord24(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function buildAcpApprovalFrameParams(rawParams, requestHandle, sessionId, method) {
   return {
-    ...isRecord23(rawParams) ? rawParams : {},
+    ...isRecord24(rawParams) ? rawParams : {},
     requestHandle,
     sessionId,
     upstreamMethod: method
   };
 }
 function acpApprovalSummary(method, params) {
-  if (isRecord23(params)) {
-    if (isRecord23(params.toolCall)) {
+  if (isRecord24(params)) {
+    if (isRecord24(params.toolCall)) {
       const title = typeof params.toolCall.title === "string" && params.toolCall.title.trim().length > 0 ? params.toolCall.title.trim() : void 0;
       if (title !== void 0) return title;
     }
@@ -105562,6 +105841,12 @@ var BUILTIN_ACP_SPECS = Object.freeze({
     name: "Hermes",
     kind: "desktop_cli",
     downloadUrl: "https://hermes-agent.nousresearch.com"
+  }),
+  kimi: Object.freeze({
+    id: "kimi",
+    name: "Kimi",
+    kind: "desktop_cli",
+    downloadUrl: "https://moonshotai.github.io/kimi-code/"
   })
 });
 function isBuiltinAcpBackend(id7) {
@@ -105636,6 +105921,14 @@ function candidateBinaryPaths(id7, options = {}) {
           pJoin(localAppData, "Hermes", "bin", "hermes.exe"),
           pJoin(home, ".hermes", "bin", "hermes.exe"),
           pJoin(home, "hermes-agent", ".hermes", "bin", "hermes.exe")
+        );
+        break;
+      case "kimi":
+        candidates.push(
+          pJoin(home, ".kimi-code", "bin", "kimi.exe"),
+          pJoin(localAppData, "kimi-code", "bin", "kimi.exe"),
+          pJoin(localAppData, "Programs", "kimi-code", "kimi.exe"),
+          pJoin(home, ".local", "bin", "kimi.exe")
         );
         break;
       case "cursor":
@@ -105739,6 +106032,14 @@ function candidateBinaryPaths(id7, options = {}) {
           "/opt/homebrew/bin/hermes"
         );
         break;
+      case "kimi":
+        candidates.push(
+          pJoin(home, ".kimi-code", "bin", "kimi"),
+          pJoin(home, ".local", "bin", "kimi"),
+          "/usr/local/bin/kimi",
+          "/opt/homebrew/bin/kimi"
+        );
+        break;
     }
   }
   return [...new Set(candidates.filter((p) => typeof p === "string" && p.trim().length > 0))];
@@ -105781,7 +106082,8 @@ function findExistingBinary(id7, options = {}) {
     pi: "pi-acp",
     claude: "claude-agent-acp",
     opencode: "opencode",
-    hermes: "hermes"
+    hermes: "hermes",
+    kimi: "kimi"
   };
   const defaultCmd = defaultCommands[id7] ?? id7;
   const fromPath = lookupSystemPath(defaultCmd, platform3, check2);
@@ -106304,7 +106606,6 @@ var PluginControlRuntime = class {
     const id7 = value.id.trim().toLowerCase();
     const command = value.command.trim();
     if (!command) throw new ClientModeError("INVALID_MESSAGE", "ACP command is required.");
-    if (id7 === "kimi") throw new ClientModeError("INVALID_MESSAGE", "Kimi is not implemented.");
     if (!isValidAcpBackendId(id7)) {
       throw new ClientModeError("INVALID_MESSAGE", "ACP backend id must match ^[a-z0-9][a-z0-9_-]{0,31}$ and cannot use reserved names.");
     }
@@ -106320,7 +106621,7 @@ var PluginControlRuntime = class {
   async removeAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     const id7 = record9(payload).id;
-    if (typeof id7 !== "string" || ["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(id7)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
+    if (typeof id7 !== "string" || ["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes", "kimi"].includes(id7)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
     const current = resolveConfig(this.settings.get());
     const backends = (current.acp?.backends ?? []).filter((item) => item.id !== id7);
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }));
@@ -106355,6 +106656,7 @@ var PluginControlRuntime = class {
       cursor: ["acp"],
       antigravity: ["acp"],
       hermes: ["acp"],
+      kimi: ["acp"],
       opencode: ["acp"],
       pi: [],
       claude: []
@@ -106521,7 +106823,7 @@ function backendCommandAvailable(backend, command) {
   if (!command || typeof command !== "string" || command.trim().length === 0) return false;
   const trimmed = command.trim();
   if (defaultCheckExecutable(trimmed)) return true;
-  const candidates = backend === "codex" ? codexBinaryCandidates(trimmed) : backend === "cursor" || backend === "antigravity" || backend === "opencode" ? cursorBinaryCandidates(trimmed) : [trimmed];
+  const candidates = backend === "codex" ? codexBinaryCandidates(trimmed) : backend === "cursor" || backend === "antigravity" || backend === "opencode" || backend === "kimi" ? cursorBinaryCandidates(trimmed) : [trimmed];
   return candidates.some((candidate) => defaultCheckExecutable(candidate) || !hasPathSeparator(candidate) && commandAvailable(candidate));
 }
 function hasPathSeparator(command) {
@@ -106572,18 +106874,18 @@ function editableConfig(config2) {
     ...config2.acp === void 0 ? {} : { acp: { enabled: config2.acp.enabled, backends: config2.acp.backends } }
   };
 }
-function isRecord24(value) {
+function isRecord25(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record9(value) {
-  if (!isRecord24(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord25(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
   return { ok: true, value };
 }
 function withUpdate(result, update) {
-  if (update === void 0 || !result.ok || !isRecord24(result.value)) return result;
+  if (update === void 0 || !result.ok || !isRecord25(result.value)) return result;
   return ok3({ ...result.value, update });
 }
 function fail5(error62) {
@@ -110952,7 +111254,7 @@ function resolveSessionWorkspaceRoot(gateway, supportsHarnessSessions, codex, ac
     const colonIndex = sessionId.indexOf(":");
     if (colonIndex > 0) {
       const prefix = sessionId.slice(0, colonIndex);
-      if (prefix === "acp" || prefix !== "codex" && prefix !== "harness" && prefix !== "kimi" && prefix === prefix.trim() && isValidAcpBackendId(prefix)) {
+      if (prefix === "acp" || prefix !== "codex" && prefix !== "harness" && prefix === prefix.trim() && isValidAcpBackendId(prefix)) {
         return acp(sessionId);
       }
     }
@@ -111168,9 +111470,9 @@ function diagnosticReason2(error62) {
   return message.replace(/\s+/g, " ").slice(0, 160) || "Unknown peer connection failure.";
 }
 function extractEndpoint(message) {
-  if (!isRecord25(message) || !isRecord25(message.payload)) return void 0;
+  if (!isRecord26(message) || !isRecord26(message.payload)) return void 0;
   const payload = message.payload;
-  if (isRecord25(payload.params)) {
+  if (isRecord26(payload.params)) {
     if (typeof payload.params.endpoint === "string") return payload.params.endpoint;
     if (typeof payload.params.method === "string") return payload.params.method;
   }
@@ -111178,7 +111480,7 @@ function extractEndpoint(message) {
   if (typeof payload.method === "string") return payload.method;
   return void 0;
 }
-function isRecord25(value) {
+function isRecord26(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function shortId2(value) {
@@ -114030,7 +114332,7 @@ var HarnessRemoteBridge = class {
       if (params.endpoint === "$events/result" && nativeResult.ok && this.forwardedEventsObserver?.onEventResult !== void 0) {
         const args = requestArgs(params.payload);
         const eventId = typeof args.eventId === "string" && args.eventId.length > 0 ? args.eventId : void 0;
-        const outcomeKind = isRecord26(args.outcome) && typeof args.outcome.kind === "string" ? args.outcome.kind : void 0;
+        const outcomeKind = isRecord27(args.outcome) && typeof args.outcome.kind === "string" ? args.outcome.kind : void 0;
         if (eventId !== void 0) {
           try {
             this.forwardedEventsObserver.onEventResult(eventId, outcomeKind);
@@ -114038,12 +114340,12 @@ var HarnessRemoteBridge = class {
           }
         }
       }
-      if (params.endpoint === "dsBot/call" && nativeResult.ok && isRecord26(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== void 0) {
+      if (params.endpoint === "dsBot/call" && nativeResult.ok && isRecord27(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== void 0) {
         const root2 = record11(params.payload);
-        const args = isRecord26(root2.args) ? root2.args : root2;
+        const args = isRecord27(root2.args) ? root2.args : root2;
         const botEndpoint = typeof args.endpoint === "string" && args.endpoint.length > 0 ? args.endpoint : void 0;
         if (botEndpoint !== void 0) {
-          const botPayload = isRecord26(args.payload) ? args.payload : null;
+          const botPayload = isRecord27(args.payload) ? args.payload : null;
           try {
             this.forwardedEventsObserver.onDsBotCall({ endpoint: botEndpoint, payload: botPayload }, nativeResult.value);
           } catch {
@@ -114150,7 +114452,7 @@ var HarnessRemoteBridge = class {
       const record12 = await this.schedule.create(sessionId, request2, AbortSignal.timeout(6e4));
       return { ok: true, value: record12 };
     } catch (error62) {
-      const published = isRecord26(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
+      const published = isRecord27(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
       if (published === void 0) {
         return {
           ok: false,
@@ -114389,8 +114691,8 @@ var HarnessRemoteBridge = class {
     const args = parsed.data.args;
     const result = await this.gateway.dispatch(plugin ? "pluginManager/listPlugins" : "pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord26(value) && value[plugin ? "entryId" : "name"] === args[key]);
-    if (!isRecord26(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
+    const row = result.value.find((value) => isRecord27(value) && value[plugin ? "entryId" : "name"] === args[key]);
+    if (!isRecord27(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
     if (remoteOwnedBundleRow(row, plugin)) {
       throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be enabled or disabled locally on the Host.");
     }
@@ -114410,8 +114712,8 @@ var HarnessRemoteBridge = class {
     if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "Invalid plugin update request.");
     const result = await this.gateway.dispatch("pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord26(value) && value.name === parsed.data.args.name);
-    if (!isRecord26(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
+    const row = result.value.find((value) => isRecord27(value) && value.name === parsed.data.args.name);
+    if (!isRecord27(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
       throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be updated remotely.");
     }
     if (remoteOwnedBundleRow(row, false)) {
@@ -114530,7 +114832,7 @@ var HarnessRemoteBridge = class {
   }
   async resolveMessageFilePayload(payload, endpoint, signal) {
     const deny = () => workspaceFileFailure("WORKSPACE_PATH_DENIED", "The message attachment is unavailable.", "outside-root");
-    if (!isRecord26(payload) || !isRecord26(payload.args)) throw deny();
+    if (!isRecord27(payload) || !isRecord27(payload.args)) throw deny();
     const args = payload.args;
     const sessionId = args.workspaceFileScopeId;
     if (typeof sessionId !== "string" || !isMessageFilePath(args.path)) throw deny();
@@ -114556,9 +114858,9 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
     }
     if (endpoint === "workspaceFiles/readBytes") {
-      const options = isRecord26(args.options) ? args.options : {};
+      const options = isRecord27(args.options) ? args.options : {};
       if ("baseFile" in args || "baseFile" in options) throw deny();
-      if (!isRecord26(options.range) && !isRecord26(args.range)) {
+      if (!isRecord27(options.range) && !isRecord27(args.range)) {
         if (reference.bytes > MAX_READ_BYTES2) {
           throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
         }
@@ -114572,7 +114874,7 @@ var HarnessRemoteBridge = class {
     return { ...payload, args: { ...args, path } };
   }
   async assertNativeWorkspaceFileCall(endpoint, payload, signal) {
-    const rootPayload = isRecord26(payload) ? payload : {};
+    const rootPayload = isRecord27(payload) ? payload : {};
     const args = requestArgs(payload);
     const sessionId = typeof args.workspaceFileScopeId === "string" ? args.workspaceFileScopeId : typeof args.sessionId === "string" ? args.sessionId : typeof args.agentId === "string" ? args.agentId : void 0;
     if (sessionId === void 0) {
@@ -114582,7 +114884,7 @@ var HarnessRemoteBridge = class {
     if (!sessionWorkspace) {
       throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
-    const options = isRecord26(args.options) ? args.options : void 0;
+    const options = isRecord27(args.options) ? args.options : void 0;
     const rawBaseFile = endpoint === "workspaceFiles/readBytes" ? typeof options?.baseFile === "string" ? options.baseFile : typeof args.baseFile === "string" ? args.baseFile : void 0 : void 0;
     if (endpoint === "workspaceFiles/readBytes") {
       if (options !== void 0 && "baseFile" in options && options.baseFile !== void 0 && typeof options.baseFile !== "string") {
@@ -114616,8 +114918,8 @@ var HarnessRemoteBridge = class {
       }
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint, sessionWorkspace.cwd);
     }
-    let finalArgs = isRecord26(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
-    if (isRecord26(finalArgs.options)) {
+    let finalArgs = isRecord27(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
+    if (isRecord27(finalArgs.options)) {
       const { baseFile: _baseFile, ...restOptions } = finalArgs.options;
       finalArgs.options = restOptions;
     }
@@ -114629,11 +114931,11 @@ var HarnessRemoteBridge = class {
       const boundedLength = Math.min(rawLength, MAX_READ_BYTES2);
       const normalizedRange = { offset: offset2, length: boundedLength };
       if (requiresWorkspaceChangePath(this.harnessVersion)) {
-        finalArgs.options = { ...isRecord26(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
+        finalArgs.options = { ...isRecord27(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
         delete finalArgs.range;
       } else {
         finalArgs.range = normalizedRange;
-        if (isRecord26(finalArgs.options)) {
+        if (isRecord27(finalArgs.options)) {
           finalArgs.options = { ...finalArgs.options, range: normalizedRange };
         }
       }
@@ -114642,7 +114944,7 @@ var HarnessRemoteBridge = class {
         finalArgs.length = boundedLength;
       }
     }
-    return isRecord26(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
+    return isRecord27(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
   }
   async resolveWorkspaceRootForSession(sessionId, signal) {
     signal.throwIfAborted();
@@ -114746,7 +115048,7 @@ var HarnessRemoteBridge = class {
 };
 function journalSessionId(payload) {
   const address2 = requestArgs(payload).address;
-  return isRecord26(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
+  return isRecord27(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
 }
 function isPathOutside2(rel) {
   if (rel === ".." || isAbsolute11(rel)) return true;
@@ -114756,17 +115058,17 @@ function isPathOutside2(rel) {
   return rel.startsWith("../");
 }
 function byteOrLineRange2(args) {
-  const options = isRecord26(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord26(options.range)) return options.range;
-  return isRecord26(args.range) ? args.range : args;
+  const options = isRecord27(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord27(options.range)) return options.range;
+  return isRecord27(args.range) ? args.range : args;
 }
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord26(payload) || !isRecord26(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord27(payload) || !isRecord27(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord26(payload) || !isRecord26(payload.args)) return payload;
+  if (!isRecord27(payload) || !isRecord27(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -114780,10 +115082,10 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   return payload;
 }
 async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
-  if (endpoint !== "session/attachment" || !isRecord26(payload) || !isRecord26(payload.args)) return payload;
-  const request2 = isRecord26(payload.args.request) ? payload.args.request : void 0;
+  if (endpoint !== "session/attachment" || !isRecord27(payload) || !isRecord27(payload.args)) return payload;
+  const request2 = isRecord27(payload.args.request) ? payload.args.request : void 0;
   if (request2 === void 0) return payload;
-  const attachment = isRecord26(request2.attachment) ? request2.attachment : void 0;
+  const attachment = isRecord27(request2.attachment) ? request2.attachment : void 0;
   const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request2.attachmentId === "string" ? request2.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
   if (!isDshV022OrNewer(harnessVersion)) {
@@ -114815,7 +115117,7 @@ async function findSessionAttachmentReference(gateway, sessionId, attachmentId, 
       const result = await gateway.dispatch("session/page", { args: { request: pageRequest } }, signal);
       const reference = extractAttachmentReference(result, attachmentId);
       if (reference !== void 0) return reference;
-      if (result.ok === true && isRecord26(result.value)) {
+      if (result.ok === true && isRecord27(result.value)) {
         if (result.value.hasMore === true && typeof result.value.beforeSeq === "number") {
           beforeSeq = result.value.beforeSeq;
           continue;
@@ -114839,7 +115141,7 @@ function extractAttachmentReference(result, attachmentId) {
   const value = result.value;
   let records;
   if (Array.isArray(value)) records = value;
-  else if (isRecord26(value)) {
+  else if (isRecord27(value)) {
     if (Array.isArray(value.records)) records = value.records;
     else if (Array.isArray(value.events)) records = value.events;
   }
@@ -114860,7 +115162,7 @@ function findImageReference(value, attachmentId, depth) {
     return void 0;
   }
   const block = value;
-  const candidate = isRecord26(block.attachment) ? block.attachment : block;
+  const candidate = isRecord27(block.attachment) ? block.attachment : block;
   const candidateId = typeof candidate.attachmentId === "string" ? candidate.attachmentId : void 0;
   if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
     return {
@@ -115010,7 +115312,7 @@ var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constru
 var MAX_WHITELIST_PROJECTION_BYTES = 64 * 1024;
 var MAX_UNKNOWN_PROJECTION_BYTES = 4096;
 function filterSessionProjections(session2) {
-  if (!isRecord26(session2) || !isRecord26(session2.projections) || !isRecord26(session2.projections.values)) {
+  if (!isRecord27(session2) || !isRecord27(session2.projections) || !isRecord27(session2.projections.values)) {
     return session2;
   }
   const originalValues = session2.projections.values;
@@ -115051,15 +115353,15 @@ function trimSessionCatalogRows(endpoint, items) {
   return kept.length <= SESSION_LIST_ROW_BUDGET ? kept : kept.slice().sort((left, right) => updatedAtOf(right) - updatedAtOf(left)).slice(0, SESSION_LIST_ROW_BUDGET);
 }
 function isListableRemoteSession(session2) {
-  return isRecord26(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
+  return isRecord27(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
 }
 function updatedAtOf(session2) {
-  return isRecord26(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
+  return isRecord27(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
 }
 function withSessionRowTitle(session2) {
-  if (!isRecord26(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
-  const values = isRecord26(session2.projections) ? session2.projections.values : void 0;
-  const title = isRecord26(values) ? values.title : void 0;
+  if (!isRecord27(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
+  const values = isRecord27(session2.projections) ? session2.projections.values : void 0;
+  const title = isRecord27(values) ? values.title : void 0;
   return typeof title === "string" && title !== "" ? { ...session2, title } : session2;
 }
 function filterSessionListProjections(resultOrEndpoint, maybeResult) {
@@ -115068,7 +115370,7 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
   if (endpoint !== void 0 && endpoint !== "session/list" && endpoint !== "session/search") return result;
   if (!result || !result.ok) return result;
   const filterList = (items) => trimSessionCatalogRows(endpoint, items).map(filterSessionProjections).map(withSessionRowTitle);
-  if (isRecord26(result.value)) {
+  if (isRecord27(result.value)) {
     let changed = false;
     const updated = { ...result.value };
     if (Array.isArray(result.value.items)) {
@@ -115092,27 +115394,27 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
 function filterRemotePluginInventory(endpoint, result) {
   if (!result.ok) return result;
   const isRemote = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
-  const filterEntries = (entries) => entries.filter((entry) => !isRecord26(entry) || !isRemote(entry.moduleName));
+  const filterEntries = (entries) => entries.filter((entry) => !isRecord27(entry) || !isRemote(entry.moduleName));
   if (endpoint === "pluginManager/listPlugins" && Array.isArray(result.value)) {
     return { ...result, value: filterEntries(result.value) };
   }
   if (endpoint === "pluginManager/listBundles" && Array.isArray(result.value)) {
-    return { ...result, value: result.value.filter((bundle) => !isRecord26(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord26(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
+    return { ...result, value: result.value.filter((bundle) => !isRecord27(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord27(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
   }
-  if (endpoint === "pluginInventory/list" && isRecord26(result.value) && Array.isArray(result.value.entries)) {
+  if (endpoint === "pluginInventory/list" && isRecord27(result.value) && Array.isArray(result.value.entries)) {
     return { ...result, value: { ...result.value, entries: filterEntries(result.value.entries) } };
   }
   return result;
 }
 function requestArgs(payload) {
   const root2 = record11(payload);
-  const args = isRecord26(root2.args) ? root2.args : root2;
+  const args = isRecord27(root2.args) ? root2.args : root2;
   return record11(args.request ?? args._request ?? args);
 }
 function record11(value) {
-  return isRecord26(value) ? value : {};
+  return isRecord27(value) ? value : {};
 }
-function isRecord26(value) {
+function isRecord27(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isCompactSnapshot(value) {
@@ -115121,7 +115423,7 @@ function isCompactSnapshot(value) {
 function remoteOwnedBundleRow(row, plugin) {
   const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
   if (remoteModule(plugin ? row.moduleName : row.name)) return true;
-  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord26(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
+  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord27(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
@@ -115140,11 +115442,11 @@ var MAX_CAUSE_DEPTH = 8;
 function requestIndexKey(ownerDeviceId, sessionId, requestId2) {
   return `${ownerDeviceId}\0${sessionId}\0${requestId2}`;
 }
-function isRecord27(value) {
+function isRecord28(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function commandIdOf(result) {
-  if (result?.ok !== true || !isRecord27(result.value)) return void 0;
+  if (result?.ok !== true || !isRecord28(result.value)) return void 0;
   return typeof result.value.commandId === "string" ? result.value.commandId : void 0;
 }
 var RemoteCompactionOperations = class {
@@ -115536,7 +115838,7 @@ function isAbortThrown(thrown, reason) {
       current = "cause" in current ? current.cause : void 0;
       continue;
     }
-    if (isRecord27(current)) {
+    if (isRecord28(current)) {
       if (typeof current.code === "string" && ABORT_CODE_PATTERN.test(current.code)) return true;
       if (typeof current.message === "string" && matchesSignalReason(current.message, reason)) return true;
       current = current.cause;
@@ -115551,13 +115853,13 @@ function matchesSignalReason(message, reason) {
   return reasonMessage !== void 0 && reasonMessage !== "" && message.includes(reasonMessage);
 }
 function isCommandSuccess(result) {
-  if (result.ok !== true || !isRecord27(result.value)) return false;
-  const command = isRecord27(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord28(result.value)) return false;
+  const command = isRecord28(result.value.result) ? result.value.result : void 0;
   return command?.kind === "success";
 }
 function commandText2(result) {
-  if (result.ok !== true || !isRecord27(result.value)) return void 0;
-  const command = isRecord27(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord28(result.value)) return void 0;
+  const command = isRecord28(result.value.result) ? result.value.result : void 0;
   return typeof command?.text === "string" && command.text.trim() !== "" ? command.text : void 0;
 }
 function sanitizeMessage(message) {
@@ -115576,13 +115878,13 @@ function waitWithTimeout(promise2, ms) {
   });
 }
 function readCompactionConfirmation(result, acceptedAt, commandId) {
-  if (result.ok !== true || !isRecord27(result.value)) return { kind: "unknown" };
+  if (result.ok !== true || !isRecord28(result.value)) return { kind: "unknown" };
   const records = Array.isArray(result.value.records) ? result.value.records : [];
   const legacy = Array.isArray(result.value.events) ? result.value.events : [];
   const events = [];
   for (const record12 of [...records, ...legacy]) {
-    const event2 = isRecord27(record12) && isRecord27(record12.event) ? record12.event : record12;
-    if (isRecord27(event2) && typeof event2.type === "string") events.push(event2);
+    const event2 = isRecord28(record12) && isRecord28(record12.event) ? record12.event : record12;
+    if (isRecord28(event2) && typeof event2.type === "string") events.push(event2);
   }
   if (events.length === 0) return { kind: "unknown" };
   const matchedCommandRun = commandId === void 0 ? latestCompactCommandId(events, acceptedAt) : hasCompactCommandRun(events, commandId) ? commandId : void 0;
@@ -115590,34 +115892,34 @@ function readCompactionConfirmation(result, acceptedAt, commandId) {
   if (resolvedCommandId === void 0) return { kind: "not-yet" };
   const end = [...events].reverse().find((event2) => {
     if (event2.type !== "compaction/end") return false;
-    const data3 = isRecord27(event2.data) ? event2.data : void 0;
+    const data3 = isRecord28(event2.data) ? event2.data : void 0;
     return data3?.sourceCommandId === resolvedCommandId;
   });
   if (end === void 0) {
     const hasCompactionStart = events.some((event2) => {
       if (event2.type !== "compaction/start") return false;
-      const data3 = isRecord27(event2.data) ? event2.data : void 0;
+      const data3 = isRecord28(event2.data) ? event2.data : void 0;
       return data3?.sourceCommandId === resolvedCommandId;
     });
     if (hasCompactionStart) return { kind: "not-yet", started: true };
     if (matchedCommandRun !== void 0) return { kind: "not-yet", commandRecorded: true };
     return { kind: "not-yet" };
   }
-  const data2 = isRecord27(end.data) ? end.data : {};
+  const data2 = isRecord28(end.data) ? end.data : {};
   const error62 = data2.error === void 0 ? void 0 : errorText(data2.error);
   return error62 === void 0 ? { kind: "finished" } : { kind: "finished", error: error62 };
 }
 function hasCompactCommandRun(events, commandId) {
   return events.some((event2) => {
     if (event2.type !== "command/run") return false;
-    const data2 = isRecord27(event2.data) ? event2.data : void 0;
+    const data2 = isRecord28(event2.data) ? event2.data : void 0;
     return data2?.name === "compact" && data2.commandId === commandId;
   });
 }
 function latestCompactCommandId(events, acceptedAt) {
   for (const event2 of [...events].reverse()) {
     if (event2.type !== "command/run") continue;
-    const data2 = isRecord27(event2.data) ? event2.data : void 0;
+    const data2 = isRecord28(event2.data) ? event2.data : void 0;
     if (data2?.name !== "compact" || typeof data2.commandId !== "string") continue;
     const time3 = typeof event2.time === "number" ? event2.time : 0;
     if (time3 !== 0 && time3 < acceptedAt - 5e3) continue;
@@ -115627,7 +115929,7 @@ function latestCompactCommandId(events, acceptedAt) {
 }
 function errorText(error62) {
   if (typeof error62 === "string") return sanitizeMessage(error62);
-  if (isRecord27(error62)) {
+  if (isRecord28(error62)) {
     const message = error62.message ?? error62.error ?? error62.reason;
     if (typeof message === "string" && message.trim() !== "") return sanitizeMessage(message);
     try {
@@ -116292,7 +116594,7 @@ var HostPluginRuntime = class {
     for (const backend of this.acp.enabledBackends()) {
       types22.push({
         id: backend,
-        name: backend === "claude" ? "Claude" : backend === "hermes" ? "Hermes" : backend === "pi" ? "Pi" : backend === "cursor" ? "Cursor" : backend === "antigravity" ? "Antigravity" : backend === "opencode" ? "OpenCode" : backend,
+        name: acpBackendLabel(backend),
         capability: `agent.acp.${backend}.v1`,
         available: readyBackends.includes(backend)
       });
@@ -116893,21 +117195,21 @@ var LocalPluginUpgrade = class {
 };
 function bundleUpdatable(listed, packageName) {
   if (!Array.isArray(listed)) return false;
-  return listed.some((row) => isRecord28(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
+  return listed.some((row) => isRecord29(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
 }
 function classifyUpdateResult(result) {
-  if (!isRecord28(result) || !isRecord28(result.result)) return { status: "failed", message: "update-failed" };
+  if (!isRecord29(result) || !isRecord29(result.result)) return { status: "failed", message: "update-failed" };
   const application = result.result.application;
   if (application === "applied" || application === "restart-required") return { status: "started" };
   return { status: "failed", message: failureMessage(result.result.error) };
 }
 function failureMessage(error62) {
-  if (!isRecord28(error62)) return "update-failed";
+  if (!isRecord29(error62)) return "update-failed";
   const code = typeof error62.code === "string" && error62.code.length > 0 && error62.code.length <= 80 ? error62.code : "update-failed";
   const diagnostic = typeof error62.diagnostic === "string" ? error62.diagnostic.replace(/\s+/g, " ").trim().slice(0, 180) : "";
   return diagnostic === "" ? code : `${code}: ${diagnostic}`;
 }
-function isRecord28(value) {
+function isRecord29(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

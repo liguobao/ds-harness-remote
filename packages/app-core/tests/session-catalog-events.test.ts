@@ -44,12 +44,14 @@ vi.mock('../src/services/codex', () => ({
   updateCodexSession: vi.fn(),
   withCodexPermission: vi.fn(),
 }))
-vi.mock('../src/services/cursor', () => ({
+vi.mock('../src/services/cursor', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/services/cursor')>(),
   applyCursorFrame: vi.fn(),
   createAntigravitySession: vi.fn(),
   createClaudeSession: vi.fn(),
   createCursorSession: vi.fn(),
   createHermesSession: vi.fn(),
+  createKimiSession: vi.fn(),
   createOpencodeSession: vi.fn(),
   createPiSession: vi.fn(),
   cursorNativeId: vi.fn(),

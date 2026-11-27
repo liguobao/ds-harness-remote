@@ -162,12 +162,13 @@ Host はローカルの ACP 対応 Agent を起動し、ds-harness-remote を通
 - **OpenCode** — `opencode acp` 経由でワークスペースと履歴を利用できます。会話のアーカイブには認証 API を提供するバージョンが必要で、アーカイブ解除は未対応です。
 - **Claude** — ローカル認証済みの `claude-agent-acp` 経由で接続し、設定で有効化します。テキストと承認に対応し、画像は未対応です。
 - **Hermes** — `hermes acp` 経由で接続し、設定で有効化します。テキスト、画像、ストリーミング出力、承認、モデル選択に対応します。
+- **Kimi** — `kimi acp` 経由で接続し、設定で有効化します。テキスト、画像、ストリーミング出力、承認、モデル／思考／モード選択に対応します。
 
-Claude と Hermes はファイルとターミナルへの直接アクセスにも対応し、Host のワークスペース境界とターミナル設定に従います。
+Claude、Hermes、Kimi はファイルとターミナルへの直接アクセスにも対応し、Host のワークスペース境界とターミナル設定に従います。
 
 セットアップとアダプター開発については、[Agent ワークスペース連携ガイド](docs/acp-remote.md)を参照してください。
 
-Desktop／Android での Cursor、Claude、Hermes、Pi、OpenCode、AGY のモデル選択には Host の実際のモデル一覧を使用し、Agent の ACP インターフェースに従います。
+Desktop／Android での Cursor、Claude、Hermes、Kimi、Pi、OpenCode、AGY のモデル選択には Host の実際のモデル一覧を使用し、Agent の ACP インターフェースに従います。
 
 推論の強度（Effort）の選択肢は、バックエンドが実際に提供するものに従います。Cursor はセッションごとに別のプロセスを使用するため、モデルの変更が他の会話に影響することはありません。
 

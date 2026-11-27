@@ -578,7 +578,6 @@ export class PluginControlRuntime {
     const id = value.id.trim().toLowerCase()
     const command = value.command.trim()
     if (!command) throw new ClientModeError('INVALID_MESSAGE', 'ACP command is required.')
-    if (id === 'kimi') throw new ClientModeError('INVALID_MESSAGE', 'Kimi is not implemented.')
     if (!isValidAcpBackendId(id)) {
       throw new ClientModeError('INVALID_MESSAGE', 'ACP backend id must match ^[a-z0-9][a-z0-9_-]{0,31}$ and cannot use reserved names.')
     }
@@ -595,7 +594,7 @@ export class PluginControlRuntime {
   private async removeAcp(payload: unknown): Promise<PluginSettingsView> {
     if (this.settings === undefined) throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     const id = record(payload).id
-    if (typeof id !== 'string' || ['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes'].includes(id)) throw new ClientModeError('INVALID_MESSAGE', 'Only custom ACP backends can be removed.')
+    if (typeof id !== 'string' || ['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes', 'kimi'].includes(id)) throw new ClientModeError('INVALID_MESSAGE', 'Only custom ACP backends can be removed.')
     const current = resolveConfig(this.settings.get())
     const backends = (current.acp?.backends ?? []).filter(item => item.id !== id)
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }))
@@ -631,6 +630,7 @@ export class PluginControlRuntime {
       cursor: ['acp'],
       antigravity: ['acp'],
       hermes: ['acp'],
+      kimi: ['acp'],
       opencode: ['acp'],
       pi: [],
       claude: [],
@@ -823,7 +823,7 @@ function backendCommandAvailable(backend: string, command: string): boolean {
   const trimmed = command.trim()
   if (defaultCheckExecutable(trimmed)) return true
   const candidates = backend === 'codex' ? codexBinaryCandidates(trimmed)
-    : backend === 'cursor' || backend === 'antigravity' || backend === 'opencode' ? cursorBinaryCandidates(trimmed) : [trimmed]
+    : backend === 'cursor' || backend === 'antigravity' || backend === 'opencode' || backend === 'kimi' ? cursorBinaryCandidates(trimmed) : [trimmed]
   return candidates.some(candidate => defaultCheckExecutable(candidate) || (!hasPathSeparator(candidate) && commandAvailable(candidate)))
 }
 

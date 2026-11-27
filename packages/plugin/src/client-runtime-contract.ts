@@ -31,6 +31,7 @@ export interface RemoteHostFeatures {
   opencode: boolean
   claude?: boolean
   hermes?: boolean
+  kimi?: boolean
   acpModelLoadsSession?: boolean
   acpOpencodeArchive?: boolean
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]

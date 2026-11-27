@@ -224,7 +224,7 @@ describe('AcpVirtualHarness', () => {
   })
 
   it('deduplicates concurrent ACP history hydration across backends and reuses cached history across workspace switches', async () => {
-    await runScenarios((['claude', 'hermes', 'opencode', 'pi'] as const).map(backend => ({ name: backend, run: async () => {
+    await runScenarios((['claude', 'hermes', 'kimi', 'opencode', 'pi'] as const).map(backend => ({ name: backend, run: async () => {
       const event = { type: 'event', event: { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: 'Cached project prompt' }] } } }
       let resolveHistory!: (value: unknown[]) => void
       const client = {
@@ -372,28 +372,35 @@ describe('AcpVirtualHarness', () => {
     } finally { await target.close() }
   })
 
-  it('passes images and exposes attachments in Hermes sessions', async () => {
-    const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='
-    let onFrame: ((frame: AgentAcpFrameData) => void) | undefined
-    const client = {
-      ...fakeAcp(),
-      createSession: vi.fn(async (cwd: string) => ({ sessionId: 'hermes_1', cwd })),
-      prompt: vi.fn(async () => ({})),
-      openStream: vi.fn(async (_id: string, handler: (frame: AgentAcpFrameData) => void) => { onFrame = handler; return { close: async () => undefined } }),
-    }
-    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'hermes')
-    const signal = new AbortController().signal
-    try {
-      const workspace = await target.selectOrCreateWorkspace('/test')
-      await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId } } }, signal)
-      expect(await target.dispatch('session/prompt', { args: { request: { sessionId: 'hermes:hermes_1', content: [{ type: 'image', mediaType: 'image/png', data }] } } }, signal)).toMatchObject({ ok: true })
-      expect(client.prompt).toHaveBeenCalledWith('hermes_1', '', signal, [{ type: 'image', mimeType: 'image/png', data }], 'hermes')
-      const history = await target.dispatch('session/history', { args: { request: { sessionId: 'hermes:hermes_1' } } }, signal) as any
-      const image = history.value.records.find((entry: any) => entry.event.type === 'user/message').event.data.content[0]
-      expect(image).toMatchObject({ type: 'image', attachment: { mediaType: 'image/png', width: 1, height: 1 } })
-      expect(await target.dispatch('session/attachment', { args: { request: { sessionId: 'hermes:hermes_1', attachmentId: image.attachment.attachmentId } } }, signal)).toMatchObject({ ok: true, value: { data } })
-      onFrame!({ frame: { method: 'session/update', params: { sessionId: 'hermes_1', update: { sessionUpdate: 'prompt_completed' } } } } as AgentAcpFrameData)
-    } finally { await target.close() }
+  it('passes images and exposes attachments in Hermes and Kimi sessions', async () => {
+    await runScenarios((['hermes', 'kimi'] as const).map(backend => ({
+      name: backend,
+      run: async () => {
+        const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='
+        let onFrame: ((frame: AgentAcpFrameData) => void) | undefined
+        const nativeSessionId = `${backend}_1`
+        const publicSessionId = `${backend}:${nativeSessionId}`
+        const client = {
+          ...fakeAcp(),
+          createSession: vi.fn(async (cwd: string) => ({ sessionId: nativeSessionId, cwd })),
+          prompt: vi.fn(async () => ({})),
+          openStream: vi.fn(async (_id: string, handler: (frame: AgentAcpFrameData) => void) => { onFrame = handler; return { close: async () => undefined } }),
+        }
+        const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, backend)
+        const signal = new AbortController().signal
+        try {
+          const workspace = await target.selectOrCreateWorkspace('/test')
+          await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId } } }, signal)
+          expect(await target.dispatch('session/prompt', { args: { request: { sessionId: publicSessionId, content: [{ type: 'image', mediaType: 'image/png', data }] } } }, signal)).toMatchObject({ ok: true })
+          expect(client.prompt).toHaveBeenCalledWith(nativeSessionId, '', signal, [{ type: 'image', mimeType: 'image/png', data }], backend)
+          const history = await target.dispatch('session/history', { args: { request: { sessionId: publicSessionId } } }, signal) as any
+          const image = history.value.records.find((entry: any) => entry.event.type === 'user/message').event.data.content[0]
+          expect(image).toMatchObject({ type: 'image', attachment: { mediaType: 'image/png', width: 1, height: 1 } })
+          expect(await target.dispatch('session/attachment', { args: { request: { sessionId: publicSessionId, attachmentId: image.attachment.attachmentId } } }, signal)).toMatchObject({ ok: true, value: { data } })
+          onFrame!({ frame: { method: 'session/update', params: { sessionId: nativeSessionId, update: { sessionUpdate: 'prompt_completed' } } } } as AgentAcpFrameData)
+        } finally { await target.close() }
+      },
+    })))
   })
 
   it('delegates unprojected global surfaces to the Host gateway', async () => {
@@ -1859,7 +1866,7 @@ describe('AcpVirtualHarness', () => {
   })
 })
 
-it.each(['claude', 'hermes'] as const)('%s routes direct files and terminal streams through ACP tools', async backend => {
+it.each(['claude', 'hermes', 'kimi'] as const)('%s routes direct files and terminal streams through ACP tools', async backend => {
   const client = { ...fakeAcp(), workspaceToolCall: vi.fn(async () => ({ entries: [] })) }
   const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, backend)
   const signal = new AbortController().signal

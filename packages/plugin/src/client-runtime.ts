@@ -523,7 +523,7 @@ export class ClientModeRuntime {
       if (remote.features.codex) {
         await read('codex', () => discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), activeSignal))
       }
-      const knownAcpBackends = new Set<string>(['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'])
+      const knownAcpBackends = new Set<string>(['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi'])
       for (const wt of remote.features.workspaceTypes ?? []) {
         if (wt.id !== 'codex' && wt.id !== 'harness' && wt.available) knownAcpBackends.add(wt.id)
       }
@@ -1218,6 +1218,7 @@ function hasAcpFeature(features: RemoteHostFeatures, backend: string): boolean {
   if (backend === 'opencode') return features.opencode
   if (backend === 'claude') return Boolean(features.claude)
   if (backend === 'hermes') return Boolean(features.hermes)
+  if (backend === 'kimi') return Boolean(features.kimi)
   return features.workspaceTypes?.some(item => item.id === backend && item.available) ?? false
 }
 
