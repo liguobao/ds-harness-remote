@@ -1690,4 +1690,69 @@ describe('stale link frame dropping and configurable rate limit', () => {
       vi.useRealTimers()
     }
   })
+
+  it('updates an existing host version in place across upgrades and keeps device removal restricted to Web account sessions', async () => {
+    const keys = generateKeyPair()
+    const hostId = randomUUID()
+    const initial = await request('/devices/register', 'POST', {
+      v: 1,
+      device: {
+        deviceId: hostId,
+        identityKey: keys.publicKey,
+        name: 'MASO3185',
+        role: 'host',
+        platform: 'win32',
+        clientVersion: '0.6.4',
+        harnessVersion: '1.0.0-rc.1',
+      },
+    }, accountToken)
+    expect(initial.status).toBe(200)
+
+    const upgraded = await request('/devices/register', 'POST', {
+      v: 1,
+      device: {
+        deviceId: hostId,
+        identityKey: keys.publicKey,
+        name: 'MASO3185',
+        role: 'host',
+        platform: 'win32',
+        clientVersion: '0.6.9',
+        harnessVersion: '1.0.0-rc.5',
+      },
+    }, accountToken)
+    expect(upgraded.status).toBe(200)
+
+    const wire = await socket({
+      deviceId: hostId,
+      identityKey: keys.publicKey,
+      name: 'MASO3185',
+      role: 'host',
+      platform: 'win32',
+      clientVersion: '0.6.9',
+      keys,
+      accessToken: upgraded.data.accessToken,
+      refreshToken: upgraded.data.refreshToken,
+    }, { harnessVersion: '1.0.0-rc.5' })
+    await wire.next('hello.ack')
+
+    const client = await device('client')
+    const listed = await request('/devices', 'GET', undefined, client.accessToken)
+    expect(listed.status).toBe(200)
+    expect(listed.data.items).toHaveLength(1)
+    expect(listed.data.items[0]).toMatchObject({
+      deviceId: hostId,
+      name: 'MASO3185',
+      online: true,
+      clientVersion: '0.6.9',
+      harnessVersion: '1.0.0-rc.5',
+    })
+
+    // Client device Bearer tokens must not delete other devices; removal stays Web-session-only.
+    const clientDelete = await request(`/account/devices/${hostId}`, 'DELETE', undefined, client.accessToken)
+    expect(clientDelete.status).toBe(401)
+    expect(clientDelete.data.error.code).toBe('ACCOUNT_AUTH_REQUIRED')
+
+    const webDelete = await request(`/account/devices/${hostId}`, 'DELETE', undefined, accountToken)
+    expect(webDelete.status).toBe(200)
+  })
 })

@@ -59,7 +59,7 @@ import {
 } from '../services/storage'
 import type { ServerConfig, WorkspaceShortcut } from '../types'
 import type { AppState, QrLoginStart, QrProviderList, StoreAccess } from './store-state'
-import { clearBrowseMemory } from '../services/browse-memory'
+import { clearBrowseMemory, hostListScope, pruneHiddenOfflineHosts } from '../services/browse-memory'
 import { useAttentionStore } from './attention-store'
 import { initialData } from './store-state'
 
@@ -417,6 +417,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           }
         })
         if (!current()) return
+        pruneHiddenOfflineHosts(hostListScope(config), new Set(result.devices.map(device => device.deviceId)))
         const failedIds = new Set(result.lookupFailedDeviceIds ?? [])
         const mismatchCount = result.keyMismatchDeviceIds?.length ?? 0
         const allLookupsFailed = failedIds.size > 0 && result.devices.every(device => failedIds.has(device.deviceId))

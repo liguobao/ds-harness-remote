@@ -247,3 +247,55 @@ it('persists and restores valid draft images and quotes while dropping malformed
   expect(cEntries[c.browseKey(scope, 's-img-12')]?.images).toEqual([validImage])
   await c.clearBrowseMemory()
 })
+
+it('persists encrypted scoped hiddenHosts, isolates accounts, prunes removed devices, and restores legacy snapshots', async () => {
+  const name = 'file:///app/remote-browse.enc', aad = 'dsh-remote-private-browse-v1'
+  const secret = () => fromBase64Url(keys.get('dshremote.browse-key.v1')!)
+  const rewrite = (mutate: (data: any) => void): void => {
+    const data = JSON.parse(new TextDecoder().decode(decryptFrame(secret(), JSON.parse(files.get(name)!), aad)))
+    mutate(data)
+    files.set(name, JSON.stringify(encryptFrame(secret(), new TextEncoder().encode(JSON.stringify(data)), aad)))
+  }
+
+  const a = await load()
+  const scopeA = a.hostListScope({ baseUrl: 'https://dsh.r2049.cn', account: 'alice@example.com' })
+  const scopeB = a.hostListScope({ baseUrl: 'https://dsh.r2049.cn', account: 'bob@example.com' })
+  expect(a.hostListScope(undefined)).toBe('')
+
+  a.hideOfflineHost(scopeA, 'retired-win-rc1')
+  a.hideOfflineHost(scopeA, 'retired-linux-rc1')
+  a.hideOfflineHost(scopeA, 'retired-win-rc1')
+  a.hideOfflineHost(scopeB, 'bob-old-host')
+  await a.flushBrowseMemory()
+
+  // Ciphertext never leaks hidden device IDs in plaintext.
+  expect(files.get(name)!).not.toMatch(/retired-win-rc1|retired-linux-rc1|bob-old-host/)
+
+  const b = await load()
+  expect(b.useBrowseMemory.getState().hiddenHosts[scopeA]).toEqual(['retired-win-rc1', 'retired-linux-rc1'])
+  expect(b.useBrowseMemory.getState().hiddenHosts[scopeB]).toEqual(['bob-old-host'])
+
+  //Unhiding one host leaves the rest; pruning against active server directory removes stale IDs.
+  b.unhideOfflineHost(scopeA, 'retired-win-rc1')
+  expect(b.useBrowseMemory.getState().hiddenHosts[scopeA]).toEqual(['retired-linux-rc1'])
+  b.pruneHiddenOfflineHosts(scopeA, new Set(['active-win-rc5']))
+  expect(b.useBrowseMemory.getState().hiddenHosts[scopeA]).toBeUndefined()
+  await b.flushBrowseMemory()
+
+  // Legacy snapshots without hiddenHosts or malformed entries hydrate safely.
+  rewrite(data => {
+    delete data.hiddenHosts
+  })
+  const c = await load()
+  expect(c.useBrowseMemory.getState().hiddenHosts).toEqual({})
+
+  rewrite(data => {
+    data.hiddenHosts = { [scopeA]: ['host-1', '', 42, 'host-1'], '': ['ignored'] }
+  })
+  const d = await load()
+  expect(d.useBrowseMemory.getState().hiddenHosts).toEqual({ [scopeA]: ['host-1'] })
+
+  await d.clearBrowseMemory()
+  const e = await load()
+  expect(e.useBrowseMemory.getState().hiddenHosts).toEqual({})
+})
