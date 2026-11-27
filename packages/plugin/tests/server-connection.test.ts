@@ -36,6 +36,39 @@ class FakeWebSocket {
 }
 
 describe('HostServerConnection', () => {
+  it('pauses on an unsupported credential lock and reconnects on explicit request after repair', async () => {
+    vi.useFakeTimers()
+    const socket = new FakeWebSocket()
+    const createSocket = vi.fn(() => socket)
+    const authenticate = vi.fn()
+      .mockRejectedValueOnce(new ServerApiError('SERVER_CREDENTIALS_LOCK_UNSUPPORTED', 'hard links unavailable', false))
+      .mockResolvedValue({ accessToken: 'test-token' })
+    const options = config()
+    options.reconnect.enabled = true
+    const server = new HostServerConnection(options,
+      { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', ...generateKeyPair() },
+      {} as IdentityStore, { baseUrl: 'https://remote.test', authenticate } as unknown as HostServerApi,
+      { close: async () => {} } as unknown as ConnectionController, logger(), createSocket)
+    try {
+      server.start()
+      await vi.advanceTimersByTimeAsync(options.reconnect.maxDelayMs + 1)
+      expect(authenticate).toHaveBeenCalledTimes(1)
+      expect(createSocket).not.toHaveBeenCalled()
+      expect(server.lastError()).toBe('SERVER_CREDENTIALS_LOCK_UNSUPPORTED')
+      expect(server.isReconnecting()).toBe(false)
+      server.reconnect()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(createSocket).toHaveBeenCalledTimes(1)
+      socket.open()
+      socket.receive(createControlFrame('hello.ack', helloAck('control-repaired')))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(server.isOnline()).toBe(true)
+      expect(server.lastError()).toBeUndefined()
+    } finally {
+      try { await server.stop() } finally { vi.useRealTimers() }
+    }
+  })
+
   it('starts the hello timeout after the WebSocket upgrade completes', async () => {
     vi.useFakeTimers()
     const socket = new FakeWebSocket()

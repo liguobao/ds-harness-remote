@@ -56,9 +56,12 @@ const SAFE_STARTUP_CODES = new Set([
   'SERVER_CREDENTIALS_INVALID',
   'SERVER_CREDENTIALS_BUSY',
   'SERVER_CREDENTIALS_LOCK_DIRECTORY',
+  'SERVER_CREDENTIALS_LOCK_UNSUPPORTED',
 ])
 
 export const CREDENTIALS_LOCK_DIRECTORY_MESSAGE = 'The credential refresh lock is a directory. Stop all Harness instances, then move the old lock directory aside and restart.'
+
+export const CREDENTIALS_LOCK_UNSUPPORTED_MESSAGE = 'Cannot create a credential lock hard link in DSH_HOME. Check write permissions and file system hard link support.'
 
 const SAFE_STATIC_STARTUP_MESSAGES = new Set([
   'device identity is incomplete; repair it explicitly before reconnecting',
@@ -83,6 +86,7 @@ export function safeStartupError(error: unknown): { code: string; message: strin
     return { code, message: 'Local Remote server credentials are invalid.' }
   }
   if (code === 'SERVER_CREDENTIALS_LOCK_DIRECTORY') return { code, message: CREDENTIALS_LOCK_DIRECTORY_MESSAGE }
+  if (code === 'SERVER_CREDENTIALS_LOCK_UNSUPPORTED') return { code, message: CREDENTIALS_LOCK_UNSUPPORTED_MESSAGE }
   if (code === 'SERVER_CREDENTIALS_BUSY') {
     return {
       code,

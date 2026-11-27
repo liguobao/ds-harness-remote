@@ -884,6 +884,13 @@ export function createRemotePluginOptions(React: ClientReact) {
       }, t(resetBusy ? 'resettingAction' : 'resetIdentity')),
     )
 
+    const reconnectButton = React.createElement('button', {
+      type: 'button',
+      className: 'dshRemoteReconnect',
+      disabled: reconnectBusy || hostStatus?.configured === false,
+      onClick: () => void reconnectHost(),
+    }, t(reconnectBusy ? 'reconnectingAction' : 'reconnect'))
+
     const startupErrorBanner = settingsView?.startupError !== undefined
       ? React.createElement('div', { className: 'dshRemoteError', role: 'alert' },
           React.createElement('p', null, startupErrorMessage(settingsView.startupError, t)),
@@ -1292,12 +1299,7 @@ export function createRemotePluginOptions(React: ClientReact) {
                     : hostStatus.lastActiveAt === undefined
                       ? t('neverConnected')
                       : t('lastActive', { time: formatLocalTime(hostStatus.lastActiveAt) }))),
-                React.createElement('button', {
-                  type: 'button',
-                  className: 'dshRemoteReconnect',
-                  disabled: reconnectBusy || hostStatus?.configured === false,
-                  onClick: () => void reconnectHost(),
-                }, t(reconnectBusy ? 'reconnectingAction' : 'reconnect'))),
+                reconnectButton),
               hostStatus?.authorized && !hostStatus.accountRequired ? React.createElement(ServerNotice, {
                 offline: !hostStatus.online && hostStatus.reconnecting,
                 linked: (hostStatus.connectedClients?.length ?? 0) > 0,
@@ -1321,6 +1323,10 @@ export function createRemotePluginOptions(React: ClientReact) {
               inlineSignIn)
             : React.createElement('div', { className: 'dshRemoteSettings' },
               startupErrorBanner,
+              hostStatus?.error === 'SERVER_CREDENTIALS_LOCK_UNSUPPORTED'
+                ? React.createElement('div', { className: 'dshRemoteConnectionIssue', role: 'status' },
+                  React.createElement('p', null, connectionErrorMessage(hostStatus.error, t)), reconnectButton)
+                : null,
               React.createElement('div', { className: 'dshRemoteHostIdentity' },
                 React.createElement('div', null,
                   React.createElement('span', null, t('hostName')),

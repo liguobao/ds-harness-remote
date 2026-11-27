@@ -2,7 +2,7 @@ import { chmod, link, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFi
 import { basename, dirname, join, sep } from 'node:path'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
-import { CREDENTIALS_LOCK_DIRECTORY_MESSAGE } from './safe-error.js'
+import { CREDENTIALS_LOCK_DIRECTORY_MESSAGE, CREDENTIALS_LOCK_UNSUPPORTED_MESSAGE } from './safe-error.js'
 
 const credentialSchema = z.object({
   schemaVersion: z.literal(1),
@@ -141,7 +141,7 @@ export class ServerCredentialsBusyError extends Error {
 export class ServerCredentialsLockUnsupportedError extends Error {
   readonly code = 'SERVER_CREDENTIALS_LOCK_UNSUPPORTED'
   constructor() {
-    super('Credential lock cannot create a hard link in DSH_HOME. Use a writable local ext4 or XFS file system.')
+    super(CREDENTIALS_LOCK_UNSUPPORTED_MESSAGE)
   }
 }
 

@@ -64457,9 +64457,11 @@ var SAFE_STARTUP_CODES = /* @__PURE__ */ new Set([
   "STORAGE_CONFLICT",
   "SERVER_CREDENTIALS_INVALID",
   "SERVER_CREDENTIALS_BUSY",
-  "SERVER_CREDENTIALS_LOCK_DIRECTORY"
+  "SERVER_CREDENTIALS_LOCK_DIRECTORY",
+  "SERVER_CREDENTIALS_LOCK_UNSUPPORTED"
 ]);
 var CREDENTIALS_LOCK_DIRECTORY_MESSAGE = "The credential refresh lock is a directory. Stop all Harness instances, then move the old lock directory aside and restart.";
+var CREDENTIALS_LOCK_UNSUPPORTED_MESSAGE = "Cannot create a credential lock hard link in DSH_HOME. Check write permissions and file system hard link support.";
 var SAFE_STATIC_STARTUP_MESSAGES = /* @__PURE__ */ new Set([
   "device identity is incomplete; repair it explicitly before reconnecting",
   "device public and private keys do not match",
@@ -64479,6 +64481,7 @@ function safeStartupError(error62) {
     return { code, message: "Local Remote server credentials are invalid." };
   }
   if (code === "SERVER_CREDENTIALS_LOCK_DIRECTORY") return { code, message: CREDENTIALS_LOCK_DIRECTORY_MESSAGE };
+  if (code === "SERVER_CREDENTIALS_LOCK_UNSUPPORTED") return { code, message: CREDENTIALS_LOCK_UNSUPPORTED_MESSAGE };
   if (code === "SERVER_CREDENTIALS_BUSY") {
     return {
       code,
@@ -87289,7 +87292,7 @@ var ServerCredentialsBusyError = class extends Error {
 var ServerCredentialsLockUnsupportedError = class extends Error {
   code = "SERVER_CREDENTIALS_LOCK_UNSUPPORTED";
   constructor() {
-    super("Credential lock cannot create a hard link in DSH_HOME. Use a writable local ext4 or XFS file system.");
+    super(CREDENTIALS_LOCK_UNSUPPORTED_MESSAGE);
   }
 };
 var ServerCredentialsLockDirectoryError = class extends Error {
@@ -112498,7 +112501,7 @@ var HostServerConnection = class {
             this.logger.error("failed to clear revoked Host authorization", { code: errorCode4(clearError) });
           }
         }
-        if (TERMINAL_AUTH_ERRORS.has(code) || code === "UNSUPPORTED_VERSION" || code === "SERVER_CREDENTIALS_LOCK_DIRECTORY") {
+        if (TERMINAL_AUTH_ERRORS.has(code) || code === "UNSUPPORTED_VERSION" || code === "SERVER_CREDENTIALS_LOCK_DIRECTORY" || code === "SERVER_CREDENTIALS_LOCK_UNSUPPORTED") {
           await this.dropTunnels();
           return;
         }
