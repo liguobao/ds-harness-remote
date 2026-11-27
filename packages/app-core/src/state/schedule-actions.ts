@@ -124,16 +124,19 @@ export function createScheduleActions({
     },
 
     async toggleScheduleTask(task: ScheduleCatalogEntry): Promise<boolean> {
-      if (get().connection.phase !== 'connected') return false
+      if (get().connection.phase !== 'connected' || (task.status !== 'active' && task.status !== 'paused')) return false
       const generation = getConnectionGeneration()
       try {
-        await Promise.resolve()
-        const nextStatus = task.status === 'active' ? 'inactive' : 'active'
-        if (generation !== getConnectionGeneration()) return false
+        const proxy = runtime.connection.requireProxy()
+        const record = await proxy.scheduleSetActive(task.id, task.status === 'paused', task.updatedAt ?? null)
+        if (generation !== getConnectionGeneration() || record === undefined) return false
+        // A catalog read started before this write can still carry the previous status.
+        ++requestSeq
         set(state => ({
+          scheduleLoading: false,
           scheduleTasks: state.scheduleTasks.map(t =>
             t.id === task.id && t.sessionId === task.sessionId
-              ? { ...t, status: nextStatus }
+              ? { ...t, ...record }
               : t
           ),
         }))

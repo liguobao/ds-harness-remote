@@ -940,6 +940,7 @@ const deDE = {
     editRule: 'Regel bearbeiten',
     formTitle: 'Aufgabenname',
     formPrompt: 'Erinnerungsanweisung',
+    formCronRequired: 'Gib einen Cron-Ausdruck ein',
     formFrequency: 'Häufigkeit',
     formTargetSession: 'Zielsitzung',
     formTime: 'Ausführungszeit',
