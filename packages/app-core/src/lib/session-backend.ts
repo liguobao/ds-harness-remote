@@ -32,7 +32,7 @@ export function sessionBackendFromId(id: string): AgentBackend {
 }
 
 export function mergeBackendPinnedSessionIds(
-  current: readonly string[],
+  current: readonly string[] | undefined,
   backend: AgentBackend,
   nextForBackend: readonly string[],
 ): string[] {
@@ -40,7 +40,7 @@ export function mergeBackendPinnedSessionIds(
   const normalized = nextForBackend
     .filter((id): id is string => typeof id === 'string' && id.length > 0)
     .map(id => backend === 'harness' || id.startsWith(`${backend}:`) ? id : `${backend}:${id}`)
-  const preserved = current.filter(id => sessionBackendFromId(id) !== backend)
+  const preserved = (current ?? []).filter(id => sessionBackendFromId(id) !== backend)
   return [...new Set([...preserved, ...normalized])]
 }
 

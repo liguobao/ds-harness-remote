@@ -236,14 +236,15 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           return
         }
         set(state => {
-          const nextArchived = archivedSessionIds ?? state.archivedSessionIds
+          const nextArchived = archivedSessionIds ?? state.archivedSessionIds ?? []
           const archivedSet = new Set(nextArchived)
+          const currentPinned = state.pinnedSessionIds ?? []
           const rawBackendPinned = backend === 'harness' ? pinnedSessionIds : catalog.pinnedSessionIds
           const nextPinnedSessionIds = rawBackendPinned !== undefined
-            ? mergeBackendPinnedSessionIds(state.pinnedSessionIds, backend, rawBackendPinned)
+            ? mergeBackendPinnedSessionIds(currentPinned, backend, rawBackendPinned)
                 .filter(id => !archivedSet.has(id))
             : archivedSessionIds !== undefined
-              ? state.pinnedSessionIds.filter(id => !archivedSet.has(id))
+              ? currentPinned.filter(id => !archivedSet.has(id))
               : undefined
           return {
             hostWorkspaceGit: connection.hasWorkspaceGit?.() ?? false,
@@ -344,7 +345,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           set(state => ({
             workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
             sessions: state.sessions.filter(session => !sessionIds.has(session.sessionId)),
-            pinnedSessionIds: state.pinnedSessionIds.filter(id => !sessionIds.has(id)),
+            pinnedSessionIds: (state.pinnedSessionIds ?? []).filter(id => !sessionIds.has(id)),
             messages: Object.fromEntries(Object.entries(state.messages).filter(([id]) => !sessionIds.has(id))),
             selectedSession: state.selectedSession !== undefined && sessionIds.has(state.selectedSession.sessionId)
               ? undefined
@@ -366,7 +367,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         set(state => ({
           workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
           sessions: state.sessions.filter(session => !sessionIds.has(session.sessionId)),
-          pinnedSessionIds: state.pinnedSessionIds.filter(id => !sessionIds.has(id)),
+          pinnedSessionIds: (state.pinnedSessionIds ?? []).filter(id => !sessionIds.has(id)),
           busyAction: undefined,
         }))
         clearDeletedShortcuts(target)

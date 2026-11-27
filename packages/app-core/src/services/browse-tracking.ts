@@ -364,8 +364,9 @@ export function startBrowseTracking(): () => void {
   const unsubscribeApp = useAppStore.subscribe((next, prev) => {
     if (
       !disposed
-      && next.connection.phase === 'connected'
+      && next?.connection?.phase === 'connected'
       && next.selectedDevice !== undefined
+      && prev !== undefined
       && (next.pinnedSessionIds !== prev.pinnedSessionIds || next.archivedSessionIds !== prev.archivedSessionIds)
     ) {
       // Persist only changed catalog data immediately; leave notifications and

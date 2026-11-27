@@ -439,14 +439,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           const selectedFresh = state.selectedSession === undefined
             ? undefined
             : byId.get(state.selectedSession.sessionId)
-          const archivedSet = new Set(workspaces.archivedSessionIds)
+          const archivedSet = new Set(workspaces.archivedSessionIds ?? [])
+          const currentPinned = state.pinnedSessionIds ?? []
           const nextPinnedSessionIds = workspaces.pinnedSessionIds !== undefined
             ? mergeBackendPinnedSessionIds(
-                state.pinnedSessionIds,
+                currentPinned,
                 'harness',
                 workspaces.pinnedSessionIds.filter(id => !archivedSet.has(id)),
               )
-            : state.pinnedSessionIds.filter(id => !archivedSet.has(id))
+            : currentPinned.filter(id => !archivedSet.has(id))
           return {
             sessionLifecycles: marks,
             workspaces: [...nonHarnessWorkspaces, ...workspaces.items],
@@ -1459,7 +1460,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         const created = sessions.find(s => s.sessionId === childId)
         set(state => {
           const metadataCurrent = metadataVersion === catalogMutationVersion(runtime.connection, 'harness')
-          const archivedSet = new Set(workspaceList.archivedSessionIds)
+          const archivedSet = new Set(workspaceList.archivedSessionIds ?? [])
+          const currentPinned = state.pinnedSessionIds ?? []
           return {
             sessions: [
               ...(state.sessions ?? []).filter(item => !isHarnessBackend(item.backend)),
@@ -1473,11 +1475,11 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               archivedSessionIds: workspaceList.archivedSessionIds,
               pinnedSessionIds: workspaceList.pinnedSessionIds !== undefined
                 ? mergeBackendPinnedSessionIds(
-                    state.pinnedSessionIds,
+                    currentPinned,
                     'harness',
                     workspaceList.pinnedSessionIds.filter(id => !archivedSet.has(id)),
                   )
-                : state.pinnedSessionIds.filter(id => !archivedSet.has(id)),
+                : currentPinned.filter(id => !archivedSet.has(id)),
             } : {}),
             busyAction: undefined,
           }
@@ -1512,7 +1514,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               ...workspace,
               sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
             })),
-            pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+            pinnedSessionIds: (state.pinnedSessionIds ?? []).filter(id => id !== sessionId),
             busyAction: undefined,
             ...(state.selectedSession?.sessionId === sessionId ? {
               selectedSession: undefined,
@@ -1540,7 +1542,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               ...workspace,
               sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
             })),
-            pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+            pinnedSessionIds: (state.pinnedSessionIds ?? []).filter(id => id !== sessionId),
             busyAction: undefined,
             ...(state.selectedSession?.sessionId === sessionId ? {
               selectedSession: undefined,
@@ -1563,7 +1565,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         // catalog membership, and do not let a second read hide a successful write.
         set(state => ({
           archivedSessionIds,
-          pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+          pinnedSessionIds: (state.pinnedSessionIds ?? []).filter(id => id !== sessionId),
           busyAction: undefined,
           ...(state.selectedSession?.sessionId === sessionId ? {
             selectedSession: undefined,
