@@ -340,6 +340,14 @@ export class HarnessRemoteBridge {
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
   private readonly messageFiles = new MessageFileAttachments()
   private warnedMissingRemoteEvents = false
+  /**
+   * In-flight `session/list` reads, keyed by the normalized payload. Several
+   * Remote surfaces opening at once ask for the same catalogue; one Host read
+   * answers them all instead of N concurrent walks over every Session. Entries
+   * live only for the duration of the dispatch, so a later call always sees
+   * fresh data.
+   */
+  private readonly inflightSessionList = new Map<string, Promise<TypertRpcResult>>()
 
   private readonly terminalCarrier: TerminalCarrierCompat | undefined
 
@@ -500,11 +508,31 @@ export class HarnessRemoteBridge {
     }
   }
 
+  private async dispatchSessionListOnce(
+    nativePayload: unknown,
+    signal: AbortSignal,
+  ): Promise<TypertRpcResult> {
+    const key = JSON.stringify(nativePayload ?? null)
+    const inflight = this.inflightSessionList.get(key)
+    if (inflight !== undefined) {
+      this.logger?.debug('harness remote call deduped', { endpoint: 'session/list' })
+      return inflight
+    }
+    const pending = this.gateway.dispatch('session/list', nativePayload, signal)
+    this.inflightSessionList.set(key, pending)
+    try {
+      return await pending
+    } finally {
+      this.inflightSessionList.delete(key)
+    }
+  }
+
   private async dispatchWithOfficeFallback(
     endpoint: string,
     nativePayload: unknown,
     signal: AbortSignal,
   ): Promise<TypertRpcResult> {
+    if (endpoint === 'session/list') return this.dispatchSessionListOnce(nativePayload, signal)
     const fallbackEndpoint = OFFICE_FALLBACK_ENDPOINT.get(endpoint)
     if (fallbackEndpoint === undefined) {
       return this.gateway.dispatch(endpoint, nativePayload, signal)

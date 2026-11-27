@@ -7,7 +7,7 @@ import { HarnessRemoteBridge } from '../src/harness-remote-bridge.js'
 import { CodexWorkspaceBridge, type RemoteTerminalProcess, type RemoteTerminalSpawner } from '../src/codex-workspace-bridge.js'
 import { TerminalPolicy } from '../src/terminal-policy.js'
 import { RpcError } from '../src/rpc-router.js'
-import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
+import type { LocalTypertGateway, TypertRpcResult } from '../src/typert-gateway-contract.js'
 import { MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
 
 describe('HarnessRemoteBridge', () => {
@@ -208,6 +208,30 @@ describe('HarnessRemoteBridge', () => {
     expect(arraySession.projections.values.oversizedPlugin).toBeUndefined()
     expect(arraySession.projections.values.smallUnknown).toEqual({ data: 'third-party' })
     expect(arraySession.projections.values.turnOutline).toBe('x'.repeat(5000))
+  })
+
+  it('shares one in-flight session/list dispatch and never caches a settled result', async () => {
+    let release: ((value: TypertRpcResult) => void) | undefined
+    const dispatch = vi.fn(
+      async () => new Promise<TypertRpcResult>((resolve) => { release = resolve }),
+    )
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
+    const payload = { args: {} }
+
+    const first = bridge.call({ endpoint: 'session/list', payload })
+    const second = bridge.call({ endpoint: 'session/list', payload })
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(1))
+
+    const result: TypertRpcResult = { ok: true, value: { sessions: [{ sessionId: 's1' }] } }
+    release?.(result)
+    await expect(first).resolves.toEqual(result)
+    await expect(second).resolves.toEqual(result)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+
+    const third = bridge.call({ endpoint: 'session/list', payload })
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2))
+    release?.({ ok: true, value: { sessions: [] } })
+    await expect(third).resolves.toEqual({ ok: true, value: { sessions: [] } })
   })
 
   it('prunes session catalog projections on list and search without changing detail responses', async () => {
