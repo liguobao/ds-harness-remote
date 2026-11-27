@@ -1241,16 +1241,16 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
 
     const computerIcon = React.createElement('svg', {
       className: 'dshRemoteComputerIcon',
-      viewBox: '0 0 24 24',
+      viewBox: '0 0 16 16',
       fill: 'none',
       stroke: 'currentColor',
-      strokeWidth: 1.7,
+      strokeWidth: 1,
       strokeLinecap: 'round',
       strokeLinejoin: 'round',
       'aria-hidden': true,
     },
-      React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
-      React.createElement('path', { d: 'M8 21h8M12 17v4' }))
+      React.createElement('rect', { x: 1.5, y: 2.5, width: 13, height: 9, rx: 1.5 }),
+      React.createElement('path', { d: 'M5 14h6M8 11.5v2.5' }))
     const remoteActive = status?.mode === 'remote'
     // `wide` is the sidebar being expanded; the row decides whether the seat
     // also carries its label, so the two are kept apart here.

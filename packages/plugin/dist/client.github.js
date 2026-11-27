@@ -5269,7 +5269,7 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
       // 9px inline paint inset and a 2px inline margin (4px between neighbours).
       ".dshRemoteSidebarEntry{box-sizing:border-box;flex:none;width:36px;min-width:36px;display:block;margin:4px 2px}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:36px;height:36px;min-height:36px;justify-content:center;gap:0;padding:0;border-radius:var(--dsw-radius-md,12px)}.dshRemoteSidebarEntry.isWide{flex:0 1 auto;width:fit-content;min-width:36px;max-width:100%;height:42px}.dshRemoteSidebarEntry.isWide .dshRemoteModeButton{width:auto;max-width:100%;min-width:0;height:42px;justify-content:flex-start;gap:var(--dsh-sidebar-label-gap,6px);padding:0 calc(var(--dsh-sidebar-row-padding,12px) - var(--dsh-sidebar-paint-inset,3px));border-inline:var(--dsh-sidebar-paint-inset,3px) solid transparent;background-clip:padding-box;border-radius:var(--dsw-radius-md,12px);font:inherit;font-size:14px;line-height:22px;text-align:start}.dshRemoteSidebarLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteSidebarEntry.isRail{height:36px}.dshRemoteSidebarEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}.dshRemoteSidebarEntry .dshRemoteModeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteSidebarEntry .dshRemoteModeButton:disabled{opacity:.45;cursor:default}",
       ".dshRemoteSidebarEntry.isWide.isActive .dshRemoteSidebarLabel{max-width:170px}",
-      ".dshRemoteComputerIcon{box-sizing:border-box;width:18px;height:18px;flex:0 0 18px;color:var(--dsw-alias-label-secondary)}.dshRemoteSidebarEntry.isWide .dshRemoteComputerIcon{width:16px;height:16px;flex-basis:16px}",
+      ".dshRemoteComputerIcon{box-sizing:border-box;width:18px;height:18px;flex:0 0 18px;color:var(--dsw-alias-label-primary)}.dshRemoteSidebarEntry.isWide .dshRemoteComputerIcon{width:16px;height:16px;flex-basis:16px}",
       // Compact entry: the same button portalled to the end of the host account row.
       ".dshRemoteAccountEntry{display:inline-flex;align-items:center;flex:none}.dshRemoteAccountEntry .dshRemoteAccountEntryButton{box-sizing:border-box;width:26px;height:26px;min-width:26px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:0}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:disabled{opacity:.45;cursor:default}.dshRemoteAccountEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}",
       // Segmented control for the entry style; scoped through the group because the
@@ -6044,16 +6044,16 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
         "svg",
         {
           className: "dshRemoteComputerIcon",
-          viewBox: "0 0 24 24",
+          viewBox: "0 0 16 16",
           fill: "none",
           stroke: "currentColor",
-          strokeWidth: 1.7,
+          strokeWidth: 1,
           strokeLinecap: "round",
           strokeLinejoin: "round",
           "aria-hidden": !0
         },
-        React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
-        React.createElement("path", { d: "M8 21h8M12 17v4" })
+        React.createElement("rect", { x: 1.5, y: 2.5, width: 13, height: 9, rx: 1.5 }),
+        React.createElement("path", { d: "M5 14h6M8 11.5v2.5" })
       ), remoteActive = status?.mode === "remote", labelled = props.wide && entryForm === "label", updateDot = localUpdateAvailable ? React.createElement("span", { className: "dshRemoteUpdateDot", title: t("updateBadge"), "aria-hidden": !0 }) : null, renderEntry = (entryLabelled, options = {}) => {
         let updateSuffix = localUpdateAvailable && entryLabelled ? React.createElement("span", {
           className: "dshRemoteUpdateSuffix",
@@ -7912,17 +7912,17 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
           {
             width: props.size ?? 18,
             height: props.size ?? 18,
-            viewBox: "0 0 24 24",
+            viewBox: "0 0 16 16",
             fill: "none",
             stroke: props.color ?? "currentColor",
-            strokeWidth: 1.8,
+            strokeWidth: 1,
             strokeLinecap: "round",
             strokeLinejoin: "round",
             "aria-hidden": !0,
             className: "dshRemoteComputerIcon"
           },
-          React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
-          React.createElement("path", { d: "M8 21h8M12 17v4" })
+          React.createElement("rect", { x: 1.5, y: 2.5, width: 13, height: 9, rx: 1.5 }),
+          React.createElement("path", { d: "M5 14h6M8 11.5v2.5" })
         );
         if (ctx.inject(["inputTriggers"], (inputContext) => {
           let hostCache = /* @__PURE__ */ new Map();
