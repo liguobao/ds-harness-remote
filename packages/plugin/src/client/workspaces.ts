@@ -2218,7 +2218,13 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                           }, React.createElement('span', { 'aria-hidden': true }, '…')))
                       })),
                       React.createElement('footer', { className: 'dshRemoteOpenBar' },
-                    React.createElement('div', null, React.createElement('span', null, t('currentDirectory')), React.createElement('strong', null, path || '—')),
+                    addingWorkspace
+                      ? React.createElement('label', null, React.createElement('span', null, t('currentDirectory')),
+                        React.createElement('input', {
+                          type: 'text', value: path, disabled: busy, spellCheck: false, autoComplete: 'off',
+                          onChange: (event: Event) => setPath((event.target as HTMLInputElement).value),
+                        }))
+                      : React.createElement('div', null, React.createElement('span', null, t('currentDirectory')), React.createElement('strong', null, path || '—')),
                     React.createElement('button', {
                       type: 'button',
                       disabled: busy || path.trim() === ''
