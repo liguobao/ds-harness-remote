@@ -21,6 +21,7 @@ import {
   clearDeviceCredentials,
   clearLastConnectedDeviceId,
   clearLocalData,
+  createDeviceIdentity,
   forgetHost,
   loadChatAppearance,
   loadDefaultPermissionPreset,
@@ -113,6 +114,18 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     const generation = accountGeneration + 1
     const url = await change(operation)
     return generation === accountGeneration ? url : undefined
+  }
+
+  async function createSignInContext(baseUrl: string) {
+    const { identity } = get()
+    if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
+    return loginFlow.createContext(baseUrl, identity, async () => {
+      // Persist the replacement before sending it so another sign-in can use
+      // the same identity even if the registration response is lost.
+      const nextIdentity = await createDeviceIdentity()
+      set({ identity: nextIdentity })
+      return nextIdentity
+    })
   }
 
   const actions: AccountActions = {
@@ -219,9 +232,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async configureServer(input, email, password, verification) {
       set({ busyAction: passwordLoginChannel.busyAction, error: undefined })
       try {
-        const identity = get().identity
-        if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
-        const context = await loginFlow.createContext(input, identity)
+        const context = await createSignInContext(input)
         const outcome = await loginFlow.signInWith(passwordLoginChannel, context, verification ?? { email, password })
         return await finalizeLogin(set, context.baseUrl, outcome)
       } catch (error) {
@@ -298,9 +309,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       }
       set({ busyAction: channel.completeBusyAction, error: undefined })
       try {
-        const identity = get().identity
-        if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
-        const context = await loginFlow.createContext(baseUrl, identity)
+        const context = await createSignInContext(baseUrl)
         const outcome = await loginFlow.completeRedirect(channel, context, token)
         return await finalizeLogin(set, context.baseUrl, outcome)
       } catch (error) {
@@ -369,10 +378,8 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async completeQrLogin(baseUrl, token, method) {
       set({ busyAction: 'server', error: undefined })
       try {
-        const identity = get().identity
-        if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
         if (token.length < 16) throw new Error(zhCN.setup.qrFailed)
-        const context = await loginFlow.createContext(baseUrl, identity)
+        const context = await createSignInContext(baseUrl)
         const outcome = await loginFlow.completeRedirect(redirectLoginChannelFor(method), context, token)
         return await finalizeLogin(set, context.baseUrl, outcome)
       } catch (error) {

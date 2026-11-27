@@ -33,7 +33,8 @@ describe('QR sign-in Server API', () => {
         const fetchImplementation = vi.fn<typeof fetch>(async input => String(input).endsWith('/auth/me')
           ? jsonResponse({ account: 'account' })
           : jsonResponse({ items: [{ id, displayName: id, startUrl: '/api/v1/auth/custom/start?flow=mobile' }] }))
-        const context = { baseUrl, publicApi: new RemoteServerApi(baseUrl, undefined, fetchImplementation), identity: { deviceId: 'phone' } as DeviceIdentity }
+        const recoverIdentity = vi.fn<() => Promise<DeviceIdentity>>()
+        const context = { baseUrl, publicApi: new RemoteServerApi(baseUrl, undefined, fetchImplementation), identity: { deviceId: 'phone' } as DeviceIdentity, recoverIdentity }
         const channel = redirectLoginChannelFor(method as RedirectLoginMethod)
         const url = new URL(await channel.prepareRedirect(context))
         expect(url.origin).toBe(baseUrl)
@@ -41,7 +42,7 @@ describe('QR sign-in Server API', () => {
         expect(url.searchParams.get('flow')).toBe('mobile')
         expect(url.searchParams.get('return_to')).toBe('dshremote://oauth')
         expect(await channel.completeSignIn(context, 't'.repeat(24))).toEqual({ account: 'account', loginMethod: method })
-        expect(serverSession.registerWithAccountToken).toHaveBeenCalledWith(baseUrl, context.identity, 't'.repeat(24), 'account')
+        expect(serverSession.registerWithAccountToken).toHaveBeenCalledWith(baseUrl, context.identity, 't'.repeat(24), 'account', recoverIdentity)
         const missing = { ...context, publicApi: new RemoteServerApi(baseUrl, undefined, async () => jsonResponse({ items: [] })) }
         await expect(channel.prepareRedirect(missing)).rejects.toThrow()
       },

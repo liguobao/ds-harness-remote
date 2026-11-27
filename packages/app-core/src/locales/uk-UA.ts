@@ -951,6 +951,7 @@ const ukUA = {
     editRule: 'Змінити правило',
     formTitle: 'Назва завдання',
     formPrompt: 'Запит нагадування',
+    formCronRequired: 'Введіть вираз Cron',
     formFrequency: 'Частота',
     formTargetSession: 'Цільова сесія',
     formTime: 'Час запуску',

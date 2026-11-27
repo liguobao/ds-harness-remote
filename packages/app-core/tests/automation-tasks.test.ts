@@ -463,7 +463,7 @@ describe('Automation Tasks and Sidebar i18n', () => {
     expect(state.scheduleTasks[0].status).toBe('active')
   })
 
-  it('toggles schedule task active and inactive status with generation protection', async () => {
+  it('uses Host revisions and applies only confirmed pause and resume responses', async () => {
     let generation = 1
     const task: ScheduleCatalogEntry = {
       id: 'task-1',
@@ -475,6 +475,7 @@ describe('Automation Tasks and Sidebar i18n', () => {
       timeZone: 'UTC',
       scheduledAt: '2026-10-29T08:00:00.000Z',
       status: 'active',
+      updatedAt: '2026-10-28T08:00:00.000Z',
     }
 
     let state: any = {
@@ -487,9 +488,21 @@ describe('Automation Tasks and Sidebar i18n', () => {
       state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) }
     })
     const get = vi.fn(() => state)
-    const runtime: any = {
-      connection: { requireProxy: () => ({}) },
+    const paused = { ...task, status: 'paused', updatedAt: '2026-10-28T09:00:00.000Z' } as const
+    const resumed = { ...task, scheduledAt: '2026-10-30T08:00:00.000Z' }
+    const catalog = Promise.withResolvers<ScheduleCatalogEntry[]>()
+    const proxy = {
+      scheduleSetActive: vi.fn<() => Promise<ScheduleCatalogEntry | undefined>>()
+        .mockResolvedValueOnce(paused)
+        .mockResolvedValueOnce(resumed)
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(async () => {
+          generation++
+          return paused
+        }),
+      scheduleCatalog: vi.fn(() => catalog.promise),
     }
+    const runtime: any = { connection: { requireProxy: () => proxy } }
 
     const actions = createScheduleActions({
       get,
@@ -498,29 +511,22 @@ describe('Automation Tasks and Sidebar i18n', () => {
       getConnectionGeneration: () => generation,
     })
 
-    // Toggle from active to inactive
-    const ok = await actions.toggleScheduleTask(task)
-    expect(ok).toBe(true)
-    expect(state.scheduleTasks[0].status).toBe('inactive')
+    const staleCatalog = actions.loadScheduleTasks()
+    await expect(actions.toggleScheduleTask(task)).resolves.toBe(true)
+    catalog.resolve([task])
+    await staleCatalog
+    expect(proxy.scheduleSetActive).toHaveBeenNthCalledWith(1, task.id, false, task.updatedAt)
+    expect(state.scheduleTasks[0]).toEqual(paused)
 
-    // Toggle from inactive to active
-    const ok2 = await actions.toggleScheduleTask(state.scheduleTasks[0])
-    expect(ok2).toBe(true)
-    expect(state.scheduleTasks[0].status).toBe('active')
+    await expect(actions.toggleScheduleTask(paused)).resolves.toBe(true)
+    expect(proxy.scheduleSetActive).toHaveBeenNthCalledWith(2, task.id, true, paused.updatedAt)
+    expect(state.scheduleTasks[0]).toEqual(resumed)
 
-    // Stale generation
-    let calls = 0
-    const staleActions = createScheduleActions({
-      get,
-      set,
-      runtime,
-      getConnectionGeneration: () => {
-        calls++
-        return calls === 1 ? 1 : 2
-      },
-    })
-    const ok3 = await staleActions.toggleScheduleTask(state.scheduleTasks[0])
-    expect(ok3).toBe(false)
+    await expect(actions.toggleScheduleTask(resumed)).resolves.toBe(false)
+    await expect(actions.toggleScheduleTask(resumed)).resolves.toBe(false)
+    await expect(actions.toggleScheduleTask({ ...task, status: 'ended' })).resolves.toBe(false)
+    expect(proxy.scheduleSetActive).toHaveBeenCalledTimes(4)
+    expect(state.scheduleTasks[0]).toEqual(resumed)
   })
 
 })

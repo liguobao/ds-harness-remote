@@ -1,5 +1,8 @@
 import { strings as zhCN } from '../locales/i18n'
-import { AccountRequiredError } from '../services/server-session-manager'
+
+export class AccountRequiredError extends Error {
+  constructor(message: string) { super(message) }
+}
 
 export class RemoteApiError extends Error {
   constructor(
