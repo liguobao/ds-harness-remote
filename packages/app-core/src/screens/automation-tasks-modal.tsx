@@ -43,6 +43,14 @@ import type {
   ScheduleTimingChange,
 } from '../types'
 import { resolveSessionDisplayTitle } from './session-title'
+import {
+  CRON_PLACEHOLDER,
+  DEFAULT_CRON_EXPRESSION,
+  type SchedulePreset,
+  monthlyCron,
+  nextPresetRuns,
+  parseMonthlyCron,
+} from './automation-schedule-logic'
 import { strings } from '../locales/i18n'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { androidRipple, continuousRadius } from '../ui/platform-style'
@@ -89,18 +97,6 @@ function extractExpectedRecord(entry: ScheduleCatalogEntry): ScheduleRecord {
     case 'cron':
       return { ...base, kind: 'cron', expression: entry.expression ?? '* * * * *', timeZone: entry.timeZone ?? 'UTC' }
   }
-}
-
-type SchedulePreset = 'daily' | 'workdays' | 'weekly' | 'monthly' | 'hourly' | 'minutely' | 'once' | 'cron'
-
-const MONTHLY_CRON = /^([0-5]?\d)\s+([01]?\d|2[0-3])\s+1\s+\*\s+\*$/u
-
-const DEFAULT_CRON_EXPRESSION = '0 9 1 * *'
-const CRON_PLACEHOLDER = '0 9 * * *'
-
-function monthlyCron(time: string): string {
-  const [hour, minute] = time.split(':').map(Number)
-  return `${minute} ${hour} 1 * *`
 }
 
 /** Preset -> concrete Host selector kind. */
@@ -465,38 +461,14 @@ export function AutomationTasksModal({
 
   /** Preview of the next three local runs for the chosen preset. */
   const nextRunsLabel = useMemo(() => {
-    const stamps: Date[] = []
-    const hours = Number(formTime.split(':')[0])
-    const minutes = Number(formTime.split(':')[1])
-    const base = new Date()
-    if (formPreset === 'minutely') {
-      for (let i = 1; i <= 3; i += 1) stamps.push(new Date(base.getTime() + i * 60_000))
-    } else if (formPreset === 'hourly') {
-      for (let i = 1; i <= 3; i += 1) stamps.push(new Date(base.getTime() + i * 3_600_000))
-    } else if (formPreset === 'once') {
-      stamps.push(new Date(base.getTime() + (formDelayMinutes ?? 15) * 60_000))
-    } else if (formPreset === 'monthly') {
-      for (let i = 0; i <= 3 && stamps.length < 3; i += 1) {
-        const candidate = new Date(base)
-        candidate.setMonth(base.getMonth() + i, 1)
-        candidate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0)
-        if (candidate.getTime() <= base.getTime()) continue
-        stamps.push(candidate)
-      }
-    } else {
-      const weekdays = formPreset === 'workdays' ? [1, 2, 3, 4, 5] : formWeekdays
-      for (let day = 0; day < 21 && stamps.length < 3; day += 1) {
-        const candidate = new Date(base)
-        candidate.setDate(base.getDate() + day)
-        candidate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0)
-        if (candidate.getTime() <= base.getTime()) continue
-        if (formPreset === 'weekly' || formPreset === 'workdays') {
-          const weekday = candidate.getDay() === 0 ? 7 : candidate.getDay()
-          if (!weekdays.includes(weekday)) continue
-        }
-        stamps.push(candidate)
-      }
-    }
+    if (formPreset === 'cron') return '—'
+    const stamps = nextPresetRuns({
+      preset: formPreset,
+      time: formTime,
+      weekdays: formWeekdays,
+      delayMinutes: formDelayMinutes ?? 15,
+      now: new Date(),
+    })
     if (stamps.length === 0) return '—'
     return stamps
       .map(
@@ -572,6 +544,10 @@ export function AutomationTasksModal({
     setPickerAnchor(null)
     setTimingDirty(false)
     setFormCronExpression(DEFAULT_CRON_EXPRESSION)
+    setFormTime('09:00')
+    setFormWeekdays([1, 2, 3, 4, 5])
+    setFormDelayMinutes(30)
+    setFormIntervalMinutes(60)
 
     if (task.kind === 'daily') {
       setFormKind('daily')
@@ -593,13 +569,9 @@ export function AutomationTasksModal({
       const expression = task.expression || DEFAULT_CRON_EXPRESSION
       setFormKind('cron')
       setFormCronExpression(expression)
-      const match = MONTHLY_CRON.exec(expression.trim())
-      setFormPreset(match === null ? 'cron' : 'monthly')
-      setFormTime(
-        match === null
-          ? '09:00'
-          : `${String(Number(match[2])).padStart(2, '0')}:${String(Number(match[1])).padStart(2, '0')}`,
-      )
+      const parsedTime = parseMonthlyCron(expression)
+      setFormPreset(parsedTime === null ? 'cron' : 'monthly')
+      setFormTime(parsedTime ?? '09:00')
     } else {
       setFormKind('at')
       setFormPreset('once')

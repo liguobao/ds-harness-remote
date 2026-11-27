@@ -40,6 +40,7 @@ import {
 } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
 import type { ScheduleCreateRequest } from '../../types'
+import { nextDailyAt } from '../automation-schedule-logic'
 import { Button } from '../../ui/components'
 import { radius } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
@@ -758,11 +759,7 @@ export function BotSchedulesPanel({
       whenPayload = { kind: 'every', minutes: mins, timeZone }
       fallbackReq = { title: title.trim(), prompt: prompt.trim(), every_seconds: mins * 60 }
     } else {
-      const hh = Number(normalizedTime.slice(0, 2))
-      const mm = Number(normalizedTime.slice(3))
-      const next = new Date()
-      next.setHours(hh, mm, 0, 0)
-      if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1)
+      const next = nextDailyAt(normalizedTime, new Date())
       const iso = next.toISOString()
       whenPayload = { kind: 'at', at: iso, timeZone }
       fallbackReq = { title: title.trim(), prompt: prompt.trim(), at: iso }
