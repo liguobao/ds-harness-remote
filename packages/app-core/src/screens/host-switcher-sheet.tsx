@@ -3,17 +3,20 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { Check, RefreshCw, SlidersHorizontal, X } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
-import { strings } from '../locales/i18n'
+import { remoteHostVisibilityStrings, strings } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import type { ConnectionPhase, RemoteDevice } from '../types'
 import { ConnectionScreen } from './device-screens'
 import { platformIcon, platformName } from '../lib/device-display'
+import { hostListScope, isHostHidden, useBrowseMemory } from '../services/browse-memory'
 import { ErrorBanner, GroupCard, GroupRow, IconButton } from '../ui/components'
 import { useResponsiveLayout } from '../ui/responsive'
 import { radius, spacing, type, type ThemeColors } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { SheetModal } from '../ui/sheet'
+
+const EMPTY_HIDDEN_HOSTS: readonly string[] = []
 
 export interface HostSwitcherSheetProps {
   visible: boolean
@@ -33,6 +36,7 @@ export interface HostSwitcherSheetProps {
  */
 export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHosts, onConnected, initialConnectingDevice }: HostSwitcherSheetProps) {
   useAppStore(state => state.language)
+  const config = useAppStore(state => state.config)
   const devices = useAppStore(state => state.devices)
   const selectedDevice = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)
@@ -40,6 +44,10 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
   const refreshDevices = useAppStore(state => state.refreshDevices)
   const error = useAppStore(state => state.error)
   const clearError = useAppStore(state => state.clearError)
+  const hiddenHosts = useBrowseMemory(state => state.hiddenHosts)
+  const scope = hostListScope(config)
+  const hiddenIds = scope ? (hiddenHosts[scope] ?? EMPTY_HIDDEN_HOSTS) : EMPTY_HIDDEN_HOSTS
+  const visibleDevices = devices.filter(device => !isHostHidden(device, hiddenIds, selectedDevice?.deviceId))
   const [chosenDevice, setChosenDevice] = useState<RemoteDevice>()
   const connectingDevice = chosenDevice ?? initialConnectingDevice
   const busy = connectingDevice !== undefined
@@ -115,42 +123,47 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
                       <Text style={styles.emptyTitle}>{strings.devices.emptyTitle}</Text>
                       <Text style={styles.emptyBody}>{strings.devices.emptyBody}</Text>
                     </View>
-                  : devices.map((device, index) => {
-                      const isCurrent = selectedDevice?.deviceId === device.deviceId
-                      const isConnected = isCurrent && connection.phase === 'connected'
-                      const Icon = platformIcon(device.platform)
-                      const status = hostStatus(device, isCurrent, connection.phase, colors, strings)
-                      return (
-                        <GroupRow
-                          key={device.deviceId}
-                          first={index === 0}
-                          icon={Icon}
-                          label={device.name}
-                          detail={`${strings.remoteHosts.remoteTag} · ${platformName(device.platform)}`}
-                          selected={isConnected}
-                          chevron={false}
-                          accessibilityLabel={[device.name, status.label, device.harnessVersion].filter(Boolean).join(', ')}
-                          disabled={busy}
-                          onPress={() => {
-                            if (isConnected) onClose()
-                            else if (device.trusted && device.online) setChosenDevice(device)
-                            else onSelectDevice(device)
-                          }}
-                          accessory={
-                            <View style={styles.trailingGroup}>
-                              <View style={styles.statusLine}>
-                                <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
-                                <Text numberOfLines={1} style={[styles.statusText, isConnected && { color: colors.primary }]}>{status.label}</Text>
-                                <View style={styles.checkSlot}>
-                                  {isConnected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
+                  : visibleDevices.length === 0
+                    ? <View style={styles.emptyState}>
+                        <Text style={styles.emptyTitle}>{remoteHostVisibilityStrings.allHiddenTitle}</Text>
+                        <Text style={styles.emptyBody}>{remoteHostVisibilityStrings.allHiddenManageBody}</Text>
+                      </View>
+                    : visibleDevices.map((device, index) => {
+                        const isCurrent = selectedDevice?.deviceId === device.deviceId
+                        const isConnected = isCurrent && connection.phase === 'connected'
+                        const Icon = platformIcon(device.platform)
+                        const status = hostStatus(device, isCurrent, connection.phase, colors, strings)
+                        return (
+                          <GroupRow
+                            key={device.deviceId}
+                            first={index === 0}
+                            icon={Icon}
+                            label={device.name}
+                            detail={`${strings.remoteHosts.remoteTag} · ${platformName(device.platform)}`}
+                            selected={isConnected}
+                            chevron={false}
+                            accessibilityLabel={[device.name, status.label, device.harnessVersion].filter(Boolean).join(', ')}
+                            disabled={busy}
+                            onPress={() => {
+                              if (isConnected) onClose()
+                              else if (device.trusted && device.online) setChosenDevice(device)
+                              else onSelectDevice(device)
+                            }}
+                            accessory={
+                              <View style={styles.trailingGroup}>
+                                <View style={styles.statusLine}>
+                                  <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
+                                  <Text numberOfLines={1} style={[styles.statusText, isConnected && { color: colors.primary }]}>{status.label}</Text>
+                                  <View style={styles.checkSlot}>
+                                    {isConnected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
+                                  </View>
                                 </View>
+                                {device.harnessVersion ? <Text numberOfLines={1} style={styles.version}>{device.harnessVersion}</Text> : null}
                               </View>
-                              {device.harnessVersion ? <Text numberOfLines={1} style={styles.version}>{device.harnessVersion}</Text> : null}
-                            </View>
-                          }
-                        />
-                      )
-                    })}
+                            }
+                          />
+                        )
+                      })}
               </GroupCard>
               <Text style={styles.hint}>{strings.remoteHosts.singleHostHint}</Text>
             </ScrollView>

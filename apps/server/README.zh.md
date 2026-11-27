@@ -10,7 +10,7 @@
 
 首页地址是 `/`，点击“开始使用”进入登录页；登录成功后进入 `/app/remote` 设备列表。Host 和客户端都填写同一个 Server 地址，并使用相同的账号密码登录。设备凭据由 Server 保存，Web 登录会话使用 HttpOnly Cookie。
 
-设备列表可改动设备名称，也可撤销不再使用的设备（`DELETE /api/v1/account/devices/:id`，需 Web 登录会话）。撤销后该设备立即从列表消失、原有 access/refresh 凭据全部失效，设备记录保留为已撤销状态（同一 `deviceId` 不能再用原密钥或新密钥重新登记）；设备侧收到 `DEVICE_REVOKED` 后会清除本地凭据，重新登录即轮换新身份重新登记。
+设备列表可改动设备名称，也可撤销不再使用的设备（`PATCH` / `DELETE /api/v1/account/devices/:id`，支持 Web 登录会话管理任意设备，或使用已授权 `client` 设备 Bearer 凭据重命名/移除同账号下的 `host` 设备）。撤销后该设备立即从列表消失、原有 access/refresh 凭据全部失效，设备记录保留为已撤销状态（同一 `deviceId` 不能再用原密钥或新密钥重新登记）；设备侧收到 `DEVICE_REVOKED` 后会清除本地凭据，重新登录即轮换新身份重新登记。
 
 ## 刷新响应丢失恢复
 

@@ -27,17 +27,20 @@ type Snapshot = {
   entries: Record<string, BrowseEntry>
   catalogs: Record<string, CatalogSnapshot>
   deletedWorkspaces: Record<string, string[]>
+  hiddenHosts: Record<string, string[]>
   hostModes: Record<string, 'agent' | 'bot'>
   handoffOrigins: Record<string, Record<string, SessionHandoffOrigin>>
   resume: boolean; notifications: boolean; autoConnectHost: boolean
   last?: { scope: string; deviceId: string; sessionId: string }
 }
 type Memory = Snapshot & { ready: boolean; error?: string }
-const empty = (): Snapshot => ({ entries: {}, catalogs: {}, deletedWorkspaces: {}, hostModes: {}, handoffOrigins: {}, resume: false, notifications: true, autoConnectHost: true })
+const empty = (): Snapshot => ({ entries: {}, catalogs: {}, deletedWorkspaces: {}, hiddenHosts: {}, hostModes: {}, handoffOrigins: {}, resume: false, notifications: true, autoConnectHost: true })
 export const useBrowseMemory = create<Memory>(() => ({ ...empty(), ready: false }))
 export const browseScope = (state: {config?: ServerConfig; selectedDevice?: RemoteDevice}): string => JSON.stringify([
   state.config?.baseUrl, state.config?.account, state.selectedDevice?.deviceId, state.selectedDevice?.identityKey,
 ])
+export const hostListScope = (config?: { readonly baseUrl?: string | undefined; readonly account?: string | undefined } | undefined): string =>
+  config?.baseUrl && config?.account ? JSON.stringify([config.baseUrl, config.account]) : ''
 export const browseKey = (scope: string, id: string): string => JSON.stringify([scope, id])
 let key: Uint8Array | undefined
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -50,6 +53,7 @@ const aad = 'dsh-remote-private-browse-v1'
 export const MAX_CACHED_MESSAGES_PER_SESSION = 30
 export const MAX_CACHED_SESSIONS = 10
 const MAX_DELETED_WORKSPACES_PER_SCOPE = 500
+const MAX_HIDDEN_HOSTS_PER_SCOPE = 500
 const MAX_HANDOFF_ORIGINS_PER_SCOPE = 500
 const MAX_TEXT_CHARS = 32768
 
@@ -214,16 +218,24 @@ function handoffOriginEqual(a: SessionHandoffOrigin | undefined, b: SessionHando
     && a.createdAt === b.createdAt
 }
 
-function sanitizeDeletedWorkspaces(value: unknown): Record<string, string[]> {
+function sanitizeScopedStringLists(value: unknown, maxPerScope: number): Record<string, string[]> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const result: Record<string, string[]> = {}
   for (const [scope, items] of Object.entries(value)) {
-    if (!Array.isArray(items)) continue
+    if (!scope || !Array.isArray(items)) continue
     const deduped = [...new Set(items.filter((item): item is string => typeof item === 'string' && item.length > 0))]
-      .slice(-MAX_DELETED_WORKSPACES_PER_SCOPE)
+      .slice(-maxPerScope)
     if (deduped.length > 0) result[scope] = deduped
   }
   return result
+}
+
+function sanitizeDeletedWorkspaces(value: unknown): Record<string, string[]> {
+  return sanitizeScopedStringLists(value, MAX_DELETED_WORKSPACES_PER_SCOPE)
+}
+
+function sanitizeHiddenHosts(value: unknown): Record<string, string[]> {
+  return sanitizeScopedStringLists(value, MAX_HIDDEN_HOSTS_PER_SCOPE)
 }
 
 function sanitizeCatalogSessionIds(value: unknown): string[] | undefined {
@@ -382,6 +394,7 @@ function snapshot(): Snapshot {
     entries: limitedEntries,
     catalogs: state.catalogs,
     deletedWorkspaces: sanitizeDeletedWorkspaces(state.deletedWorkspaces),
+    hiddenHosts: sanitizeHiddenHosts(state.hiddenHosts),
     hostModes: state.hostModes,
     handoffOrigins: sanitizeHandoffOrigins(state.handoffOrigins),
     resume: state.resume,
@@ -424,6 +437,7 @@ export async function hydrateBrowseMemory(): Promise<void> {
       const encrypted = JSON.parse(await FileSystem.readAsStringAsync(file(FileSystem)))
       const data = JSON.parse(new TextDecoder().decode(decryptFrame(key, encrypted, aad))) as Snapshot
       const deletedWorkspaces = sanitizeDeletedWorkspaces(data.deletedWorkspaces)
+      const hiddenHosts = sanitizeHiddenHosts(data.hiddenHosts)
       const handoffOrigins = sanitizeHandoffOrigins(data.handoffOrigins)
       const catalogs = Object.fromEntries(
         Object.entries(data.catalogs ?? {}).map(([scope, catalog]) => [
@@ -440,6 +454,7 @@ export async function hydrateBrowseMemory(): Promise<void> {
         entries: limitedEntries,
         catalogs,
         deletedWorkspaces,
+        hiddenHosts,
         handoffOrigins,
         ready: true,
       })
@@ -491,6 +506,61 @@ export function unmarkDeletedAcpWorkspace(scope: string, backend: AgentBackend, 
   })
   schedule()
 }
+
+/**
+ * Local-only offline host hiding, scoped by `[baseUrl, account]`.
+ * Online or currently selected Hosts are never treated as hidden so a host
+ * coming back online reappears automatically without mutating Server state.
+ */
+export function isHostHidden(
+  device: Pick<RemoteDevice, 'deviceId' | 'online'>,
+  hiddenIds: readonly string[],
+  selectedDeviceId?: string | undefined,
+): boolean {
+  if (device.online || device.deviceId === selectedDeviceId) return false
+  return hiddenIds.includes(device.deviceId)
+}
+
+export function hideOfflineHost(scope: string, deviceId: string): void {
+  if (!scope || !deviceId) return
+  useBrowseMemory.setState(state => {
+    const existing = state.hiddenHosts[scope] ?? []
+    if (existing.includes(deviceId)) return {}
+    const nextList = [...existing, deviceId].slice(-MAX_HIDDEN_HOSTS_PER_SCOPE)
+    return { hiddenHosts: { ...state.hiddenHosts, [scope]: nextList } }
+  })
+  schedule()
+}
+
+export function unhideOfflineHost(scope: string, deviceId: string): void {
+  if (!scope || !deviceId) return
+  useBrowseMemory.setState(state => {
+    const existing = state.hiddenHosts[scope]
+    if (!existing || !existing.includes(deviceId)) return {}
+    const filtered = existing.filter(item => item !== deviceId)
+    const nextHidden = { ...state.hiddenHosts }
+    if (filtered.length === 0) delete nextHidden[scope]
+    else nextHidden[scope] = filtered
+    return { hiddenHosts: nextHidden }
+  })
+  schedule()
+}
+
+export function pruneHiddenOfflineHosts(scope: string, activeDeviceIds: ReadonlySet<string>): void {
+  if (!scope) return
+  useBrowseMemory.setState(state => {
+    const existing = state.hiddenHosts[scope]
+    if (!existing || existing.length === 0) return {}
+    const filtered = existing.filter(item => activeDeviceIds.has(item))
+    if (filtered.length === existing.length) return {}
+    const nextHidden = { ...state.hiddenHosts }
+    if (filtered.length === 0) delete nextHidden[scope]
+    else nextHidden[scope] = filtered
+    return { hiddenHosts: nextHidden }
+  })
+  schedule()
+}
+
 export function saveBrowseCatalog(
   scope: string,
   workspaces: WorkspaceView[],
