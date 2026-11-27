@@ -1,3 +1,4 @@
+import type { Translate } from './client-locale.js'
 import type { StatusFeed } from './status-stream.js'
 import { CONTROL_RPC_PREFIX } from './control-route.js'
 
@@ -10,8 +11,8 @@ export interface UploadService {
 }
 
 export function installRemoteUploadCarrier(service: UploadService,
-  feed: Pick<StatusFeed<{ mode: string; controlUnavailable?: boolean }>, 'subscribe'>, original: Fetch, baseUrl: string): () => void {
-  const upload = createRemoteUploadFetch(original, baseUrl)
+  feed: Pick<StatusFeed<{ mode: string; controlUnavailable?: boolean }>, 'subscribe'>, original: Fetch, baseUrl: string, t?: Translate): () => void {
+  const upload = createRemoteUploadFetch(original, baseUrl, t)
   let previous: UploadService['post'] | undefined
   const post: UploadService['post'] = async request => {
     const response = await upload(request.path, { method: 'POST', body: request.body, headers: request.headers,
@@ -33,7 +34,7 @@ export function installRemoteUploadCarrier(service: UploadService,
   return () => { unsubscribe(); restore() }
 }
 
-export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch {
+export function createRemoteUploadFetch(original: Fetch, baseUrl: string, t?: Translate): Fetch {
   let sequence = 0
   const control = async (method: string, payload: unknown, signal: AbortSignal) => {
     const rpcId = `remote-upload-${++sequence}`
@@ -42,8 +43,14 @@ export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch
       body: JSON.stringify({ type: 'client-request', rpcId, method, payload }), signal,
     })
     if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`)
-    const envelope = await response.json() as { type?: string; rpcId?: string; result?: { ok?: boolean; value?: unknown; error?: { message?: string } } }
+    const envelope = await response.json() as { type?: string; rpcId?: string; result?: { ok?: boolean; value?: unknown; error?: { message?: string; details?: { uploadLimitBytes?: number; relay?: boolean } } } }
     if (envelope.type !== 'server-response' || envelope.rpcId !== rpcId || envelope.result?.ok !== true) {
+      const details = envelope.result?.error?.details
+      const bytes = details?.uploadLimitBytes
+      if (t && envelope.rpcId === rpcId && typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes > 0) {
+        const size = bytes === 1024 ** 3 ? '1 GiB' : `${bytes / 1024 ** 2} MiB`
+        throw new Error(t(details?.relay ? 'relayUploadTooLarge' : 'uploadTooLarge', { size }))
+      }
       throw new Error(envelope.result?.error?.message ?? 'Remote upload requires an updated Host plugin.')
     }
     return envelope.result.value

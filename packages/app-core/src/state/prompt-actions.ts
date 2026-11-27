@@ -143,6 +143,8 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         // Retry material travels with the row (not a module map) so image rows
         // stay resendable across reconnects and cannot leak after cleanup.
         promptImages: images,
+        ...(!runningAtSend && (session.backend === undefined || session.backend === 'harness')
+          ? { submittedWhileIdle: true } : {}),
       }
       set(state => ({
         messages: {

@@ -12,8 +12,13 @@ import { useSessionUiArtifacts } from './use-session-ui-artifacts'
 const parseBlocksForChunk = (text: string) => parseMarkdownBlocks(text)
 
 export function useChatTranscript({ session, sessions, messages, hostId }: { session: RemoteSession | undefined; sessions: RemoteSession[]; messages: ChatItem[]; hostId: string | undefined }) {
+  // An idle submission can briefly appear in next-turn before the Host claims it.
+  const idleSubmissionIds = useMemo(() => new Set(session?.running === true ? [] : messages.flatMap(item =>
+    item.kind === 'message' && item.submittedWhileIdle && item.requestRpcId !== undefined ? [item.requestRpcId] : [])),
+  [messages, session?.running])
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
-    item.kind !== 'message' || (item.role !== 'system' && !item.context && !item.usageOnly && item.sendState !== 'queued'
+    item.kind !== 'message' || (item.role !== 'system' && !item.context && !item.usageOnly && (item.sendState !== 'queued'
+      || (item.requestRpcId !== undefined && idleSubmissionIds.has(item.requestRpcId)))
       && (
         hasVisibleMessageText(item.text)
         || hasVisibleMessageText(item.reasoning ?? '')
@@ -21,7 +26,7 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
         || (item.files?.length ?? 0) > 0
         // Output-less failure turns keep an empty assistant row carrying only the
         // turnEnd reason — it must stay visible so the failure is explainable.
-        || item.turnEnd !== undefined))), [messages, session?.backend])
+        || item.turnEnd !== undefined))), [messages, session?.backend, idleSubmissionIds])
   const turnUsageByTurn = useMemo(() => aggregateTurnUsageByTurn(messages), [messages])
   // Feed the previous list back so untouched groups keep their identity; the
   // streaming delta then only rebuilds the group that actually changed.
@@ -80,8 +85,10 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
   const inboxProjection = (session?.projections?.values as Record<string, unknown> | undefined)?.inbox
   const queueItems = useMemo(() => {
     const inboxItems = inboxProjection === undefined ? [] : inboxQueuedItems(inboxProjection)
+      .filter(item => item.rpcId === undefined || !idleSubmissionIds.has(item.rpcId))
     const adopted = inboxRpcIds(inboxProjection)
     const pending = messages.flatMap(item => item.kind === 'message' && item.role === 'user' && item.sendState === 'queued'
+      && (item.requestRpcId === undefined || !idleSubmissionIds.has(item.requestRpcId))
       && item.queuedAdopted !== true
       && (item.requestRpcId === undefined || !adopted.has(item.requestRpcId)) ? [{ preview: item.text }] : [])
     // Union (the official QueueDock's pendingQueue behaviour): inbox rows are
@@ -89,7 +96,7 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
     // lag window, so a queued prompt is never invisible on both ends. Only
     // inbox rows carry the host item id needed for queue actions.
     return [...inboxItems, ...pending]
-  }, [inboxProjection, messages])
+  }, [inboxProjection, messages, idleSubmissionIds])
   // Fork ancestry does not make a conversation a subagent child.
   const childSessions = useMemo(
     () => sessions.filter(item => isSubagentSession(item) && item.parentSessionId === session?.sessionId),

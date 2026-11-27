@@ -1,3 +1,4 @@
+import { strings } from '../locales/i18n'
 import { ChatImageView } from './chat-image'
 import { chatImageWorkspacePath, markdownImageSource } from '../services/chat-image-loader'
 import { createContext, memo, useContext, useMemo, useRef, useState } from 'react'
@@ -714,7 +715,7 @@ function renderListItem(
           <View
             accessibilityRole="checkbox"
             accessibilityState={{ checked: true, disabled: true }}
-            accessibilityLabel="已完成"
+            accessibilityLabel={strings.common.taskComplete}
             style={[styles.checkboxChecked, { backgroundColor: colors.primary }]}
           >
             <Svg width={10} height={10} viewBox="0 0 16 16" fill="none">
@@ -725,7 +726,7 @@ function renderListItem(
           <View
             accessibilityRole="checkbox"
             accessibilityState={{ checked: false, disabled: true }}
-            accessibilityLabel="未完成"
+            accessibilityLabel={strings.common.taskIncomplete}
             style={[styles.checkboxUnchecked, { borderColor: colors.subtle }]}
           />
         )

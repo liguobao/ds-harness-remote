@@ -2,6 +2,8 @@
 export const localeNamespace = 'ds-harness-remote'
 
 export const en = {
+  uploadTooLarge: 'The file exceeds the current upload limit of {size}.',
+  relayUploadTooLarge: 'The file exceeds the current upload limit of {size}. Relay and TURN allow 20 MiB per file, or 100 MiB on connections with member upload support.',
   serverSavedLive: 'Server address saved and applied.',
   saveServerBeforeLogin: 'Save the Server address before continuing sign-in or pairing.',
   pairingLoginTab: 'DSH Go',
@@ -406,6 +408,8 @@ export const en = {
 } as const
 
 export const zh: Record<keyof typeof en, string> = {
+  uploadTooLarge: '文件超过当前连接的单文件上传上限（{size}）。',
+  relayUploadTooLarge: '文件超过当前连接的单文件上传上限（{size}）。Relay 和 TURN 上传时，普通用户每个文件最多 20 MiB，支持会员额度的连接最多 100 MiB。',
   serverSavedLive: '服务器地址已保存并生效。',
   saveServerBeforeLogin: '请先保存服务器地址，再继续登录或配对。',
   pairingLoginTab: 'DSH Go',
@@ -810,6 +814,8 @@ export const zh: Record<keyof typeof en, string> = {
 }
 
 export const ru: Record<keyof typeof en, string> = {
+  uploadTooLarge: 'Файл превышает текущий лимит загрузки ({size}).',
+  relayUploadTooLarge: 'Файл превышает текущий лимит загрузки ({size}). Через Relay и TURN лимит составляет 20 МиБ на файл или 100 МиБ, если соединение поддерживает лимит подписки.',
   serverSavedLive: 'Адрес сервера сохранён и применён.',
   saveServerBeforeLogin: 'Сохраните адрес сервера, прежде чем продолжить вход или сопряжение.',
   pairingLoginTab: 'DSH Go',
@@ -1214,6 +1220,8 @@ export const ru: Record<keyof typeof en, string> = {
 }
 
 export const uk: Record<keyof typeof en, string> = {
+  uploadTooLarge: 'Файл перевищує поточний ліміт завантаження ({size}).',
+  relayUploadTooLarge: 'Файл перевищує поточний ліміт завантаження ({size}). Через Relay і TURN ліміт становить 20 МіБ на файл або 100 МіБ, якщо з’єднання підтримує ліміт передплати.',
   serverSavedLive: 'Адресу сервера збережено й застосовано.',
   saveServerBeforeLogin: 'Збережіть адресу сервера, перш ніж продовжити вхід або спарювання.',
   pairingLoginTab: 'DSH Go',

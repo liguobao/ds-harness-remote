@@ -668,11 +668,15 @@ const ukUA = {
     "right": "Праворуч",
     "backspace": "Backspace"
 },
+  dshWeb: {
+    open: 'Відкрити DSH Web', verifying: 'Перевіряємо доступ і завантажуємо сторінку…', connecting: 'Підключаємося до DSH Web…',
+  },
   common: {
+    taskComplete: 'Виконано', taskIncomplete: 'Не виконано',
     back: 'Назад', retry: 'Повторити', close: 'Закрити', cancel: 'Скасувати', refresh: 'Оновити', delete: 'Видалити', unavailable: 'Недоступно', unknown: 'Невідомо',
   },
   app: {
-    credit: 'Power By Github/liguobao',
+    credit: 'За підтримки GitHub/liguobao',
     oauthCancelled: 'Авторизацію не завершено. Спробуйте ще раз.', oauthInvalid: 'Ваші дані входу більше не дійсні. Увійдіть знову.',
     loadingTagline: 'Підключіться один раз. Працюйте, коли зручно.', loadingIdentity: 'Підготовка захищеного ідентифікатора…', bootFailed: 'Не вдалося запустити DSH Remote', secureStorageUnavailable: 'Захищені дані на цьому телефоні тимчасово недоступні. Спробуйте ще раз.',
     deviceUnavailable: 'Не вдалося знайти цей пристрій', deviceNoLongerTrusted: 'Можливо, його видалено або з нього виконано вихід з поточного облікового запису.', backToDevices: 'До пристроїв',

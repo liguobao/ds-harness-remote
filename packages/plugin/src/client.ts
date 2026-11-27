@@ -428,7 +428,7 @@ window.__ModuleLoader__.load({
       ctx.inject(['fileUpload'], uploadContext => {
         const service = uploadContext.get<UploadService>('fileUpload')
         if (service === undefined || isHostcTunnel || typeof originalPluginFetch !== 'function') return
-        uploadContext.effect(() => installRemoteUploadCarrier(service, statusFeed, originalPluginFetch.bind(window), document.baseURI),
+        uploadContext.effect(() => installRemoteUploadCarrier(service, statusFeed, originalPluginFetch.bind(window), document.baseURI, t),
           'ds-harness-remote: attachment upload carrier')
       })
       ctx.effect(() => () => statusFeed.close(), 'ds-harness-remote: status stream')

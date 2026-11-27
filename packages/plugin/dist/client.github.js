@@ -1624,8 +1624,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
 
   // packages/plugin/src/remote-upload-client.ts
   var REMOTE_UPLOAD_MAX_BYTES = 192 * 1024 * 1024;
-  function installRemoteUploadCarrier(service, feed, original, baseUrl) {
-    let upload = createRemoteUploadFetch(original, baseUrl), previous, post = async (request) => {
+  function installRemoteUploadCarrier(service, feed, original, baseUrl, t) {
+    let upload = createRemoteUploadFetch(original, baseUrl, t), previous, post = async (request) => {
       let response = await upload(request.path, {
         method: "POST",
         body: request.body,
@@ -1643,7 +1643,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       unsubscribe(), restore();
     };
   }
-  function createRemoteUploadFetch(original, baseUrl) {
+  function createRemoteUploadFetch(original, baseUrl, t) {
     let sequence = 0, control = async (method, payload, signal) => {
       let rpcId = `remote-upload-${++sequence}`, response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
         method: "POST",
@@ -1654,8 +1654,14 @@ Minimum version required to store current data is: ` + bestVersion + `.
       });
       if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`);
       let envelope = await response.json();
-      if (envelope.type !== "server-response" || envelope.rpcId !== rpcId || envelope.result?.ok !== !0)
+      if (envelope.type !== "server-response" || envelope.rpcId !== rpcId || envelope.result?.ok !== !0) {
+        let details = envelope.result?.error?.details, bytes = details?.uploadLimitBytes;
+        if (t && envelope.rpcId === rpcId && typeof bytes == "number" && Number.isSafeInteger(bytes) && bytes > 0) {
+          let size = bytes === 1073741824 ? "1 GiB" : `${bytes / 1048576} MiB`;
+          throw new Error(t(details?.relay ? "relayUploadTooLarge" : "uploadTooLarge", { size }));
+        }
         throw new Error(envelope.result?.error?.message ?? "Remote upload requires an updated Host plugin.");
+      }
       return envelope.result.value;
     };
     return async (input, init) => {
@@ -1717,6 +1723,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
 
   // packages/plugin/src/client-locale.ts
   var localeNamespace = "ds-harness-remote", en = {
+    uploadTooLarge: "The file exceeds the current upload limit of {size}.",
+    relayUploadTooLarge: "The file exceeds the current upload limit of {size}. Relay and TURN allow 20 MiB per file, or 100 MiB on connections with member upload support.",
     serverSavedLive: "Server address saved and applied.",
     saveServerBeforeLogin: "Save the Server address before continuing sign-in or pairing.",
     pairingLoginTab: "DSH Go",
@@ -2121,6 +2129,8 @@ If a code was sent, recover the original submission without changing it.`,
     kimiVirtualWorkspace: "Kimi virtual workspace",
     codexVirtualSessions: "Sessions"
   }, zh = {
+    uploadTooLarge: "\u6587\u4EF6\u8D85\u8FC7\u5F53\u524D\u8FDE\u63A5\u7684\u5355\u6587\u4EF6\u4E0A\u4F20\u4E0A\u9650\uFF08{size}\uFF09\u3002",
+    relayUploadTooLarge: "\u6587\u4EF6\u8D85\u8FC7\u5F53\u524D\u8FDE\u63A5\u7684\u5355\u6587\u4EF6\u4E0A\u4F20\u4E0A\u9650\uFF08{size}\uFF09\u3002Relay \u548C TURN \u4E0A\u4F20\u65F6\uFF0C\u666E\u901A\u7528\u6237\u6BCF\u4E2A\u6587\u4EF6\u6700\u591A 20 MiB\uFF0C\u652F\u6301\u4F1A\u5458\u989D\u5EA6\u7684\u8FDE\u63A5\u6700\u591A 100 MiB\u3002",
     serverSavedLive: "\u670D\u52A1\u5668\u5730\u5740\u5DF2\u4FDD\u5B58\u5E76\u751F\u6548\u3002",
     saveServerBeforeLogin: "\u8BF7\u5148\u4FDD\u5B58\u670D\u52A1\u5668\u5730\u5740\uFF0C\u518D\u7EE7\u7EED\u767B\u5F55\u6216\u914D\u5BF9\u3002",
     pairingLoginTab: "DSH Go",
@@ -2525,6 +2535,8 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     kimiVirtualWorkspace: "Kimi \u5DE5\u4F5C\u533A",
     codexVirtualSessions: "Sessions"
   }, ru = {
+    uploadTooLarge: "\u0424\u0430\u0439\u043B \u043F\u0440\u0435\u0432\u044B\u0448\u0430\u0435\u0442 \u0442\u0435\u043A\u0443\u0449\u0438\u0439 \u043B\u0438\u043C\u0438\u0442 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 ({size}).",
+    relayUploadTooLarge: "\u0424\u0430\u0439\u043B \u043F\u0440\u0435\u0432\u044B\u0448\u0430\u0435\u0442 \u0442\u0435\u043A\u0443\u0449\u0438\u0439 \u043B\u0438\u043C\u0438\u0442 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 ({size}). \u0427\u0435\u0440\u0435\u0437 Relay \u0438 TURN \u043B\u0438\u043C\u0438\u0442 \u0441\u043E\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u0442 20 \u041C\u0438\u0411 \u043D\u0430 \u0444\u0430\u0439\u043B \u0438\u043B\u0438 100 \u041C\u0438\u0411, \u0435\u0441\u043B\u0438 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442 \u043B\u0438\u043C\u0438\u0442 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438.",
     serverSavedLive: "\u0410\u0434\u0440\u0435\u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D \u0438 \u043F\u0440\u0438\u043C\u0435\u043D\u0451\u043D.",
     saveServerBeforeLogin: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u0435 \u0430\u0434\u0440\u0435\u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u0440\u043E\u0434\u043E\u043B\u0436\u0438\u0442\u044C \u0432\u0445\u043E\u0434 \u0438\u043B\u0438 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435.",
     pairingLoginTab: "DSH Go",
@@ -2929,6 +2941,8 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     kimiVirtualWorkspace: "\u0412\u0438\u0440\u0442\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0440\u0430\u0431\u043E\u0447\u0430\u044F \u043E\u0431\u043B\u0430\u0441\u0442\u044C Kimi",
     codexVirtualSessions: "\u0421\u0435\u0441\u0441\u0438\u0438"
   }, uk = {
+    uploadTooLarge: "\u0424\u0430\u0439\u043B \u043F\u0435\u0440\u0435\u0432\u0438\u0449\u0443\u0454 \u043F\u043E\u0442\u043E\u0447\u043D\u0438\u0439 \u043B\u0456\u043C\u0456\u0442 \u0437\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0435\u043D\u043D\u044F ({size}).",
+    relayUploadTooLarge: "\u0424\u0430\u0439\u043B \u043F\u0435\u0440\u0435\u0432\u0438\u0449\u0443\u0454 \u043F\u043E\u0442\u043E\u0447\u043D\u0438\u0439 \u043B\u0456\u043C\u0456\u0442 \u0437\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0435\u043D\u043D\u044F ({size}). \u0427\u0435\u0440\u0435\u0437 Relay \u0456 TURN \u043B\u0456\u043C\u0456\u0442 \u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C 20 \u041C\u0456\u0411 \u043D\u0430 \u0444\u0430\u0439\u043B \u0430\u0431\u043E 100 \u041C\u0456\u0411, \u044F\u043A\u0449\u043E \u0437\u2019\u0454\u0434\u043D\u0430\u043D\u043D\u044F \u043F\u0456\u0434\u0442\u0440\u0438\u043C\u0443\u0454 \u043B\u0456\u043C\u0456\u0442 \u043F\u0435\u0440\u0435\u0434\u043F\u043B\u0430\u0442\u0438.",
     serverSavedLive: "\u0410\u0434\u0440\u0435\u0441\u0443 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0437\u0431\u0435\u0440\u0435\u0436\u0435\u043D\u043E \u0439 \u0437\u0430\u0441\u0442\u043E\u0441\u043E\u0432\u0430\u043D\u043E.",
     saveServerBeforeLogin: "\u0417\u0431\u0435\u0440\u0435\u0436\u0456\u0442\u044C \u0430\u0434\u0440\u0435\u0441\u0443 \u0441\u0435\u0440\u0432\u0435\u0440\u0430, \u043F\u0435\u0440\u0448 \u043D\u0456\u0436 \u043F\u0440\u043E\u0434\u043E\u0432\u0436\u0438\u0442\u0438 \u0432\u0445\u0456\u0434 \u0430\u0431\u043E \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F.",
     pairingLoginTab: "DSH Go",
@@ -7939,7 +7953,7 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
         ctx.inject(["fileUpload"], (uploadContext) => {
           let service = uploadContext.get("fileUpload");
           service === void 0 || isHostcTunnel || typeof originalPluginFetch != "function" || uploadContext.effect(
-            () => installRemoteUploadCarrier(service, statusFeed, originalPluginFetch.bind(window), document.baseURI),
+            () => installRemoteUploadCarrier(service, statusFeed, originalPluginFetch.bind(window), document.baseURI, t),
             "ds-harness-remote: attachment upload carrier"
           );
         }), ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream"), ctx.effect(() => {

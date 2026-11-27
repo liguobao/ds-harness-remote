@@ -665,11 +665,15 @@ const ruRU = {
     "right": "Вправо",
     "backspace": "Backspace"
 },
+  dshWeb: {
+    open: 'Открыть DSH Web', verifying: 'Проверяем доступ и загружаем страницу…', connecting: 'Подключаемся к DSH Web…',
+  },
   common: {
+    taskComplete: 'Выполнено', taskIncomplete: 'Не выполнено',
     back: 'Назад', retry: 'Повторить', close: 'Закрыть', cancel: 'Отмена', refresh: 'Обновить', delete: 'Удалить', unavailable: 'Недоступно', unknown: 'Неизвестно',
   },
   app: {
-    credit: 'Power By Github/liguobao',
+    credit: 'При поддержке GitHub/liguobao',
     oauthCancelled: 'Авторизация не завершена. Повторите попытку.', oauthInvalid: 'Данные для входа больше недействительны. Войдите снова.',
     loadingTagline: 'Подключитесь один раз — и всё готово, когда нужно.', loadingIdentity: 'Подготовка защищённого идентификатора…', bootFailed: 'Не удалось запустить DSH Remote', secureStorageUnavailable: 'Защищённые данные на этом телефоне временно недоступны. Повторите попытку.',
     deviceUnavailable: 'Устройство не найдено', deviceNoLongerTrusted: 'Возможно, оно удалено или вышло из текущего аккаунта.', backToDevices: 'К устройствам',

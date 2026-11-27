@@ -308,6 +308,8 @@ export interface ChatMessage extends ChatItemBase {
   sendState?: 'queued' | 'failed' | 'unconfirmed' | 'canceled'
   /** Human-readable delivery failure reason kept on the row (single error surface). */
   sendError?: string
+  /** Local Harness submission optimistically placed in the idle transcript. */
+  submittedWhileIdle?: boolean
   /** The Host inbox adopted this local prompt — it must never re-enter the local queue fallback. */
   queuedAdopted?: boolean
   /** Original prompt image payloads kept for retries (the row's `images` are display-only). */

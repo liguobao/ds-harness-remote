@@ -657,11 +657,15 @@ const enUS = {
     "right": "Right",
     "backspace": "Backspace"
 },
+  dshWeb: {
+    open: 'Open DSH Web', verifying: 'Verifying access and loading the page…', connecting: 'Establishing the DSH Web connection…',
+  },
   common: {
+    taskComplete: 'Completed', taskIncomplete: 'Incomplete',
     back: 'Back', retry: 'Retry', close: 'Close', cancel: 'Cancel', refresh: 'Refresh', delete: 'Delete', unavailable: 'Unavailable', unknown: 'Unknown',
   },
   app: {
-    credit: 'Power By Github/liguobao',
+    credit: 'Powered by GitHub/liguobao',
     oauthCancelled: 'Authorization was not completed. Please try again.', oauthInvalid: 'Your sign-in information is no longer valid. Please sign in again.',
     loadingTagline: 'Connect once. Ready whenever you are.', loadingIdentity: 'Preparing secure identity…', bootFailed: 'DSH Remote could not start', secureStorageUnavailable: 'Secure data on this phone is temporarily unavailable. Please try again.',
     deviceUnavailable: 'This device could not be found', deviceNoLongerTrusted: 'It may have been removed or signed out of the current account.', backToDevices: 'Back to devices',

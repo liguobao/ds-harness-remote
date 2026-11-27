@@ -2466,7 +2466,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
           <Pressable
             style={StyleSheet.absoluteFill}
             accessibilityRole="button"
-            accessibilityLabel="Close view options"
+            accessibilityLabel={strings.common.close}
             onPress={closeConfig}
           />
           {/* 浮窗内容：位于遮罩之上，点击不会穿透 */}

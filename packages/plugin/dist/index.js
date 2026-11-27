@@ -73354,6 +73354,13 @@ var ClientModeError = class extends Error {
     this.retryable = retryable;
   }
 };
+var UploadSizeError = class extends ClientModeError {
+  constructor(limitBytes, relay, message) {
+    super("INVALID_MESSAGE", message);
+    this.limitBytes = limitBytes;
+    this.relay = relay;
+  }
+};
 function assertAuthorizedHost(listed, descriptor) {
   if (descriptor.role !== "host" || descriptor.deviceId !== listed.deviceId || descriptor.membershipId !== listed.membershipId) {
     throw new ClientModeError("PEER_IDENTITY_MISMATCH", "Server Host details do not match the authorized device list.");
@@ -73409,6 +73416,7 @@ function fail2(error62) {
       message: source?.message ?? "The remote-mode operation failed.",
       details: {
         ...remoteCode === void 0 ? {} : { remoteCode, retryable },
+        ...source instanceof UploadSizeError ? { uploadLimitBytes: source.limitBytes, relay: source.relay } : {},
         ...source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}
       }
     }
@@ -91731,7 +91739,7 @@ var ClientModeRuntime = class {
         if (!oversized) return;
         const size2 = limit === 1024 ** 3 ? "1 GiB" : `${limit / 1024 ** 2} MiB`;
         const tiers = mode2 === "Relay" || mode2 === "TURN" ? " Relay and TURN allow 20 MiB per file, or 100 MiB on connections with member upload support." : "";
-        throw new ClientModeError("INVALID_MESSAGE", `The file exceeds the current upload limit of ${size2}.${tiers}`);
+        throw new UploadSizeError(limit, mode2 === "Relay" || mode2 === "TURN", `The file exceeds the current upload limit of ${size2}.${tiers}`);
       };
       checkSize(data2.length > Math.ceil(limit / 3) * 4);
       const assertCurrent = () => {

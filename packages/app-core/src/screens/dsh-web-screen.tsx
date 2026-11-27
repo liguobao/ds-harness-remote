@@ -1,3 +1,4 @@
+import { strings } from '../locales/i18n'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Modal, Platform, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -162,13 +163,13 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
         </form><script>document.forms[0].submit()</script>`,
     }
   }, [grant, grantUrl])
-  const openTitle = chinese ? '打开 DSH Web' : 'Open DSH Web'
+  const openTitle = strings.dshWeb.open
   const title = loaded && !failed && grant
     ? `${hostName} · ${'close' in grant ? 'LAN' : 'CF Worker'}`
     : openTitle
   const loadingMessage = grant
-    ? (chinese ? '正在验证访问并加载页面…' : 'Verifying access and loading the page…')
-    : (chinese ? '正在建立 DSH Web 连接…' : 'Establishing the DSH Web connection…')
+    ? strings.dshWeb.verifying
+    : strings.dshWeb.connecting
   return (
     <Modal visible onRequestClose={onClose} animationType="slide">
       <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]}>

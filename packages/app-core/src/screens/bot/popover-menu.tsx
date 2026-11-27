@@ -1,3 +1,4 @@
+import { strings } from '../../locales/i18n'
 import { useEffect, useRef } from 'react'
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { LucideIcon } from 'lucide-react-native'
@@ -66,7 +67,7 @@ export function BotFloatingPopover({
   return (
     <Modal transparent visible animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.overlay}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Dismiss menu" />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={strings.common.close} />
         <Animated.View
           style={[
             styles.card,

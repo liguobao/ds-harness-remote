@@ -26,7 +26,7 @@ import type {
   RemoteWorkspaceSelection,
   RemoteWorkspaceView,
 } from './client-runtime-contract.js'
-import { ClientModeError, HOST_AUTHORIZATION_ERRORS, record, shortId } from './client-runtime-contract.js'
+import { ClientModeError, UploadSizeError, HOST_AUTHORIZATION_ERRORS, record, shortId } from './client-runtime-contract.js'
 import {
   readRemoteWorkspaceBaseline,
   remoteWorkspaceTitle,
@@ -905,7 +905,7 @@ export class ClientModeRuntime {
         const size = limit === 1024 ** 3 ? '1 GiB' : `${limit / 1024 ** 2} MiB`
         const tiers = mode === 'Relay' || mode === 'TURN'
           ? ' Relay and TURN allow 20 MiB per file, or 100 MiB on connections with member upload support.' : ''
-        throw new ClientModeError('INVALID_MESSAGE', `The file exceeds the current upload limit of ${size}.${tiers}`)
+        throw new UploadSizeError(limit, mode === 'Relay' || mode === 'TURN', `The file exceeds the current upload limit of ${size}.${tiers}`)
       }
       checkSize(data.length > Math.ceil(limit / 3) * 4)
       const assertCurrent = () => {

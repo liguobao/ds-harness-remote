@@ -655,11 +655,15 @@ const zhCN = {
     "right": "右",
     "backspace": "退格"
 },
+  dshWeb: {
+    open: '打开 DSH Web', verifying: '正在验证访问并加载页面…', connecting: '正在建立 DSH Web 连接…',
+  },
   common: {
+    taskComplete: '已完成', taskIncomplete: '未完成',
     back: '返回', retry: '重试', close: '关闭', cancel: '取消', refresh: '刷新', delete: '删除', unavailable: '不可用', unknown: '未知',
   },
   app: {
-    credit: 'Power By Github/liguobao',
+    credit: '由 GitHub/liguobao 提供支持',
     oauthCancelled: '未完成授权，请再试一次。', oauthInvalid: '登录信息已失效，请重新登录。',
     loadingTagline: '随时随地开始你的工作。', loadingIdentity: '正在准备安全身份…', bootFailed: 'DSH Remote 无法启动', secureStorageUnavailable: '暂时无法读取此手机的安全数据，请重试。',
     deviceUnavailable: '找不到这台设备', deviceNoLongerTrusted: '它可能已被移除或退出当前账号。', backToDevices: '返回设备列表',

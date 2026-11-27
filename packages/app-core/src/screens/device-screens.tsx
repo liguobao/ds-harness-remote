@@ -284,8 +284,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces, on
   const reconnect = useAppStore(state => state.reconnect)
   const [renaming, setRenaming] = useState(false)
   const [connectionExpanded, setConnectionExpanded] = useState(false)
-  const language = useAppStore(state => state.language)
-  const dshWebLabel = language?.startsWith('zh') ? '打开 DSH Web' : 'Open DSH Web'
+  useAppStore(state => state.language)
   const [webRpc, setWebRpc] = useState<ReturnType<typeof requireConnectionRpc>>()
   const isSelected = selected?.deviceId === device.deviceId
   const isConnected = isSelected && connection.phase === 'connected'
@@ -356,7 +355,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces, on
                         )}
                         {webAvailable && (
                           <Button
-                            label={dshWebLabel}
+                            label={zhCN.dshWeb.open}
                             variant={onWorkspaces !== undefined ? 'secondary' : 'primary'}
                             onPress={() => setWebRpc((current: ReturnType<typeof requireConnectionRpc> | undefined) => current ?? requireConnectionRpc())}
                           />

@@ -179,6 +179,12 @@ export class ClientModeError extends Error {
   constructor(readonly code: string, message: string, readonly retryable = false) { super(message) }
 }
 
+export class UploadSizeError extends ClientModeError {
+  constructor(readonly limitBytes: number, readonly relay: boolean, message: string) {
+    super('INVALID_MESSAGE', message)
+  }
+}
+
 export function assertAuthorizedHost(listed: ServerHostDevice, descriptor: AuthorizedPeerDevice): void {
   if (descriptor.role !== 'host' || descriptor.deviceId !== listed.deviceId
     || descriptor.membershipId !== listed.membershipId) {
@@ -246,6 +252,7 @@ export function fail(error: unknown): ControlResult<unknown> {
       message: source?.message ?? 'The remote-mode operation failed.',
       details: {
         ...(remoteCode === undefined ? {} : { remoteCode, retryable }),
+        ...(source instanceof UploadSizeError ? { uploadLimitBytes: source.limitBytes, relay: source.relay } : {}),
         ...(source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}),
       },
     },

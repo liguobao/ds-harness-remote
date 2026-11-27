@@ -614,11 +614,11 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
 
 
           <View style={styles.loginFooter}>
-            <Pressable accessibilityRole="link" accessibilityLabel="GitHub/liguobao"
+            <Pressable accessibilityRole="link" accessibilityLabel={zhCN.app.credit}
               onPress={() => void Linking.openURL('https://github.com/liguobao').catch(() => {
                 Alert.alert(zhCN.settings.linkFailedTitle, zhCN.settings.linkFailedBody)
               })} style={styles.loginCreditLink}>
-              <Text style={styles.loginCredit}>Powered by <Text style={styles.loginCreditName}>GitHub/liguobao</Text></Text>
+              <Text style={styles.loginCreditName}>{zhCN.app.credit}</Text>
             </Pressable>
           </View>
         </Screen>
@@ -2014,7 +2014,6 @@ function createStyles(colors: ThemeColors) {
   textLinkLabel: { ...type.smallStrong, color: colors.primary },
   textLinkDisabled: { opacity: 0.5 },
   loginFooter: { marginTop: 'auto', paddingTop: spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  loginCredit: { ...type.caption, color: colors.muted },
   loginCreditLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.xs },
   loginCreditName: { ...type.caption, color: colors.primary, textDecorationLine: 'underline' },
   lead: { ...type.body, color: colors.muted, marginTop: spacing.sm },
