@@ -10,7 +10,7 @@ import { ForegroundConnectionRecovery } from '../src/services/connection-recover
 
 const { proxy, transport, storage, authenticate, acp, codex, botDispatch, network } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(), sessionSelectModel: vi.fn(),
-    agentPresetList: vi.fn(), agentPresetSelect: vi.fn(), sessionCancel: vi.fn(),
+    agentPresetList: vi.fn(), agentPresetSelect: vi.fn(), agentTeamSetEnabled: vi.fn(), sessionCancel: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), getNetworkDetails: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn(), requireSessionTools: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), setMode: vi.fn(), selectPermission: vi.fn(), archiveSession: vi.fn(), createSession: vi.fn() },
@@ -3169,6 +3169,115 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
           } finally {
             await useAppStore.getState().setOffline()
             vi.useRealTimers()
+          }
+        },
+      },
+    ], prepareScenario1)
+  })
+})
+
+describe('Agent team toggle state machine', () => {
+  it('toggles agentTeam on native Harness root sessions, rejects non-harness/subagent, and guards races', async () => {
+    await runScenarios([
+      {
+        name: 'enables and preserves existing team members/tasks/failure on native Harness root session',
+        run: async () => {
+          const existingTeam = {
+            id: 'team-1',
+            enabled: false,
+            members: [{ id: 'm1', name: 'helper' }],
+            tasks: [{ id: 't1', revision: 1, subject: 'Audit', description: 'Check', status: 'pending', blockedBy: [], writeScopes: [] }],
+            failure: 'previous warning',
+          }
+          const initial: RemoteSession = {
+            ...session,
+            projections: { values: { permissions: { currentValue: 'default' }, agentTeam: existingTeam } },
+          }
+          useAppStore.setState({ selectedSession: initial, sessions: [initial] })
+          proxy.agentTeamSetEnabled.mockResolvedValueOnce(undefined)
+
+          expect(await useAppStore.getState().setAgentTeamEnabled(true)).toBe(true)
+          expect(proxy.agentTeamSetEnabled).toHaveBeenCalledWith('s1', true)
+          expect(useAppStore.getState().agentTeamToggling).toBe(false)
+          expect(useAppStore.getState().error).toBeUndefined()
+          expect(useAppStore.getState().selectedSession?.projections?.values?.agentTeam).toEqual({
+            ...existingTeam,
+            enabled: true,
+          })
+          expect(useAppStore.getState().sessions[0]?.projections?.values?.agentTeam).toEqual({
+            ...existingTeam,
+            enabled: true,
+          })
+        },
+      },
+      {
+        name: 'rejects codex, ACP, and subagent sessions without calling Host RPC',
+        run: async () => {
+          const targets: RemoteSession[] = [
+            { ...session, sessionId: 'codex:t1', backend: 'codex' },
+            { ...session, sessionId: 'claude:c1', backend: 'claude' },
+            { ...session, sessionId: 'sub-1', parentSessionId: 's1', origin: 'subagent' },
+          ]
+          for (const target of targets) {
+            useAppStore.setState({ selectedSession: target, sessions: [target] })
+            expect(await useAppStore.getState().setAgentTeamEnabled(true)).toBe(false)
+          }
+          expect(proxy.agentTeamSetEnabled).not.toHaveBeenCalled()
+        },
+      },
+      {
+        name: 'fails closed on RPC error without mutating local state and clears agentTeamToggling',
+        run: async () => {
+          for (const code of ['METHOD_NOT_ALLOWED', 'gateway/invocation-unavailable']) {
+            const initial: RemoteSession = {
+              ...session,
+              projections: { values: { agentTeam: { enabled: false, tasks: [] } } },
+            }
+            useAppStore.setState({ selectedSession: initial, sessions: [initial], error: undefined })
+            proxy.agentTeamSetEnabled.mockRejectedValueOnce(Object.assign(new Error('Host rejected'), { code }))
+
+            expect(await useAppStore.getState().setAgentTeamEnabled(true)).toBe(false)
+            expect(useAppStore.getState().agentTeamToggling).toBe(false)
+            expect(useAppStore.getState().error).toBeTruthy()
+            expect(useAppStore.getState().selectedSession?.projections?.values?.agentTeam).toEqual({
+              enabled: false,
+              tasks: [],
+            })
+          }
+        },
+      },
+      {
+        name: 'ignores late success or failure after switching sessions or disconnecting',
+        run: async () => {
+          for (const outcome of ['late-resolve-on-switch', 'late-reject-on-disconnect'] as const) {
+            prepareScenario1()
+            const s1: RemoteSession = { ...session, sessionId: 's1', projections: { values: { agentTeam: { enabled: false, tasks: [] } } } }
+            const s2: RemoteSession = { ...session, sessionId: 's2', projections: { values: { agentTeam: { enabled: false, tasks: [] } } } }
+            useAppStore.setState({ selectedSession: s1, sessions: [s1, s2] })
+            let resolveToggle!: () => void
+            let rejectToggle!: (err: Error) => void
+            proxy.agentTeamSetEnabled.mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
+              resolveToggle = resolve
+              rejectToggle = reject
+            }))
+            const pending = useAppStore.getState().setAgentTeamEnabled(true)
+            expect(useAppStore.getState().agentTeamToggling).toBe(true)
+
+            if (outcome === 'late-resolve-on-switch') {
+              await expect(useAppStore.getState().openSession(s2)).resolves.toBe(true)
+              expect(useAppStore.getState().agentTeamToggling).toBe(false)
+              resolveToggle()
+              expect(await pending).toBe(false)
+              expect(useAppStore.getState().selectedSession?.sessionId).toBe('s2')
+              expect(useAppStore.getState().selectedSession?.projections?.values?.agentTeam).toEqual({ enabled: false, tasks: [] })
+              expect(useAppStore.getState().sessions.find(item => item.sessionId === 's1')?.projections?.values?.agentTeam).toEqual({ enabled: false, tasks: [] })
+            } else {
+              await useAppStore.getState().disconnect()
+              expect(useAppStore.getState().agentTeamToggling).toBe(false)
+              rejectToggle(new Error('late disconnect error'))
+              expect(await pending).toBe(false)
+              expect(useAppStore.getState().error).toBeUndefined()
+            }
           }
         },
       },

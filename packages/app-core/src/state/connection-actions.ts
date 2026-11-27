@@ -55,6 +55,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         modelSelecting: false,
         agentPresetSelecting: false,
         agentPresetLoading: false,
+        agentTeamToggling: false,
         busyAction: undefined,
         codexReadySessionId: undefined,
         selectedDevice: device,
@@ -176,6 +177,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                   modelSelecting: false,
                   agentPresetSelecting: false,
                   agentPresetLoading: false,
+                  agentTeamToggling: false,
                   busyAction: undefined,
                 })
               }
@@ -455,6 +457,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         agentPresetOptions: undefined,
         agentPresetLoading: false,
         agentPresetSelecting: false,
+        agentTeamToggling: false,
         historyHasMore: false,
         historyLoadingOlder: false,
         oldestLoadedSeq: undefined,
@@ -483,6 +486,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           modelSelecting: false,
           agentPresetSelecting: false,
           agentPresetLoading: false,
+          agentTeamToggling: false,
           cursorAvailable: false,
           antigravityAvailable: false,
           piAvailable: false,

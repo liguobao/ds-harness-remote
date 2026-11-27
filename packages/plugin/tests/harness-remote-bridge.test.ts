@@ -2393,3 +2393,55 @@ describe('HarnessRemoteBridge dsBot/* allowlist', () => {
     await bridge.closeAll()
   })
 })
+
+describe('HarnessRemoteBridge agentTeams/setEnabled allowlist', () => {
+  it('forwards agentTeams/setEnabled unary calls and rejects streams or wider agentTeams methods', async () => {
+    await runScenarios([
+      {
+        name: 'allows unary agentTeams/setEnabled true and false with args preserved',
+        run: async () => {
+          for (const enabled of [true, false]) {
+            const dispatch = vi.fn(async () => ({ ok: true as const, value: undefined }))
+            const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
+            const payload = { args: { agentId: 's1', enabled } }
+            await expect(bridge.call({ endpoint: 'agentTeams/setEnabled', payload })).resolves.toEqual({ ok: true, value: undefined })
+            expect(dispatch).toHaveBeenCalledWith('agentTeams/setEnabled', payload, expect.any(AbortSignal))
+          }
+        },
+      },
+      {
+        name: 'preserves native gateway errors from agentTeams/setEnabled',
+        run: async () => {
+          const failure = { ok: false as const, error: { code: 'gateway/invocation-unavailable', message: 'Unavailable', details: {} } }
+          const dispatch = vi.fn(async () => failure)
+          const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
+          await expect(bridge.call({
+            endpoint: 'agentTeams/setEnabled',
+            payload: { args: { agentId: 's1', enabled: true } },
+          })).resolves.toEqual(failure)
+        },
+      },
+      {
+        name: 'rejects agentTeams/setEnabled stream opens and non-allowlisted agentTeams endpoints',
+        run: async () => {
+          const dispatch = vi.fn()
+          const open = vi.fn()
+          const bridge = new HarnessRemoteBridge(gateway({ dispatch, open }), vi.fn())
+          await expect(bridge.openStream({
+            streamId: 'team-stream',
+            endpoint: 'agentTeams/setEnabled',
+            payload: { args: { agentId: 's1', enabled: true } },
+          })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+          for (const disallowed of ['agentTeams/list', 'agentTeams/create', 'agentTeams/delete']) {
+            await expect(bridge.call({
+              endpoint: disallowed,
+              payload: { args: { agentId: 's1' } },
+            })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+          }
+          expect(dispatch).not.toHaveBeenCalled()
+          expect(open).not.toHaveBeenCalled()
+        },
+      },
+    ])
+  })
+})

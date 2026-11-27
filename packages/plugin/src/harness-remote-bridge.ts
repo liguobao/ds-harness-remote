@@ -129,6 +129,7 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'agentPresets/list',
   'agentPresets/read',
   'agentPresets/select',
+  'agentTeams/setEnabled',
   'commands/execute',
   'commands/list',
   'cotTranslation/limits',
@@ -706,6 +707,7 @@ export class HarnessRemoteBridge {
     const params = streamOpenSchema.parse(input) as HarnessRemoteStreamOpenParams
     this.assertAllowed(params.endpoint)
     if (params.endpoint.startsWith('pluginManager/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Plugin management endpoints are not streams.')
+    if (params.endpoint === 'agentTeams/setEnabled') throw new RpcError('METHOD_NOT_ALLOWED', 'Agent team configuration endpoints are not streams.')
     if (params.endpoint.startsWith('cotTranslation/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Translation endpoints are not streams.')
     if (params.endpoint.startsWith('settings/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Settings endpoints are not streams.')
     if (params.endpoint === 'workspaceFiles/search') throw new RpcError('METHOD_NOT_ALLOWED', 'Workspace search is not a stream.')

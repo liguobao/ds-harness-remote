@@ -5,7 +5,7 @@ import type { ChatSection } from '../../state/message-helpers'
 import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning } from '../../state/message-helpers'
 import { extractReferencedFiles, parseMarkdownBlocks } from '../../ui/markdown'
 import { aggregateTurnUsageByTurn } from '../chat-process'
-import type { ChatItem, RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
+import type { AgentTeamState, ChatItem, RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
 import { chunkTranscriptSections, isSectionLive, type DisplayChatSection } from './transcript-chunks'
 import { useSessionUiArtifacts } from './use-session-ui-artifacts'
 
@@ -98,7 +98,7 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
   // (member name + role description + phase) and the task board (subject +
   // status + owning member). This is the team view — distinct from the
   // subagent child-session list above.
-  const teamState = useMemo(() => {
+  const teamState = useMemo((): AgentTeamState | undefined => {
     const raw = (session?.projections?.values as Record<string, unknown> | undefined)?.agentTeam
     if (typeof raw !== 'object' || raw === null) return undefined
     const record = raw as Record<string, unknown>
@@ -106,7 +106,13 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
       typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).id === 'string') : []
     const tasks = Array.isArray(record.tasks) ? record.tasks.filter((entry): entry is TeamTaskSnapshot =>
       typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).id === 'string') : []
-    return { members, tasks } satisfies { members: TeamMemberSnapshot[]; tasks: TeamTaskSnapshot[] }
+    return {
+      ...(typeof record.id === 'string' ? { id: record.id } : {}),
+      ...(typeof record.enabled === 'boolean' ? { enabled: record.enabled } : {}),
+      members,
+      tasks,
+      ...(typeof record.failure === 'string' ? { failure: record.failure } : {}),
+    }
   }, [session?.projections?.values])
   return { visibleMessages, visibleSections, chunkedSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState }
 }

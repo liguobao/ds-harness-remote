@@ -69660,7 +69660,7 @@ function extractSessionIdFromGatewayPayload(payload) {
   return void 0;
 }
 function isSessionMutationEndpoint(endpoint) {
-  return endpoint === "session/prompt" || endpoint === "session/cancel" || endpoint === "session/rename" || endpoint === "session/selectModel" || endpoint === "session/selectPermission" || endpoint === "session/fork" || endpoint === "agentPresets/select" || endpoint === "commands/execute" || endpoint === "workspace/archiveSession";
+  return endpoint === "session/prompt" || endpoint === "session/cancel" || endpoint === "session/rename" || endpoint === "session/selectModel" || endpoint === "session/selectPermission" || endpoint === "session/fork" || endpoint === "agentPresets/select" || endpoint === "agentTeams/setEnabled" || endpoint === "commands/execute" || endpoint === "workspace/archiveSession";
 }
 function canonicalUnaryHistoryKey(endpoint, payload) {
   if (!isRecord3(payload)) return endpoint;
@@ -113773,6 +113773,7 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "agentPresets/list",
   "agentPresets/read",
   "agentPresets/select",
+  "agentTeams/setEnabled",
   "commands/execute",
   "commands/list",
   "cotTranslation/limits",
@@ -114274,6 +114275,7 @@ var HarnessRemoteBridge = class {
     const params = streamOpenSchema3.parse(input4);
     this.assertAllowed(params.endpoint);
     if (params.endpoint.startsWith("pluginManager/")) throw new RpcError("METHOD_NOT_ALLOWED", "Plugin management endpoints are not streams.");
+    if (params.endpoint === "agentTeams/setEnabled") throw new RpcError("METHOD_NOT_ALLOWED", "Agent team configuration endpoints are not streams.");
     if (params.endpoint.startsWith("cotTranslation/")) throw new RpcError("METHOD_NOT_ALLOWED", "Translation endpoints are not streams.");
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (params.endpoint === "workspaceFiles/search") throw new RpcError("METHOD_NOT_ALLOWED", "Workspace search is not a stream.");

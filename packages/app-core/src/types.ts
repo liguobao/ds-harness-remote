@@ -200,7 +200,8 @@ export interface TeamTaskSnapshot {
 
 /** Team state published through the `agentTeam` session projection. */
 export interface AgentTeamState {
-  id: string
+  id?: string
+  enabled?: boolean
   members: TeamMemberSnapshot[]
   tasks: TeamTaskSnapshot[]
   failure?: string

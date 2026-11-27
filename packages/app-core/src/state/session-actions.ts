@@ -91,11 +91,12 @@ export function acpClientForBackend(connection: SessionAccess['runtime']['connec
 
 /** Session actions use the store's single connection/session runtime. */
 export function createSessionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'refreshSessionStatus' | 'syncHarnessCatalog' | 'openSession' | 'forkChatMessage' | 'quoteChatMessage' | 'rateMessage' | 'createSession' | 'loadSessionHandoffItems' | 'handoffSession' | 'forkSession' | 'archiveSession' | 'unarchiveSession' | 'pinSession' | 'unpinSession' | 'renameSession' | 'selectModel' | 'selectPermission' | 'loadAgentPresets' | 'selectAgentPreset' | 'loadOlderHistory'> {
+  'refreshSessionStatus' | 'syncHarnessCatalog' | 'openSession' | 'forkChatMessage' | 'quoteChatMessage' | 'rateMessage' | 'createSession' | 'loadSessionHandoffItems' | 'handoffSession' | 'forkSession' | 'archiveSession' | 'unarchiveSession' | 'pinSession' | 'unpinSession' | 'renameSession' | 'selectModel' | 'selectPermission' | 'loadAgentPresets' | 'selectAgentPreset' | 'setAgentTeamEnabled' | 'loadOlderHistory'> {
   let modelSelectToken = 0
   let permissionSelectToken = 0
   let agentPresetLoadToken = 0
   let agentPresetSelectToken = 0
+  let agentTeamToggleToken = 0
   // Track sessions currently displaying an offline browse-memory snapshot so
   // online read-only handoff loads never shortcut to stale offline messages.
   const offlineOnlySessionIds = new Set<string>()
@@ -513,6 +514,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           agentPresetOptions: undefined,
           agentPresetLoading: false,
           agentPresetSelecting: false,
+          agentTeamToggling: false,
           historyHasMore: false,
           oldestLoadedSeq: undefined,
         }))
@@ -583,6 +585,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         agentPresetOptions: undefined,
         agentPresetLoading: false,
         agentPresetSelecting: false,
+        agentTeamToggling: false,
         sessionLifecycles: state.sessionLifecycles[session.sessionId] === undefined
           ? state.sessionLifecycles
           : {
@@ -1524,6 +1527,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               agentPresetOptions: undefined,
               agentPresetLoading: false,
               agentPresetSelecting: false,
+              agentTeamToggling: false,
             } : {}),
           }))
           persistCatalogState()
@@ -1552,6 +1556,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               agentPresetOptions: undefined,
               agentPresetLoading: false,
               agentPresetSelecting: false,
+              agentTeamToggling: false,
             } : {}),
           }))
           persistCatalogState()
@@ -1575,6 +1580,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             agentPresetOptions: undefined,
             agentPresetLoading: false,
             agentPresetSelecting: false,
+            agentTeamToggling: false,
           } : {}),
         }))
         persistCatalogState()
@@ -1983,6 +1989,62 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       } catch (error) {
         if (!isCurrent()) { releaseIfLatest(); return false }
         set({ agentPresetSelecting: false, error: friendlyError(error) })
+        return false
+      }
+    },
+
+    async setAgentTeamEnabled(enabled) {
+      const session = get().selectedSession
+      if (session === undefined || get().connection.phase !== 'connected' || get().agentTeamToggling) return false
+      if (!isHarnessBackend(session.backend) || isSubagentSession(session)) return false
+      const generation = runtime.connectionGeneration
+      const loadGeneration = runtime.sessionLoadGeneration
+      const token = ++agentTeamToggleToken
+      const isCurrent = () => token === agentTeamToggleToken
+        && generation === runtime.connectionGeneration
+        && loadGeneration === runtime.sessionLoadGeneration
+        && get().connection.phase === 'connected'
+        && get().selectedSession?.sessionId === session.sessionId
+      const releaseIfLatest = () => {
+        if (token === agentTeamToggleToken && get().agentTeamToggling) set({ agentTeamToggling: false })
+      }
+      set({ agentTeamToggling: true, error: undefined })
+      try {
+        await runtime.connection.requireProxy().agentTeamSetEnabled(session.sessionId, enabled)
+        if (!isCurrent()) { releaseIfLatest(); return false }
+        set(state => {
+          const update = (item: RemoteSession): RemoteSession => {
+            if (item.sessionId !== session.sessionId) return item
+            const existingRaw = item.projections?.values?.agentTeam
+            const existingTeam = typeof existingRaw === 'object' && existingRaw !== null && !Array.isArray(existingRaw)
+              ? existingRaw as Record<string, unknown>
+              : {}
+            const nextTeam = {
+              ...existingTeam,
+              ...(Array.isArray(existingTeam.tasks) ? {} : { tasks: [] }),
+              enabled,
+            }
+            return {
+              ...item,
+              projections: {
+                ...item.projections,
+                values: {
+                  ...item.projections?.values,
+                  agentTeam: nextTeam,
+                },
+              },
+            }
+          }
+          return {
+            sessions: state.sessions.map(update),
+            selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),
+            agentTeamToggling: false,
+          }
+        })
+        return true
+      } catch (error) {
+        if (!isCurrent()) { releaseIfLatest(); return false }
+        set({ agentTeamToggling: false, error: friendlyError(error) })
         return false
       }
     },

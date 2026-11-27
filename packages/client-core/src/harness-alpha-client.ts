@@ -780,6 +780,14 @@ export class HarnessAlphaClient {
     return typeof committed === 'string' && committed.length > 0 ? committed : agentPreset
   }
 
+  /** Enable or disable agent team collaboration for a native Harness session. */
+  async agentTeamSetEnabled(sessionId: string, enabled: boolean): Promise<void> {
+    if (typeof sessionId !== 'string' || sessionId.trim().length === 0 || typeof enabled !== 'boolean') {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid agent team toggle parameters.')
+    }
+    await this.callValue<void>('agentTeams/setEnabled', { agentId: sessionId, enabled })
+  }
+
   /**
    * Official SessionAddress: a subagent session must be addressed through its
    * durable parent (`{ kind: 'subagent', parentSessionId, childSessionId }`);

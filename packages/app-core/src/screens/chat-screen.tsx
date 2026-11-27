@@ -780,6 +780,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
   const agentPresetLoading = useAppStore(state => state.agentPresetLoading)
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
+  const agentTeamToggling = useAppStore(state => state.agentTeamToggling)
+  const setAgentTeamEnabled = useAppStore(state => state.setAgentTeamEnabled)
   const quickPromptActionMode = useAppStore(state => state.quickPromptActionMode)
   const setQuickPromptActionMode = useAppStore(state => state.setQuickPromptActionMode)
   const previewImageUri = useAppStore(state => state.previewImageUri)
@@ -1903,6 +1905,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
   }
 
   const canHandoffCurrentSession = connected && !isSubagentSession(session) && (messages.length > 0 || !session.blank)
+  const agentTeamAvailable = connected && sessionBackend === 'harness' && !isSubagentSession(session)
+  const agentTeamEnabled = teamState?.enabled === true
   const hasComposerTray = images.length > 0 || stagedFiles.length > 0 || uploadingFiles || stagedReferences.length > 0 || pendingHandoff !== undefined
   const composerHeaderSlot = hasComposerTray ? (
     <>
@@ -2277,6 +2281,10 @@ const ChatConversationPane = memo(function ChatConversationPane({
             onReferenceChat={(session.backend ?? 'harness') === 'harness' ? () => setReferenceChatOpen(true) : undefined}
             onOpenWorkspace={() => setHeaderPopoverView('workspace-standalone')} onOpenMode={() => setModePickerOpen(true)}
             onOpenTools={() => setToolPickerOpen(true)} onOpenPermissions={() => setPermissionPickerOpen(true)}
+            agentTeamAvailable={agentTeamAvailable}
+            agentTeamEnabled={agentTeamEnabled}
+            agentTeamToggling={agentTeamToggling}
+            onToggleAgentTeam={enabled => { void setAgentTeamEnabled(enabled) }}
           />
         )}
       />

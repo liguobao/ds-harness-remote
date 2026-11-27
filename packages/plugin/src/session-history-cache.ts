@@ -108,6 +108,7 @@ export function isSessionMutationEndpoint(endpoint: string): boolean {
     || endpoint === 'session/selectPermission'
     || endpoint === 'session/fork'
     || endpoint === 'agentPresets/select'
+    || endpoint === 'agentTeams/setEnabled'
     || endpoint === 'commands/execute'
     || endpoint === 'workspace/archiveSession'
 }
