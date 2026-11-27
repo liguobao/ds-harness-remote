@@ -2260,10 +2260,9 @@ The full Server and Remote plugin implement phone confirmation followed by one l
 
 ### Remote official attachment uploads
 
-The Remote browser client installs the official `__DSH_FILE_UPLOAD__.fetch` hook
-and also replaces the live `fileUpload.post` carrier when the shell has already
-constructed it. This covers the shared Harness Web/Desktop/IDE upload service.
-In local mode the request retains its original destination. In Remote mode,
+The Remote browser client replaces the live `fileUpload.post` carrier when the
+Host reports Remote mode. Returning to local mode restores the shell's original
+carrier, including its Worker or shell-specific upload transport. In Remote mode,
 `api/session/uploadFileBinary` attachments enter the Client-local control operation `plugin.route.call`
 with body `{ endpoint: "image", payload: { sessionId, mediaType, name?, data } }`
 for images, or `{ endpoint: "file", payload: { sessionId, name?, data } }` for

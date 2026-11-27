@@ -3,7 +3,7 @@ import { RemoteTypertGateway } from '../src/remote-typert-gateway.js'
 import type { RemoteClientCore } from '@dsh-remote/client-core'
 import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 import { describe, expect, it, vi } from 'vitest'
-import { createRemoteUploadFetch, REMOTE_UPLOAD_MAX_BYTES } from '../src/remote-upload-client.js'
+import { installRemoteUploadCarrier, createRemoteUploadFetch, REMOTE_UPLOAD_MAX_BYTES } from '../src/remote-upload-client.js'
 import { PluginRouteBridge } from '../src/plugin-route-bridge.js'
 import { createPluginRouteDispatcher } from '../src/plugin-route-dispatcher.js'
 
@@ -94,20 +94,28 @@ describe('Remote attachment upload', () => {
     await expect(dispatchCommandForHost(gateway, payload, new AbortController().signal, '0.1.2')).rejects.toThrow('does not support')
     expect(dispatch).toHaveBeenCalledTimes(2)
   })
-  it('keeps local uploads on their original carrier', async () => {
-    let count = 0
-    const original = vi.fn(async (_input: unknown, init?: RequestInit) => {
-      count++
-      if (count === 1) {
-        const request = JSON.parse(String(init?.body))
-        return Response.json({ type: 'server-response', rpcId: request.rpcId, result: { ok: true, value: { mode: 'local' } } })
-      }
-      expect(init?.body).toBe('local-image')
-      return new Response('local-response')
-    }) as unknown as typeof fetch
-    const upload = createRemoteUploadFetch(original, base)
-    expect(await (await upload(`${base}api/session/uploadFileBinary?sessionId=s&mediaType=image/png`, { method: 'POST', body: 'local-image' })).text()).toBe('local-response')
+  it('restores the native post across mode changes and disposal', async () => {
+    const native = vi.fn(async () => ({ status: 200, body: 'local' }))
+    const service = { post: native } as Parameters<typeof installRemoteUploadCarrier>[0]
+    let publish!: (status: { mode: string; controlUnavailable?: boolean }) => void
+    const unsubscribe = vi.fn()
+    const { original } = carrier()
+    const dispose = installRemoteUploadCarrier(service, { subscribe(listener) { publish = listener; return unsubscribe } }, original, base)
+    publish({ mode: 'local' })
+    expect(service.post).toBe(native)
+    publish({ mode: 'remote' })
+    const request = { path: base + 'api/session/uploadFileBinary?sessionId=s', body: 'file' }
+    expect((await service.post(request)).body).toContain('remote-receipt')
+    publish({ mode: 'local', controlUnavailable: true })
+    expect(service.post).not.toBe(native)
+    publish({ mode: 'local' })
+    expect(service.post).toBe(native)
+    expect((await service.post(request)).body).toBe('local')
     expect(original).toHaveBeenCalledTimes(2)
+    publish({ mode: 'remote' })
+    dispose()
+    expect(service.post).toBe(native)
+    expect(unsubscribe).toHaveBeenCalledOnce()
   })
   it('fails closed offline and bounds input before any upload mutation', async () => {
     const offline = carrier('remote', false)
@@ -134,18 +142,11 @@ describe('Remote attachment upload', () => {
     expect(handler).toHaveBeenCalledOnce()
   })
 
-  it.each([404, 405])('falls back to the plain local upload when the control route answers %i', async status => {
-    const passthrough = vi.fn(async () => new Response('local-response'))
-    const original = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input).endsWith('/status')) return new Response('', { status })
-      expect(await (input as Request).text()).toBe('local-image')
-      return passthrough()
-    }) as unknown as typeof fetch
-    const upload = createRemoteUploadFetch(original, base)
-    const response = await upload(new Request(`${base}api/session/uploadFileBinary?sessionId=s&mediaType=image/png`, { method: 'POST', body: 'local-image' }))
-    expect(await response.text()).toBe('local-response')
-    expect(passthrough).toHaveBeenCalledOnce()
-    expect(original).toHaveBeenCalledTimes(2)
+  it.each([404, 405])('rejects the first remote upload when status returns %i', async status => {
+    const original = vi.fn(async () => new Response('', { status }))
+    await expect(createRemoteUploadFetch(original, base)(base + 'api/session/uploadFileBinary?sessionId=s',
+      { method: 'POST', body: 'file' })).rejects.toThrow(`HTTP ${status}`)
+    expect(original).toHaveBeenCalledOnce()
   })
   it.each([404, 405])('rejects a plugin route answered %i once the status was remote', async status => {
     const original = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

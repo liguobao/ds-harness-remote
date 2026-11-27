@@ -1,42 +1,50 @@
+import type { StatusFeed } from './status-stream.js'
 import { CONTROL_RPC_PREFIX } from './control-route.js'
 
 type Fetch = typeof globalThis.fetch
 /** Transport safety ceiling; the Host enforces its configured attachment limits. */
 export const REMOTE_UPLOAD_MAX_BYTES = 192 * 1024 * 1024
 
-/** Official upload hook: shared by browser, Desktop and IDE upload runtimes. */
+export interface UploadService {
+  post(request: { path: string; body: BodyInit; headers?: Record<string, string>; signal?: AbortSignal }): Promise<{ status: number; body: string }>
+}
+
+export function installRemoteUploadCarrier(service: UploadService,
+  feed: Pick<StatusFeed<{ mode: string; controlUnavailable?: boolean }>, 'subscribe'>, original: Fetch, baseUrl: string): () => void {
+  const upload = createRemoteUploadFetch(original, baseUrl)
+  let previous: UploadService['post'] | undefined
+  const post: UploadService['post'] = async request => {
+    const response = await upload(request.path, { method: 'POST', body: request.body, headers: request.headers,
+      signal: request.signal, ...(request.body instanceof ReadableStream ? { duplex: 'half' } : {}) })
+    return { status: response.status, body: await response.text() }
+  }
+  const restore = () => {
+    if (previous !== undefined && service.post === post) service.post = previous
+    previous = undefined
+  }
+  const unsubscribe = feed.subscribe(status => {
+    if (status.controlUnavailable) return
+    if (status.mode === 'local') restore()
+    if (status.mode === 'remote' && previous === undefined) {
+      previous = service.post
+      service.post = post
+    }
+  })
+  return () => { unsubscribe(); restore() }
+}
+
 export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch {
   let sequence = 0
-  // Last mode the control route reported. A route that answered once and then answers 404/405 is
-  // reloading or unmounted, which is not the same as never having had one.
-  let lastMode: string | undefined
   const control = async (method: string, payload: unknown, signal: AbortSignal) => {
     const rpcId = `remote-upload-${++sequence}`
     const response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
       method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'client-request', rpcId, method, payload }), signal,
     })
-    // A Host that never registered this prefix — an older plugin build on a newer DSH, or a
-    // Remote UI whose Host runs no plugin — answers 404/405 to the status probe. Uploading then
-    // is not a remote transfer at all, so fall back to the plain local request instead of failing
-    // the user's upload before a single byte is sent.
-    //
-    // Only the status probe may degrade, and only while no remote Host has been observed: a route
-    // that answered 404/405 *after* a successful remote handshake is going away under us, and
-    // treating that as local would push a remote session's file to the local Host. Other methods
-    // (`plugin.route`) must always surface their failure — an empty `{ mode: 'local' }` would be
-    // turned into a 200 response upstream.
-    if (method === 'status' && lastMode !== 'remote' && (response.status === 404 || response.status === 405)) {
-      return { mode: 'local' }
-    }
     if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`)
     const envelope = await response.json() as { type?: string; rpcId?: string; result?: { ok?: boolean; value?: unknown; error?: { message?: string } } }
     if (envelope.type !== 'server-response' || envelope.rpcId !== rpcId || envelope.result?.ok !== true) {
       throw new Error(envelope.result?.error?.message ?? 'Remote upload requires an updated Host plugin.')
-    }
-    if (method === 'status') {
-      const mode = (envelope.result.value as { mode?: unknown } | undefined)?.mode
-      if (mode === 'local' || mode === 'remote') lastMode = mode
     }
     return envelope.result.value
   }
@@ -48,7 +56,6 @@ export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch
     if ((init?.method ?? source?.method ?? 'GET').toUpperCase() !== 'POST') return original(input, init)
     const signal = AbortSignal.any([init?.signal ?? source?.signal ?? new AbortController().signal, AbortSignal.timeout(60_000)])
     const status = await control('status', {}, signal) as { mode?: string; connected?: boolean; backend?: string; target?: { deviceId: string } }
-    if (status.mode === 'local') return original(input, init)
     if (status.mode !== 'remote' || !status.connected) throw new Error('Remote Host is disconnected. Reconnect before uploading a file.')
     if (status.backend !== undefined && status.backend !== 'harness' && status.backend !== 'codex') throw new Error('Remote attachment receipts require a Harness or CodeX session.')
     const sessionId = url.searchParams.get('sessionId')

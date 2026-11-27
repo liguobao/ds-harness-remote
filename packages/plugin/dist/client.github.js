@@ -1624,8 +1624,27 @@ Minimum version required to store current data is: ` + bestVersion + `.
 
   // packages/plugin/src/remote-upload-client.ts
   var REMOTE_UPLOAD_MAX_BYTES = 192 * 1024 * 1024;
+  function installRemoteUploadCarrier(service, feed, original, baseUrl) {
+    let upload = createRemoteUploadFetch(original, baseUrl), previous, post = async (request) => {
+      let response = await upload(request.path, {
+        method: "POST",
+        body: request.body,
+        headers: request.headers,
+        signal: request.signal,
+        ...request.body instanceof ReadableStream ? { duplex: "half" } : {}
+      });
+      return { status: response.status, body: await response.text() };
+    }, restore = () => {
+      previous !== void 0 && service.post === post && (service.post = previous), previous = void 0;
+    }, unsubscribe = feed.subscribe((status) => {
+      status.controlUnavailable || (status.mode === "local" && restore(), status.mode === "remote" && previous === void 0 && (previous = service.post, service.post = post));
+    });
+    return () => {
+      unsubscribe(), restore();
+    };
+  }
   function createRemoteUploadFetch(original, baseUrl) {
-    let sequence = 0, lastMode, control = async (method, payload, signal) => {
+    let sequence = 0, control = async (method, payload, signal) => {
       let rpcId = `remote-upload-${++sequence}`, response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
         method: "POST",
         credentials: "same-origin",
@@ -1633,16 +1652,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
         body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
         signal
       });
-      if (method === "status" && lastMode !== "remote" && (response.status === 404 || response.status === 405))
-        return { mode: "local" };
       if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`);
       let envelope = await response.json();
       if (envelope.type !== "server-response" || envelope.rpcId !== rpcId || envelope.result?.ok !== !0)
         throw new Error(envelope.result?.error?.message ?? "Remote upload requires an updated Host plugin.");
-      if (method === "status") {
-        let mode = envelope.result.value?.mode;
-        (mode === "local" || mode === "remote") && (lastMode = mode);
-      }
       return envelope.result.value;
     };
     return async (input, init) => {
@@ -1651,7 +1664,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
       let source = input instanceof Request ? input : void 0;
       if ((init?.method ?? source?.method ?? "GET").toUpperCase() !== "POST") return original(input, init);
       let signal = AbortSignal.any([init?.signal ?? source?.signal ?? new AbortController().signal, AbortSignal.timeout(6e4)]), status = await control("status", {}, signal);
-      if (status.mode === "local") return original(input, init);
       if (status.mode !== "remote" || !status.connected) throw new Error("Remote Host is disconnected. Reconnect before uploading a file.");
       if (status.backend !== void 0 && status.backend !== "harness" && status.backend !== "codex") throw new Error("Remote attachment receipts require a Harness or CodeX session.");
       let sessionId = url.searchParams.get("sessionId"), mediaType = url.searchParams.get("mediaType");
@@ -7680,8 +7692,6 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     } : void 0
   }) : void 0;
   pluginRouteFetch !== void 0 && (window.fetch = pluginRouteFetch);
-  var uploadGlobal = globalThis, previousUploadHook = uploadGlobal.__DSH_FILE_UPLOAD__, remoteUploadHook = typeof originalPluginFetch == "function" && typeof document < "u" ? { fetch: createRemoteUploadFetch(previousUploadHook?.fetch ?? originalPluginFetch.bind(window), document.baseURI) } : void 0;
-  remoteUploadHook !== void 0 && (uploadGlobal.__DSH_FILE_UPLOAD__ = remoteUploadHook);
   function controlRouteUnavailableStatus() {
     return {
       mode: "local",
@@ -7883,25 +7893,10 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
       }
       function apply(ctx) {
         if (window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__) return;
-        window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = !0, readyPluginSessions(ctx.sessions), ctx.inject(["fileUpload"], (uploadContext) => {
-          let service = uploadContext.get("fileUpload");
-          if (service === void 0 || remoteUploadHook === void 0) return;
-          let originalPost = service.post, post = async (request) => {
-            let response = await remoteUploadHook.fetch(request.path, {
-              method: "POST",
-              body: request.body,
-              headers: request.headers,
-              signal: request.signal
-            });
-            return { status: response.status, body: await response.text() };
-          };
-          uploadContext.effect(() => (service.post = post, () => {
-            service.post === post && (service.post = originalPost);
-          }), "ds-harness-remote: attachment upload carrier");
-        }), ctx.effect(() => () => {
+        window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = !0, readyPluginSessions(ctx.sessions), ctx.effect(() => () => {
           window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = !1;
         }, "ds-harness-remote: client singleton"), ctx.effect(() => () => {
-          pluginRouteFetch !== void 0 && window.fetch === pluginRouteFetch && (window.fetch = originalPluginFetch), uploadGlobal.__DSH_FILE_UPLOAD__ === remoteUploadHook && (uploadGlobal.__DSH_FILE_UPLOAD__ = previousUploadHook);
+          pluginRouteFetch !== void 0 && window.fetch === pluginRouteFetch && (window.fetch = originalPluginFetch);
         }, "ds-harness-remote: plugin route fetch");
         let t = ctx.locale.bind(localeNamespace), remoteOpenListeners = /* @__PURE__ */ new Set(), openRemote = () => {
           for (let listener of remoteOpenListeners) listener();
@@ -7941,7 +7936,13 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
             console.warn("ds-harness-remote: status event stream unavailable, polling status instead:", reason);
           }
         });
-        ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream"), ctx.effect(() => {
+        ctx.inject(["fileUpload"], (uploadContext) => {
+          let service = uploadContext.get("fileUpload");
+          service === void 0 || isHostcTunnel || typeof originalPluginFetch != "function" || uploadContext.effect(
+            () => installRemoteUploadCarrier(service, statusFeed, originalPluginFetch.bind(window), document.baseURI),
+            "ds-harness-remote: attachment upload carrier"
+          );
+        }), ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream"), ctx.effect(() => {
           let unsubscribe = statusFeed.subscribe((status) => {
             document.documentElement.classList.toggle("dshRemoteBrowserUnavailable", status.mode === "remote");
           });
