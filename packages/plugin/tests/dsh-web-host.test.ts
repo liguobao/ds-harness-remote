@@ -1,9 +1,21 @@
 import { TunnelError } from '../src/hostc/api.js'
+import { mkdtemp, rm } from 'node:fs/promises'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Duplex } from 'node:stream'
+import { Context } from '@deepseek-ai/cordis'
+import {
+  createRpcRequest,
+  DSH_WEB_LAN_CAPABILITY,
+  dshWebLanGrantSchema,
+  type RemoteMessage,
+  type RpcResponsePayload,
+} from '@dsh-remote/protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type RawData, WebSocket, WebSocketServer } from 'ws'
+import * as remotePlugin from '../src/index.js'
 import { authorizeUpstream, DshWebPeer, type DshWebBrowserAuth } from '../src/dsh-web-host.js'
 import { Connection } from '../src/hostc/connection.js'
 import {
@@ -911,6 +923,117 @@ describe('LAN Web connection ownership', () => {
       peer.dispose()
       wsServer.close()
       await upstream.close()
+    }
+  })
+})
+
+describe('DSH 0.2.3 token auth integration', () => {
+  it('advertises DSH Web and authenticates upstream via webserver/entry-url + connection.admit', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-web-023-'))
+    vi.stubEnv('DSH_HOME', dshHome)
+    const localGui = await listenHttp((req, res) => {
+      if (req.method === 'GET' && req.url === '/?token=launch-secret') {
+        res.writeHead(303, {
+          location: './',
+          'set-cookie': ['dsh-auth-old=; Max-Age=0; Path=/', 'dsh-auth-test=signed; Path=/; HttpOnly'],
+        })
+        res.end()
+        return
+      }
+      if (req.method === 'GET' && req.url === '/' && req.headers.cookie === 'dsh-auth-test=signed') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end('<html>dsh-023</html>')
+        return
+      }
+      res.writeHead(401)
+      res.end()
+    })
+
+    const store = new remotePlugin.IdentityStore({ directory: join(dshHome, 'ds-harness-remote'), role: 'host' })
+    await store.loadOrCreate('DSH 0.2.3 Host')
+    await store.trustPeer({ deviceId: 'client-phone', name: 'Phone', publicKey: 'key-client-phone', platform: 'android' })
+
+    const ctx = new Context()
+    ctx.provide('settings', {
+      configure: () => () => undefined,
+      describe: () => [{ ns: 'ds-harness-remote', value: { codex: { enabled: false }, acp: { enabled: false } } }],
+      replace: async () => undefined,
+    } as never)
+    ctx.provide('typertGateway', {
+      supportsCarrier: true,
+      dispatchRpc: async () => ({ ok: false, error: { code: 'gateway/arguments-invalid', message: 'probe', details: {} } }),
+      invoke: async () => undefined,
+      openWireStream: async () => (async function* () {})(),
+    } as never)
+    ctx.provide('webApp', { getAdvertisedUrl: () => localGui.origin.href } as never)
+    ctx.provide('webServer', {
+      getOrigin: () => localGui.origin.href,
+      register: () => async () => undefined,
+    } as never)
+    ctx.provide('connection', {
+      admit: (req: { headers: Record<string, string> }) => (
+        req.headers.cookie === 'dsh-auth-test=signed'
+          ? { peer: { principal: { kind: 'owner' }, signal: new AbortController().signal } }
+          : { rejection: 401 }
+      ),
+      rpc: {},
+    } as never)
+    ctx.on('webserver/entry-url' as never, ((baseUrl: string, entries: Array<{ label: string; url: string; open: boolean }>) => {
+      entries.push({ label: 'dsh web', url: `${baseUrl}?token=launch-secret`, open: true })
+    }) as never)
+
+    const fiber = await ctx.plugin(remotePlugin, { codex: { enabled: false }, acp: { enabled: false } })
+    try {
+      await vi.waitFor(() => expect(ctx.dshRemote.currentIdentity()).toBeDefined())
+      let onInbound: (message: RemoteMessage) => void = () => undefined
+      const sent: RemoteMessage[] = []
+      await ctx.dshRemote.acceptAuthenticatedPeer({
+        security: { protocol: 'Noise_IK_25519_ChaChaPoly_SHA256', connectionId: 'conn-023', membershipId: 'mem-023' },
+        peerDeviceId: 'client-phone',
+        peerIdentityKey: 'key-client-phone',
+        mode: 'LAN',
+        lanWebAddress: async () => '127.0.0.1',
+        send: async message => { sent.push(message) },
+        onMessage: handler => { onInbound = handler; return () => { onInbound = () => undefined } },
+        close: async () => undefined,
+      })
+
+      const call = async (method: Parameters<typeof createRpcRequest>[0], params: unknown) => {
+        const req = createRpcRequest(method, params)
+        onInbound(req)
+        let response: RemoteMessage | undefined
+        await vi.waitFor(() => {
+          response = sent.find(m =>
+            (m.type === 'rpc.response' || m.type === 'rpc.error')
+            && (m.payload as { requestId?: string }).requestId === req.id)
+          expect(response).toBeDefined()
+        })
+        if (response!.type === 'rpc.error') {
+          throw new Error(`RPC error: ${JSON.stringify(response!.payload)}`)
+        }
+        return (response!.payload as RpcResponsePayload).result
+      }
+
+      const described = await call('harness.transport.describe', {}) as { capabilities: string[]; dshWebLanReady?: boolean }
+      expect(described.capabilities).toContain(DSH_WEB_LAN_CAPABILITY)
+      expect(described.dshWebLanReady).toBe(true)
+
+      const grant = dshWebLanGrantSchema.parse(await call('dsh.web.lan.direct.open', {}))
+      const bootstrap = await fetch(`${grant.url}__remote/session-bootstrap`, {
+        redirect: 'manual',
+        headers: { 'x-dsh-web-grant': grant.browserGrant },
+      })
+      expect(bootstrap.status).toBe(303)
+      const sessionCookie = bootstrap.headers.get('set-cookie')!.split(';')[0]!
+      const page = await fetch(grant.url, { headers: { cookie: sessionCookie } })
+      expect(page.status).toBe(200)
+      expect(await page.text()).toBe('<html>dsh-023</html>')
+    } finally {
+      vi.unstubAllEnvs()
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+      await localGui.close()
+      await rm(dshHome, { recursive: true, force: true })
     }
   })
 })
