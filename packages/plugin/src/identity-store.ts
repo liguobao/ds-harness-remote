@@ -68,6 +68,16 @@ export type IdentityErrorCode = 'IDENTITY_INVALID' | 'IDENTITY_LOCKED' | 'STORAG
 
 const STORAGE_CONFLICT_MESSAGE = 'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.'
 const STORAGE_CONFLICT_ENTRY_PATTERN = /^(?:device\.json|device\.key|trusted-peers\.json|server-credentials\.json|host-pairing\.json|pairing-host-only\.json)(?:\.bak(?:-[0-9]+)?|\.old|\.orig|~|\.swp)$/
+/** Every record this plugin writes directly into a storage root or role directory. */
+const LEGACY_IDENTITY_RECORD_NAMES: ReadonlySet<string> = new Set([
+  'device.json',
+  'device.key',
+  'trusted-peers.json',
+  'server-credentials.json',
+  'server-credentials.json.refresh-lock',
+  'host-pairing.json',
+  'pairing-host-only.json',
+])
 
 export class IdentityInvalidError extends Error {
   constructor(
@@ -368,6 +378,13 @@ async function prepareDefaultIdentityDirectoryLocked({ source, target, lockDirec
     }
     if (old !== undefined) {
       if (current !== undefined) {
+        // A directory named `remote` that holds none of this plugin's records
+        // belongs to another product: it must not keep an owned root from
+        // starting, and it is never moved or modified here.
+        if (await isUnownedStorageRoot(source)) {
+          await assertOwnedRemoteStorage(target)
+          return target
+        }
         throw new IdentityInvalidError('Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.', 'STORAGE_CONFLICT')
       }
       await assertOwnedRemoteStorage(source)
@@ -470,15 +487,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
       : `${STORAGE_CONFLICT_MESSAGE} Unexpected entry "${safeStorageEntryName(entryName)}" was found.`,
     code,
   )
-  const identityFiles = new Set([
-    'device.json',
-    'device.key',
-    'trusted-peers.json',
-    'server-credentials.json',
-    'server-credentials.json.refresh-lock',
-    'host-pairing.json',
-    'pairing-host-only.json',
-  ])
+  const identityFiles = LEGACY_IDENTITY_RECORD_NAMES
   let identities = 0
   let verifiedScopedIdentities = 0
   const checkIdentity = async (directory: string, scope?: string, role?: RemoteDeviceRole): Promise<void> => {
@@ -636,6 +645,30 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     // Do not surface schema errors or file contents that might contain secrets.
     throw rejected(failureCode)
   }
+}
+
+/** Legacy storage carries no owner marker, so a root holding none of this
+ * plugin's records or artifacts belongs to whatever else created it. Reporting
+ * that here keeps a foreign directory from being claimed by migration or from
+ * blocking a root this plugin already owns. It never moves, creates or deletes. */
+async function isUnownedStorageRoot(root: string): Promise<boolean> {
+  let entries: Dirent[]
+  try {
+    entries = await readStorageEntries(root)
+  } catch {
+    // An unreadable root is not evidence of ownership either way; keep the
+    // caller's fail-closed path.
+    return false
+  }
+  return !entries.some(entry =>
+    (entry.name === 'servers' && entry.isDirectory())
+    || LEGACY_IDENTITY_RECORD_NAMES.has(entry.name)
+    || entry.name.includes('.refresh-lock')
+    || isOwnedTempArtifact(entry.name)
+    || isRefreshQueueArtifact(entry.name)
+    || isLockArtifact(entry.name)
+    || isBackupArtifact(entry.name)
+    || isIdentityTempArtifact(entry.name))
 }
 
 async function isRepairableLegacyClientDirectory(directory: string, names: ReadonlySet<string>): Promise<boolean> {

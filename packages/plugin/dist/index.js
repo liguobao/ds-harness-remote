@@ -91914,6 +91914,15 @@ var trustedPeersSchema = external_exports.object({
 }).strict();
 var STORAGE_CONFLICT_MESSAGE = "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.";
 var STORAGE_CONFLICT_ENTRY_PATTERN = /^(?:device\.json|device\.key|trusted-peers\.json|server-credentials\.json|host-pairing\.json|pairing-host-only\.json)(?:\.bak(?:-[0-9]+)?|\.old|\.orig|~|\.swp)$/;
+var LEGACY_IDENTITY_RECORD_NAMES = /* @__PURE__ */ new Set([
+  "device.json",
+  "device.key",
+  "trusted-peers.json",
+  "server-credentials.json",
+  "server-credentials.json.refresh-lock",
+  "host-pairing.json",
+  "pairing-host-only.json"
+]);
 var IdentityInvalidError = class extends Error {
   constructor(message, code = "IDENTITY_INVALID") {
     super(message);
@@ -92160,6 +92169,10 @@ async function prepareDefaultIdentityDirectoryLocked({ source, target: target3, 
   }
   if (old !== void 0) {
     if (current !== void 0) {
+      if (await isUnownedStorageRoot(source)) {
+        await assertOwnedRemoteStorage(target3);
+        return target3;
+      }
       throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.", "STORAGE_CONFLICT");
     }
     await assertOwnedRemoteStorage(source);
@@ -92233,15 +92246,7 @@ async function assertOwnedRemoteStorage(root2) {
     entryName === void 0 ? STORAGE_CONFLICT_MESSAGE : `${STORAGE_CONFLICT_MESSAGE} Unexpected entry "${safeStorageEntryName(entryName)}" was found.`,
     code
   );
-  const identityFiles = /* @__PURE__ */ new Set([
-    "device.json",
-    "device.key",
-    "trusted-peers.json",
-    "server-credentials.json",
-    "server-credentials.json.refresh-lock",
-    "host-pairing.json",
-    "pairing-host-only.json"
-  ]);
+  const identityFiles = LEGACY_IDENTITY_RECORD_NAMES;
   let identities = 0;
   let verifiedScopedIdentities = 0;
   const checkIdentity = async (directory, scope3, role2) => {
@@ -92380,6 +92385,15 @@ async function assertOwnedRemoteStorage(root2) {
     }
     throw rejected(failureCode);
   }
+}
+async function isUnownedStorageRoot(root2) {
+  let entries;
+  try {
+    entries = await readStorageEntries(root2);
+  } catch {
+    return false;
+  }
+  return !entries.some((entry) => entry.name === "servers" && entry.isDirectory() || LEGACY_IDENTITY_RECORD_NAMES.has(entry.name) || entry.name.includes(".refresh-lock") || isOwnedTempArtifact(entry.name) || isRefreshQueueArtifact(entry.name) || isLockArtifact(entry.name) || isBackupArtifact(entry.name) || isIdentityTempArtifact(entry.name));
 }
 async function isRepairableLegacyClientDirectory(directory, names) {
   for (const name2 of names) {
