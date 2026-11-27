@@ -30,3 +30,33 @@ export function sessionBackendFromId(id: string): AgentBackend {
   }
   return 'harness'
 }
+
+export function mergeBackendPinnedSessionIds(
+  current: readonly string[] | undefined,
+  backend: AgentBackend,
+  nextForBackend: readonly string[],
+): string[] {
+  registerAcpBackendId(backend)
+  const normalized = nextForBackend
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    .map(id => backend === 'harness' || id.startsWith(`${backend}:`) ? id : `${backend}:${id}`)
+  const preserved = (current ?? []).filter(id => sessionBackendFromId(id) !== backend)
+  return [...new Set([...preserved, ...normalized])]
+}
+
+// Shared by session actions and workspace refreshes on the same connection.
+// A successful mutation invalidates metadata reads started before its acknowledgement.
+const catalogMutationVersions = new WeakMap<object, Map<AgentBackend, number>>()
+
+export function catalogMutationVersion(connection: object, backend: AgentBackend): number {
+  return catalogMutationVersions.get(connection)?.get(backend) ?? 0
+}
+
+export function invalidateCatalogMetadata(connection: object, backend: AgentBackend): void {
+  let versions = catalogMutationVersions.get(connection)
+  if (versions === undefined) {
+    versions = new Map()
+    catalogMutationVersions.set(connection, versions)
+  }
+  versions.set(backend, catalogMutationVersion(connection, backend) + 1)
+}

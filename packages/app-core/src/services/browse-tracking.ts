@@ -179,7 +179,8 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
 
 export function startBrowseTracking(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined
-  let previousCatalog: unknown, previousSessions: unknown, previousMessages: unknown, previousSelected: string | undefined
+  let previousCatalog: unknown, previousSessions: unknown, previousPinned: unknown, previousArchived: unknown, previousMessages: unknown, previousSelected: string | undefined
+  let previousScope: string | undefined
   let previousUpdated = 0
   let disposed = false
   let observing = false
@@ -234,10 +235,22 @@ export function startBrowseTracking(): () => void {
     }
 
     const scope = browseScope(state)
-    if (previousCatalog !== state.workspaces || previousSessions !== state.sessions) {
+    if (
+      previousScope !== scope
+      || previousCatalog !== state.workspaces
+      || previousSessions !== state.sessions
+      || previousPinned !== state.pinnedSessionIds
+      || previousArchived !== state.archivedSessionIds
+    ) {
+      previousScope = scope
       previousCatalog = state.workspaces
       previousSessions = state.sessions
-      saveBrowseCatalog(scope, state.workspaces, state.sessions)
+      previousPinned = state.pinnedSessionIds
+      previousArchived = state.archivedSessionIds
+      saveBrowseCatalog(scope, state.workspaces, state.sessions, {
+        pinnedSessionIds: state.pinnedSessionIds,
+        archivedSessionIds: state.archivedSessionIds,
+      })
     }
 
     const selected = state.selectedSession
@@ -348,7 +361,25 @@ export function startBrowseTracking(): () => void {
   const heartbeat = Platform.OS === 'ios' ? setInterval(() => {
     if (AppState.currentState === 'active' && useAppStore.getState().connection.phase === 'connected') scheduleObserve()
   }, 60_000) : undefined
-  const unsubscribeApp = useAppStore.subscribe(scheduleObserve)
+  const unsubscribeApp = useAppStore.subscribe((next, prev) => {
+    if (
+      !disposed
+      && next?.connection?.phase === 'connected'
+      && next.selectedDevice !== undefined
+      && prev !== undefined
+      && (next.pinnedSessionIds !== prev.pinnedSessionIds || next.archivedSessionIds !== prev.archivedSessionIds)
+    ) {
+      // Persist only changed catalog data immediately; leave notifications and
+      // other expensive observation work on the existing coalesced path.
+      if (useBrowseMemory.getState().ready && saveBrowseCatalog(
+        browseScope(next), next.workspaces, next.sessions, {
+          pinnedSessionIds: next.pinnedSessionIds,
+          archivedSessionIds: next.archivedSessionIds,
+        },
+      )) void flushBrowseMemory()
+    }
+    scheduleObserve()
+  })
   const unsubscribePreferences = useBrowseMemory.subscribe((next, prev) => {
     if (next.notifications !== prev.notifications) observe()
   })

@@ -1776,17 +1776,25 @@ function normalizeAgentPreset(value: unknown): unknown {
   return value === LEGACY_AGENT_PRESET ? LEGACY_AGENT_PRESET_TARGET : value
 }
 
-function normalizeWorkspaceList(value: Record<string, unknown>): HarnessWorkspaceList {
+export function normalizeWorkspaceList(value: Record<string, unknown>): HarnessWorkspaceList {
+  const rawItems = Array.isArray(value.items)
+    ? value.items.filter((item): item is Record<string, unknown> => isRecord(item) && typeof item.workspaceId === 'string')
+    : []
+  const pinnedSessionIds = Array.isArray(value.pinnedSessionIds)
+    ? [...new Set(value.pinnedSessionIds.filter((item): item is string => typeof item === 'string'))]
+    : rawItems.some(item => Array.isArray(item.pinnedSessionIds))
+      ? [...new Set(rawItems.flatMap(item =>
+          Array.isArray(item.pinnedSessionIds)
+            ? item.pinnedSessionIds.filter((id): id is string => typeof id === 'string')
+            : [],
+        ))]
+      : undefined
   return {
-    items: Array.isArray(value.items)
-      ? value.items.filter(item => isRecord(item) && typeof item.workspaceId === 'string') as HarnessWorkspaceView[]
-      : [],
+    items: rawItems as unknown as HarnessWorkspaceView[],
     archivedSessionIds: Array.isArray(value.archivedSessionIds)
       ? value.archivedSessionIds.filter((item): item is string => typeof item === 'string')
       : [],
-    pinnedSessionIds: Array.isArray(value.pinnedSessionIds)
-      ? value.pinnedSessionIds.filter((item): item is string => typeof item === 'string')
-      : [],
+    ...(pinnedSessionIds === undefined ? {} : { pinnedSessionIds }),
   }
 }
 

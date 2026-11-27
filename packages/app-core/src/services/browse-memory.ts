@@ -17,9 +17,15 @@ export type BrowseEntry = {
   groupRounds?: Record<string, Record<string, string | number | boolean | null>[]>
   messages?: ChatItem[]
 }
+export type CatalogSnapshot = {
+  workspaces: WorkspaceView[]
+  sessions: RemoteSession[]
+  pinnedSessionIds?: string[]
+  archivedSessionIds?: string[]
+}
 type Snapshot = {
   entries: Record<string, BrowseEntry>
-  catalogs: Record<string, { workspaces: WorkspaceView[]; sessions: RemoteSession[] }>
+  catalogs: Record<string, CatalogSnapshot>
   deletedWorkspaces: Record<string, string[]>
   hostModes: Record<string, 'agent' | 'bot'>
   handoffOrigins: Record<string, Record<string, SessionHandoffOrigin>>
@@ -220,6 +226,11 @@ function sanitizeDeletedWorkspaces(value: unknown): Record<string, string[]> {
   return result
 }
 
+function sanitizeCatalogSessionIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))]
+}
+
 function filterCatalogByDeletedKeys(
   catalog: Snapshot['catalogs'][string],
   deletedKeys?: ReadonlySet<string>,
@@ -247,11 +258,19 @@ function filterCatalogByDeletedKeys(
       && session.cwd !== undefined
       && isDeletedAcpWorkspace(deletedKeys, session.backend, session.cwd, platform)
     ) {
+      removedSessionIds.add(session.sessionId)
       return false
     }
     return true
   })
-  return { workspaces: keptWorkspaces, sessions: keptSessions }
+  const pinnedSessionIds = catalog.pinnedSessionIds?.filter(id => !removedSessionIds.has(id))
+  const archivedSessionIds = catalog.archivedSessionIds?.filter(id => !removedSessionIds.has(id))
+  return {
+    workspaces: keptWorkspaces,
+    sessions: keptSessions,
+    ...(pinnedSessionIds !== undefined ? { pinnedSessionIds } : {}),
+    ...(archivedSessionIds !== undefined ? { archivedSessionIds } : {}),
+  }
 }
 
 function restoreCatalog(catalog: Snapshot['catalogs'][string], deletedKeys?: ReadonlySet<string>): Snapshot['catalogs'][string] {
@@ -263,6 +282,8 @@ function restoreCatalog(catalog: Snapshot['catalogs'][string], deletedKeys?: Rea
     const previous = sessions.get(id)
     if (previous === undefined || session.updatedAt > previous.updatedAt) sessions.set(id, safeSession(session))
   }
+  const pinnedSessionIds = sanitizeCatalogSessionIds(catalog.pinnedSessionIds)
+  const archivedSessionIds = sanitizeCatalogSessionIds(catalog.archivedSessionIds)
   return filterCatalogByDeletedKeys(
     {
       sessions: [...sessions.values()],
@@ -270,6 +291,8 @@ function restoreCatalog(catalog: Snapshot['catalogs'][string], deletedKeys?: Rea
         ...workspace,
         sessionIds: [...new Set(workspace.sessionIds)],
       })),
+      ...(pinnedSessionIds !== undefined ? { pinnedSessionIds } : {}),
+      ...(archivedSessionIds !== undefined ? { archivedSessionIds } : {}),
     },
     deletedKeys,
   )
@@ -468,11 +491,29 @@ export function unmarkDeletedAcpWorkspace(scope: string, backend: AgentBackend, 
   })
   schedule()
 }
-export function saveBrowseCatalog(scope: string, workspaces: WorkspaceView[], sessions: RemoteSession[]): void {
-  const catalog = {workspaces, sessions: sessions.map(safeSession)}
-  if (JSON.stringify(useBrowseMemory.getState().catalogs[scope]) === JSON.stringify(catalog)) return
+export function saveBrowseCatalog(
+  scope: string,
+  workspaces: WorkspaceView[],
+  sessions: RemoteSession[],
+  meta?: { pinnedSessionIds?: readonly string[]; archivedSessionIds?: readonly string[] },
+): boolean {
+  const existing = useBrowseMemory.getState().catalogs[scope]
+  const pinnedSessionIds = meta?.pinnedSessionIds !== undefined
+    ? sanitizeCatalogSessionIds(meta.pinnedSessionIds)
+    : existing?.pinnedSessionIds
+  const archivedSessionIds = meta?.archivedSessionIds !== undefined
+    ? sanitizeCatalogSessionIds(meta.archivedSessionIds)
+    : existing?.archivedSessionIds
+  const catalog: CatalogSnapshot = {
+    workspaces,
+    sessions: sessions.map(safeSession),
+    ...(pinnedSessionIds !== undefined ? { pinnedSessionIds } : {}),
+    ...(archivedSessionIds !== undefined ? { archivedSessionIds } : {}),
+  }
+  if (JSON.stringify(existing) === JSON.stringify(catalog)) return false
   useBrowseMemory.setState(state => ({catalogs: {...state.catalogs, [scope]: catalog}}))
   schedule()
+  return true
 }
 export function saveSessionMessagesSnapshot(scope: string, id: string, messages: ChatItem[]): void {
   updateBrowseEntry(scope, id, { messages: sanitizeCachedMessages(messages) })
