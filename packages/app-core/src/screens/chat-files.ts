@@ -61,10 +61,7 @@ export function isDirectTransportMode(mode: string | undefined): boolean {
   return mode === 'LAN' || mode === 'P2P'
 }
 
-/** Matches Host workspaceUploadMaxBytes(mode): 1 GiB over LAN/P2P, 20 MiB otherwise. */
-export function workspaceUploadMaxBytes(mode: string | undefined): number {
-  return isDirectTransportMode(mode) ? MAX_DIRECT_UPLOAD_BYTES : MAX_RELAY_UPLOAD_BYTES
-}
+export { workspaceUploadMaxBytes } from '@dsh-remote/protocol'
 
 /**
  * Pure TypeScript RFC 4648 base64 encoder that works uniformly across
@@ -574,6 +571,10 @@ export function isValidUtf8Text(text: string): boolean {
   if (text.includes('\0')) return false
   if (text.includes('\uFFFD')) return false
   return true
+}
+
+export function formatUploadLimit(bytes: number): string {
+  return bytes === 1024 ** 3 ? '1 GiB' : `${bytes / 1024 ** 2} MiB`
 }
 
 export function formatFileBytes(bytes: number): string {

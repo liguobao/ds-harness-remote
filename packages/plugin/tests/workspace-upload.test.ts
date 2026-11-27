@@ -167,6 +167,21 @@ it('allows 1 GiB only on live direct paths and discards a large upload after rel
   }
 })
 
+it.each(['TURN', 'Relay'])('applies the current member allowance on %s at open and during transfer', async mode => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-member-upload-'))
+  directories.push(root)
+  let member = true
+  const host = new WorkspaceUploadHost(async () => root, undefined, () => mode, Date.now, undefined, () => member)
+  hosts.push(host)
+  const params = request('member.bin', 100 * 1024 ** 2)
+  await expect(host.call('workspace.upload.open', { ...params, totalBytes: params.totalBytes + 1 })).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await host.call('workspace.upload.open', params)
+  member = false
+  await expect(host.call('workspace.upload.chunk', { ...scope(params), offset: 0, data: 'YQ==' })).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  expect(await readdir(root)).toEqual([])
+  await expect(host.call('workspace.upload.open', request('standard.bin', 20 * 1024 ** 2 + 1))).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+})
+
 describe('workspace-root upload authority and lifecycle', () => {
   it('publishes exact binary bytes without overwriting files or following target symlinks, and commits idempotently', async () => {
     const { root, host } = await setup()

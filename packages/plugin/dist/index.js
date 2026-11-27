@@ -64511,163 +64511,6 @@ function parseCodexSessionId(value) {
   return match === null ? void 0 : { sessionId: value, threadId: match[1] };
 }
 
-// packages/plugin/src/workspace-transfer-limits.ts
-function workspaceUploadMaxBytes(mode2) {
-  return mode2 === "LAN" || mode2 === "P2P" ? 1024 * 1024 * 1024 : 20 * 1024 * 1024;
-}
-
-// packages/plugin/src/remote-file-upload.ts
-import { constants } from "node:fs";
-import { open as open2 } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-var CHUNK = 64 * 1024;
-async function uploadRemoteFile(client, sessionId, localPath, name2, signal, assertCurrent) {
-  let file2;
-  try {
-    file2 = await open2(localPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-    const handle = file2;
-    const before = await handle.stat();
-    if (!before.isFile()) return { status: "rejected" };
-    return await uploadWorkspaceSource(client, sessionId, name2, before.size, signal, assertCurrent, async (offset2, length) => {
-      const buffer3 = Buffer.alloc(length);
-      const read = await handle.read(buffer3, 0, length, offset2);
-      return buffer3.subarray(0, read.bytesRead);
-    }, async () => {
-      const after = await handle.stat();
-      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
-        throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
-      }
-    });
-  } catch {
-    return { status: "rejected" };
-  } finally {
-    await file2?.close();
-  }
-}
-async function uploadRemoteBuffer(client, sessionId, name2, data2, signal, assertCurrent) {
-  const result = await uploadWorkspaceSource(
-    client,
-    sessionId,
-    name2,
-    data2.byteLength,
-    signal,
-    assertCurrent,
-    (offset2, size2) => data2.subarray(offset2, offset2 + size2)
-  );
-  if (result.status === "accepted") return result;
-  throw new Error(result.status === "unknown" ? "The upload result is uncertain. Check the remote workspace before retrying." : "The file could not be uploaded to the selected CodeX workspace.");
-}
-async function uploadWorkspaceSource(client, sessionId, name2, totalBytes, signal, assertCurrent, read, beforeCommit) {
-  const uploadId = randomUUID();
-  const scope3 = { sessionId, uploadId };
-  let remoteOpened = false;
-  let committing = false;
-  const check2 = () => {
-    signal.throwIfAborted();
-    assertCurrent();
-    if (totalBytes > workspaceUploadMaxBytes(client.getStats?.().mode)) throw new Error("UPLOAD_TRANSPORT_LIMIT");
-  };
-  const call = async (method, params) => {
-    check2();
-    const result = await client.rpc(method, params, signal);
-    check2();
-    return result;
-  };
-  try {
-    check2();
-    remoteOpened = true;
-    const opened = external_exports.object({ uploadId: external_exports.literal(uploadId), chunkBytes: external_exports.number().int().min(1).max(CHUNK) }).parse(await call("workspace.upload.open", { ...scope3, name: name2, totalBytes }));
-    let offset2 = 0;
-    while (offset2 < totalBytes) {
-      check2();
-      const chunk = await read(offset2, Math.min(opened.chunkBytes, totalBytes - offset2));
-      if (chunk.length === 0) throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
-      const next = offset2 + chunk.length;
-      external_exports.object({ uploadId: external_exports.literal(uploadId), receivedBytes: external_exports.literal(next) }).parse(
-        await call("workspace.upload.chunk", { ...scope3, offset: offset2, data: Buffer.from(chunk).toString("base64") })
-      );
-      offset2 = next;
-    }
-    await beforeCommit?.();
-    check2();
-    committing = true;
-    const result = external_exports.object({ name: external_exports.string().min(1), path: external_exports.string().min(1), bytes: external_exports.literal(totalBytes) }).parse(await call("workspace.upload.commit", scope3));
-    return { status: "accepted", ...result };
-  } catch {
-    if (remoteOpened) await client.rpc("workspace.upload.abort", scope3, AbortSignal.timeout(5e3)).catch(() => void 0);
-    return { status: committing ? "unknown" : "rejected" };
-  }
-}
-
-// packages/plugin/src/local-mention-upload.ts
-import { lstat, readFile } from "node:fs/promises";
-import { posix, win32 } from "node:path";
-var MAX_MENTION_BYTES = 192 * 1024 * 1024;
-var LOCAL_MENTION = /(^|\s)@(?:"([^"\r\n]+)"|([^\s]+))/gu;
-async function uploadLocalMentions(payload, remote, signal, platform3 = process.platform, fileIO = { lstat, readFile }) {
-  if (!isMentionRecord(payload) || !isMentionRecord(payload.args) || !isMentionRecord(payload.args.request)) return payload;
-  const request2 = payload.args.request;
-  if (typeof request2.sessionId !== "string" || !Array.isArray(request2.content)) return payload;
-  const content = [];
-  let uploaded = 0;
-  let seen = 0;
-  let staged = 0;
-  for (const block of request2.content) {
-    if (!isMentionRecord(block) || block.type !== "text" || typeof block.text !== "string") {
-      content.push(block);
-      continue;
-    }
-    const matches = [...block.text.matchAll(LOCAL_MENTION)].filter((match) => (platform3 === "win32" ? win32 : posix).isAbsolute(match[2] ?? match[3]));
-    if (matches.length === 0) {
-      content.push(block);
-      continue;
-    }
-    let cursor3 = 0;
-    for (const match of matches) {
-      signal.throwIfAborted();
-      const start = match.index + (match[1]?.length ?? 0);
-      if (start > cursor3) content.push({ ...block, text: block.text.slice(cursor3, start) });
-      const path = match[2] ?? match[3];
-      const candidates = await remote.dispatch("fileReferences/list", { args: {
-        agentId: request2.sessionId,
-        query: path
-      } }, signal);
-      if (candidates.ok && Array.isArray(candidates.value) && candidates.value.some((candidate) => isMentionRecord(candidate) && candidate.kind === "file" && candidate.path === path)) continue;
-      if (++seen > 4) throw new Error("Remote supports at most four absolute local file mentions per message.");
-      let file2;
-      try {
-        file2 = await fileIO.lstat(path);
-      } catch (error62) {
-        if (isMissingFile(error62)) continue;
-        throw error62;
-      }
-      if (!file2.isFile() || file2.isSymbolicLink() || uploaded + file2.size > MAX_MENTION_BYTES) {
-        throw new Error("The selected local file is unavailable or exceeds the Remote transfer limit.");
-      }
-      uploaded += file2.size;
-      const data2 = (await fileIO.readFile(path, { signal })).toString("base64");
-      const result = await remote.dispatch("fileUploads/upload", { args: {
-        agentId: request2.sessionId,
-        request: { data: data2, name: (platform3 === "win32" ? win32 : posix).basename(path) }
-      } }, signal);
-      if (!result.ok) throw new Error(result.error.message);
-      const value = result.value;
-      if (typeof value?.receiptId !== "string" || value.receiptId.length === 0) throw new Error("The Remote Host did not return a file receipt.");
-      content.push({ type: "file", receiptId: value.receiptId });
-      staged++;
-      cursor3 = match.index + match[0].length;
-    }
-    if (cursor3 < block.text.length) content.push({ ...block, text: block.text.slice(cursor3) });
-  }
-  return staged === 0 ? payload : { ...payload, args: { ...payload.args, request: { ...request2, content } } };
-}
-function isMentionRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function isMissingFile(error62) {
-  return isMentionRecord(error62) && (error62.code === "ENOENT" || error62.code === "ENOTDIR");
-}
-
 // packages/protocol/dist/lan-upload.js
 var LAN_UPLOAD_CAPABILITY = "workspace.upload.lan.v1";
 var LAN_UPLOAD_MIN_BYTES = 1024 * 1024;
@@ -65493,6 +65336,12 @@ function acceptNegotiatedCapabilities(offered, negotiated) {
   }
   return [...accepted];
 }
+var MEMBER_RELAY_UPLOAD_CAPABILITY = "workspace.upload.relay.100m.v1";
+function workspaceUploadMaxBytes(mode2, member = false) {
+  if (mode2 === "LAN" || mode2 === "P2P")
+    return 1024 ** 3;
+  return (member && (mode2 === "TURN" || mode2 === "Relay") ? 100 : 20) * 1024 ** 2;
+}
 var REMOTE_COMPACTION_CAPABILITY = "remote.compaction.async.v1";
 var REMOTE_SESSION_EVENTS_CAPABILITY = "remote.session.events.v1";
 var rpcMethodSchema = external_exports.enum(rpcMethods);
@@ -65675,6 +65524,7 @@ var connectRequestPayloadSchema = external_exports.object({
   preferredTransports: external_exports.array(external_exports.unknown()).min(1).max(MAX_PREFERRED_TRANSPORT_ENTRIES).pipe(external_exports.array(transportEnum))
 });
 var connectIncomingPayloadSchema = external_exports.object({
+  memberUploadExpiresAt: external_exports.number().int().positive().optional(),
   relayRecoveryTicket: external_exports.string().min(1).max(4096).optional(),
   recoveryTicket: external_exports.string().min(1).max(4096).optional(),
   connectionId: external_exports.string().min(1),
@@ -65986,6 +65836,181 @@ function cryptoRandomId() {
   if (g?.randomUUID)
     return g.randomUUID();
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+
+// packages/plugin/src/remote-file-upload.ts
+import { constants } from "node:fs";
+import { open as open2 } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+var CHUNK = 64 * 1024;
+async function uploadRemoteFile(client, sessionId, localPath, name2, signal, assertCurrent, features = {}) {
+  let file2;
+  try {
+    file2 = await open2(localPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    const handle = file2;
+    const before = await handle.stat();
+    if (!before.isFile()) return { status: "rejected" };
+    return await uploadWorkspaceSource(client, sessionId, name2, before.size, signal, assertCurrent, features, async (offset2, length) => {
+      const buffer3 = Buffer.alloc(length);
+      const read = await handle.read(buffer3, 0, length, offset2);
+      return buffer3.subarray(0, read.bytesRead);
+    }, async () => {
+      const after = await handle.stat();
+      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
+        throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
+      }
+    });
+  } catch {
+    return { status: "rejected" };
+  } finally {
+    await file2?.close();
+  }
+}
+async function uploadRemoteBuffer(client, sessionId, name2, data2, signal, assertCurrent, features = {}) {
+  const result = await uploadWorkspaceSource(
+    client,
+    sessionId,
+    name2,
+    data2.byteLength,
+    signal,
+    assertCurrent,
+    features,
+    (offset2, size2) => data2.subarray(offset2, offset2 + size2)
+  );
+  if (result.status === "accepted") return result;
+  throw new Error(result.status === "unknown" ? "The upload result is uncertain. Check the remote workspace before retrying." : "The file could not be uploaded to the selected CodeX workspace.");
+}
+async function uploadWorkspaceSource(client, sessionId, name2, totalBytes, signal, assertCurrent, features, read, beforeCommit) {
+  const uploadId = randomUUID();
+  const scope3 = { sessionId, uploadId };
+  let remoteOpened = false;
+  const pending = [];
+  let failed = false;
+  let committing = false;
+  const check2 = () => {
+    signal.throwIfAborted();
+    assertCurrent();
+    if (totalBytes > workspaceUploadMaxBytes(client.getStats?.().mode, features.memberRelayUpload)) throw new Error("UPLOAD_TRANSPORT_LIMIT");
+  };
+  const call = async (method, params) => {
+    check2();
+    const result = await client.rpc(method, params, signal);
+    check2();
+    return result;
+  };
+  try {
+    check2();
+    remoteOpened = true;
+    const binary = features.binaryUpload === true;
+    const opened = external_exports.object({
+      uploadId: external_exports.literal(uploadId),
+      chunkBytes: external_exports.number().int().min(1).max(binary ? BINARY_UPLOAD_CHUNK_BYTES : CHUNK),
+      encoding: external_exports.literal("binary-v1").optional()
+    }).parse(await call("workspace.upload.open", { ...scope3, name: name2, totalBytes, ...binary ? { encoding: "binary-v1" } : {} }));
+    if (opened.encoding !== (binary ? "binary-v1" : void 0)) throw new Error("UPLOAD_ENCODING_MISMATCH");
+    let offset2 = 0;
+    while (offset2 < totalBytes) {
+      check2();
+      const length = Math.min(opened.chunkBytes, totalBytes - offset2);
+      const chunk = await read(offset2, length);
+      if (failed) throw new Error("UPLOAD_CHUNK_FAILED");
+      if (chunk.length !== length) throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
+      const next = offset2 + chunk.length;
+      const ack = call(binary ? "workspace.upload.chunk.binary" : "workspace.upload.chunk", {
+        ...scope3,
+        offset: offset2,
+        data: binary ? chunk : Buffer.from(chunk).toString("base64")
+      }).then((result2) => {
+        external_exports.object({ uploadId: external_exports.literal(uploadId), receivedBytes: external_exports.literal(next) }).parse(result2);
+        return true;
+      }).catch(() => {
+        failed = true;
+        return false;
+      });
+      pending.push(ack);
+      if (pending.length >= (binary ? 4 : 1) && !await pending.shift()) throw new Error("UPLOAD_CHUNK_FAILED");
+      offset2 = next;
+    }
+    if (!(await Promise.all(pending)).every(Boolean)) throw new Error("UPLOAD_CHUNK_FAILED");
+    await beforeCommit?.();
+    check2();
+    committing = true;
+    const result = external_exports.object({ name: external_exports.string().min(1), path: external_exports.string().min(1), bytes: external_exports.literal(totalBytes) }).parse(await call("workspace.upload.commit", scope3));
+    return { status: "accepted", ...result };
+  } catch {
+    await Promise.all(pending);
+    if (remoteOpened) await client.rpc("workspace.upload.abort", scope3, AbortSignal.timeout(5e3)).catch(() => void 0);
+    return { status: committing ? "unknown" : "rejected" };
+  }
+}
+
+// packages/plugin/src/local-mention-upload.ts
+import { lstat, readFile } from "node:fs/promises";
+import { posix, win32 } from "node:path";
+var MAX_MENTION_BYTES = 192 * 1024 * 1024;
+var LOCAL_MENTION = /(^|\s)@(?:"([^"\r\n]+)"|([^\s]+))/gu;
+async function uploadLocalMentions(payload, remote, signal, platform3 = process.platform, fileIO = { lstat, readFile }) {
+  if (!isMentionRecord(payload) || !isMentionRecord(payload.args) || !isMentionRecord(payload.args.request)) return payload;
+  const request2 = payload.args.request;
+  if (typeof request2.sessionId !== "string" || !Array.isArray(request2.content)) return payload;
+  const content = [];
+  let uploaded = 0;
+  let seen = 0;
+  let staged = 0;
+  for (const block of request2.content) {
+    if (!isMentionRecord(block) || block.type !== "text" || typeof block.text !== "string") {
+      content.push(block);
+      continue;
+    }
+    const matches = [...block.text.matchAll(LOCAL_MENTION)].filter((match) => (platform3 === "win32" ? win32 : posix).isAbsolute(match[2] ?? match[3]));
+    if (matches.length === 0) {
+      content.push(block);
+      continue;
+    }
+    let cursor3 = 0;
+    for (const match of matches) {
+      signal.throwIfAborted();
+      const start = match.index + (match[1]?.length ?? 0);
+      if (start > cursor3) content.push({ ...block, text: block.text.slice(cursor3, start) });
+      const path = match[2] ?? match[3];
+      const candidates = await remote.dispatch("fileReferences/list", { args: {
+        agentId: request2.sessionId,
+        query: path
+      } }, signal);
+      if (candidates.ok && Array.isArray(candidates.value) && candidates.value.some((candidate) => isMentionRecord(candidate) && candidate.kind === "file" && candidate.path === path)) continue;
+      if (++seen > 4) throw new Error("Remote supports at most four absolute local file mentions per message.");
+      let file2;
+      try {
+        file2 = await fileIO.lstat(path);
+      } catch (error62) {
+        if (isMissingFile(error62)) continue;
+        throw error62;
+      }
+      if (!file2.isFile() || file2.isSymbolicLink() || uploaded + file2.size > MAX_MENTION_BYTES) {
+        throw new Error("The selected local file is unavailable or exceeds the Remote transfer limit.");
+      }
+      uploaded += file2.size;
+      const data2 = (await fileIO.readFile(path, { signal })).toString("base64");
+      const result = await remote.dispatch("fileUploads/upload", { args: {
+        agentId: request2.sessionId,
+        request: { data: data2, name: (platform3 === "win32" ? win32 : posix).basename(path) }
+      } }, signal);
+      if (!result.ok) throw new Error(result.error.message);
+      const value = result.value;
+      if (typeof value?.receiptId !== "string" || value.receiptId.length === 0) throw new Error("The Remote Host did not return a file receipt.");
+      content.push({ type: "file", receiptId: value.receiptId });
+      staged++;
+      cursor3 = match.index + match[0].length;
+    }
+    if (cursor3 < block.text.length) content.push({ ...block, text: block.text.slice(cursor3) });
+  }
+  return staged === 0 ? payload : { ...payload, args: { ...payload.args, request: { ...request2, content } } };
+}
+function isMentionRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isMissingFile(error62) {
+  return isMentionRecord(error62) && (error62.code === "ENOENT" || error62.code === "ENOTDIR");
 }
 
 // packages/client-core/dist/errors.js
@@ -73489,6 +73514,8 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
+    ...capabilities.has(MEMBER_RELAY_UPLOAD_CAPABILITY) ? { memberRelayUpload: true } : {},
+    ...capabilities.has("workspace.upload.v1") && capabilities.has("workspace.upload.binary.v1") ? { binaryUpload: true } : {},
     commandList: remoteGateway,
     fileViewer: capabilities.has("fileviewer.read.v1"),
     terminal,
@@ -86648,7 +86675,7 @@ var RemoteSessionTools = class {
           uploaderEntered = true;
           return uploadRemoteFile(remote.client, args.sessionId, args.localPath, name2, active2, () => {
             if (generation !== this.generation) fail4("REMOTE_AUTHORITY_CHANGED");
-          });
+          }, remote.features);
         })).then((result) => Object.assign(receipt, result), () => {
           receipt.status = uploaderEntered ? "unknown" : "rejected";
           return receipt;
@@ -91695,10 +91722,18 @@ var ClientModeRuntime = class {
       const payload = record3(request2.payload);
       const session2 = parseCodexSessionId(payload.sessionId);
       const data2 = typeof payload.data === "string" ? payload.data : void 0;
-      const limit = workspaceUploadMaxBytes(remote.client.getStats().mode);
-      if (session2 === void 0 || data2 === void 0 || data2.length > Math.ceil(limit / 3) * 4 || request2.endpoint !== "file" && request2.endpoint !== "image") {
-        throw new ClientModeError("INVALID_MESSAGE", "The CodeX upload is invalid or exceeds the transfer limit.");
+      const mode2 = remote.client.getStats().mode;
+      const limit = workspaceUploadMaxBytes(mode2, remote.features.memberRelayUpload);
+      if (session2 === void 0 || data2 === void 0 || request2.endpoint !== "file" && request2.endpoint !== "image") {
+        throw new ClientModeError("INVALID_MESSAGE", "The CodeX upload is invalid.");
       }
+      const checkSize = (oversized) => {
+        if (!oversized) return;
+        const size2 = limit === 1024 ** 3 ? "1 GiB" : `${limit / 1024 ** 2} MiB`;
+        const tiers = mode2 === "Relay" || mode2 === "TURN" ? " Relay and TURN allow 20 MiB per file, or 100 MiB on connections with member upload support." : "";
+        throw new ClientModeError("INVALID_MESSAGE", `The file exceeds the current upload limit of ${size2}.${tiers}`);
+      };
+      checkSize(data2.length > Math.ceil(limit / 3) * 4);
       const assertCurrent = () => {
         this.assertRemoteCurrent(remote, signal);
         if (this.codexVirtual !== virtual) throw new ClientModeError("REMOTE_NOT_CONNECTED", "The selected CodeX workspace changed.");
@@ -91707,8 +91742,9 @@ var ClientModeRuntime = class {
       await virtual.assertDesktopUploadSession(session2.sessionId, signal);
       assertCurrent();
       const bytes = Buffer.from(data2, "base64");
-      if (bytes.length > limit || bytes.toString("base64") !== data2) {
-        throw new ClientModeError("INVALID_MESSAGE", "The CodeX upload is invalid or exceeds the transfer limit.");
+      checkSize(bytes.length > limit);
+      if (bytes.toString("base64") !== data2) {
+        throw new ClientModeError("INVALID_MESSAGE", "The CodeX upload is invalid.");
       }
       const name2 = typeof payload.name === "string" && payload.name.length > 0 ? payload.name : "attachment";
       const receiptId = uuidV7();
@@ -91720,7 +91756,7 @@ var ClientModeRuntime = class {
         virtual.registerDesktopUpload(session2.sessionId, receiptId, { type: "image", mediaType, data: data2 });
         return { status: 200, json: { ok: true, value: { receiptId, file: { attachmentId: receiptId, name: name2, bytes: bytes.length } } } };
       }
-      const uploaded = await uploadRemoteBuffer(remote.client, session2.sessionId, name2, bytes, signal, assertCurrent);
+      const uploaded = await uploadRemoteBuffer(remote.client, session2.sessionId, name2, bytes, signal, assertCurrent, remote.features);
       assertCurrent();
       virtual.registerDesktopUpload(session2.sessionId, receiptId, {
         type: "text",
@@ -111040,12 +111076,13 @@ var openParams = scope2.extend({ name: external_exports.string().min(1), totalBy
 var chunkParams = scope2.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
 var binaryChunkParams = scope2.extend({ offset: external_exports.number().int().min(0), data: external_exports.instanceof(Uint8Array).refine((data2) => data2.byteLength > 0 && data2.byteLength <= BINARY_UPLOAD_CHUNK_BYTES) }).strict();
 var WorkspaceUploadHost = class {
-  constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now, budget = new WorkspaceUploadBudget()) {
+  constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now, budget = new WorkspaceUploadBudget(), memberRelayUpload = () => false) {
     this.resolveRoot = resolveRoot;
     this.ttlMs = ttlMs;
     this.transportMode = transportMode;
     this.now = now;
     this.budget = budget;
+    this.memberRelayUpload = memberRelayUpload;
     this.timer = setInterval(() => {
       void this.serialize(() => this.expire()).catch(() => void 0);
     }, Math.min(ttlMs, 3e4));
@@ -111106,7 +111143,7 @@ var WorkspaceUploadHost = class {
   }
   async begin(input4) {
     const p = openParams.parse(input4);
-    if (p.totalBytes > workspaceUploadMaxBytes(this.transportMode())) throw failure4("UPLOAD_LIMIT");
+    if (p.totalBytes > workspaceUploadMaxBytes(this.transportMode(), this.memberRelayUpload())) throw failure4("UPLOAD_LIMIT");
     if (!validName(p.name)) throw failure4("UPLOAD_INVALID_NAME");
     if (this.uploads.has(p.uploadId) || this.completed.has(p.uploadId)) throw failure4("UPLOAD_ID_IN_USE");
     if (this.uploads.size >= 2) throw failure4("UPLOAD_LIMIT");
@@ -111235,7 +111272,7 @@ var WorkspaceUploadHost = class {
     return this.now() - upload.authorityCheckedAt >= WORKSPACE_UPLOAD_AUTHORITY_TTL_MS || upload.received - upload.authorityBytes >= WORKSPACE_UPLOAD_AUTHORITY_BYTES;
   }
   async validateRoot(upload, recheckAuthority = true) {
-    if (upload.totalBytes > workspaceUploadMaxBytes(this.transportMode())) throw failure4("UPLOAD_LIMIT");
+    if (upload.totalBytes > workspaceUploadMaxBytes(this.transportMode(), this.memberRelayUpload())) throw failure4("UPLOAD_LIMIT");
     if (recheckAuthority) {
       const current = await this.sessionRoot(upload.sessionId);
       this.assertLive();
@@ -111348,7 +111385,7 @@ var ConnectionController = class {
     }
     await Promise.all(replaced.map((connection2) => this.disconnect(connection2, "CONNECTION_REPLACED")));
     const router = this.createRouter(
-      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode, sameLinkIpv6Endpoints: channel.sameLinkIpv6Endpoints?.bind(channel), lanWebAddress: channel.lanWebAddress?.bind(channel), createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
+      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, memberRelayUpload: () => channel.memberRelayUpload === true, transportMode: () => channel.mode, sameLinkIpv6Endpoints: channel.sameLinkIpv6Endpoints?.bind(channel), lanWebAddress: channel.lanWebAddress?.bind(channel), createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
       (message) => this.sendTo(connectionId, channel, message)
     );
     const connection = {
@@ -112889,6 +112926,7 @@ var HostServerConnection = class {
       prologue: createNoisePrologue(payload.connectionId, this.identity.deviceId, peer.deviceId)
     });
     const tunnel = {
+      memberUploadExpiresAt: payload.memberUploadExpiresAt,
       recoveryTicket: this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY) ? payload.recoveryTicket : void 0,
       relayRecoveryTicket: this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY) ? payload.relayRecoveryTicket : void 0,
       connectionId: payload.connectionId,
@@ -113626,6 +113664,9 @@ var ServerNoiseChannel = class {
     };
     this.peerDeviceId = tunnel.peer.deviceId;
     this.peerIdentityKey = tunnel.peer.publicKey;
+  }
+  get memberRelayUpload() {
+    return (this.tunnel.memberUploadExpiresAt ?? 0) > Date.now();
   }
   sends = new SerialSend();
   security;
@@ -116125,7 +116166,7 @@ var HostPluginRuntime = class {
         () => harnessSessionGeneration(this.harnessVersion) === "v3",
         (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
-      ), void 0, context.transportMode, Date.now, this.uploadBudget);
+      ), void 0, context.transportMode, Date.now, this.uploadBudget, context.memberRelayUpload);
       const workspaceGit = new WorkspaceGitHost(resolveSessionWorkspaceRoot(
         peerGateway,
         () => harnessSessionGeneration(this.harnessVersion) === "v3",
@@ -116144,7 +116185,7 @@ var HostPluginRuntime = class {
         this.logger,
         fileViewer,
         harnessRemote,
-        () => this.transportCapabilities(peerGateway),
+        () => this.transportCapabilities(peerGateway, context.memberRelayUpload?.()),
         codex,
         cursor3,
         // Handles and their lifetime belong to this connection; only policy is shared.
@@ -116577,8 +116618,9 @@ var HostPluginRuntime = class {
     }
     return capabilities;
   }
-  async transportCapabilities(gateway) {
+  async transportCapabilities(gateway, memberRelayUpload = false) {
     const capabilities = this.hostCapabilities();
+    if (memberRelayUpload) capabilities.push(MEMBER_RELAY_UPLOAD_CAPABILITY);
     if (gateway?.supportsCarrier !== true) return capabilities;
     let result;
     try {
@@ -116870,7 +116912,7 @@ function remoteSessionTools(resolve11) {
   const operation = { ...string8, description: "Unique 16\u2013128 character operation key (letters, digits, _ or -). Keep this key for receipt lookup. Never use a new key to retry an unknown outcome." };
   const metadata = {
     remote_upload_file: {
-      description: "Upload an existing local regular file (absolute localPath on this plugin machine) to a Harness session workspace root, only when the user authorizes sending that file to that Host. Maximum 1 GiB on verified LAN/direct P2P paths; otherwise 20 MiB (including TURN/Relay/unknown). Host must also support the larger limit. Optional name is a filename, not a path. Existing remote files are never overwritten; the Host chooses a unique name. Requires a unique operationId; inspect remote_get_operation on uncertain delivery and never automatically retry with a new key. Returns remote path/name/bytes, never contents. Does not send a prompt or alter UI selection.",
+      description: "Upload an existing local regular file (absolute localPath on this plugin machine) to a Harness session workspace root, only when the user authorizes sending that file to that Host. Maximum 1 GiB on verified LAN/direct P2P paths; 100 MiB on TURN/Relay with a current network membership, otherwise 20 MiB. Host must also support the larger limit. Optional name is a filename, not a path. Existing remote files are never overwritten; the Host chooses a unique name. Requires a unique operationId; inspect remote_get_operation on uncertain delivery and never automatically retry with a new key. Returns remote path/name/bytes, never contents. Does not send a prompt or alter UI selection.",
       parameters: object5({ ...session2, operationId: operation, localPath: string8, name: string8 }, [...Object.keys(session2), "operationId", "localPath"])
     },
     remote_download_file: {

@@ -65,6 +65,7 @@ import { AutomationTasksModal } from './automation-tasks-modal'
 import { ChatErrorBoundary } from './chat-error-boundary'
 import {
   formatDurationMs,
+  formatUploadLimit,
   formatFileBytes,
   formatUploadedFilesPrompt,
   formatUploadedFilesReferencePrompt,
@@ -1404,8 +1405,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
     const targetSessionId = session.sessionId
     const sendSessionGen = sessionGenerationRef.current
     if (submittedFiles.length > 0) {
-      const transportModeAtStart = useAppStore.getState().connection.stats.mode
-      const maxBytesAtStart = workspaceUploadMaxBytes(transportModeAtStart)
+      const { mode: transportModeAtStart, memberRelayUpload } = useAppStore.getState().connection.stats
+      const maxBytesAtStart = workspaceUploadMaxBytes(transportModeAtStart, memberRelayUpload)
       const oversizedFile = submittedFiles.find(
         file => !(typeof file.remotePath === 'string' && file.remotePath.trim().length > 0)
           && typeof file.content !== 'string'
@@ -1416,7 +1417,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
           strings.messageActions.failed,
           strings.chat.fileTooLargeForTransport(
             oversizedFile.name,
-            formatFileBytes(maxBytesAtStart),
+            formatUploadLimit(maxBytesAtStart),
             isDirectTransportMode(transportModeAtStart),
           ),
         )
@@ -1467,15 +1468,15 @@ const ChatConversationPane = memo(function ChatConversationPane({
         const code = (uploadError as { code?: string })?.code
         const activeFile = failingFile ?? submittedFiles[0]
         const activeName = activeFile?.name ?? ''
-        const transportMode = useAppStore.getState().connection.stats.mode
-        const maxTransportBytes = workspaceUploadMaxBytes(transportMode)
+        const { mode: transportMode, memberRelayUpload } = useAppStore.getState().connection.stats
+        const maxTransportBytes = workspaceUploadMaxBytes(transportMode, memberRelayUpload)
         let errorMsg: string
         if (code === 'FEATURE_NOT_SUPPORTED' || code === 'UPLOAD_WORKSPACE_UNAVAILABLE') {
           errorMsg = strings.chat.uploadUnavailable
         } else if (code === 'UPLOAD_LIMIT' && (activeFile?.size ?? 0) > maxTransportBytes) {
           errorMsg = strings.chat.fileTooLargeForTransport(
             activeName,
-            formatFileBytes(maxTransportBytes),
+            formatUploadLimit(maxTransportBytes),
             isDirectTransportMode(transportMode),
           )
         } else {

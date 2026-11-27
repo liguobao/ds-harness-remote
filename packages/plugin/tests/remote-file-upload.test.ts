@@ -71,13 +71,14 @@ describe('Remote upload tool transfer and receipts', () => {
     const rpc = vi.fn((method: string, params: unknown) => host.call(method, params))
     const client = { rpc, getStats: () => ({ mode: 'Relay' }) } as unknown as RemoteClientCore
     const signal = new AbortController().signal
-    const bytes = Buffer.alloc(140_000, 7)
+    const bytes = Buffer.alloc(1024 * 1024 + 13, 7)
     try {
       await writeFile(join(root, 'notes.txt'), 'existing')
       await expect(uploadRemoteBuffer(client, 'codex:foreign', 'notes.txt', bytes, signal, () => {})).rejects.toThrow()
-      await expect(uploadRemoteBuffer(client, 'codex:thread', 'notes.txt', bytes, signal, () => {})).resolves.toMatchObject({
+      await expect(uploadRemoteBuffer(client, 'codex:thread', 'notes.txt', bytes, signal, () => {}, { binaryUpload: true })).resolves.toMatchObject({
         path: './notes (1).txt', bytes: bytes.length,
       })
+      expect(rpc.mock.calls.filter(([method]) => method === 'workspace.upload.chunk.binary')).toHaveLength(5)
       expect(await readFile(join(root, 'notes.txt'), 'utf8')).toBe('existing')
       expect(await readFile(join(root, 'notes (1).txt'))).toEqual(bytes)
       expect(rpc.mock.calls.filter(([method]) => method === 'workspace.upload.commit')).toHaveLength(1)

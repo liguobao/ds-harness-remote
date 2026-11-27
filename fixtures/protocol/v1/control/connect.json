@@ -74,6 +74,7 @@
           "clientDeviceId": "0198abc0-3001-7abc-8123-123456789abc",
           "clientIdentityKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           "authorization": "account",
+          "memberUploadExpiresAt": 1786100000000,
           "preferredTransports": ["p2p", "turn", "relay"]
         }
       },

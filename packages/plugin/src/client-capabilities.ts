@@ -1,3 +1,4 @@
+import { MEMBER_RELAY_UPLOAD_CAPABILITY } from '@dsh-remote/protocol'
 import { RemoteClientCore, remoteWorkspaceTypeAvailable } from '@dsh-remote/client-core'
 import { MAX_REMOTE_CAPABILITY_ENTRIES, parseRemoteWorkspaceTypes } from '@dsh-remote/protocol'
 import type { RemoteHostFeatures } from './client-runtime-contract.js'
@@ -61,6 +62,8 @@ export async function probeRemoteHostFeatures(
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
   return {
+    ...(capabilities.has(MEMBER_RELAY_UPLOAD_CAPABILITY) ? { memberRelayUpload: true } : {}),
+    ...(capabilities.has('workspace.upload.v1') && capabilities.has('workspace.upload.binary.v1') ? { binaryUpload: true } : {}),
     commandList: remoteGateway,
     fileViewer: capabilities.has('fileviewer.read.v1'),
     terminal,

@@ -10,6 +10,7 @@ import { useAppStore } from '../../state/store'
 import type { PromptImage, RemoteSession } from '../../types'
 import {
   documentImageReadBudget,
+  formatUploadLimit,
   formatFileBytes,
   isDirectTransportMode,
   isTextFile,
@@ -98,8 +99,8 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
 
       if (sessionGenerationRef.current !== capturedGen || useAppStore.getState().selectedSession?.sessionId !== targetSessionId) return
 
-      const transportMode = useAppStore.getState().connection.stats.mode
-      const maxUploadBytes = workspaceUploadMaxBytes(transportMode)
+      const { mode: transportMode, memberRelayUpload } = useAppStore.getState().connection.stats
+      const maxUploadBytes = workspaceUploadMaxBytes(transportMode, memberRelayUpload)
       const direct = isDirectTransportMode(transportMode)
 
       const pickedImages: PromptImage[] = []
@@ -122,7 +123,7 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
           if (realSize > maxUploadBytes) {
             Alert.alert(
               strings.chat.filePickerFailedTitle,
-              strings.chat.fileTooLargeForTransport(name, formatFileBytes(maxUploadBytes), direct),
+              strings.chat.fileTooLargeForTransport(name, formatUploadLimit(maxUploadBytes), direct),
             )
             continue
           }
@@ -206,8 +207,8 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
       const newImages: PromptImage[] = []
       const limits = sessionImageLimits(session)
       const imageBudget = documentImageReadBudget(limits)
-      const transportMode = useAppStore.getState().connection.stats.mode
-      const maxUploadBytes = workspaceUploadMaxBytes(transportMode)
+      const { mode: transportMode, memberRelayUpload } = useAppStore.getState().connection.stats
+      const maxUploadBytes = workspaceUploadMaxBytes(transportMode, memberRelayUpload)
       const direct = isDirectTransportMode(transportMode)
 
       const currentImages = useBrowseMemory.getState().entries[memoryKey]?.images ?? EMPTY_IMAGES
@@ -287,7 +288,7 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
         if (realSize > maxUploadBytes) {
           Alert.alert(
             strings.chat.filePickerFailedTitle,
-            strings.chat.fileTooLargeForTransport(rawName, formatFileBytes(maxUploadBytes), direct),
+            strings.chat.fileTooLargeForTransport(rawName, formatUploadLimit(maxUploadBytes), direct),
           )
           continue
         }

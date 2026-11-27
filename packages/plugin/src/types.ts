@@ -11,6 +11,7 @@ export interface AuthenticatedPeerChannel {
     connectionId: string
     membershipId: string
   }
+  readonly memberRelayUpload?: boolean
   readonly peerDeviceId: string
   readonly peerIdentityKey: string
   readonly sameLinkIpv6Endpoints?: (pair?: SameLinkIpv6Pair) => Promise<string[]>

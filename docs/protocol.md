@@ -1679,7 +1679,7 @@ ACP 同时要求调用连接的 peer 仍有效、backend 可用、session owner 
 | `workspace.upload.commit` | `{sessionId, uploadId}` | `{name, path, bytes}` |
 | `workspace.upload.abort` | `{sessionId, uploadId}` | `{aborted:true}` |
 
-- `open`：`totalBytes` 是非负整数：Host 验证当前连接为 LAN 或直接 P2P 时最大 1 GiB（1,073,741,824 bytes）；TURN、Relay、未知路径最大 20 MiB。Host 在 open、chunk 和 commit 重新检查实际路径；大文件传输回退至中继时拒绝并清理未提交数据。旧 Host 可保留 20 MiB 限额，Client 不得自动重传。`name` 是单个文件名，UTF-8 编码最多
+- `open`：`totalBytes` 是非负整数：Host 验证当前连接为 LAN 或直接 P2P 时最大 1 GiB（1,073,741,824 bytes）；TURN、Relay 普通用户最大 20 MiB，有效会员最大 100 MiB；未知路径最大 20 MiB。Gateway 可在发给 Host 的 `connect.incoming` 中给出 `memberUploadExpiresAt`（Unix 毫秒）。Host 在该时间之前可向当前客户端声明 `workspace.upload.relay.100m.v1`，缺少该字段或已到期时按普通额度处理。Host 在 open、chunk 和 commit 重新检查实际路径；回退至中继或会员到期后超过当前额度时拒绝并清理未提交数据。旧 Host 可保留 20 MiB 限额，Client 不得自动重传。`name` 是单个文件名，UTF-8 编码最多
   220 bytes；禁止 `/`、`\`、ASCII 控制字符、DEL、`<>:"|?*`、`.`、`..`、尾部点/空格、
   Windows 保留名，以及 Host 临时文件前缀 `.dsh-upload-`。不能传 `cwd`、目标目录或目标路径。
   未协商二进制扩展时，Host 返回 `chunkBytes: 65536`，表示后续每块**解码后**最多 64 KiB。
@@ -2016,7 +2016,7 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 | File Viewer range / RPC | 512 KiB |
 | File Viewer directory entries / RPC | 1,000 |
 | RPC text input | 64 KiB |
-| Workspace upload file | LAN / direct P2P：1 GiB；TURN / Relay / 未知：20 MiB；允许零字节 |
+| Workspace upload file | LAN / direct P2P：1 GiB；TURN / Relay：普通 20 MiB、会员 100 MiB；未知：20 MiB；允许零字节 |
 | Workspace upload chunk（解码后） | 64 KiB；以 open 返回的 chunkBytes 为准 |
 | Workspace active uploads / connection | 2；2 min idle 后回收 |
 | Workspace active uploads / Host | 4 |

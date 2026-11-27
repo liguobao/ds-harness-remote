@@ -19,6 +19,8 @@ export interface ConnectedRemote {
 }
 
 export interface RemoteHostFeatures {
+  memberRelayUpload?: boolean
+  binaryUpload?: boolean
   commandList: boolean
   fileViewer: boolean
   terminal: boolean

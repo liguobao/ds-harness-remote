@@ -14,7 +14,7 @@ import { elevationStyle } from '../ui/platform-style'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import {
-  formatFileBytes,
+  formatUploadLimit,
   isDirectTransportMode,
   sanitizeUploadFileName,
   uploadStagedFilesToWorkspace,
@@ -94,8 +94,8 @@ export function WorkspaceFilesPanel({
         copyToCacheDirectory: true,
       })
       if (controller.signal.aborted || picked.canceled || !picked.assets || picked.assets.length === 0) return
-      const transportMode = useAppStore.getState().connection.stats.mode
-      const maxUploadBytes = workspaceUploadMaxBytes(transportMode)
+      const { mode: transportMode, memberRelayUpload } = useAppStore.getState().connection.stats
+      const maxUploadBytes = workspaceUploadMaxBytes(transportMode, memberRelayUpload)
       const direct = isDirectTransportMode(transportMode)
       const files: StagedFile[] = []
       for (const asset of picked.assets) {
@@ -115,7 +115,7 @@ export function WorkspaceFilesPanel({
           continue
         }
         if (size > maxUploadBytes) {
-          Alert.alert(t.tools.upload, t.chat.fileTooLargeForTransport(name, formatFileBytes(maxUploadBytes), direct))
+          Alert.alert(t.tools.upload, t.chat.fileTooLargeForTransport(name, formatUploadLimit(maxUploadBytes), direct))
           continue
         }
         files.push({

@@ -1,3 +1,4 @@
+import { MEMBER_RELAY_UPLOAD_CAPABILITY } from '@dsh-remote/protocol'
 import { DshWebLanPeer } from './dsh-web-lan.js'
 import { DshWebPeer, type DshWebRuntime } from './dsh-web-host.js'
 import { HostAttentionTracker } from './attention-tracker.js'
@@ -245,7 +246,7 @@ export class HostPluginRuntime {
           () => harnessSessionGeneration(this.harnessVersion) === 'v3',
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
-        ), undefined, context.transportMode, Date.now, this.uploadBudget)
+        ), undefined, context.transportMode, Date.now, this.uploadBudget, context.memberRelayUpload)
       const workspaceGit = new WorkspaceGitHost(resolveSessionWorkspaceRoot(
         peerGateway,
         () => harnessSessionGeneration(this.harnessVersion) === 'v3',
@@ -262,7 +263,7 @@ export class HostPluginRuntime {
         this.logger,
         fileViewer,
         harnessRemote,
-        () => this.transportCapabilities(peerGateway),
+        () => this.transportCapabilities(peerGateway, context.memberRelayUpload?.()),
         codex,
         cursor,
         // Handles and their lifetime belong to this connection; only policy is shared.
@@ -706,8 +707,9 @@ export class HostPluginRuntime {
     return capabilities
   }
 
-  private async transportCapabilities(gateway?: LocalTypertGateway): Promise<string[]> {
+  private async transportCapabilities(gateway?: LocalTypertGateway, memberRelayUpload = false): Promise<string[]> {
     const capabilities = this.hostCapabilities()
+    if (memberRelayUpload) capabilities.push(MEMBER_RELAY_UPLOAD_CAPABILITY)
     if (gateway?.supportsCarrier !== true) return capabilities
     let result: Awaited<ReturnType<LocalTypertGateway['dispatch']>>
     try {

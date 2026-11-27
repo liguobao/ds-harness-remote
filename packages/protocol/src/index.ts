@@ -477,6 +477,7 @@ export interface ConnectRequestPayload {
 }
 
 export interface ConnectIncomingPayload {
+  memberUploadExpiresAt?: number
   relayRecoveryTicket?: string
   recoveryTicket?: string
   connectionId: string
@@ -710,7 +711,14 @@ export interface DevicePresenceResponse {
   attentionDigest?: AttentionDigest
 }
 
+export const MEMBER_RELAY_UPLOAD_CAPABILITY = 'workspace.upload.relay.100m.v1'
+export function workspaceUploadMaxBytes(mode: string | undefined, member = false): number {
+  if (mode === 'LAN' || mode === 'P2P') return 1024 ** 3
+  return (member && (mode === 'TURN' || mode === 'Relay') ? 100 : 20) * 1024 ** 2
+}
+
 export interface TransportStats {
+  memberRelayUpload?: boolean
   mode: 'LAN' | 'P2P' | 'TURN' | 'Relay' | 'Disconnected'
   connected: boolean
   rttMs?: number
@@ -1287,6 +1295,7 @@ export const connectRequestPayloadSchema = z.object({
 })
 
 export const connectIncomingPayloadSchema = z.object({
+  memberUploadExpiresAt: z.number().int().positive().optional(),
   relayRecoveryTicket: z.string().min(1).max(4096).optional(),
   recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),

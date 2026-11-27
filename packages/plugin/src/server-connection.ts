@@ -78,6 +78,7 @@ type RelayAssignment = Pick<ConnectIncomingPayload, 'relayEndpoint' | 'relayTick
 export type WebSocketFactory = (url: string) => WebSocketLike
 
 interface PendingTunnel {
+  memberUploadExpiresAt?: number
   recoveryTicket?: string
   relayRecoveryTicket?: string
   lease?: ControlLease
@@ -764,6 +765,7 @@ export class HostServerConnection {
       prologue: createNoisePrologue(payload.connectionId, this.identity.deviceId, peer.deviceId),
     })
     const tunnel: PendingTunnel = {
+      memberUploadExpiresAt: payload.memberUploadExpiresAt,
       recoveryTicket: this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY) ? payload.recoveryTicket : undefined,
       relayRecoveryTicket: this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY) ? payload.relayRecoveryTicket : undefined,
       connectionId: payload.connectionId,
@@ -1581,6 +1583,7 @@ interface DrainingLeg {
 }
 
 export class ServerNoiseChannel implements AuthenticatedPeerChannel {
+  get memberRelayUpload(): boolean { return (this.tunnel.memberUploadExpiresAt ?? 0) > Date.now() }
   private readonly sends = new SerialSend()
   readonly security
   readonly peerDeviceId: string

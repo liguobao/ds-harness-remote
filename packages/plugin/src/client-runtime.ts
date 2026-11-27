@@ -894,11 +894,20 @@ export class ClientModeRuntime {
       const payload = record(request.payload)
       const session = parseCodexSessionId(payload.sessionId)
       const data = typeof payload.data === 'string' ? payload.data : undefined
-      const limit = workspaceUploadMaxBytes(remote.client.getStats().mode)
-      if (session === undefined || data === undefined || data.length > Math.ceil(limit / 3) * 4
+      const mode = remote.client.getStats().mode
+      const limit = workspaceUploadMaxBytes(mode, remote.features.memberRelayUpload)
+      if (session === undefined || data === undefined
         || (request.endpoint !== 'file' && request.endpoint !== 'image')) {
-        throw new ClientModeError('INVALID_MESSAGE', 'The CodeX upload is invalid or exceeds the transfer limit.')
+        throw new ClientModeError('INVALID_MESSAGE', 'The CodeX upload is invalid.')
       }
+      const checkSize = (oversized: boolean) => {
+        if (!oversized) return
+        const size = limit === 1024 ** 3 ? '1 GiB' : `${limit / 1024 ** 2} MiB`
+        const tiers = mode === 'Relay' || mode === 'TURN'
+          ? ' Relay and TURN allow 20 MiB per file, or 100 MiB on connections with member upload support.' : ''
+        throw new ClientModeError('INVALID_MESSAGE', `The file exceeds the current upload limit of ${size}.${tiers}`)
+      }
+      checkSize(data.length > Math.ceil(limit / 3) * 4)
       const assertCurrent = () => {
         this.assertRemoteCurrent(remote, signal)
         if (this.codexVirtual !== virtual) throw new ClientModeError('REMOTE_NOT_CONNECTED', 'The selected CodeX workspace changed.')
@@ -907,8 +916,9 @@ export class ClientModeRuntime {
       await virtual.assertDesktopUploadSession(session.sessionId, signal)
       assertCurrent()
       const bytes = Buffer.from(data, 'base64')
-      if (bytes.length > limit || bytes.toString('base64') !== data) {
-        throw new ClientModeError('INVALID_MESSAGE', 'The CodeX upload is invalid or exceeds the transfer limit.')
+      checkSize(bytes.length > limit)
+      if (bytes.toString('base64') !== data) {
+        throw new ClientModeError('INVALID_MESSAGE', 'The CodeX upload is invalid.')
       }
       const name = typeof payload.name === 'string' && payload.name.length > 0 ? payload.name : 'attachment'
       const receiptId = uuidV7()
@@ -921,7 +931,7 @@ export class ClientModeRuntime {
         virtual.registerDesktopUpload(session.sessionId, receiptId, { type: 'image', mediaType, data })
         return { status: 200, json: { ok: true, value: { receiptId, file: { attachmentId: receiptId, name, bytes: bytes.length } } } }
       }
-      const uploaded = await uploadRemoteBuffer(remote.client, session.sessionId, name, bytes, signal, assertCurrent)
+      const uploaded = await uploadRemoteBuffer(remote.client, session.sessionId, name, bytes, signal, assertCurrent, remote.features)
       assertCurrent()
       virtual.registerDesktopUpload(session.sessionId, receiptId, {
         type: 'text', text: `\nAttached workspace file: ${JSON.stringify(uploaded.path)}\n`,

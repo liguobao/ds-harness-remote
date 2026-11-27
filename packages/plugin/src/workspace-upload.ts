@@ -40,6 +40,7 @@ export class WorkspaceUploadHost {
     private readonly transportMode: () => string | undefined = () => undefined,
     private readonly now: () => number = Date.now,
     private readonly budget: WorkspaceUploadBudget = new WorkspaceUploadBudget(),
+    private readonly memberRelayUpload: () => boolean = () => false,
   ) {
     this.timer = setInterval(() => { void this.serialize(() => this.expire()).catch(() => undefined) }, Math.min(ttlMs, 30_000))
     this.timer.unref()
@@ -94,7 +95,7 @@ export class WorkspaceUploadHost {
 
   private async begin(input: unknown) {
     const p = openParams.parse(input)
-    if (p.totalBytes > workspaceUploadMaxBytes(this.transportMode())) throw failure('UPLOAD_LIMIT')
+    if (p.totalBytes > workspaceUploadMaxBytes(this.transportMode(), this.memberRelayUpload())) throw failure('UPLOAD_LIMIT')
     if (!validName(p.name)) throw failure('UPLOAD_INVALID_NAME')
     if (this.uploads.has(p.uploadId) || this.completed.has(p.uploadId)) throw failure('UPLOAD_ID_IN_USE')
     if (this.uploads.size >= 2) throw failure('UPLOAD_LIMIT')
@@ -225,7 +226,7 @@ export class WorkspaceUploadHost {
   }
 
   private async validateRoot(upload: Upload, recheckAuthority = true) {
-    if (upload.totalBytes > workspaceUploadMaxBytes(this.transportMode())) throw failure('UPLOAD_LIMIT')
+    if (upload.totalBytes > workspaceUploadMaxBytes(this.transportMode(), this.memberRelayUpload())) throw failure('UPLOAD_LIMIT')
     if (recheckAuthority) {
       const current = await this.sessionRoot(upload.sessionId)
       this.assertLive()

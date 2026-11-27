@@ -1,3 +1,4 @@
+import { MEMBER_RELAY_UPLOAD_CAPABILITY } from '@dsh-remote/protocol'
 import {
   WORKSPACE_GIT_CAPABILITY,
   ATTENTION_INBOX_CAPABILITY,
@@ -77,6 +78,7 @@ export interface AndroidConnectionOptions {
 
 export class AndroidRemoteConnection {
   private compactHistorySupported = false
+  private memberRelayUpload = false
   private binaryUploads = false
   private lanWeb = false
   private lanWebIpv6 = false
@@ -304,6 +306,7 @@ export class AndroidRemoteConnection {
         this.muxHandler?.(frame)
       }
       this.compactHistorySupported = features.capabilities.includes('remote.history.compact.v1')
+      this.memberRelayUpload = features.capabilities.includes(MEMBER_RELAY_UPLOAD_CAPABILITY)
       this.binaryUploads = features.capabilities.includes('workspace.upload.v1') && features.capabilities.includes('workspace.upload.binary.v1')
       const sender = this.binaryUploads && features.capabilities.includes(LAN_UPLOAD_CAPABILITY) ? nativeWebSocketSender() : undefined
       const carrier = this.transport
@@ -613,7 +616,8 @@ export class AndroidRemoteConnection {
   }
 
   getStats() {
-    return this.core?.getStats()
+    const stats = this.core?.getStats()
+    return stats && this.memberRelayUpload ? { ...stats, memberRelayUpload: true } : stats
   }
 
   /** A locally open socket can be half-open after Android suspends networking. */
@@ -718,6 +722,7 @@ export class AndroidRemoteConnection {
     this.sameLinkIpv6Endpoints = []
     this.sameLinkIpv6PairProbe = false
     this.lanWebIpv6 = false
+    this.memberRelayUpload = false
     this.binaryUploads = false
     const upgrader = this.upgrader
     this.upgrader = undefined

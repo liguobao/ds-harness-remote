@@ -109,7 +109,7 @@ export class RemoteSessionTools {
           uploaderEntered = true
           return uploadRemoteFile(remote.client, args.sessionId, args.localPath, name, active, () => {
             if (generation !== this.generation) fail('REMOTE_AUTHORITY_CHANGED')
-          })
+          }, remote.features)
         })).then(result => Object.assign(receipt, result), () => {
           // Before the uploader is entered, no upload RPC can have been sent.
           // Once entered, cleanup/transport failures may hide a publication.
