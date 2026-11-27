@@ -612,6 +612,7 @@ describe('HarnessRemoteBridge', () => {
     await runScenarios([
       { endpoint: 'schedule/history', request: { sessionId: 'session-1', id: 'task-1', limit: 20, before: 'message-1' }, value: { id: 'task-1', records: [], earlierRecordsUnavailable: false, earlierRecordsPruned: false, retention: { days: 30, records: 100 } } },
       { endpoint: 'schedule/update', request: { sessionId: 'session-1', id: 'task-1', expected: { id: 'task-1', kind: 'at', title: 'Old', prompt: 'Check build', scheduledAt: '2026-10-23T00:00:00.000Z' }, title: 'New' }, value: { id: 'task-1', updated: false, code: 'schedule_conflict' } },
+      { endpoint: 'schedule/edit', request: { id: 'task-1', action: 'update', patch: { active: false }, expectedUpdatedAt: null }, value: { id: 'task-1', code: 'schedule_conflict' } },
       { endpoint: 'schedule/delete', request: { sessionId: 'session-1', id: 'task-1' }, value: { id: 'task-1', deleted: false, code: 'schedule_not_found' } },
     ].map(({ endpoint, request, value }) => ({
       name: endpoint,

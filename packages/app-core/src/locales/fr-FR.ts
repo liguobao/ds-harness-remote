@@ -940,6 +940,7 @@ const frFR = {
     editRule: 'Modifier la règle',
     formTitle: 'Nom de la tâche',
     formPrompt: 'Rappel / Instruction',
+    formCronRequired: 'Saisissez une expression Cron',
     formFrequency: 'Fréquence',
     formTargetSession: 'Session cible',
     formTime: 'Heure de déclenchement',

@@ -948,6 +948,7 @@ const ruRU = {
     editRule: 'Изменить правило',
     formTitle: 'Название задачи',
     formPrompt: 'Текст напоминания',
+    formCronRequired: 'Введите выражение Cron',
     formFrequency: 'Периодичность',
     formTargetSession: 'Целевая сессия',
     formTime: 'Время запуска',

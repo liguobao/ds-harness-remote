@@ -157,7 +157,8 @@ export interface ScheduleCatalogEntry {
   title: string
   prompt: string
   scheduledAt: string
-  status: 'active' | 'inactive'
+  status: 'active' | 'inactive' | 'paused' | 'ended'
+  updatedAt?: string
   afterSeconds?: number
   everySeconds?: number
   time?: string
@@ -1104,6 +1105,17 @@ export class HarnessAlphaClient {
     return this.callValue<ScheduleUpdateResult>('schedule/update', {
       request,
     })
+  }
+
+  async scheduleSetActive(id: string, active: boolean, expectedUpdatedAt: string | null): Promise<ScheduleCatalogEntry | undefined> {
+    const result = await this.callValue<ScheduleCatalogEntry | { id: string; code: string }>('schedule/edit', {
+      request: { id, action: 'update', patch: { active }, expectedUpdatedAt },
+    })
+    if (typeof result !== 'object' || result === null || 'code' in result
+      || result.id !== id || result.status !== (active ? 'active' : 'paused')) {
+      return undefined
+    }
+    return result
   }
 
   async scheduleDelete(sessionId: string, id: string): Promise<ScheduleDeleteResult> {
