@@ -136,6 +136,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const [customAcpWorkspaceIds, setCustomAcpWorkspaceIds] = React.useState<Record<string, string | undefined>>({})
     const [directory, setDirectory] = React.useState<RemoteDirectoryListing | undefined>(undefined)
     const [path, setPath] = React.useState('')
+    const [previewPath, setPreviewPath] = React.useState<string | undefined>(undefined)
     const [addingWorkspace, setAddingWorkspace] = React.useState(false)
     const [showAllWorkspaces, setShowAllWorkspaces] = React.useState(false)
     const [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(false)
@@ -535,8 +536,24 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       }
     }
 
+    React.useEffect(() => {
+      const targetDeviceId = selectedHost?.deviceId
+      if (!addingWorkspace || !previewPath || !targetDeviceId || busy) return
+      let active = true
+      const timer = window.setTimeout(() => {
+        void props.control<RemoteDirectoryListing>('directory.list', { targetDeviceId, path: previewPath }).then(listing => {
+          if (active) setDirectory(listing)
+        }).catch(() => {
+          // A typed path may be incomplete or name a directory the user intends to create.
+          if (active) setDirectory(undefined)
+        })
+      }, 350)
+      return () => { active = false; window.clearTimeout(timer) }
+    }, [addingWorkspace, previewPath, selectedHost?.deviceId, busy, props.control])
+
     const browseDirectory = async (nextPath?: string): Promise<void> => {
       if (selectedHost === undefined) return
+      setPreviewPath(undefined)
       setBusy(true)
       setError(undefined)
       try {
@@ -1684,8 +1701,27 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                       }, React.createElement('path', { d: 'M8 3v10M3 8h10', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' })))),
                   addingWorkspace
                     ? React.createElement('div', { className: 'dshRemoteFolderBrowser' },
+                      React.createElement('form', {
+                        className: 'dshRemotePathBar',
+                        onSubmit: (event: Event) => {
+                          event.preventDefault()
+                          if (!busy && path.trim()) void browseDirectory(path.trim())
+                        },
+                      }, React.createElement('input', {
+                        type: 'text', value: path, disabled: busy, spellCheck: false, autoComplete: 'off',
+                        'aria-label': t('currentDirectory'),
+                        onChange: (event: Event) => {
+                          const value = (event.target as HTMLInputElement).value
+                          setPath(value)
+                          setPreviewPath(value.trim())
+                          setDirectory(undefined)
+                          setError(undefined)
+                        },
+                      }), React.createElement('button', {
+                        type: 'submit', disabled: busy || !path.trim(),
+                      }, t('browsePath'))),
                       directory === undefined
-                        ? React.createElement('p', null, t('loadingDirectory'))
+                        ? busy ? React.createElement('p', null, t('loadingDirectory')) : null
                         : React.createElement(React.Fragment, null,
                           React.createElement('nav', { className: 'dshRemoteCrumbs', 'aria-label': t('currentDirectory') },
                             directory.crumbs.map(crumb => React.createElement('button', {
@@ -2218,13 +2254,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                           }, React.createElement('span', { 'aria-hidden': true }, '…')))
                       })),
                       React.createElement('footer', { className: 'dshRemoteOpenBar' },
-                    addingWorkspace
-                      ? React.createElement('label', null, React.createElement('span', null, t('currentDirectory')),
-                        React.createElement('input', {
-                          type: 'text', value: path, disabled: busy, spellCheck: false, autoComplete: 'off',
-                          onChange: (event: Event) => setPath((event.target as HTMLInputElement).value),
-                        }))
-                      : React.createElement('div', null, React.createElement('span', null, t('currentDirectory')), React.createElement('strong', null, path || '—')),
+                    React.createElement('div', null, React.createElement('span', null, t('currentDirectory')), React.createElement('strong', null, path || '—')),
                     React.createElement('button', {
                       type: 'button',
                       disabled: busy || path.trim() === ''
