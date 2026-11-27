@@ -16,7 +16,8 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type RawData, WebSocket, WebSocketServer } from 'ws'
 import * as remotePlugin from '../src/index.js'
-import { authorizeUpstream, DshWebPeer, type DshWebBrowserAuth } from '../src/dsh-web-host.js'
+import { authorizeUpstream, DshWebPeer, resolveDshWebRuntime, type DshWebBrowserAuth } from '../src/dsh-web-host.js'
+import { openDshWebUpstream } from '../src/dsh-web-upstream.js'
 import { Connection } from '../src/hostc/connection.js'
 import {
   CLOSE_SHUTDOWN,
@@ -1035,5 +1036,196 @@ describe('DSH 0.2.3 token auth integration', () => {
       await localGui.close()
       await rm(dshHome, { recursive: true, force: true })
     }
+  })
+
+  it('invalidates entry-url upstream when listener, connection, or webServer changes', async () => {
+    const localGui = await listenHttp((req, res) => {
+      if (req.url === '/?token=launch-secret') {
+        res.writeHead(303, { location: './', 'set-cookie': 'dsh-auth-test=signed; Path=/' })
+        res.end()
+        return
+      }
+      if (req.url === '/' && req.headers.cookie === 'dsh-auth-test=signed') {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end('<html>ok</html>')
+        return
+      }
+      res.writeHead(401)
+      res.end()
+    })
+    try {
+      for (const change of ['dispose-listener', 'replace-connection', 'replace-webserver'] as const) {
+        const ctx = new Context()
+        ctx.provide('webApp', { getAdvertisedUrl: () => localGui.origin.href } as never)
+        const wsFiber = await ctx.plugin({
+          name: 'ws',
+          apply(c) { c.provide('webServer', { getOrigin: () => localGui.origin.href } as never) },
+        })
+        const connFiber = await ctx.plugin({
+          name: 'conn',
+          apply(c) {
+            c.provide('connection', {
+              admit: () => ({ peer: { signal: new AbortController().signal } }),
+            } as never)
+          },
+        })
+        const disposeEntry = ctx.on('webserver/entry-url' as never, ((baseUrl: string, entries: Array<{ url: string }>) => {
+          entries.push({ url: `${baseUrl}?token=launch-secret` })
+        }) as never)
+
+        const upstream = await openDshWebUpstream(() => resolveDshWebRuntime(ctx), AbortSignal.timeout(5_000))
+        expect(upstream.isCurrent()).toBe(true)
+        expect(upstream.authorize({ method: 'GET', path: '/', headers: [], body: false }, localGui.origin)?.headers)
+          .toContainEqual(['cookie', 'dsh-auth-test=signed'])
+
+        if (change === 'dispose-listener') {
+          disposeEntry()
+        } else if (change === 'replace-connection') {
+          await connFiber.dispose()
+          ctx.provide('connection', { admit: () => ({ peer: { signal: new AbortController().signal } }) } as never)
+        } else {
+          await wsFiber.dispose()
+          ctx.provide('webServer', { getOrigin: () => localGui.origin.href } as never)
+        }
+
+        expect(upstream.isCurrent()).toBe(false)
+        expect(upstream.authorize({ method: 'GET', path: '/', headers: [], body: false }, localGui.origin)).toBeUndefined()
+        await ctx.fiber.dispose()
+      }
+    } finally {
+      await localGui.close()
+    }
+  })
+
+  it('unwraps Cordis tracing proxy before calling connection.admit', async () => {
+    const localGui = await listenHttp((req, res) => {
+      if (req.url === '/?token=launch-secret') {
+        res.writeHead(303, { location: './', 'set-cookie': 'dsh-auth-test=signed; Path=/' })
+        res.end()
+        return
+      }
+      if (req.url === '/' && req.headers.cookie === 'dsh-auth-test=signed') {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end('<html>ok</html>')
+        return
+      }
+      res.writeHead(401)
+      res.end()
+    })
+    try {
+      const target = {
+        admit(this: unknown, req: { headers: Record<string, string> }) {
+          if (this !== target) throw new Error('cannot get property "connection.authentication" without inject')
+          return req.headers.cookie === 'dsh-auth-test=signed'
+            ? { peer: { signal: new AbortController().signal } }
+            : { rejection: 401 }
+        },
+      }
+      const cordisOriginal = Symbol.for('cordis.original')
+      const proxiedConnection = new Proxy(target, {
+        get(obj, prop, receiver) {
+          if (prop === cordisOriginal) return obj
+          return Reflect.get(obj, prop, receiver)
+        },
+      })
+      const ctx = new Context()
+      ctx.provide('webApp', {} as never)
+      ctx.provide('webServer', { getOrigin: () => localGui.origin.href } as never)
+      ctx.provide('connection', proxiedConnection as never)
+      ctx.on('webserver/entry-url' as never, ((b: string, e: unknown[]) => {
+        e.push({ url: `${b}?token=launch-secret` })
+      }) as never)
+      try {
+        const upstream = await openDshWebUpstream(() => resolveDshWebRuntime(ctx), AbortSignal.timeout(5_000))
+        expect(upstream.isCurrent()).toBe(true)
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    } finally {
+      await localGui.close()
+    }
+  })
+
+  it('fails closed on invalid entry-url discovery and token exchange boundaries', async () => {
+    const { runScenarios } = await import('../../../scripts/test-scenarios.mjs')
+    type BoundaryScenario =
+      | { name: string; kind: 'resolve'; setup: (ctx: Context, origin: URL) => void }
+      | { name: string; kind: 'open'; status: number; setCookie: string[]; admit: () => unknown }
+    const scenarios: BoundaryScenario[] = [
+      { name: 'missing webApp', kind: 'resolve', setup: (ctx, origin) => {
+        ctx.provide('webServer', { getOrigin: () => origin.href } as never)
+        ctx.provide('connection', { admit: () => ({ peer: { signal: new AbortController().signal } }) } as never)
+        ctx.on('webserver/entry-url' as never, ((b: string, e: unknown[]) => { e.push({ url: `${b}?token=t` }) }) as never)
+      } },
+      { name: 'missing entry-url listener', kind: 'resolve', setup: (ctx, origin) => {
+        ctx.provide('webApp', {} as never)
+        ctx.provide('webServer', { getOrigin: () => origin.href } as never)
+        ctx.provide('connection', { admit: () => ({ peer: { signal: new AbortController().signal } }) } as never)
+      } },
+      { name: 'wrong entry origin', kind: 'resolve', setup: (ctx, origin) => {
+        ctx.provide('webApp', {} as never)
+        ctx.provide('webServer', { getOrigin: () => origin.href } as never)
+        ctx.provide('connection', { admit: () => ({ peer: { signal: new AbortController().signal } }) } as never)
+        ctx.on('webserver/entry-url' as never, ((_b: string, e: unknown[]) => { e.push({ url: 'http://evil.invalid/?token=t' }) }) as never)
+      } },
+      { name: 'non-root entry pathname', kind: 'resolve', setup: (ctx, origin) => {
+        ctx.provide('webApp', {} as never)
+        ctx.provide('webServer', { getOrigin: () => origin.href } as never)
+        ctx.provide('connection', { admit: () => ({ peer: { signal: new AbortController().signal } }) } as never)
+        ctx.on('webserver/entry-url' as never, ((b: string, e: unknown[]) => { e.push({ url: `${b}sub?token=t` }) }) as never)
+      } },
+      { name: 'duplicate token parameter', kind: 'resolve', setup: (ctx, origin) => {
+        ctx.provide('webApp', {} as never)
+        ctx.provide('webServer', { getOrigin: () => origin.href } as never)
+        ctx.provide('connection', { admit: () => ({ peer: { signal: new AbortController().signal } }) } as never)
+        ctx.on('webserver/entry-url' as never, ((b: string, e: unknown[]) => { e.push({ url: `${b}?token=a&token=b` }) }) as never)
+      } },
+      { name: 'non-303 token exchange', kind: 'open', status: 200, setCookie: ['dsh-auth=ok; Path=/'], admit: () => ({ peer: { signal: new AbortController().signal } }) },
+      { name: 'only deleted Max-Age=0 cookie', kind: 'open', status: 303, setCookie: ['dsh-auth-old=; Max-Age=0; Path=/'], admit: () => ({ peer: { signal: new AbortController().signal } }) },
+      { name: 'admit rejects cookie', kind: 'open', status: 303, setCookie: ['dsh-auth=bad; Path=/'], admit: () => ({ rejection: 401 }) },
+      { name: 'admit returns aborted peer', kind: 'open', status: 303, setCookie: ['dsh-auth=ok; Path=/'], admit: () => {
+        const ac = new AbortController()
+        ac.abort()
+        return { peer: { signal: ac.signal } }
+      } },
+    ]
+    await runScenarios(scenarios.map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        if (scenario.kind === 'resolve') {
+          const ctx = new Context()
+          try {
+            scenario.setup(ctx, new URL('http://127.0.0.1:3080/'))
+            expect(resolveDshWebRuntime(ctx)).toBeUndefined()
+          } finally {
+            await ctx.fiber.dispose()
+          }
+          return
+        }
+        const server = await listenHttp((req, res) => {
+          if (req.url === '/?token=launch-secret') {
+            res.writeHead(scenario.status, { location: './', 'set-cookie': scenario.setCookie })
+            res.end()
+            return
+          }
+          res.writeHead(200, { 'content-type': 'text/html' })
+          res.end('<html>ok</html>')
+        })
+        const ctx = new Context()
+        try {
+          ctx.provide('webApp', {} as never)
+          ctx.provide('webServer', { getOrigin: () => server.origin.href } as never)
+          ctx.provide('connection', { admit: scenario.admit } as never)
+          ctx.on('webserver/entry-url' as never, ((b: string, e: unknown[]) => {
+            e.push({ url: `${b}?token=launch-secret` })
+          }) as never)
+          await expect(openDshWebUpstream(() => resolveDshWebRuntime(ctx), AbortSignal.timeout(5_000)))
+            .rejects.toMatchObject({ code: 'DSH_WEB_NOT_READY' })
+        } finally {
+          await ctx.fiber.dispose()
+          await server.close()
+        }
+      },
+    })))
   })
 })

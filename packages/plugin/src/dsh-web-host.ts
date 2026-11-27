@@ -9,7 +9,14 @@ import { RpcError } from './safe-error.js'
 import { ServerApiError, type DshWebRequest, type HostServerApi } from './server-api.js'
 
 import { openDshWebUpstream, type ResolveRuntime } from './dsh-web-upstream.js'
-export { authorizeUpstream, type DshWebBrowserAuth, type DshWebRuntime } from './dsh-web-upstream.js'
+export {
+  authorizeUpstream,
+  resolveDshWebRuntime,
+  type DshWebBrowserAuth,
+  type DshWebContextLike,
+  type DshWebEntryUrlAuth,
+  type DshWebRuntime,
+} from './dsh-web-upstream.js'
 
 type DialConnector = (signal: AbortSignal) => Promise<Connection>
 type WebSessionApi = Pick<HostServerApi, 'dshWebRequest' | 'closeDshWeb'>
