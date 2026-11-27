@@ -85050,6 +85050,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       };
     })();
     const selection = knownSelection ?? this.modelSelection(sessionId, await this.models(signal));
+    let selectedPermission = this.permissionSelection(sessionId);
     const isFreshBlankThread = this.blankThreads.has(threadId) || this.pendingThreads.has(threadId);
     if (!isFreshBlankThread) {
       const resumeResult = await this.client.request("thread/resume", {
@@ -85057,7 +85058,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         model: selection.model
       }, signal);
       const serverPreset = codexPermissionPresetFromResponse(resumeResult);
-      if (serverPreset !== void 0) {
+      if (selectedPermission === void 0 && serverPreset !== void 0) {
+        selectedPermission = serverPreset;
         this.setPermissionSelection(sessionId, serverPreset);
       }
     }
@@ -85076,7 +85078,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       await this.client.request(mode2, {
         threadId,
         input: input4,
-        ...codexModelParams(selection)
+        ...codexModelParams(selection),
+        ...selectedPermission === void 0 ? {} : { permissionPreset: selectedPermission }
       }, signal);
     }
     this.blankThreads.delete(threadId);

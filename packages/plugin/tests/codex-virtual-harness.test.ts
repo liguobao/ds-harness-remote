@@ -109,7 +109,7 @@ describe('CodexVirtualHarness', () => {
     expect(client.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({
       threadId: 'thr_1',
     }), expect.any(AbortSignal))
-    expect(client.request.mock.calls.find(([method]) => method === 'turn/start')?.[1]).not.toHaveProperty('permissionPreset')
+    expect(client.request.mock.calls.find(([method]) => method === 'turn/start')?.[1]).toHaveProperty('permissionPreset', 'danger-full-access')
     await iterator.return?.()
     await target.close()
   })
@@ -865,11 +865,33 @@ describe('CodexVirtualHarness', () => {
     expect(client.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({
       threadId: 'thr_full',
     }), expect.any(AbortSignal))
-    expect(client.request.mock.calls.find(([method]) => method === 'turn/start')?.[1]).not.toHaveProperty('permissionPreset')
+    expect(client.request.mock.calls.find(([method]) => method === 'turn/start')?.[1]).toHaveProperty('permissionPreset', 'danger-full-access')
     expect(await target.dispatch('session/list', { args: {} }, new AbortController().signal))
       .toMatchObject({ value: { items: expect.arrayContaining([expect.objectContaining({
         sessionId: 'codex:thr_full', projections: { kind: 'sequenced', asOfSeq: 0, values: expect.objectContaining({ permissions: expect.objectContaining({ currentValue: 'danger-full-access' }) }) },
       })]) } })
+    await target.close()
+  })
+
+  it('keeps the confirmed permission when resuming resets the upstream settings', async () => {
+    const client = fakeCodex()
+    const request = client.request.getMockImplementation()!
+    client.request.mockImplementation(async (method, params, signal) => {
+      if (method === 'thread/resume' && !('permissionPreset' in params)) {
+        return { thread: codexThread('thr_1', '/workspace/repo', 'Thread'), approvalPolicy: 'on-request', sandbox: 'workspace-write' }
+      }
+      return request(method, params, signal)
+    })
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    await target.invoke({ namespace: 'commands', method: 'execute', args: {
+      agentId: 'codex:thr_1', line: '/permission danger-full-access', images: [],
+    } })
+    await target.dispatch('session/prompt', { args: { request: {
+      sessionId: 'codex:thr_1', content: [{ type: 'text', text: 'Continue' }],
+    } } }, new AbortController().signal)
+    expect(client.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({
+      threadId: 'thr_1', permissionPreset: 'danger-full-access',
+    }), expect.any(AbortSignal))
     await target.close()
   })
 
@@ -1130,6 +1152,7 @@ describe('CodexVirtualHarness', () => {
       input: [{ type: 'text', text: 'Start here' }],
       model: 'gpt-5.6-sol',
       effort: 'low',
+      permissionPreset: 'workspace-write',
     }, expect.any(AbortSignal))
     await target.close()
   })

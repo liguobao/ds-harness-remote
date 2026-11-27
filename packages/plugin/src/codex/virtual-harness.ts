@@ -776,6 +776,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         }
       })()
     const selection = knownSelection ?? this.modelSelection(sessionId, await this.models(signal))
+    let selectedPermission = this.permissionSelection(sessionId)
     const isFreshBlankThread = this.blankThreads.has(threadId) || this.pendingThreads.has(threadId)
     if (!isFreshBlankThread) {
       const resumeResult = await this.client.request('thread/resume', {
@@ -783,7 +784,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         model: selection.model,
       }, signal)
       const serverPreset = codexPermissionPresetFromResponse(resumeResult)
-      if (serverPreset !== undefined) {
+      if (selectedPermission === undefined && serverPreset !== undefined) {
+        selectedPermission = serverPreset
         this.setPermissionSelection(sessionId, serverPreset)
       }
     }
@@ -803,6 +805,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         threadId,
         input,
         ...codexModelParams(selection),
+        ...(selectedPermission === undefined ? {} : { permissionPreset: selectedPermission }),
       }, signal)
     }
     this.blankThreads.delete(threadId)
