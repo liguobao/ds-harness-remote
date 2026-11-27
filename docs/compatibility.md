@@ -29,7 +29,7 @@ The Host, bundled Remote Client and Android use the official Typert carrier. Hos
 
 ## CodeX, ACP and platforms
 
-CodeX uses its independent App Server domain. Cursor, AGY, Pi, OpenCode, Claude and Hermes use the ACP gateway. Catalog, models, tools and history depend on the actual CLI; see [backend integration](acp-remote.md). A failed backend never falls back to a different backend.
+CodeX uses its independent App Server domain. Cursor, AGY, Pi, OpenCode, Claude, Hermes and Kimi use the ACP gateway. Catalog, models, tools and history depend on the actual CLI; see [backend integration](acp-remote.md). A failed backend never falls back to a different backend.
 
 OpenCode v1 native archive requires its authenticated private HTTP API. Pure stdio / v2 builds without that API return unavailable; deletion must not substitute for archive. See the [archive design](acp-remote.md#opencode-与原生归档).
 

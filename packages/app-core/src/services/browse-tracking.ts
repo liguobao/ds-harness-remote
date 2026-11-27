@@ -27,6 +27,7 @@ function isItemWaitingInput(session: { backend?: AgentBackend }, item: any): boo
 export function backendBadge(backend?: string): string {
   switch ((backend ?? '').trim().toLowerCase()) {
     case 'hermes': return 'H'
+    case 'kimi': return 'K'
     case 'claude': return 'C'
     case 'codex': return 'X'
     case 'opencode': return 'O'

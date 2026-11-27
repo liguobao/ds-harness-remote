@@ -38,6 +38,7 @@
     ],
     "eslint/no-debugger": "error",
     "eslint/no-dupe-keys": "error",
+    "eslint/no-dupe-else-if": "error",
     "eslint/no-duplicate-case": "error",
     "eslint/no-unreachable": "error",
     "eslint/no-const-assign": "error",

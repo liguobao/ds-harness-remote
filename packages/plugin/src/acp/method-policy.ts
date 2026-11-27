@@ -10,7 +10,6 @@ const mode = z.enum(['agent', 'plan', 'ask'])
 const RESERVED_ACP_BACKENDS = new Set([
   'codex',
   'harness',
-  'kimi',
   'acp',
   'constructor',
   'tostring',

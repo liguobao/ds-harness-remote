@@ -42,10 +42,12 @@ const { files, keys, proxy, transport, storage, authenticate, acp, codex } = vi.
     hasOpencode: vi.fn(),
     hasClaude: vi.fn(),
     hasHermes: vi.fn(),
+    hasKimi: vi.fn(),
     hasAcpBackend: vi.fn(),
     customAcpBackends: vi.fn(),
     requireClaude: vi.fn(),
     requireHermes: vi.fn(),
+    requireKimi: vi.fn(),
   },
   acp: {
     call: vi.fn(),
@@ -112,6 +114,7 @@ vi.mock('../src/services/connection', () => ({
     hasOpencode = transport.hasOpencode
     hasClaude = transport.hasClaude
     hasHermes = transport.hasHermes
+    hasKimi = transport.hasKimi
     hasAcpBackend = transport.hasAcpBackend
     customAcpBackends = transport.customAcpBackends
     requireCursor() { return acp }
@@ -120,6 +123,7 @@ vi.mock('../src/services/connection', () => ({
     requireOpencode() { return acp }
     requireClaude() { transport.requireClaude(); return acp }
     requireHermes() { transport.requireHermes(); return acp }
+    requireKimi() { transport.requireKimi(); return acp }
     requireAcpBackend() { return acp }
     getNetworkDetails() { return Promise.resolve(undefined) }
     getStats() { return { mode: 'Relay', connected: true } }
@@ -492,6 +496,7 @@ describe('handoff-workspace', () => {
         opencodeAvailable: false,
         claudeAvailable: true,
         hermesAvailable: false,
+        kimiAvailable: false,
         customAcpBackends: ['custom-agent', '', 'codex', 'claude', 'custom-agent', 'second-acp'],
       },
       'codex',
@@ -507,6 +512,7 @@ describe('handoff-workspace', () => {
         opencodeAvailable: false,
         claudeAvailable: true,
         hermesAvailable: false,
+        kimiAvailable: false,
         customAcpBackends: ['custom-agent'],
       },
       'custom-agent',
@@ -784,6 +790,7 @@ describe('session-actions handoff integration', () => {
     transport.hasOpencode.mockReturnValue(true)
     transport.hasClaude.mockReturnValue(true)
     transport.hasHermes.mockReturnValue(true)
+    transport.hasKimi.mockReturnValue(true)
     transport.hasAcpBackend.mockReturnValue(false)
     transport.customAcpBackends.mockReturnValue([])
     acp.openStream.mockImplementation(async () => ({ streamId: 'acp-stream-1', close: async () => undefined }))
@@ -831,6 +838,7 @@ describe('session-actions handoff integration', () => {
       codexAvailable: true,
       claudeAvailable: true,
       hermesAvailable: true,
+      kimiAvailable: true,
       opencodeAvailable: true,
       piAvailable: true,
       antigravityAvailable: true,
@@ -945,7 +953,7 @@ describe('session-actions handoff integration', () => {
       expect(codex.subscribe).not.toHaveBeenCalled()
       expect(codexItems.map(item => (item as ChatMessage).text)).toEqual(['Codex history line'])
 
-      await runScenarios((['claude', 'hermes', 'opencode', 'pi', 'antigravity'] as const).map(backend => ({
+      await runScenarios((['claude', 'hermes', 'kimi', 'opencode', 'pi', 'antigravity'] as const).map(backend => ({
         name: `legacy ACP reader for ${backend}`,
         run: async () => {
           acp.loadSessionDetails = undefined

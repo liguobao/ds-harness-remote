@@ -13,6 +13,7 @@ import { AntigravityAcpClient } from '../src/acp/adapters/antigravity-process.js
 import { ClaudeAcpClient } from '../src/acp/adapters/claude-process.js'
 import { CursorAcpClient } from '../src/acp/adapters/cursor-process.js'
 import { HermesAcpClient } from '../src/acp/adapters/hermes-process.js'
+import { KimiAcpClient } from '../src/acp/adapters/kimi-process.js'
 import { opencodeHasNativeApi } from '../src/acp/adapters/opencode-native-api.js'
 import { OpencodeAcpClient } from '../src/acp/adapters/opencode-process.js'
 import { SafeLogger } from '../src/logging.js'
@@ -204,6 +205,7 @@ describe('Windows ACP executable filtering and .cmd/.bat spawn safety', () => {
       { name: 'cursor', client: new CursorAcpClient('agent.cmd', logger, throwSpawn), code: 'CURSOR_BINARY_UNAVAILABLE' },
       { name: 'claude', client: new ClaudeAcpClient('claude-agent-acp.cmd', logger, throwSpawn), code: 'CLAUDE_BINARY_UNAVAILABLE' },
       { name: 'hermes', client: new HermesAcpClient('hermes.cmd', logger, throwSpawn), code: 'HERMES_BINARY_UNAVAILABLE' },
+      { name: 'kimi', client: new KimiAcpClient('kimi.cmd', logger, throwSpawn), code: 'KIMI_BINARY_UNAVAILABLE' },
       { name: 'opencode', client: new OpencodeAcpClient('opencode.cmd', logger, throwSpawn), code: 'OPENCODE_BINARY_UNAVAILABLE' },
       { name: 'antigravity', client: new AntigravityAcpClient('agy.cmd', logger, throwSpawn, { sessionWorker: true }), code: 'ANTIGRAVITY_BINARY_UNAVAILABLE' },
     ] as const

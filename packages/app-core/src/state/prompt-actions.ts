@@ -14,6 +14,7 @@ import { cursorNativeId } from '../services/cursor'
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { resolveHarnessSendMode } from '../screens/chat/composer-gate'
 import type { ChatItem, RemoteSession } from '../types'
+import { acpClientForBackend } from './acp-backend-helpers'
 import { withCodexPermissionState } from './codex-session-state'
 import { findApproval, findQuestion, inboxQueuedItems, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered, removeInboxQueueItem } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
@@ -244,13 +245,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           }))
           // Host may return immediately with stopReason=in_progress so frames can
           // interleave; keep running until prompt_completed / failure.
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude()
-            : session.backend === 'hermes' ? runtime.connection.requireHermes()
-            : session.backend === 'opencode' ? runtime.connection.requireOpencode()
-            : session.backend === 'pi' ? runtime.connection.requirePi()
-            : session.backend === 'antigravity' ? runtime.connection.requireAntigravity()
-            : session.backend === 'cursor' ? runtime.connection.requireCursor()
-            : runtime.connection.requireAcpBackend(session.backend)
+          const acpClient = acpClientForBackend(runtime.connection, session.backend)
           const promptResult = await acpClient.prompt(cursorNativeId(session), text, undefined, images.map(image => ({
             type: 'image' as const, mimeType: image.mediaType, data: image.data,
           })), session.backend)
@@ -485,12 +480,8 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           }
           if (turnId === undefined) throw new Error(zhCN.runtime.codexTurnUnavailable)
           await client.interrupt(threadId, turnId)
-        } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') {
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'hermes' ? runtime.connection.requireHermes() : session.backend === 'opencode'
-            ? runtime.connection.requireOpencode()
-            : session.backend === 'pi'
-              ? runtime.connection.requirePi()
-              : session.backend === 'antigravity' ? runtime.connection.requireAntigravity() : runtime.connection.requireCursor()
+        } else if (isAcpManagedBackend(session.backend)) {
+          const acpClient = acpClientForBackend(runtime.connection, session.backend)
           await acpClient.cancel(cursorNativeId(session))
           set(state => ({
             sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
@@ -520,13 +511,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         if (session?.backend === 'codex') {
           await runtime.connection.requireCodex().respond(item.approvalId, outcome === 'allowed-once' ? 'accept' : 'decline')
         } else if (isAcpManagedBackend(session?.backend)) {
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude()
-            : session.backend === 'hermes' ? runtime.connection.requireHermes()
-            : session.backend === 'opencode' ? runtime.connection.requireOpencode()
-            : session.backend === 'pi' ? runtime.connection.requirePi()
-            : session.backend === 'antigravity' ? runtime.connection.requireAntigravity()
-            : session.backend === 'cursor' ? runtime.connection.requireCursor()
-            : runtime.connection.requireAcpBackend(session.backend)
+          const acpClient = acpClientForBackend(runtime.connection, session.backend)
           await acpClient.respond(
             item.approvalId,
             outcome === 'allowed-once' ? 'allow-once' : 'reject-once',
@@ -566,13 +551,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         })
         const session = get().sessions.find(value => value.sessionId === item.sessionId) ?? get().selectedSession
         if (isAcpManagedBackend(session?.backend)) {
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude()
-            : session.backend === 'hermes' ? runtime.connection.requireHermes()
-            : session.backend === 'opencode' ? runtime.connection.requireOpencode()
-            : session.backend === 'pi' ? runtime.connection.requirePi()
-            : session.backend === 'antigravity' ? runtime.connection.requireAntigravity()
-            : session.backend === 'cursor' ? runtime.connection.requireCursor()
-            : runtime.connection.requireAcpBackend(session.backend)
+          const acpClient = acpClientForBackend(runtime.connection, session.backend)
           await acpClient.respond(item.frameRpcId, 'allow-once', { answers })
           set(state => ({
             messages: mapQuestionAnswered(state.messages, itemId),

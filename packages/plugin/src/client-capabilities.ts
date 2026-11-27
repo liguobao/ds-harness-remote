@@ -49,6 +49,7 @@ export async function probeRemoteHostFeatures(
   const claude = available('claude', 'agent.acp.claude.v1')
   const opencode = available('opencode', 'agent.acp.opencode.v1')
   const hermes = available('hermes', 'agent.acp.hermes.v1')
+  const kimi = available('kimi', 'agent.acp.kimi.v1')
   if (remoteV1 && remoteV3) {
     throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
   }
@@ -56,7 +57,7 @@ export async function probeRemoteHostFeatures(
   const remoteGateway = remoteV3 || remoteV1
   const anyCustomAcp = workspaceTypes?.some(type => type.available && type.id !== 'codex' && type.id !== 'harness')
     || value.capabilities.some(cap => cap.startsWith('agent.acp.') && cap.endsWith('.v1') && cap !== 'agent.acp.v1' && cap !== 'agent.acp.transfer.v1' && cap !== 'agent.acp.workspace-files.v1' && cap !== 'agent.acp.terminal.v1')
-  if (!remoteGateway && !codex && !cursor && !antigravity && !pi && !opencode && !claude && !hermes && !anyCustomAcp) {
+  if (!remoteGateway && !codex && !cursor && !antigravity && !pi && !opencode && !claude && !hermes && !kimi && !anyCustomAcp) {
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
   return {
@@ -72,6 +73,7 @@ export async function probeRemoteHostFeatures(
     opencode,
     claude,
     ...(hermes ? { hermes: true } : {}),
+    ...(kimi ? { kimi: true } : {}),
     ...(capabilities.has('agent.acp.antigravity.model-load.v1') ? { acpModelLoadsSession: true } : {}),
     ...(capabilities.has('agent.acp.opencode.archive.v1') ? { acpOpencodeArchive: true } : {}),
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),

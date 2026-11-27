@@ -397,7 +397,7 @@ export function saveHostSessionsDrawerPreferences(
 export async function loadWorkspaceBackend(deviceId: string): Promise<AgentBackend | undefined> {
   const stored = await readJson<{ byDevice?: Record<string, unknown> }>(KEYS.workspaceBackends)
   const value = stored?.byDevice?.[deviceId]
-  return value === 'harness' || value === 'codex' || value === 'cursor' || value === 'antigravity' || value === 'pi' || value === 'opencode' || value === 'claude' || value === 'hermes' ? value : undefined
+  return value === 'harness' || value === 'codex' || value === 'cursor' || value === 'antigravity' || value === 'pi' || value === 'opencode' || value === 'claude' || value === 'hermes' || value === 'kimi' ? value : undefined
 }
 
 let workspaceBackendsWrite = Promise.resolve()
@@ -516,7 +516,7 @@ function workspaceShortcut(value: unknown): WorkspaceShortcut | undefined {
 
 function agentBackend(value: unknown): AgentBackend {
   return value === 'harness' || value === 'codex' || value === 'cursor' || value === 'antigravity'
-    || value === 'pi' || value === 'opencode' || value === 'claude' || value === 'hermes'
+    || value === 'pi' || value === 'opencode' || value === 'claude' || value === 'hermes' || value === 'kimi'
     ? value
     : 'harness'
 }

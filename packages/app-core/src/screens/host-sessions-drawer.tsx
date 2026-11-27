@@ -169,6 +169,7 @@ const HARNESS_OPTIONS: HarnessOption[] = [
   { value: 'codex', name: 'Codex' },
   { value: 'claude', name: 'Claude' },
   { value: 'hermes', name: 'Hermes' },
+  { value: 'kimi', name: 'Kimi' },
   { value: 'cursor', name: 'Cursor' },
   { value: 'antigravity', name: 'Antigravity' },
   { value: 'opencode', name: 'OpenCode' },
@@ -625,12 +626,13 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   const opencodeAvailable = useStoreGateSelector(useAppStore, state => state.opencodeAvailable, gate)
   const claudeAvailable = useStoreGateSelector(useAppStore, state => state.claudeAvailable, gate)
   const hermesAvailable = useStoreGateSelector(useAppStore, state => state.hermesAvailable, gate)
+  const kimiAvailable = useStoreGateSelector(useAppStore, state => state.kimiAvailable, gate)
   const customAcpBackends = useStoreGateSelector(useAppStore, selectCustomAcpBackends, gate)
   const availableBackends = useStoreGateSelector(useAppStore, state => [
     'harness', state.codexAvailable && 'codex', state.cursorAvailable && 'cursor',
     state.antigravityAvailable && 'antigravity', state.piAvailable && 'pi',
     state.opencodeAvailable && 'opencode', state.claudeAvailable && 'claude',
-    state.hermesAvailable && 'hermes', ...selectCustomAcpBackends(state),
+    state.hermesAvailable && 'hermes', state.kimiAvailable && 'kimi', ...selectCustomAcpBackends(state),
   ].filter(Boolean).join(','), gate)
   const attentionItems = useStoreGateSelector(useAttentionStore, state => state.items, gate)
   const attentionStatusBySession = useMemo(() => {
@@ -784,6 +786,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
       case 'opencode': return useAppStore.getState().opencodeAvailable
       case 'claude': return useAppStore.getState().claudeAvailable
       case 'hermes': return useAppStore.getState().hermesAvailable
+      case 'kimi': return useAppStore.getState().kimiAvailable
       default: return selectCustomAcpBackends(useAppStore.getState()).includes(target)
     }
   }
@@ -2496,6 +2499,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
           opencodeAvailable={opencodeAvailable}
           claudeAvailable={claudeAvailable}
           hermesAvailable={hermesAvailable}
+          kimiAvailable={kimiAvailable}
           customAcpBackends={customAcpBackends}
           initialBackend={backend}
           busy={
@@ -2507,6 +2511,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
             || busy === 'create-opencode-workspace'
             || busy === 'create-claude-workspace'
             || busy === 'create-hermes-workspace'
+            || busy === 'create-kimi-workspace'
           }
           onClose={() => setCreateWorkspaceOpen(false)}
           onCreate={(path, targetBackend) => createWorkspace(path, targetBackend)}

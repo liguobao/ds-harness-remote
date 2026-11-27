@@ -960,43 +960,48 @@ describe('AcpRemoteGateway', () => {
     }
   })
 
-  it('allows image prompts on a Hermes-owned session and reports image prompt capabilities', async () => {
-    const acp = readyAcp()
-    acp.call = vi.fn(async (method) => {
-      if (method === 'session/new') return { sessionId: 'hermes-image-session' }
-      if (method === 'session/load') return { sessionId: 'hermes-image-session' }
-      if (method === 'session/prompt') return { stopReason: 'end_turn' }
-      return {}
-    })
-    const gateway = new AcpRemoteGateway(
-      { enabled: true, backends: [{ id: 'hermes', enabled: true, command: 'hermes', args: ['acp'] }] },
-      silentLogger(),
-      () => acp,
-    )
-    await gateway.start()
-    try {
-      const initResult = await gateway.call('owner', {
-        method: 'initialize',
-        params: { protocolVersion: 1, backend: 'hermes' },
-      })
-      expect(initResult).toMatchObject({
-        backend: 'hermes',
-        capabilities: {
-          promptTypes: ['text', 'image'],
-        },
-      })
+  it('allows image prompts on Hermes and Kimi sessions and reports image prompt capabilities', async () => {
+    await runScenarios((['hermes', 'kimi'] as const).map(backend => ({
+      name: backend,
+      run: async () => {
+        const acp = readyAcp()
+        acp.call = vi.fn(async (method) => {
+          if (method === 'session/new') return { sessionId: `${backend}-image-session` }
+          if (method === 'session/load') return { sessionId: `${backend}-image-session` }
+          if (method === 'session/prompt') return { stopReason: 'end_turn' }
+          return {}
+        })
+        const gateway = new AcpRemoteGateway(
+          { enabled: true, backends: [{ id: backend, enabled: true, command: backend, args: ['acp'] }] },
+          silentLogger(),
+          () => acp,
+        )
+        await gateway.start()
+        try {
+          const initResult = await gateway.call('owner', {
+            method: 'initialize',
+            params: { protocolVersion: 1, backend },
+          })
+          expect(initResult).toMatchObject({
+            backend,
+            capabilities: {
+              promptTypes: ['text', 'image'],
+            },
+          })
 
-      await gateway.call('owner', { method: 'session/new', params: { cwd: process.cwd(), backend: 'hermes' } })
-      const prompt = [
-        { type: 'text', text: 'describe this image' },
-        { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=' },
-      ]
-      const promptResult = await gateway.call('owner', {
-        method: 'session/prompt',
-        params: { sessionId: 'hermes-image-session', backend: 'hermes', prompt },
-      })
-      expect(promptResult).toMatchObject({ accepted: true, stopReason: 'in_progress' })
-    } finally { await gateway.close() }
+          await gateway.call('owner', { method: 'session/new', params: { cwd: process.cwd(), backend } })
+          const prompt = [
+            { type: 'text', text: 'describe this image' },
+            { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=' },
+          ]
+          const promptResult = await gateway.call('owner', {
+            method: 'session/prompt',
+            params: { sessionId: `${backend}-image-session`, backend, prompt },
+          })
+          expect(promptResult).toMatchObject({ accepted: true, stopReason: 'in_progress' })
+        } finally { await gateway.close() }
+      },
+    })))
   })
 
   it('answers initialize on the gateway without forwarding to Cursor', async () => {

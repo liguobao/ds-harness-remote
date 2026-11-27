@@ -25,6 +25,7 @@ afterEach(async () => {
 describe('acp-backend-installer candidate paths & safety', () => {
   it('validates builtin backends whitelist', () => {
     expect(isBuiltinAcpBackend('hermes')).toBe(true)
+    expect(isBuiltinAcpBackend('kimi')).toBe(true)
     expect(isBuiltinAcpBackend('cursor')).toBe(true)
     expect(isBuiltinAcpBackend('claude')).toBe(true)
     expect(isBuiltinAcpBackend('codex')).toBe(true)
@@ -51,6 +52,12 @@ describe('acp-backend-installer candidate paths & safety', () => {
     })
     expect(candidates).toContain('/mock-env/fixture-user/.local/bin/agent')
     expect(candidates).toContain('/Applications/Cursor.app/Contents/MacOS/agent')
+
+    const kimiCandidates = candidateBinaryPaths('kimi', {
+      platform: 'darwin',
+      homedir: '/mock-env/fixture-user',
+    })
+    expect(kimiCandidates).toContain('/mock-env/fixture-user/.kimi-code/bin/kimi')
   })
 })
 

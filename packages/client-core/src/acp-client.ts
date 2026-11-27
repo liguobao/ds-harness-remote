@@ -18,7 +18,7 @@ import {
 import type { RemoteClientCore } from './index.js'
 import { createRemoteId, RemoteGatewayError } from './remote-gateway.js'
 
-export type AcpAgentBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | (string & {})
+export type AcpAgentBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | 'kimi' | (string & {})
 
 /**
  * `session/prompt` blocks until the upstream turn finishes. Keep this well above
@@ -204,10 +204,10 @@ export class AgentAcpClient {
     const result = await this.call('dsh/workspaceList', {
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(error => {
-      if (backend === 'pi' || backend === 'claude' || backend === 'hermes') throw error
+      if (backend === 'pi' || backend === 'claude' || backend === 'hermes' || backend === 'kimi') throw error
       return []
     })
-    if ((backend === 'pi' || backend === 'claude' || backend === 'hermes') && !Array.isArray(result)) {
+    if ((backend === 'pi' || backend === 'claude' || backend === 'hermes' || backend === 'kimi') && !Array.isArray(result)) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP workspace catalog is invalid.')
     }
     return Array.isArray(result) ? result as Array<{ path: string; title?: string; sessionCount?: number }> : []
@@ -224,10 +224,10 @@ export class AgentAcpClient {
       ...(backend === undefined ? {} : { backend }),
       ...(limit === undefined ? {} : { limit }),
     }, signal).catch(error => {
-      if (backend === 'pi' || backend === 'claude' || backend === 'hermes') throw error
+      if (backend === 'pi' || backend === 'claude' || backend === 'hermes' || backend === 'kimi') throw error
       return { items: [] }
     })
-    if ((backend === 'pi' || backend === 'claude' || backend === 'hermes') && (!isRecord(result) || !Array.isArray(result.items))) {
+    if ((backend === 'pi' || backend === 'claude' || backend === 'hermes' || backend === 'kimi') && (!isRecord(result) || !Array.isArray(result.items))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session catalog is invalid.')
     }
     return isRecord(result) && Array.isArray(result.items) ? result.items as Array<{
@@ -258,7 +258,7 @@ export class AgentAcpClient {
     commands?: AcpAvailableCommand[]
     running?: boolean
   }> {
-    const strictHistoryBackend = backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes' || backend === 'antigravity'
+    const strictHistoryBackend = backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes' || backend === 'kimi' || backend === 'antigravity'
     const result = await this.transferCall('dsh/sessionHistory', {
       sessionId,
       ...(backend === undefined ? {} : { backend }),

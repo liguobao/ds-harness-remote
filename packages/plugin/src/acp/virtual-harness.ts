@@ -691,7 +691,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     let images: AcpImage[]
     try {
       images = array(request.content).filter(part => record(part).type === 'image').map(parseAcpImage)
-      if (images.length > 4 || (images.length > 0 && this.backend !== 'antigravity' && this.backend !== 'hermes') || array(request.content).some(part => !['text', 'image'].includes(String(record(part).type)))) throw new Error('Unsupported ACP content.')
+      if (images.length > 4 || (images.length > 0 && this.backend !== 'antigravity' && this.backend !== 'hermes' && this.backend !== 'kimi') || array(request.content).some(part => !['text', 'image'].includes(String(record(part).type)))) throw new Error('Unsupported ACP content.')
     } catch { return failure('attachment-error', 'Invalid or unsupported image attachment.') }
     if (text === undefined && images.length === 0) return failure('attachment-error', 'A prompt or image is required.')
     const imageBlocks = images.map(image => acpImageContent(image, `agy-image:${crypto.randomUUID()}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType.slice(6)}`))
@@ -837,7 +837,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const attachmentId = string(request.attachmentId)
       ?? string(record(request.attachment).attachmentId)
     const session = this.lookupSession(requestedId)
-    if ((this.backend !== 'antigravity' && this.backend !== 'hermes') || session === undefined || !attachmentId?.startsWith('agy-image:')) return failure('attachment-error', 'The image is not referenced by this Session.')
+    if ((this.backend !== 'antigravity' && this.backend !== 'hermes' && this.backend !== 'kimi') || session === undefined || !attachmentId?.startsWith('agy-image:')) return failure('attachment-error', 'The image is not referenced by this Session.')
     await this.hydrateSession(session)
     const cached = this.imageAttachments.get(attachmentId)
     return cached?.sessionId === session.sessionId ? success({ attachment: cached.attachment, data: cached.data }) : failure('attachment-error', 'The image attachment is unavailable or expired.')
@@ -879,7 +879,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           this.restoreCachedSession(session, stale, true)
           return
         }
-        if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'opencode' || this.backend === 'hermes') throw error
+        if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'opencode' || this.backend === 'hermes' || this.backend === 'kimi') throw error
       }
     } else if (this.client.loadSessionHistory !== undefined) {
       try {
@@ -892,7 +892,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         }
         // A failed history read is not a successful empty baseline; do not continue
         // a restored conversation until its authoritative history is available.
-        if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'opencode' || this.backend === 'hermes') throw error
+        if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'opencode' || this.backend === 'hermes' || this.backend === 'kimi') throw error
         // Preserve legacy AGY history availability behavior.
       }
     }
@@ -1143,7 +1143,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         try {
           discovered = await this.client.listSessions(workspace.path, this.backend, 30)
         } catch (error) {
-          if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'hermes') throw error
+          if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'hermes' || this.backend === 'kimi') throw error
           // Preserve legacy AGY/Cursor catalog availability behavior.
         }
       }
@@ -1169,7 +1169,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       this.sortWorkspaceSessions(workspace)
       workspace.updatedAt = new Date().toISOString()
     } catch (error) {
-      if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'hermes') throw error
+      if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'hermes' || this.backend === 'kimi') throw error
       // Preserve legacy AGY/Cursor catalog availability behavior.
     }
   }

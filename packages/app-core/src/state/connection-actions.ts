@@ -72,6 +72,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         opencodeAvailable: false,
         claudeAvailable: false,
         hermesAvailable: false,
+        kimiAvailable: false,
         workspaceCatalog: undefined,
         workspaces: sameHost ? state.workspaces : cached?.workspaces ?? [],
         sessions: sameHost ? state.sessions : cached?.sessions ?? [],
@@ -172,6 +173,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                   opencodeAvailable: false,
                   claudeAvailable: false,
                   hermesAvailable: false,
+                  kimiAvailable: false,
                   permissionSelecting: false,
                   modelSelecting: false,
                   agentPresetSelecting: false,
@@ -202,6 +204,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           opencodeAvailable: runtime.connection.hasOpencode(),
           claudeAvailable: runtime.connection.hasClaude(),
           hermesAvailable: runtime.connection.hasHermes(),
+          kimiAvailable: runtime.connection.hasKimi(),
           customAcpBackends: runtime.connection.customAcpBackends?.() ?? [],
           connectionStage: 'ready',
           connectionNetworkDetails,
@@ -257,6 +260,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           opencodeAvailable: false,
           claudeAvailable: false,
           hermesAvailable: false,
+          kimiAvailable: false,
           error: message,
         })
         return false
@@ -437,6 +441,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         opencodeAvailable: false,
         claudeAvailable: false,
         hermesAvailable: false,
+        kimiAvailable: false,
         workspaceCatalog: undefined,
         workspaces: [],
         archivedSessionIds: [],
@@ -489,6 +494,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           opencodeAvailable: false,
           claudeAvailable: false,
           hermesAvailable: false,
+          kimiAvailable: false,
           sessions: state.sessions.map(item =>
             (isAcpManagedBackend(item.backend) || item.backend === 'codex') && item.running ? { ...item, running: false } : item,
           ),

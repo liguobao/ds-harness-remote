@@ -164,12 +164,13 @@ Supported backends:
 - **OpenCode** — connects through `opencode acp`, with workspaces and history. Session archiving requires a build with the authenticated API; unarchive is not yet available.
 - **Claude** — connects through a locally authorized `claude-agent-acp`; enable it in settings. Supports text and approvals; images are not yet supported.
 - **Hermes** — connects through `hermes acp`; enable it in settings. Supports text, images, streamed output, approvals, and model selection.
+- **Kimi** — connects through `kimi acp`; enable it in settings. Supports text, images, streamed output, approvals, and model/thinking/mode selection.
 
-Claude and Hermes also support direct file and terminal access, subject to the Host's workspace boundaries and terminal settings.
+Claude, Hermes, and Kimi also support direct file and terminal access, subject to the Host's workspace boundaries and terminal settings.
 
 Setup and adapter development: [Agent workspace integration guide](docs/acp-remote.md).
 
-Model selection for Cursor, Claude, Hermes, Pi, OpenCode, and AGY on Desktop/Android uses the Host's actual model catalog as determined by the Agent’s ACP interface.
+Model selection for Cursor, Claude, Hermes, Kimi, Pi, OpenCode, and AGY on Desktop/Android uses the Host's actual model catalog as determined by the Agent’s ACP interface.
 
 Reasoning effort options depend on what the backend provides. Cursor uses a separate process per session, so model changes do not affect other conversations.
 

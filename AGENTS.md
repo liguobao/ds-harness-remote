@@ -134,7 +134,7 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
   - 取消/超时查 `session/events` 确认，`succeeded` 优先，`unconfirmed` 禁 Client 重提。
 
 ### 5. CodeX、ACP 多后端与共享远程终端
-- CodeX（`packages/plugin/src/codex/`，`codex.app.*`）与 ACP（`agent.acp.*`：`cursor`/`antigravity`/`pi`/`opencode`/`claude`/`hermes`，见 [acp-remote.md](docs/acp-remote.md)、[codex-remote.md](docs/codex-remote.md)）保持独立数据面。
+- CodeX（`packages/plugin/src/codex/`，`codex.app.*`）与 ACP（`agent.acp.*`：`cursor`/`antigravity`/`pi`/`opencode`/`claude`/`hermes`/`kimi`，见 [acp-remote.md](docs/acp-remote.md)、[codex-remote.md](docs/codex-remote.md)）保持独立数据面。
 - UI 仅内存投影（`packages/plugin/src/acp/virtual-harness.ts` 禁 Node/FS 依赖），**禁写 DSH `SessionStore`、Workspace 库或 Harness 日志**。
 - CodeX authority 取 `project/list`（回退 `thread/list` 绝对 `cwd`），`project/create` 仅注册已存在目录（`realpath`）。
 - ACP 边界：

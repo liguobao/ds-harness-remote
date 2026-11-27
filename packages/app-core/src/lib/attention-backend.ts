@@ -1,7 +1,7 @@
 import type { AttentionItem } from '@dsh-remote/protocol'
 
 export interface AttentionBackendIdentity {
-  /** Stable filter key: 'harness' | 'codex' | 'antigravity' | 'hermes' | 'cursor' | 'claude' | 'opencode' | 'pi' | 'ds-bot' | 'acp:<id>' */
+  /** Stable filter key: 'harness' | 'codex' | 'antigravity' | 'hermes' | 'kimi' | 'cursor' | 'claude' | 'opencode' | 'pi' | 'ds-bot' | 'acp:<id>' */
   key: string
   /** Canonical human-readable platform name (never generic 'Harness' or 'AGY'). */
   label: string
@@ -46,6 +46,13 @@ const KNOWN_BACKENDS: Readonly<Record<string, AttentionBackendIdentity>> = {
     accentLight: '#B45309',
     accentDark: '#FBBF24',
   },
+  kimi: {
+    key: 'kimi',
+    label: 'Kimi',
+    shortBadge: 'K',
+    accentLight: '#1D4ED8',
+    accentDark: '#60A5FA',
+  },
   cursor: {
     key: 'cursor',
     label: 'Cursor',
@@ -88,11 +95,12 @@ const CANONICAL_ORDER = new Map<string, number>([
   ['codex', 1],
   ['antigravity', 2],
   ['hermes', 3],
-  ['cursor', 4],
-  ['claude', 5],
-  ['opencode', 6],
-  ['pi', 7],
-  ['ds-bot', 8],
+  ['kimi', 4],
+  ['cursor', 5],
+  ['claude', 6],
+  ['opencode', 7],
+  ['pi', 8],
+  ['ds-bot', 9],
 ])
 
 function formatCustomAdapterLabel(raw: string): string {
@@ -111,7 +119,7 @@ function formatCustomAdapterLabel(raw: string): string {
 
 /**
  * Resolves a single canonical brand identity (label, short glyph, accent colors,
- * and filter key) across DeepSeek Harness, Codex, Antigravity, Hermes, Cursor,
+ * and filter key) across DeepSeek Harness, Codex, Antigravity, Hermes, Kimi, Cursor,
  * Claude, OpenCode, Pi, DS-Bot, and custom ACP adapters.
  */
 export function resolveAttentionBackendIdentity(

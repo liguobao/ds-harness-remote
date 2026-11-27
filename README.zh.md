@@ -166,12 +166,13 @@ Host 启动本机支持ACP 的Agent，通过ds-harness-remote 通道传递 Promp
 - **OpenCode**：通过 `opencode acp` 接入，支持工作区与历史；会话归档需版本提供认证 API，暂不支持恢复归档。
 - **Claude**：通过本机已授权的 `claude-agent-acp` 接入，需在设置中开启；支持文字与审批，暂不支持图片。
 - **Hermes**：通过 `hermes acp` 接入，需在设置中开启；支持文字、图片、流式输出、审批与模型选择。
+- **Kimi**：通过 `kimi acp` 接入，需在设置中开启；支持文字、图片、流式输出、审批与模型/思考强度/模式选择。
 
-Claude 和 Hermes 均支持直接 Files/Terminal 访问，复用 Host 的工作区路径隔离与终端权限设置。
+Claude、Hermes 和 Kimi 均支持直接 Files/Terminal 访问，复用 Host 的工作区路径隔离与终端权限设置。
 
 配置与后端适配开发见 [Agent 工作区接入指南](docs/acp-remote.md)。
 
-Desktop/Android 的 Cursor、Claude、Hermes、Pi、OpenCode、AGY 模型选择使用 Host 实际模型目录，由Agent ACP决定
+Desktop/Android 的 Cursor、Claude、Hermes、Kimi、Pi、OpenCode、AGY 模型选择使用 Host 实际模型目录，由Agent ACP决定
 
 思考强度选项以上游实际提供为准。Cursor 每个会话使用独立进程，切换模型不会影响其他会话。
 

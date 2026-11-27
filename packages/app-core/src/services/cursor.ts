@@ -62,7 +62,7 @@ export function createAcpSession(input: {
   cwd?: string
   title?: string
 }): RemoteSession {
-  const supportsImages = input.backend === 'antigravity' || input.backend === 'hermes'
+  const supportsImages = input.backend === 'antigravity' || input.backend === 'hermes' || input.backend === 'kimi'
   return {
     sessionId: `${input.backend}:${input.acpSessionId}`,
     backend: input.backend,
@@ -236,6 +236,10 @@ export function hermesWorkspaceId(path: string): string {
   return `hermes:cwd:${encodeURIComponent(path)}`
 }
 
+export function kimiWorkspaceId(path: string): string {
+  return `kimi:cwd:${encodeURIComponent(path)}`
+}
+
 export function opencodeWorkspacePath(workspaceId: string): string | undefined {
   if (!workspaceId.startsWith('opencode:cwd:')) return undefined
   try {
@@ -325,6 +329,7 @@ export function cursorNativeId(session: RemoteSession): string {
   if (session.sessionId.startsWith('antigravity:')) return session.sessionId.slice('antigravity:'.length)
   if (session.sessionId.startsWith('claude:')) return session.sessionId.slice('claude:'.length)
   if (session.sessionId.startsWith('hermes:')) return session.sessionId.slice('hermes:'.length)
+  if (session.sessionId.startsWith('kimi:')) return session.sessionId.slice('kimi:'.length)
   if (session.sessionId.startsWith('opencode:')) return session.sessionId.slice('opencode:'.length)
   return session.sessionId
 }
@@ -455,6 +460,23 @@ export function createHermesSession(input: {
       },
     },
   }
+}
+
+export function createKimiWorkspace(path: string, title?: string): WorkspaceView {
+  return createAcpWorkspace('kimi', path, title)
+}
+
+export function createKimiSession(input: {
+  acpSessionId: string
+  cwd?: string
+  title?: string
+}): RemoteSession {
+  return createAcpSession({
+    backend: 'kimi',
+    acpSessionId: input.acpSessionId,
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    ...(input.title === undefined ? {} : { title: input.title }),
+  })
 }
 
 export function createClaudeSession(input: {

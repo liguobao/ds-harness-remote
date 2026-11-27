@@ -1,6 +1,6 @@
 # ACP 后端接入与实现
 
-Cursor、Antigravity、Pi、OpenCode、Claude、Hermes 使用独立 `agent.acp.*` 数据面；Codex 使用 [App Server 领域](codex-remote.md)。本篇统一维护后端安装、运行差异与 adapter 接入。RPC/schema/限额统一在[协议](protocol.md#agent-acp-domain)，不在多份指南重复定义。
+Cursor、Antigravity、Pi、OpenCode、Claude、Hermes、Kimi 使用独立 `agent.acp.*` 数据面；Codex 使用 [App Server 领域](codex-remote.md)。本篇统一维护后端安装、运行差异与 adapter 接入。RPC/schema/限额统一在[协议](protocol.md#agent-acp-domain)，不在多份指南重复定义。
 
 ## 启用已有后端
 
@@ -20,9 +20,10 @@ Codex 默认开启，Cursor 默认关闭；AGY 以 Host 配置为准。未就绪
 | AGY | 优先原生 `agy acp` stdio（回退 `agy --input-format stream-json --output-format stream-json`） | 工作区/历史、文字与受限图片、流式回复、模式/模型/Thinking 选择 |
 | Pi Agent | `pi-acp` stdio（内部启动 `pi --mode rpc`） | 工作区/历史、文字、流式工具、中断、模型/Thinking |
 | Hermes | `hermes acp` stdio（Hermes Agent 自带 ACP 服务端） | 工作区/历史、文字与多模态图片、流式思考与工具、中断、单次审批、模型选择 |
+| Kimi | `kimi acp` stdio（Kimi Code CLI 自带 ACP 服务端） | 工作区/历史、文字与多模态图片、流式思考与工具、中断、单次审批、模型/Thinking/模式选择 |
 | Codex | `codex app-server` stdio | Project/Thread、历史、文字/图片、模型/权限、中断与审批 |
 
-图片规格对 AGY 与 Hermes 相同：每张最多 8 MiB、每条消息最多 4 张（合计不超过 32 MiB），支持 PNG / JPEG / WebP / GIF，单边不超过 8192 像素且不超过 4000 万像素。AGY 将图片写入 Host 专用私有 tmp 缓存，保留 24 小时，系统提前清理 tmp 后图片可能不可用；Hermes 以 base64 内联透传，不写 tmp 缓存。
+图片规格对 AGY、Hermes 与 Kimi 相同：每张最多 8 MiB、每条消息最多 4 张（合计不超过 32 MiB），支持 PNG / JPEG / WebP / GIF，单边不超过 8192 像素且不超过 4000 万像素。AGY 将图片写入 Host 专用私有 tmp 缓存，保留 24 小时，系统提前清理 tmp 后图片可能不可用；Hermes 与 Kimi 以 base64 内联透传，不写 tmp 缓存。
 工具可用性以 Host capability 和会话 scope 为准。最新工具、AGY 加密跨设备链路、Windows、APK/真机与长期稳定性仍有待验证项，见 [TODO](TODO.md)。
 
 ## 后端说明
@@ -120,6 +121,26 @@ acp:
 - 图片：支持多模态图片 Prompt，图片作为标准 ACP `image` 内容块随文本一起透传至 `hermes acp`，规格与 AGY 一致（PNG / JPEG / WebP / GIF，单张最多 8 MiB、边长不超过 8192、像素不超过 4000 万，每条消息最多 4 张）。与 AGY 不同，Hermes 直接内联 base64，不写 Host tmp 缓存，因此不存在缓存过期问题。
 - 直接 Files/Terminal 使用 Host 共享 ACP workspace tools，受可信 cwd、连接归属、路径隔离与终端开关约束；这与 Agent 自己执行工具相互独立。
 
+### Kimi Code（Moonshot AI）
+
+Host 注册后端 ID 为 `kimi`，默认**关闭**（未安装 Kimi Code 的 Host 不会被触发拉起），默认命令 `kimi`、参数 `["acp"]`（探测 `~/.kimi-code/bin/kimi`、`~/.local/bin/kimi` 等安装路径与系统 `PATH`）。
+
+Kimi Code CLI 自带标准 ACP 服务端（`kimi acp`）：
+
+```yaml
+acp:
+  backends:
+    - id: kimi
+      enabled: true
+      command: kimi
+      args: [acp]
+```
+
+- 认证：使用 Host 本机已有的 `kimi login` 凭据，不向 Client 发起登录；Remote 只在初始化时发送 `initialize`，不发送 `authenticate`。
+- 目录与会话：`session/list` 按 cwd 列出 Kimi 已持久化的会话，`session/load` 在响应前回放历史。Kimi 对已打开会话持有单进程排他锁，空闲复读复用同一活进程并屏蔽重放通知；回放期间过滤 Kimi 在用户消息后自动附带的合成 `<system-reminder>` 分片，不写入 Harness SessionStore。
+- 模型、Thinking 与模式：通过 `configOptions`（`model`、`thinking`）与 `modes`（`default`、`plan`、`auto`、`yolo`）提供与确认切换。
+- 审批与图片：通过 `session/request_permission` 做单次允许/拒绝；支持与 AGY/Hermes 相同规格的内联 base64 多模态图片 Prompt，不写 Host tmp 缓存。
+- 直接 Files/Terminal 使用 Host 共享 ACP workspace tools，受可信 cwd、连接归属、路径隔离与终端开关约束。
 
 ## 共享运行时与投影
 
@@ -133,10 +154,10 @@ ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册
 `ACP_BACKEND_DISABLED`（消息为 `The <backend> ACP backend is disabled by configuration.`），
 而不是把它报告成普通的 `CURSOR_UNAVAILABLE` 故障。
 
-Pi / Claude / Hermes 复用 Cursor 的 stdio adapter，因此它们的进程失败（含二进制缺失、
+Pi / Claude / Hermes / Kimi 复用 Cursor 的 stdio adapter，因此它们的进程失败（含二进制缺失、
 初始化失败、退出、超时与通信错误）使用各自的后端前缀，例如 `PI_BINARY_UNAVAILABLE`、
-`CLAUDE_BINARY_UNAVAILABLE`、`HERMES_BINARY_UNAVAILABLE`，日志前缀同样为
-`Pi ACP ...` / `Claude ACP ...` / `Hermes ACP ...`。禁用的 Cursor 后端不会因这些
+`CLAUDE_BINARY_UNAVAILABLE`、`HERMES_BINARY_UNAVAILABLE`、`KIMI_BINARY_UNAVAILABLE`，日志前缀同样为
+`Pi ACP ...` / `Claude ACP ...` / `Hermes ACP ...` / `Kimi ACP ...`。禁用的 Cursor 后端不会因这些
 后端复用同一 adapter 而出现在启动日志里。
 
 设置页根据 Host 上配置的命令及运行时支持的候选位置检测后端是否可发现。
@@ -164,7 +185,7 @@ Web、Desktop 和 Android 共用独立 `agent.acp.*` RPC / stream / transfer / e
 
 ## 新增与自定义 ACP 后端
 
-已在配置中添加并通过 `settings.acp.add` 注册的自定义标准 ACP 后端（排除保留名 `codex`/`harness`/`kimi`/`acp`）会通过标准 stdio ACP `initialize` / `session/*` / `dsh/*` 接入网关、工作区发现与内存投影。如需定制非标协议或专属行为，仍需按以下步骤实现独立 adapter：
+已在配置中添加并通过 `settings.acp.add` 注册的自定义标准 ACP 后端（排除保留名 `codex`/`harness`/`acp`、内建 ACP ID 与 JS 原型链保留名）会通过标准 stdio ACP `initialize` / `session/*` / `dsh/*` 接入网关、工作区发现与内存投影。如需定制非标协议或专属行为，仍需按以下步骤实现独立 adapter：
 
 1. **实现进程 adapter**：参考 [adapter.ts](../packages/plugin/src/acp/adapter.ts) 的 `start / close / isReady / call / respond / respondError / onInbound / onUnavailable` 契约，在 `acp/adapters/` 实现固定后端 ID、请求关联、通知与退出清理。原生 ACP 可参考 Cursor；其他协议需像 AGY 一样明确适配。
 2. **注册 Host 生命周期**：在 [gateway.ts](../packages/plugin/src/acp/gateway.ts) 接入后端创建、支持列表、后台启动、就绪检测和 reconfigure。关闭时取消启动，迟到初始化不能重新注册；不可用后端不能静默降级。

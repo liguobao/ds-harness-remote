@@ -25,6 +25,7 @@ const SESSION_PREFIXES: Record<string, string> = {
   opencode: OPENCODE_SESSION_PREFIX,
   claude: 'claude:',
   hermes: 'hermes:',
+  kimi: 'kimi:',
 }
 
 export type JsonRecord = Record<string, unknown>

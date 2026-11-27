@@ -9,6 +9,7 @@ const PREFIXES: ReadonlyArray<[string, AgentBackend]> = [
   ['opencode:', 'opencode'],
   ['claude:', 'claude'],
   ['hermes:', 'hermes'],
+  ['kimi:', 'kimi'],
 ]
 
 const REGISTERED_ACP_BACKENDS = new Set<string>()

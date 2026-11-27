@@ -14,6 +14,7 @@ import type { ChatItem, RemoteSession } from '../types'
 import { applyMuxFrameToMessages, sessionRunningForMuxFrame, settleOrphanedQueuedItems } from './event-reducer'
 import { inboxRpcIds, reconcileUserQuestionsProjection } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
+import { acpUnavailableMessage } from './acp-backend-helpers'
 import { isHarnessPromptStarted, isRecord, record, stringValue } from './session-state'
 import type { AppState } from './store-state'
 
@@ -408,6 +409,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
         else if (session.backend === 'opencode') void runtime.refreshOpencodeCatalog()
         else if (session.backend === 'claude') void runtime.refreshClaudeCatalog()
         else if (session.backend === 'hermes') void runtime.refreshHermesCatalog()
+        else if (session.backend === 'kimi') void runtime.refreshKimiCatalog()
         else if (session.backend === 'cursor') void runtime.refreshCursorCatalog()
         else if (session.backend) void runtime.refreshCustomAcpCatalog(session.backend)
       }
@@ -419,12 +421,7 @@ function acpPromptFailureMessage(
   backend: RemoteSession['backend'],
   update: Record<string, unknown> | undefined,
 ): string {
-  const fallback = backend === 'claude' ? zhCN.runtime.claudeUnavailable
-    : backend === 'hermes' ? zhCN.runtime.hermesUnavailable
-    : backend === 'opencode' ? zhCN.runtime.opencodeUnavailable
-    : backend === 'pi' ? zhCN.runtime.piUnavailable
-    : backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable
-    : zhCN.runtime.cursorUnavailable
+  const fallback = acpUnavailableMessage(backend)
   const code = typeof update?.code === 'string' && update.code.trim().length > 0 ? update.code.trim() : undefined
   const message = typeof update?.message === 'string' && update.message.trim().length > 0 ? update.message.trim() : undefined
   if (code === undefined && message === undefined) return fallback

@@ -4,6 +4,7 @@ import { CursorAcpClient } from '../src/acp/adapters/cursor-process.js'
 import { PiAcpClient } from '../src/acp/adapters/pi-process.js'
 import { ClaudeAcpClient } from '../src/acp/adapters/claude-process.js'
 import { HermesAcpClient } from '../src/acp/adapters/hermes-process.js'
+import { KimiAcpClient } from '../src/acp/adapters/kimi-process.js'
 import type { CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
 import type { SafeLogger } from '../src/logging.js'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
@@ -134,6 +135,7 @@ describe('shared ACP stdio adapter attribution', () => {
       { name: 'pi', create: (logger: SafeLogger) => new PiAcpClient(`${MISSING}pi-acp`, logger), label: 'Pi', prefix: 'PI' },
       { name: 'claude', create: (logger: SafeLogger) => new ClaudeAcpClient(`${MISSING}claude-agent-acp`, logger), label: 'Claude', prefix: 'CLAUDE' },
       { name: 'hermes', create: (logger: SafeLogger) => new HermesAcpClient(`${MISSING}hermes`, logger), label: 'Hermes', prefix: 'HERMES' },
+      { name: 'kimi', create: (logger: SafeLogger) => new KimiAcpClient(`${MISSING}kimi`, logger), label: 'Kimi', prefix: 'KIMI' },
     ]
     await runScenarios(cases.map(scenario => ({
       name: scenario.name,

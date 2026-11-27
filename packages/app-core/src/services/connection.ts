@@ -373,7 +373,7 @@ export class AndroidRemoteConnection {
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
     if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core, true)
     this.acpBackends.clear()
-    const candidateBackends = new Set<string>(['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'])
+    const candidateBackends = new Set<string>(['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi'])
     for (const wt of features.workspaceTypes ?? []) {
       if (wt.id !== 'codex' && wt.id !== 'harness') candidateBackends.add(wt.id)
     }
@@ -509,7 +509,7 @@ export class AndroidRemoteConnection {
   }
 
   customAcpBackends(): string[] {
-    return [...this.acpBackends].filter(id => !['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'].includes(id))
+    return [...this.acpBackends].filter(id => !['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi'].includes(id))
   }
 
   hasAcpBackend(backend: string): boolean {
@@ -521,6 +521,7 @@ export class AndroidRemoteConnection {
       const messages: Record<string, string> = {
         claude: strings.runtime.claudeUnavailable,
         hermes: strings.runtime.hermesUnavailable,
+        kimi: strings.runtime.kimiUnavailable,
         opencode: strings.runtime.opencodeUnavailable,
         pi: strings.runtime.piUnavailable,
         antigravity: strings.runtime.antigravityUnavailable,
@@ -599,6 +600,16 @@ export class AndroidRemoteConnection {
 
   hasHermes(): boolean {
     return this.cursor !== undefined && this.acpBackends.has('hermes')
+  }
+
+  /** Optional Agent ACP client (Kimi Code UI backend); available when the Host advertises agent.acp.kimi.v1. */
+  requireKimi(): AgentAcpClient {
+    if (this.cursor === undefined || !this.acpBackends.has('kimi')) throw new Error(strings.runtime.kimiUnavailable)
+    return this.cursor
+  }
+
+  hasKimi(): boolean {
+    return this.cursor !== undefined && this.acpBackends.has('kimi')
   }
 
   getStats() {

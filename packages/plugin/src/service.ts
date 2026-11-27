@@ -43,6 +43,7 @@ import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
 import { PluginRouteBridge } from './plugin-route-bridge.js'
 import type { LocalTypertGateway } from './typert-gateway-contract.js'
 import { loadNodeRtcFactory } from './werift-rtc.js'
+import { acpBackendLabel } from './acp/virtual-catalog.js'
 import type { AuthenticatedPeerChannel } from './types.js'
 import { CodexRemoteDomain } from './codex/domain.js'
 import { AcpGateway, StdioAcpAdapter } from './acp.js'
@@ -768,7 +769,7 @@ export class HostPluginRuntime {
     for (const backend of this.acp.enabledBackends()) {
       types.push({
         id: backend,
-        name: backend === 'claude' ? 'Claude' : backend === 'hermes' ? 'Hermes' : backend === 'pi' ? 'Pi' : backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'opencode' ? 'OpenCode' : backend,
+        name: acpBackendLabel(backend),
         capability: `agent.acp.${backend}.v1`,
         available: readyBackends.includes(backend),
       })

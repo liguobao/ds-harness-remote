@@ -2,7 +2,7 @@ import type { AttentionDigest, TransportStats } from '@dsh-remote/protocol'
 import type { AdaptiveConnectionDetails } from '@dsh-remote/webrtc'
 import { strings as zhCN } from './locales/i18n'
 
-export type AgentBackend = 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | (string & {})
+export type AgentBackend = 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | 'kimi' | (string & {})
 
 export type ConnectionPhase =
   | 'disconnected'

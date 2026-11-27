@@ -230,6 +230,7 @@ describe('pinned session persistence across Host reconnect (#627)', () => {
       hasOpencode: vi.fn(() => false),
       hasClaude: vi.fn(() => false),
       hasHermes: vi.fn(() => false),
+      hasKimi: vi.fn(() => false),
       customAcpBackends: vi.fn(() => []),
       hasAttentionInbox: vi.fn(() => false),
       getAttentionClient: vi.fn(() => undefined),

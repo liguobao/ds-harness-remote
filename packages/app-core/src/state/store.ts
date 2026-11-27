@@ -64,6 +64,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   opencodeAvailable: false,
   claudeAvailable: false,
   hermesAvailable: false,
+  kimiAvailable: false,
   customAcpBackends: [],
   workspaceCatalog: undefined,
   workspaces: [],

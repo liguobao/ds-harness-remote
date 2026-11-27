@@ -480,7 +480,7 @@ window.__ModuleLoader__.load({
           if (!workspacesReady(workspaceSnapshot)
             || !workspaceSnapshot.items.some(workspace => workspace.workspaceId === pending.workspaceId)) return
           const sessionSnapshot = ctx.sessions.list.getSnapshot()
-          const isVirtualBackend = pending.backend === 'codex' || pending.backend === 'cursor' || pending.backend === 'antigravity' || pending.backend === 'pi' || pending.backend === 'opencode' || pending.backend === 'claude' || pending.backend === 'hermes'
+          const isVirtualBackend = pending.backend === 'codex' || pending.backend === 'cursor' || pending.backend === 'antigravity' || pending.backend === 'pi' || pending.backend === 'opencode' || pending.backend === 'claude' || pending.backend === 'hermes' || pending.backend === 'kimi'
           if (isVirtualBackend && pending.sessionId !== undefined
             && sessionSnapshot.phase !== 'ready') return
 

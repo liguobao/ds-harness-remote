@@ -10,12 +10,14 @@ const CLAUDE_WORKSPACE_PREFIX = 'claude:cwd:'
 
 const HERMES_WORKSPACE_PREFIX = 'hermes:cwd:'
 
+const KIMI_WORKSPACE_PREFIX = 'kimi:cwd:'
+
 const CURSOR_PROVIDER = 'cursor'
 
 const OPENCODE_PROVIDER = 'opencode'
 
 /** Every ACP backend the Host can project into the Client's virtual Harness. */
-export type AcpCatalogBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | (string & {})
+export type AcpCatalogBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | 'kimi' | (string & {})
 
 const WORKSPACE_PREFIXES: Record<string, string> = {
   cursor: CURSOR_WORKSPACE_PREFIX,
@@ -24,6 +26,7 @@ const WORKSPACE_PREFIXES: Record<string, string> = {
   opencode: OPENCODE_WORKSPACE_PREFIX,
   claude: CLAUDE_WORKSPACE_PREFIX,
   hermes: HERMES_WORKSPACE_PREFIX,
+  kimi: KIMI_WORKSPACE_PREFIX,
 }
 
 const BACKEND_LABELS: Record<string, string> = {
@@ -33,6 +36,7 @@ const BACKEND_LABELS: Record<string, string> = {
   opencode: 'OpenCode',
   claude: 'Claude',
   hermes: 'Hermes',
+  kimi: 'Kimi',
 }
 
 const BACKEND_PROVIDERS: Record<string, string> = {
@@ -42,6 +46,7 @@ const BACKEND_PROVIDERS: Record<string, string> = {
   opencode: OPENCODE_PROVIDER,
   claude: 'claude',
   hermes: 'hermes',
+  kimi: 'kimi',
 }
 
 export function acpWorkspacePrefix(backend: AcpCatalogBackend): string {
@@ -56,7 +61,7 @@ export function acpBackendProvider(backend: AcpCatalogBackend): string {
   return BACKEND_PROVIDERS[backend] ?? backend
 }
 
-export const ACP_CATALOG_BACKENDS: readonly AcpCatalogBackend[] = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes']
+export const ACP_CATALOG_BACKENDS: readonly AcpCatalogBackend[] = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi']
 
 export interface AcpVirtualWorkspaceView {
   workspaceId: string
@@ -107,7 +112,7 @@ export async function discoverAcpVirtualWorkspaces(
           })
       }
     } catch (error) {
-      if (backend === 'pi' || backend === 'claude' || backend === 'hermes') throw error
+      if (backend === 'pi' || backend === 'claude' || backend === 'hermes' || backend === 'kimi') throw error
       // Discovery is optional for legacy backends; an unavailable Host returns no workspaces.
     }
   }

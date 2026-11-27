@@ -122,6 +122,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState<CursorWorkspaceView[]>([])
     const [claudeWorkspaces, setClaudeWorkspaces] = React.useState<CursorWorkspaceView[]>([])
     const [hermesWorkspaces, setHermesWorkspaces] = React.useState<CursorWorkspaceView[]>([])
+    const [kimiWorkspaces, setKimiWorkspaces] = React.useState<CursorWorkspaceView[]>([])
     const [customAcpWorkspaces, setCustomAcpWorkspaces] = React.useState<Record<string, CursorWorkspaceView[]>>({})
     const [workspaceBackend, setWorkspaceBackend] = React.useState<string>('harness')
     const [codexWorkspaceId, setCodexWorkspaceId] = React.useState<string | undefined>(undefined)
@@ -131,6 +132,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState<string | undefined>(undefined)
     const [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState<string | undefined>(undefined)
     const [hermesWorkspaceId, setHermesWorkspaceId] = React.useState<string | undefined>(undefined)
+    const [kimiWorkspaceId, setKimiWorkspaceId] = React.useState<string | undefined>(undefined)
     const [customAcpWorkspaceIds, setCustomAcpWorkspaceIds] = React.useState<Record<string, string | undefined>>({})
     const [directory, setDirectory] = React.useState<RemoteDirectoryListing | undefined>(undefined)
     const [path, setPath] = React.useState('')
@@ -146,6 +148,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(false)
     const [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(false)
     const [showAllHermesWorkspaces, setShowAllHermesWorkspaces] = React.useState(false)
+    const [showAllKimiWorkspaces, setShowAllKimiWorkspaces] = React.useState(false)
     const [showAllCustomAcpWorkspaces, setShowAllCustomAcpWorkspaces] = React.useState<Record<string, boolean>>({})
     const workspaceListId = 'dsh-remote-workspace-list'
     const codexWorkspaceHeadingId = 'dsh-remote-codex-workspace-heading'
@@ -157,11 +160,13 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const opencodeWorkspaceHeadingId = 'dsh-remote-opencode-workspace-heading'
     const claudeWorkspaceHeadingId = 'dsh-remote-claude-workspace-heading'
     const hermesWorkspaceHeadingId = 'dsh-remote-hermes-workspace-heading'
+    const kimiWorkspaceHeadingId = 'dsh-remote-kimi-workspace-heading'
     const antigravityWorkspaceListId = 'dsh-remote-antigravity-workspace-list'
     const piWorkspaceListId = 'dsh-remote-pi-workspace-list'
     const opencodeWorkspaceListId = 'dsh-remote-opencode-workspace-list'
     const claudeWorkspaceListId = 'dsh-remote-claude-workspace-list'
     const hermesWorkspaceListId = 'dsh-remote-hermes-workspace-list'
+    const kimiWorkspaceListId = 'dsh-remote-kimi-workspace-list'
     const [busy, setBusy] = React.useState(false)
     const [refreshingHosts, setRefreshingHosts] = React.useState(false)
     // Remain undecided until local credentials or an explicit auth rejection
@@ -430,6 +435,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setOpencodeWorkspaces([])
       setClaudeWorkspaces([])
       setHermesWorkspaces([])
+      setKimiWorkspaces([])
       setCustomAcpWorkspaces({})
       setShowAllWorkspaces(false)
       setShowAllCodexWorkspaces(false)
@@ -439,6 +445,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setShowAllOpencodeWorkspaces(false)
       setShowAllClaudeWorkspaces(false)
       setShowAllHermesWorkspaces(false)
+      setShowAllKimiWorkspaces(false)
       setShowAllCustomAcpWorkspaces({})
       try {
         const result = await runConnectHostProgress(
@@ -460,7 +467,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
             // together keeps an unavailable or slow ACP backend from delaying
             // CodeX discovery and the picker transition.
             const [nextCodexWorkspaces, nextCursorWorkspaces, nextAntigravityWorkspaces,
-              nextPiWorkspaces, nextOpencodeWorkspaces, nextClaudeWorkspaces, nextHermesWorkspaces, nextStatus] = await Promise.all([
+              nextPiWorkspaces, nextOpencodeWorkspaces, nextClaudeWorkspaces, nextHermesWorkspaces, nextKimiWorkspaces, nextStatus] = await Promise.all([
               props.control<CodexWorkspaceView[]>('codex.workspaces.list', { targetDeviceId: host.deviceId }).catch(() => []),
               props.control<CursorWorkspaceView[]>('cursor.workspaces.list', { targetDeviceId: host.deviceId }).catch(() => []),
               props.control<CursorWorkspaceView[]>('antigravity.workspaces.list', { targetDeviceId: host.deviceId }).catch(() => []),
@@ -468,9 +475,10 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               props.control<CursorWorkspaceView[]>('opencode.workspaces.list', { targetDeviceId: host.deviceId }).catch(() => []),
               props.control<CursorWorkspaceView[]>('claude.workspaces.list', { targetDeviceId: host.deviceId }).catch(() => []),
               props.control<CursorWorkspaceView[]>('hermes.workspaces.list', { targetDeviceId: host.deviceId }).catch(() => []),
+              props.control<CursorWorkspaceView[]>('kimi.workspaces.list', { targetDeviceId: host.deviceId }).catch(() => []),
               props.control<RemoteStatus>('status').catch(() => undefined),
             ])
-            const builtinIds = new Set(['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'])
+            const builtinIds = new Set(['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi'])
             const customTypes = (nextStatus?.remoteFeatures?.workspaceTypes ?? []).filter(w => w.available && !builtinIds.has(w.id))
             const nextCustomEntries = await Promise.all(customTypes.map(async wt => {
               const items = await props.control<CursorWorkspaceView[]>('acp.workspaces.list', { targetDeviceId: host.deviceId, backend: wt.id }).catch(() => [])
@@ -486,6 +494,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               opencodeWorkspaces: nextOpencodeWorkspaces,
               claudeWorkspaces: nextClaudeWorkspaces,
               hermesWorkspaces: nextHermesWorkspaces,
+              kimiWorkspaces: nextKimiWorkspaces,
               customAcpWorkspaces: Object.fromEntries(nextCustomEntries),
               status: nextStatus,
             }
@@ -500,6 +509,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         setOpencodeWorkspaces(result.opencodeWorkspaces)
         setClaudeWorkspaces(result.claudeWorkspaces)
         setHermesWorkspaces(result.hermesWorkspaces)
+        setKimiWorkspaces(result.kimiWorkspaces)
         setCustomAcpWorkspaces(result.customAcpWorkspaces)
         setWorkspaceBackend('harness')
         setCodexWorkspaceId(undefined)
@@ -509,6 +519,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         setOpencodeWorkspaceId(undefined)
         setClaudeWorkspaceId(undefined)
         setHermesWorkspaceId(undefined)
+        setKimiWorkspaceId(undefined)
         setCustomAcpWorkspaceIds({})
         setSelectedHost(host)
         setPath('')
@@ -541,6 +552,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         setOpencodeWorkspaceId(undefined)
         setClaudeWorkspaceId(undefined)
         setHermesWorkspaceId(undefined)
+        setKimiWorkspaceId(undefined)
         setCustomAcpWorkspaceIds({})
         setPath(listing.path)
       } catch (reason) {
@@ -560,6 +572,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setOpencodeWorkspaceId(undefined)
       setClaudeWorkspaceId(undefined)
       setHermesWorkspaceId(undefined)
+      setKimiWorkspaceId(undefined)
       setCustomAcpWorkspaceIds({})
       setShowAllWorkspaces(false)
       setShowAllCodexWorkspaces(false)
@@ -569,6 +582,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setShowAllOpencodeWorkspaces(false)
       setShowAllClaudeWorkspaces(false)
       setShowAllHermesWorkspaces(false)
+      setShowAllKimiWorkspaces(false)
       setShowAllCustomAcpWorkspaces({})
       setDirectory(undefined)
       setPath('')
@@ -585,6 +599,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setOpencodeWorkspaceId(undefined)
       setClaudeWorkspaceId(undefined)
       setHermesWorkspaceId(undefined)
+      setKimiWorkspaceId(undefined)
       setCustomAcpWorkspaceIds({})
       setDirectory(undefined)
       setPath('')
@@ -615,6 +630,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           setOpencodeWorkspaces([])
           setClaudeWorkspaces([])
           setHermesWorkspaces([])
+          setKimiWorkspaces([])
           setShowAllWorkspaces(false)
           setShowAllCodexWorkspaces(false)
           setShowAllCursorWorkspaces(false)
@@ -623,6 +639,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           setShowAllOpencodeWorkspaces(false)
           setShowAllClaudeWorkspaces(false)
           setShowAllHermesWorkspaces(false)
+          setShowAllKimiWorkspaces(false)
           setWorkspaceBackend('harness')
           setCodexWorkspaceId(undefined)
           setCursorWorkspaceId(undefined)
@@ -631,6 +648,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           setOpencodeWorkspaceId(undefined)
           setClaudeWorkspaceId(undefined)
           setHermesWorkspaceId(undefined)
+          setKimiWorkspaceId(undefined)
           setPath('')
           setAddingWorkspace(false)
           setDirectory(undefined)
@@ -658,6 +676,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           setOpencodeWorkspaces([])
           setClaudeWorkspaces([])
           setHermesWorkspaces([])
+          setKimiWorkspaces([])
           setShowAllWorkspaces(false)
           setShowAllCodexWorkspaces(false)
           setShowAllCursorWorkspaces(false)
@@ -666,6 +685,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           setShowAllOpencodeWorkspaces(false)
           setShowAllClaudeWorkspaces(false)
           setShowAllHermesWorkspaces(false)
+          setShowAllKimiWorkspaces(false)
           setWorkspaceBackend('harness')
           setCodexWorkspaceId(undefined)
           setCursorWorkspaceId(undefined)
@@ -674,6 +694,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
           setOpencodeWorkspaceId(undefined)
           setClaudeWorkspaceId(undefined)
           setHermesWorkspaceId(undefined)
+          setKimiWorkspaceId(undefined)
           setPath('')
           setAddingWorkspace(false)
           setDirectory(undefined)
@@ -705,6 +726,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               setOpencodeWorkspaces([])
               setClaudeWorkspaces([])
               setHermesWorkspaces([])
+              setKimiWorkspaces([])
               setShowAllWorkspaces(false)
               setShowAllCodexWorkspaces(false)
               setShowAllCursorWorkspaces(false)
@@ -713,6 +735,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               setShowAllOpencodeWorkspaces(false)
               setShowAllClaudeWorkspaces(false)
               setShowAllHermesWorkspaces(false)
+              setShowAllKimiWorkspaces(false)
               setWorkspaceBackend('harness')
               setCodexWorkspaceId(undefined)
               setCursorWorkspaceId(undefined)
@@ -721,6 +744,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               setOpencodeWorkspaceId(undefined)
               setClaudeWorkspaceId(undefined)
               setHermesWorkspaceId(undefined)
+              setKimiWorkspaceId(undefined)
               setPath('')
               setAddingWorkspace(false)
               setDirectory(undefined)
@@ -742,6 +766,8 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                 .then(w => setClaudeWorkspaces(w)).catch(() => undefined)
               void props.control<CursorWorkspaceView[]>('hermes.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
                 .then(w => setHermesWorkspaces(w)).catch(() => undefined)
+              void props.control<CursorWorkspaceView[]>('kimi.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                .then(w => setKimiWorkspaces(w)).catch(() => undefined)
             }
           }
         } catch (reason) {
@@ -762,6 +788,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
             setOpencodeWorkspaces([])
             setClaudeWorkspaces([])
             setHermesWorkspaces([])
+            setKimiWorkspaces([])
             setShowAllWorkspaces(false)
             setShowAllCodexWorkspaces(false)
             setShowAllCursorWorkspaces(false)
@@ -770,6 +797,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
             setShowAllOpencodeWorkspaces(false)
             setShowAllClaudeWorkspaces(false)
             setShowAllHermesWorkspaces(false)
+            setShowAllKimiWorkspaces(false)
             setWorkspaceBackend('harness')
             setCodexWorkspaceId(undefined)
             setCursorWorkspaceId(undefined)
@@ -778,6 +806,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
             setOpencodeWorkspaceId(undefined)
             setClaudeWorkspaceId(undefined)
             setHermesWorkspaceId(undefined)
+            setKimiWorkspaceId(undefined)
             setPath('')
             setAddingWorkspace(false)
             setDirectory(undefined)
@@ -805,6 +834,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setShowAllOpencodeWorkspaces(false)
       setShowAllClaudeWorkspaces(false)
       setShowAllHermesWorkspaces(false)
+      setShowAllKimiWorkspaces(false)
       setOpen(true)
       await refreshRemote()
     }
@@ -840,6 +870,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setOpencodeWorkspaces([])
       setClaudeWorkspaces([])
       setHermesWorkspaces([])
+      setKimiWorkspaces([])
       setShowAllWorkspaces(false)
       setShowAllCodexWorkspaces(false)
       setShowAllCursorWorkspaces(false)
@@ -848,6 +879,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setShowAllOpencodeWorkspaces(false)
       setShowAllClaudeWorkspaces(false)
       setShowAllHermesWorkspaces(false)
+      setShowAllKimiWorkspaces(false)
       setWorkspaceBackend('harness')
       setCodexWorkspaceId(undefined)
       setCursorWorkspaceId(undefined)
@@ -856,6 +888,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setOpencodeWorkspaceId(undefined)
       setClaudeWorkspaceId(undefined)
       setHermesWorkspaceId(undefined)
+      setKimiWorkspaceId(undefined)
       setDirectory(undefined)
       setPath('')
       setAddingWorkspace(false)
@@ -1001,6 +1034,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         setOpencodeWorkspaces([])
         setClaudeWorkspaces([])
         setHermesWorkspaces([])
+        setKimiWorkspaces([])
         setDirectory(undefined)
         setPath('')
         setPassword('')
@@ -1042,6 +1076,9 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       const targetHermesWorkspaceId = selection?.backend === 'hermes'
         ? selection.workspaceId
         : selection === undefined ? hermesWorkspaceId : undefined
+      const targetKimiWorkspaceId = selection?.backend === 'kimi'
+        ? selection.workspaceId
+        : selection === undefined ? kimiWorkspaceId : undefined
       const createWorkspace = selection === undefined && addingWorkspace
       if (selectedHost === undefined
         || targetPath === ''
@@ -1065,9 +1102,9 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
             ? (() => {
               const workspaceId = ({ cursor: targetCursorWorkspaceId, antigravity: targetAntigravityWorkspaceId,
                 pi: targetPiWorkspaceId, opencode: targetOpencodeWorkspaceId, claude: targetClaudeWorkspaceId,
-                hermes: targetHermesWorkspaceId } as Record<string, string | undefined>)[targetBackend]
+                hermes: targetHermesWorkspaceId, kimi: targetKimiWorkspaceId } as Record<string, string | undefined>)[targetBackend]
                 ?? (selection?.workspaceId ?? (selection === undefined ? customAcpWorkspaceIds[targetBackend] : undefined))
-              const isBuiltinAcp = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'].includes(targetBackend)
+              const isBuiltinAcp = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi'].includes(targetBackend)
               if (isBuiltinAcp) {
                 return createWorkspace || workspaceId === undefined
                   ? props.control<RemoteStatus>(`${targetBackend}.workspace.create`, { targetDeviceId: selectedHost.deviceId, path: targetPath })
@@ -1107,6 +1144,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const visibleOpencodeWorkspaces = showAllOpencodeWorkspaces ? opencodeWorkspaces : opencodeWorkspaces.slice(0, 3)
     const visibleClaudeWorkspaces = showAllClaudeWorkspaces ? claudeWorkspaces : claudeWorkspaces.slice(0, 3)
     const visibleHermesWorkspaces = showAllHermesWorkspaces ? hermesWorkspaces : hermesWorkspaces.slice(0, 3)
+    const visibleKimiWorkspaces = showAllKimiWorkspaces ? kimiWorkspaces : kimiWorkspaces.slice(0, 3)
     // Runtime features already validate both negotiated capabilities and
     // workspace readiness, including the existing CodeX legacy fallback.
     const codexAvailable = status?.remoteFeatures?.codex === true
@@ -1116,8 +1154,9 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const opencodeAvailable = status?.remoteFeatures?.opencode === true
     const claudeAvailable = status?.remoteFeatures?.claude === true
     const hermesAvailable = status?.remoteFeatures?.hermes === true
+    const kimiAvailable = status?.remoteFeatures?.kimi === true
     const customAcpBackends = (status?.remoteFeatures?.workspaceTypes ?? [])
-      .filter(wt => wt.available && !['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'].includes(wt.id))
+      .filter(wt => wt.available && !['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes', 'kimi'].includes(wt.id))
     // The status payload crosses the loopback SSE wire; a malformed update
     // field reads as "no update info" rather than feeding render-time parsing.
     const rawUpdate = status?.update
@@ -1619,7 +1658,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                             ? t('addAntigravityWorkspace')
                             : workspaceBackend === 'pi'
                               ? t('addPiWorkspace')
-                              : workspaceBackend === 'claude' ? t('addClaudeWorkspace') : workspaceBackend === 'hermes' ? t('addHermesWorkspace')
+                              : workspaceBackend === 'claude' ? t('addClaudeWorkspace') : workspaceBackend === 'hermes' ? t('addHermesWorkspace') : workspaceBackend === 'kimi' ? t('addKimiWorkspace')
                               : workspaceBackend === 'opencode'
                                 ? t('addOpencodeWorkspace')
                                 : workspaceBackend === 'harness'
@@ -1766,6 +1805,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                               setOpencodeWorkspaceId(undefined)
                               setClaudeWorkspaceId(undefined)
                               setHermesWorkspaceId(undefined)
+                              setKimiWorkspaceId(undefined)
                               setPath(workspace.path)
                             },
                             onDoubleClick: () => void openWorkspace({
@@ -1819,6 +1859,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                               setOpencodeWorkspaceId(undefined)
                               setClaudeWorkspaceId(undefined)
                               setHermesWorkspaceId(undefined)
+                              setKimiWorkspaceId(undefined)
                               setCodexWorkspaceId(undefined)
                               setCursorWorkspaceId(undefined)
                               setPath(workspace.path)
@@ -1925,6 +1966,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                               setPiWorkspaceId(undefined)
                               setClaudeWorkspaceId(undefined)
                               setHermesWorkspaceId(undefined)
+                              setKimiWorkspaceId(undefined)
                               setAntigravityWorkspaceId(undefined)
                               setCodexWorkspaceId(undefined)
                               setCursorWorkspaceId(undefined)
@@ -1978,6 +2020,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                               setWorkspaceBackend('hermes')
                               setClaudeWorkspaceId(undefined)
                               setHermesWorkspaceId(workspace.workspaceId)
+                              setKimiWorkspaceId(undefined)
                               setPiWorkspaceId(undefined)
                               setOpencodeWorkspaceId(undefined)
                               setAntigravityWorkspaceId(undefined)
@@ -2000,6 +2043,62 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                           'aria-controls': hermesWorkspaceListId,
                           'aria-label': t('showAllHermesWorkspaces'),
                           onClick: () => setShowAllHermesWorkspaces(true),
+                        }, React.createElement('span', { 'aria-hidden': true }, '…'))),
+                      !kimiAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                        React.createElement('div', {
+                          id: kimiWorkspaceHeadingId,
+                          className: 'dshRemoteWorkspaceSourceHeading',
+                        },
+                          React.createElement('span', { className: 'dshRemoteWorkspaceSourceText' }, React.createElement('strong', null, t('kimiVirtualWorkspace'))),
+                          React.createElement('button', {
+                            type: 'button',
+                            className: 'dshRemoteAddWorkspace',
+                            disabled: busy,
+                            title: t('addKimiWorkspace'),
+                            'aria-label': t('addKimiWorkspace'),
+                            onClick: () => startAddingWorkspace('kimi'),
+                          }, React.createElement('svg', {
+                            className: 'dshRemoteAddWorkspaceIcon', viewBox: '0 0 16 16', 'aria-hidden': true, focusable: false,
+                          }, React.createElement('path', { d: 'M8 3v10M3 8h10', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' })))),
+                        React.createElement('div', {
+                          id: kimiWorkspaceListId,
+                          className: 'dshRemoteDirectoryList dshRemoteCodexWorkspaceList',
+                          'aria-labelledby': kimiWorkspaceHeadingId,
+                        }, visibleKimiWorkspaces.length === 0
+                          ? React.createElement('p', null, t('noKimiWorkspaces'))
+                          : visibleKimiWorkspaces.map(workspace => React.createElement('button', {
+                            type: 'button',
+                            key: workspace.workspaceId,
+                            disabled: busy,
+                            className: workspaceBackend === 'kimi' && kimiWorkspaceId === workspace.workspaceId ? 'isSelected' : '',
+                            'aria-pressed': workspaceBackend === 'kimi' && kimiWorkspaceId === workspace.workspaceId,
+                            onClick: () => {
+                              setWorkspaceBackend('kimi')
+                              setClaudeWorkspaceId(undefined)
+                              setHermesWorkspaceId(undefined)
+                              setKimiWorkspaceId(workspace.workspaceId)
+                              setPiWorkspaceId(undefined)
+                              setOpencodeWorkspaceId(undefined)
+                              setAntigravityWorkspaceId(undefined)
+                              setCodexWorkspaceId(undefined)
+                              setCursorWorkspaceId(undefined)
+                              setPath(workspace.path)
+                            },
+                            onDoubleClick: () => void openWorkspace({
+                              backend: 'kimi',
+                              path: workspace.path,
+                              workspaceId: workspace.workspaceId,
+                            }),
+                          }, React.createElement('img', { className: 'dshRemoteWorkspaceIcon', src: deepSeekWorkspaceIcon, alt: '', 'aria-hidden': true }),
+                            React.createElement('span', null, workspace.title),
+                            React.createElement('small', null, `${workspace.path} · ${workspace.sessionCount}`)))),
+                        kimiWorkspaces.length <= 3 || showAllKimiWorkspaces ? null : React.createElement('button', {
+                          type: 'button',
+                          className: 'dshRemoteWorkspaceMore',
+                          disabled: busy,
+                          'aria-controls': kimiWorkspaceListId,
+                          'aria-label': t('showAllKimiWorkspaces'),
+                          onClick: () => setShowAllKimiWorkspaces(true),
                         }, React.createElement('span', { 'aria-hidden': true }, '…'))),
                       !claudeAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
                         React.createElement('div', {
@@ -2033,6 +2132,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                               setWorkspaceBackend('claude')
                               setClaudeWorkspaceId(workspace.workspaceId)
                               setHermesWorkspaceId(undefined)
+                              setKimiWorkspaceId(undefined)
                               setPiWorkspaceId(undefined)
                               setOpencodeWorkspaceId(undefined)
                               setAntigravityWorkspaceId(undefined)
@@ -2093,6 +2193,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                                 setCustomAcpWorkspaceIds({ [customBackend.id]: workspace.workspaceId })
                                 setClaudeWorkspaceId(undefined)
                                 setHermesWorkspaceId(undefined)
+                                setKimiWorkspaceId(undefined)
                                 setPiWorkspaceId(undefined)
                                 setOpencodeWorkspaceId(undefined)
                                 setAntigravityWorkspaceId(undefined)
@@ -2127,7 +2228,8 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                         || !addingWorkspace && workspaceBackend === 'pi' && piWorkspaceId === undefined && path === ''
                         || !addingWorkspace && workspaceBackend === 'opencode' && opencodeWorkspaceId === undefined && path === ''
                         || !addingWorkspace && workspaceBackend === 'claude' && claudeWorkspaceId === undefined && path === ''
-                        || !addingWorkspace && workspaceBackend === 'hermes' && hermesWorkspaceId === undefined && path === '',
+                        || !addingWorkspace && workspaceBackend === 'hermes' && hermesWorkspaceId === undefined && path === ''
+                        || !addingWorkspace && workspaceBackend === 'kimi' && kimiWorkspaceId === undefined && path === '',
                       onClick: () => void openWorkspace(),
                     }, t(busy ? 'openingWorkspace' : addingWorkspace ? 'confirmAddWorkspace' : 'openWorkspace')))))),
           notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, notice),
