@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, AppState, Easing, Pressable, ScrollView, Text, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import * as Clipboard from 'expo-clipboard'
@@ -26,15 +26,74 @@ import { useBotTeamStore } from '../state/bot-store'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, TopBar } from '../ui/components'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { useTheme } from '../ui/theme-context'
+import { useReduceMotion } from '../ui/use-reduce-motion'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
 import { BotAvatar, RoomAvatar } from './bot/avatar'
 import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
-import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
+import { BOT_MODALS_LINGER_MS, BotFloatingPopover, shouldRenderBotModalsHost, type BotPopoverAction } from './bot/popover-menu'
 import { createBotStyles } from './bot/styles'
 import { ExpandedComposer, type ExpandedComposerProps } from './chat/expanded-composer'
 import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamLoad } from './bot-sidebar-section'
+
+export function runBotConversationEnterMotion(
+  enterAnim: Pick<Animated.Value, 'setValue' | 'stopAnimation'>,
+  startTiming: (onDone: (result: { finished: boolean }) => void) => { stop: () => void },
+  selectedId: string | undefined,
+  reduceMotion: boolean,
+): (() => void) | undefined {
+  enterAnim.stopAnimation()
+  if (!selectedId || reduceMotion) {
+    enterAnim.setValue(1)
+    return undefined
+  }
+  enterAnim.setValue(0)
+  let stoppedByCleanup = false
+  const anim = startTiming(({ finished }) => {
+    if (!finished && !stoppedByCleanup) {
+      enterAnim.setValue(1)
+    }
+  })
+  return () => {
+    stoppedByCleanup = true
+    anim.stop()
+    enterAnim.setValue(1)
+  }
+}
+
+const BotScreenModalsGate = memo(function BotScreenModalsGate({ visible }: { visible: boolean }) {
+  const hasStoreModal = useBotTeamStore(
+    store =>
+      store.editor !== undefined
+      || store.detailsOpen
+      || store.report !== undefined
+      || store.contextMenu !== undefined,
+  )
+  const [deleteConfirmActive, setDeleteConfirmActive] = useState(false)
+  const active = hasStoreModal || deleteConfirmActive
+  const [lingerMounted, setLingerMounted] = useState(false)
+
+  useEffect(() => {
+    if (active) {
+      if (!visible) {
+        if (lingerMounted) setLingerMounted(false)
+        if (deleteConfirmActive) setDeleteConfirmActive(false)
+        return
+      }
+      if (!lingerMounted) setLingerMounted(true)
+      return
+    }
+    if (!lingerMounted) return
+    const timer = setTimeout(() => setLingerMounted(false), BOT_MODALS_LINGER_MS)
+    return () => clearTimeout(timer)
+  }, [visible, active, lingerMounted, deleteConfirmActive])
+
+  if (!shouldRenderBotModalsHost({ visible, hasStoreModal, deleteConfirmActive, lingerMounted })) {
+    return null
+  }
+  return <BotModalsHost onDeleteConfirmChange={setDeleteConfirmActive} />
+})
 
 export function BotModeScreen({
   selectedId: propSelectedId,
@@ -183,6 +242,7 @@ export function BotModeScreen({
 
   const [appActive, setAppActive] = useState(AppState.currentState === 'active')
   const active = appActive && screenActive
+  const reduceMotion = useReduceMotion()
   const [rosterSearch, setRosterSearch] = useState('')
   const [chatMoreOpen, setChatMoreOpen] = useState(false)
   const enterAnim = useRef(new Animated.Value(1)).current
@@ -193,15 +253,22 @@ export function BotModeScreen({
   }, [])
 
   useEffect(() => {
-    if (!selectedId) return
-    enterAnim.setValue(0)
-    Animated.timing(enterAnim, {
-      toValue: 1,
-      duration: 210,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start()
-  }, [selectedId, enterAnim])
+    return runBotConversationEnterMotion(
+      enterAnim,
+      onDone => {
+        const anim = Animated.timing(enterAnim, {
+          toValue: 1,
+          duration: 210,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        })
+        anim.start(onDone)
+        return anim
+      },
+      selectedId,
+      reduceMotion,
+    )
+  }, [selectedId, enterAnim, reduceMotion])
 
   const { clientValue, clientInitError } = useMemo(() => {
     if (connectionPhase !== 'connected') {
@@ -481,7 +548,7 @@ export function BotModeScreen({
         {conversationReady && expandedComposerProps !== null && (
           <ExpandedComposer {...expandedComposerProps} />
         )}
-        {!drawerOpen && <BotModalsHost />}
+        <BotScreenModalsGate visible={!drawerOpen} />
       </View>
     </KeyboardInset>
   )
