@@ -31,6 +31,21 @@ describe('connection authorization lease', () => {
     expect(lease.remainingMs()).toBeUndefined()
   })
 
+  it('accepts 26-second ACKs across the original five-minute deadline', () => {
+    const { lease, ack, expired } = setup()
+    for (let round = 0; round < 12; round++) {
+      const pending = requests.at(-1)!
+      vi.advanceTimersByTime(26_000)
+      expect(requests.at(-1)).toBe(pending)
+      ack(pending.requestId)
+      expect(lease.remainingMs()).toBe(274_000)
+      vi.advanceTimersByTime(1_000)
+      expect(requests.at(-1)!.ticket).toBe('renewed')
+    }
+    expect(expired).not.toHaveBeenCalled()
+    lease.stop()
+  })
+
   it('does not renew from stale replies, unanswered retries, or reconnection attempts', () => {
     const { lease, ack, expired } = setup()
     ack()

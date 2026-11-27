@@ -1,5 +1,6 @@
 export interface ControlLeaseAck { connectionId: string; requestId: string; ticket: string; leaseMs: number }
 
+const ACK_WINDOW_MS = 30_000
 const WEBRTC_LEASE_MS = 300_000
 
 /** A connection authorization deadline; socket activity alone never renews it. */
@@ -48,8 +49,12 @@ export class ControlLease {
   tick(force = false): void {
     if (!this.valid()) return
     const mono = performance.now()
+    const wall = Date.now()
+    // A recovered control socket needs its own request. On the same socket,
+    // keep the pending ID for the entire window in which its ACK is valid.
+    if (!force && this.sent && mono - this.sent.mono < ACK_WINDOW_MS && wall - this.sent.wall < ACK_WINDOW_MS) return
     if (!force && mono - this.lastRequest < 25_000) return
-    const sent = { id: String(++this.sequence), mono, wall: Date.now() }
+    const sent = { id: String(++this.sequence), mono, wall }
     this.lastRequest = mono
     try {
       this.request({ connectionId: this.connectionId, requestId: sent.id, ticket: this.ticket })
@@ -62,7 +67,7 @@ export class ControlLease {
     const sent = this.sent
     if (!sent || sent.id !== ack.requestId) return
     // Late replies cannot create a fresh five-minute window.
-    if (performance.now() - sent.mono >= 30_000 || Date.now() - sent.wall >= 30_000) return
+    if (performance.now() - sent.mono >= ACK_WINDOW_MS || Date.now() - sent.wall >= ACK_WINDOW_MS) return
     this.sent = undefined
     this.ticket = ack.ticket
     this.confirmed = true

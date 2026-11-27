@@ -68439,6 +68439,7 @@ function sleep(ms) {
 }
 
 // packages/webrtc/dist/control-lease.js
+var ACK_WINDOW_MS = 3e4;
 var WEBRTC_LEASE_MS2 = 3e5;
 var ControlLease = class {
   connectionId;
@@ -68489,9 +68490,12 @@ var ControlLease = class {
     if (!this.valid())
       return;
     const mono = performance.now();
+    const wall = Date.now();
+    if (!force && this.sent && mono - this.sent.mono < ACK_WINDOW_MS && wall - this.sent.wall < ACK_WINDOW_MS)
+      return;
     if (!force && mono - this.lastRequest < 25e3)
       return;
-    const sent = { id: String(++this.sequence), mono, wall: Date.now() };
+    const sent = { id: String(++this.sequence), mono, wall };
     this.lastRequest = mono;
     try {
       this.request({ connectionId: this.connectionId, requestId: sent.id, ticket: this.ticket });
@@ -68505,7 +68509,7 @@ var ControlLease = class {
     const sent = this.sent;
     if (!sent || sent.id !== ack.requestId)
       return;
-    if (performance.now() - sent.mono >= 3e4 || Date.now() - sent.wall >= 3e4)
+    if (performance.now() - sent.mono >= ACK_WINDOW_MS || Date.now() - sent.wall >= ACK_WINDOW_MS)
       return;
     this.sent = void 0;
     this.ticket = ack.ticket;
