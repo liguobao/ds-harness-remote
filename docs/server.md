@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 账号 | 环境变量配置的单账号 | 多账号及站点支持的授权方式 |
 | 持久化 | JSON 文件 | 由独立仓库维护 |
-| 设备 | 注册、自有角色、刷新、发现、重命名与撤销（含已授权 `client` 管理同账号 `host`） | 完整账号/设备管理与关系授权 |
+| 设备 | 注册、自有角色、刷新、发现和撤销等已实现 API | 完整账号/设备管理与关系授权 |
 | 连接 | Control、Noise 握手转发、可配置 WebRTC signaling/TURN credential、加密 Relay | 同一协议及部署实际启用的可选扩展 |
 | 注意力盲信号 / 唤醒推送 | 仅内存态 `attention.signal.v1` 聚合与可选盲 Webhook（无持久化与 APNs/FCM） | `attention.signal.v1` + `push.wake.v1`（APNs / FCM / iOS Live Activity） |
 | Web | 登录和设备状态页 | Remote Web 会话 UI 与 Admin |

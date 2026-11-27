@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
 import { z } from 'zod'
-import { MAX_DEVICE_NAME_LENGTH, deviceRegistrationRequestSchema, deviceRefreshRequestSchema, parseWireJson } from '@dsh-remote/protocol'
+import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema, parseWireJson } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
 import { AttentionWebhookDispatcher, type AttentionWebhookOptions } from './attention-webhook.js'
@@ -86,19 +86,6 @@ export {
 export type { GatewayTimingOptions, NormalizedGatewayOptions } from './config.js'
 
 const loginSchema = z.object({ email: z.string().min(1).max(254), password: z.string().min(1).max(1024) }).strict()
-const deviceNameBodySchema = z.object({
-  name: z.string().trim().min(1).max(MAX_DEVICE_NAME_LENGTH)
-    .refine(value => Buffer.byteLength(value, 'utf8') <= MAX_DEVICE_NAME_LENGTH),
-}).strict()
-
-function decodePathParam(raw: string): string {
-  try {
-    return decodeURIComponent(raw)
-  } catch {
-    throw new ApiError('INVALID_MESSAGE')
-  }
-}
-
 const publicDir = fileURLToPath(new URL('../dist/public/', import.meta.url))
 function readAssets(): Map<string, Buffer> {
   if (!existsSync(publicDir)) return new Map()
@@ -200,40 +187,13 @@ export function createRemoteServer(config: Config) {
     if (authorization) return authorization.startsWith('Bearer ') ? authorization.slice(7) : ''
     return /(?:^|;\s*)dsh_session=([A-Za-z0-9_-]+)/.exec(req.headers.cookie ?? '')?.[1] ?? ''
   }
-  function hasAccountSession(req: IncomingMessage): boolean {
-    const raw = token(req)
-    if (!raw) return false
-    const key = hash(raw)
-    if ((sessions.get(key) ?? 0) <= Date.now()) { sessions.delete(key); return false }
-    return true
-  }
   function accountAuth(req: IncomingMessage) {
-    if (!hasAccountSession(req)) throw new ApiError('ACCOUNT_AUTH_REQUIRED', 401)
+    const key = hash(token(req))
+    if ((sessions.get(key) ?? 0) <= Date.now()) { sessions.delete(key); throw new ApiError('ACCOUNT_AUTH_REQUIRED', 401) }
   }
   function deviceAuth(req: IncomingMessage) {
     if (!req.headers.authorization?.startsWith('Bearer ')) throw new ApiError('AUTH_REQUIRED', 401)
     return store.authenticate(req.headers.authorization.slice(7))
-  }
-  /**
-   * Account device management (`DELETE` / `PATCH /api/v1/account/devices/:id`)
-   * accepts either a Web account session (any registered device) or an
-   * authorized `client` device Bearer token managing an account-owned `host`.
-   */
-  function authorizeAccountHostManagement(req: IncomingMessage, targetId: string): void {
-    if (hasAccountSession(req)) return
-    if (!req.headers.authorization?.startsWith('Bearer ')) throw new ApiError('ACCOUNT_AUTH_REQUIRED', 401)
-    let caller: ReturnType<Store['authenticate']>
-    try {
-      caller = store.authenticate(req.headers.authorization.slice(7))
-    } catch (error) {
-      if (error instanceof ApiError && error.code === 'AUTH_INVALID') throw new ApiError('ACCOUNT_AUTH_REQUIRED', 401)
-      throw error
-    }
-    if (caller.descriptor.role !== 'client' || caller.descriptor.deviceId === targetId) {
-      throw new ApiError('ACCOUNT_AUTH_REQUIRED', 401)
-    }
-    const target = store.get(targetId)
-    if (target.descriptor.role !== 'host') throw new ApiError('ACCOUNT_AUTH_REQUIRED', 401)
   }
   function cookie(value: string, age: number): string { return `dsh_session=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${url.protocol === 'https:' ? '; Secure' : ''}` }
   const profile = () => ({ account: store.account, profile: { displayName: store.account }, isAdmin: false })
@@ -328,17 +288,10 @@ export function createRemoteServer(config: Config) {
       accountAuth(req); json(res, 200, { items: store.list().map(descriptor), serverUrl: url.origin, transport: 'webrtc' }); return
     }
     const accountDeviceMatch = /^\/api\/v1\/account\/devices\/([^/]+)$/.exec(path)
-    if (accountDeviceMatch && (method === 'DELETE' || method === 'PATCH')) {
-      const targetId = decodePathParam(accountDeviceMatch[1]!)
-      if (method === 'DELETE') {
-        authorizeAccountHostManagement(req, targetId)
-        store.revoke(targetId)
-        json(res, 200, { status: 'revoked' }); return
-      }
-      authorizeAccountHostManagement(req, targetId)
-      const { name } = deviceNameBodySchema.parse(await body(req))
-      store.rename(targetId, name)
-      json(res, 200, descriptor(store.get(targetId))); return
+    if (method === 'DELETE' && accountDeviceMatch) {
+      accountAuth(req)
+      store.revoke(accountDeviceMatch[1]!)
+      json(res, 200, { status: 'revoked' }); return
     }
     if (method === 'POST' && (path === '/api/v1/devices/register' || path === '/api/v1/devices/register-owned-role')) {
       const source = path.endsWith('register-owned-role') ? deviceAuth(req) : undefined
@@ -373,15 +326,14 @@ export function createRemoteServer(config: Config) {
     }
     const renameMatch = /^\/api\/v1\/devices\/([^/]+)\/name$/.exec(path)
     if (method === 'POST' && renameMatch) {
-      const targetId = decodePathParam(renameMatch[1]!)
       accountAuth(req)
-      const { name } = deviceNameBodySchema.parse(await body(req))
-      store.rename(targetId, name)
-      json(res, 200, descriptor(store.get(targetId))); return
+      const { name } = z.object({ name: z.string().trim().min(1).max(80) }).parse(await body(req))
+      store.rename(renameMatch[1]!, name)
+      json(res, 200, descriptor(store.get(renameMatch[1]!))); return
     }
     const match = /^\/api\/v1\/devices\/([^/]+)(\/presence)?$/.exec(path)
     if (method === 'GET' && match) {
-      const source = deviceAuth(req), target = store.get(decodePathParam(match[1]!))
+      const source = deviceAuth(req), target = store.get(match[1]!)
       if (source.descriptor.role === target.descriptor.role) throw new ApiError('MEMBERSHIP_REQUIRED', 403)
       const d = descriptor(target)
       json(res, 200, match[2]

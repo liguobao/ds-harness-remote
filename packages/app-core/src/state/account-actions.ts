@@ -59,7 +59,7 @@ import {
 } from '../services/storage'
 import type { ServerConfig, WorkspaceShortcut } from '../types'
 import type { AppState, QrLoginStart, QrProviderList, StoreAccess } from './store-state'
-import { clearBrowseMemory, hostListScope, pruneHiddenOfflineHosts, unhideOfflineHost } from '../services/browse-memory'
+import { clearBrowseMemory, hostListScope, pruneHiddenOfflineHosts } from '../services/browse-memory'
 import { useAttentionStore } from './attention-store'
 import { initialData } from './store-state'
 
@@ -516,22 +516,14 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
 
     async forgetDevice(deviceId) {
       const { config, identity } = get()
-      const current = captureAccount()
       if (config === undefined || identity === undefined) return false
       set({ busyAction: `forget:${deviceId}`, error: undefined })
       try {
         const { api } = await serverSession.authenticate(config.baseUrl, identity)
-        if (!current()) return false
-        try {
-          await api.removeAccountDevice(deviceId)
-        } catch (error) {
-          if (!(error instanceof RemoteApiError && error.code === 'DEVICE_NOT_FOUND')) throw error
-        }
-        if (!current()) return false
+        await api.removeAccountDevice(deviceId)
         if (get().selectedDevice?.deviceId === deviceId) await get().disconnect()
         await forgetHost(deviceId)
         useAttentionStore.getState().evictHost(deviceId)
-        unhideOfflineHost(hostListScope(config), deviceId)
         await clearCodexPermissionPresets(deviceId)
         const clearedLast = get().lastConnectedDeviceId === deviceId
         if (clearedLast) await clearLastConnectedDeviceId()
@@ -543,7 +535,6 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         if (recentWorkspaces.length !== get().recentWorkspaces.length) {
           await saveRecentWorkspaces(recentWorkspaces)
         }
-        if (!current()) return false
         set(state => ({
           devices: state.devices.filter(device => device.deviceId !== deviceId),
           favoriteWorkspaces,
@@ -556,7 +547,6 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         }))
         return true
       } catch (error) {
-        if (!current()) return false
         set({ busyAction: undefined, error: friendlyError(error) })
         return false
       }
