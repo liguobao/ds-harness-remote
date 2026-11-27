@@ -39,12 +39,6 @@ export function parseMonthlyCron(expression: string): string | null {
   return `${hour}:${minute}`
 }
 
-function atTime(base: Date, hours: number, minutes: number): Date {
-  const candidate = new Date(base)
-  candidate.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0)
-  return candidate
-}
-
 function splitTime(time: string): { hours: number; minutes: number } {
   const hours = Number(time.split(':')[0])
   const minutes = Number(time.split(':')[1])

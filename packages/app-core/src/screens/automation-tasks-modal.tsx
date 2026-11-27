@@ -547,6 +547,7 @@ export function AutomationTasksModal({
     setFormTime('09:00')
     setFormWeekdays([1, 2, 3, 4, 5])
     setFormDelayMinutes(30)
+    setFormIntervalMinutes(60)
 
     if (task.kind === 'daily') {
       setFormKind('daily')
