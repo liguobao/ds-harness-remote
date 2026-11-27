@@ -36,6 +36,7 @@ import type {
   ToolDisplayDetail,
 } from '../../types'
 import { Button, IconButton } from '../../ui/components'
+import { GlassSheen } from '../../ui/glass'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
 import { NativeMarkdown, parseMarkdownBlocks, useWorkspaceFilePress } from '../../ui/markdown'
 import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-preview'
@@ -1225,6 +1226,7 @@ export function QueueDock({ items }: { items: { id?: string; rpcId?: string; pre
 
   return (
     <View style={styles.queueDock} accessibilityRole="summary" accessibilityLabel={zhCN.chat.queueTitle(items.length)}>
+      <GlassSheen />
       <View style={styles.queueDockHeader}>
         <ListTree size={14} color={colors.primary} />
         <Text style={styles.queueDockTitle}>{zhCN.chat.queueTitle(items.length)}</Text>

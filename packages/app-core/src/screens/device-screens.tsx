@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
-import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronUp, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
 import { requireConnectionRpc, useAppStore } from '../state/store'
@@ -623,7 +623,7 @@ function createStyles(colors: ThemeColors) {
   compactSessionTitle: { ...type.body, fontSize: 16, color: colors.ink, flex: 1 },
   compactSessionMeta: { ...type.small, fontSize: 13, color: colors.subtle },
   compactSessionRunning: { color: colors.primary },
-  connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.md, zIndex: 2, width: 46, height: 46, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
+  connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.md, zIndex: 2, width: 46, height: 46, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.glassPill ?? colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, ...floatingShadow(colors) },
   connectionHero: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-end', paddingTop: spacing.xl, paddingBottom: spacing.xxl + spacing.xs, gap: spacing.xl },
   connectionHeroEmbedded: { flexGrow: 0, paddingTop: spacing.sm, paddingBottom: spacing.lg, gap: spacing.sm },
   connectionBottomSpace: { flexGrow: 1.4 },
@@ -664,16 +664,16 @@ function createStyles(colors: ThemeColors) {
   deviceIcon: { width: 56, height: 56, borderRadius: radius.xl, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   deviceHeroCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
   deviceName: { ...type.title, color: colors.ink, flexShrink: 1 },
-  connectArea: { marginTop: spacing.lg, padding: spacing.lg, borderRadius: radius.xl, backgroundColor: colors.card, gap: spacing.lg },
+  connectArea: { marginTop: spacing.lg, padding: spacing.lg, borderRadius: radius.xl, backgroundColor: colors.glassCard ?? colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, gap: spacing.lg, ...(Platform.OS === 'ios' ? floatingShadow(colors, 'low') : {}) },
   connectCopy: { ...type.body, color: colors.muted },
   trustHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   trustIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   trustCopy: { flex: 1 },
   fingerprint: { ...type.caption, color: colors.primary, fontFamily: monoFontFamily, marginTop: spacing.xs },
-  connectionError: { padding: spacing.md, borderRadius: radius.xl, backgroundColor: colors.dangerSoft, gap: spacing.sm },
+  connectionError: { padding: spacing.md, borderRadius: radius.xl, backgroundColor: colors.dangerSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorderSubtle ?? colors.separator, gap: spacing.sm },
   connectionErrorTitle: { ...type.bodyStrong, color: colors.ink },
   connectionErrorBody: { ...type.small, color: colors.muted },
-  group: { borderRadius: radius.xl, backgroundColor: colors.card, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
+  group: { borderRadius: radius.xl, backgroundColor: colors.glassCard ?? colors.card, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, ...(Platform.OS === 'ios' ? floatingShadow(colors, 'low') : {}) },
   membershipAction: { marginBottom: spacing.sm },
   quickActions: { gap: spacing.sm, marginBottom: spacing.xs },
   primaryArea: { marginTop: spacing.xxl },

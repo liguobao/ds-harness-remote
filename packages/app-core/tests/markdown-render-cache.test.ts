@@ -74,7 +74,12 @@ vi.mock('react-native', () => ({
 
 vi.mock('react-native-svg', () => ({
   default: 'Svg',
+  Defs: 'Defs',
+  LinearGradient: 'LinearGradient',
   Path: 'Path',
+  RadialGradient: 'RadialGradient',
+  Rect: 'Rect',
+  Stop: 'Stop',
   SvgXml: 'SvgXml',
 }))
 

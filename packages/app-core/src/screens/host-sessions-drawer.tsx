@@ -56,6 +56,7 @@ import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
 import { strings } from '../locales/i18n'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { ErrorBanner, GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
+import { GlassSheen, LiquidCanvasBackground } from '../ui/glass'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { androidRipple, continuousRadius, elevationStyle, tabularNumsStyle } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -522,6 +523,7 @@ const HarnessPickerModal = memo(function HarnessPickerModal({
       <View style={styles.harnessBackdrop}>
         <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={onClose} />
         <View style={[styles.harnessDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+          <GlassSheen prominent />
           <View style={styles.harnessHeader}>
             <Text style={styles.harnessTitle} accessibilityRole="header">{strings.sessions.switchHarness}</Text>
             <IconButton label={strings.common.close} icon={X} onPress={onClose} />
@@ -1916,6 +1918,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
 
   const content = (
     <View ref={containerRef} style={styles.container} collapsable={false}>
+      <LiquidCanvasBackground />
       <View style={[styles.container, fullWidthCentered && styles.centeredColumn]}>
       {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
@@ -2377,6 +2380,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
             style={styles.renameBackdrop}
           >
             <View style={styles.renameCard}>
+              <GlassSheen prominent />
               <Text style={styles.renameModalTitle}>{strings.sessions.renameSessionTitle}</Text>
               <TextInput
                 value={renameDraft}
@@ -3124,7 +3128,7 @@ const createStyles = (colors: ThemeColors) =>
     brandTitle: { ...type.heading, fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.2, color: colors.ink, flexShrink: 1 },
     brandRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     iconBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
-    iconBtnRound: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
+    iconBtnRound: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.glassPill ?? colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, ...floatingShadow(colors) },
 
     modeSwitcherWrap: {
       flexDirection: 'row',
@@ -3202,7 +3206,9 @@ const createStyles = (colors: ThemeColors) =>
       height: 28,
       paddingHorizontal: 10,
       borderRadius: radius.pill,
-      backgroundColor: colors.surfaceStrong,
+      backgroundColor: colors.glassPill ?? colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.glassBorder ?? colors.separator,
       flexShrink: 1,
       minWidth: 0,
     },
@@ -3224,7 +3230,9 @@ const createStyles = (colors: ThemeColors) =>
       paddingHorizontal: spacing.md,
       height: 42,
       borderRadius: radius.pill,
-      backgroundColor: colors.surfaceStrong,
+      backgroundColor: colors.glassCard ?? colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.glassBorder ?? colors.separator,
     },
     searchInput: { flex: 1, ...type.body, fontSize: 15, color: colors.ink, paddingVertical: 0 },
 
@@ -3237,8 +3245,8 @@ const createStyles = (colors: ThemeColors) =>
       alignItems: 'center',
       gap: spacing.xs,
       borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.separator,
-      backgroundColor: 'transparent',
+      borderTopColor: colors.glassBorderSubtle ?? colors.separator,
+      backgroundColor: colors.glassChrome ?? 'transparent',
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.xs,
     },
@@ -3279,7 +3287,9 @@ const createStyles = (colors: ThemeColors) =>
       borderRadius: radius.pill,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: colors.card,
+      backgroundColor: colors.glassCard ?? colors.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.glassBorder ?? colors.separator,
     },
     sectionList: { flex: 1 },
 
@@ -3291,7 +3301,7 @@ const createStyles = (colors: ThemeColors) =>
       minHeight: 48,
       marginHorizontal: spacing.md,
       marginTop: spacing.xs,
-      backgroundColor: colors.card,
+      backgroundColor: colors.glassCard ?? colors.card,
       overflow: 'hidden',
     },
     workspaceRowCardSingle: {
@@ -3331,8 +3341,8 @@ const createStyles = (colors: ThemeColors) =>
       paddingRight: spacing.xxs,
       minHeight: 46,
       marginHorizontal: spacing.md,
-      backgroundColor: colors.card,
-      borderTopColor: colors.separator,
+      backgroundColor: colors.glassCard ?? colors.card,
+      borderTopColor: colors.glassBorderSubtle ?? colors.separator,
       borderTopWidth: StyleSheet.hairlineWidth,
       overflow: 'hidden',
     },
@@ -3377,8 +3387,8 @@ const createStyles = (colors: ThemeColors) =>
       minHeight: 38,
       justifyContent: 'center',
       marginHorizontal: spacing.md,
-      backgroundColor: colors.card,
-      borderTopColor: colors.separator,
+      backgroundColor: colors.glassCard ?? colors.card,
+      borderTopColor: colors.glassBorderSubtle ?? colors.separator,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderBottomLeftRadius: radius.xl,
       borderBottomRightRadius: radius.xl,
@@ -3397,11 +3407,12 @@ const createStyles = (colors: ThemeColors) =>
     configPopover: {
       position: 'absolute',
       width: 220,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.glassModalSurface ?? colors.surface,
       borderRadius: radius.xl,
       padding: spacing.md,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
+      borderColor: colors.glassBorder ?? colors.separator,
+      overflow: 'hidden',
       ...floatingShadow(colors, 'high'),
       zIndex: 1000,
     },
@@ -3438,10 +3449,11 @@ const createStyles = (colors: ThemeColors) =>
     contextMenuCard: {
       width: '80%',
       maxWidth: 280,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.glassModalSurface ?? colors.surface,
       borderRadius: radius.xl,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
+      borderColor: colors.glassBorder ?? colors.separator,
+      overflow: 'hidden',
       paddingVertical: spacing.xs,
       ...floatingShadow(colors, 'high'),
     },
@@ -3480,11 +3492,12 @@ const createStyles = (colors: ThemeColors) =>
     renameCard: {
       width: '85%',
       maxWidth: 340,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.glassModalSurface ?? colors.surface,
       borderRadius: radius.xl,
       padding: spacing.lg,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
+      borderColor: colors.glassBorder ?? colors.separator,
+      overflow: 'hidden',
       ...floatingShadow(colors, 'high'),
     },
     renameModalTitle: {
@@ -3577,9 +3590,14 @@ const createStyles = (colors: ThemeColors) =>
       justifyContent: 'flex-end',
     },
     harnessDialog: {
-      backgroundColor: colors.background,
+      backgroundColor: colors.glassModalSurface ?? colors.background,
       borderTopLeftRadius: radius.xxl,
       borderTopRightRadius: radius.xxl,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderLeftWidth: StyleSheet.hairlineWidth,
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.glassBorder ?? colors.separator,
+      overflow: 'hidden',
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.md,
       paddingBottom: spacing.xxl,

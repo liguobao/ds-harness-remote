@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Animated, Easing, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { nextSheetPhase, type SheetPhase } from '../../ui/motion'
 import { androidRipple, continuousRadius, elevationStyle } from '../../ui/platform-style'
+import { GlassSheen } from '../../ui/glass'
 import { radius } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useReduceMotion } from '../../ui/use-reduce-motion'
@@ -129,6 +130,7 @@ export function ConfirmDialog({
           accessibilityLabel={title}
         />
         <View style={[styles.card, hideAndroidShadow ? styles.cardShadowless : null]} accessibilityViewIsModal>
+          <GlassSheen prominent />
           <Text style={styles.title}>{title}</Text>
           {message ? <Text style={styles.message}>{message}</Text> : null}
           <View style={styles.buttons}>
@@ -197,9 +199,10 @@ const createStyles = (colors: ThemeColors) =>
       width: '100%',
       maxWidth: 340,
       ...continuousRadius(radius.xl),
-      backgroundColor: colors.surface,
+      backgroundColor: colors.glassModalSurface ?? colors.surface,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
+      borderColor: colors.glassBorder ?? colors.border,
+      overflow: 'hidden',
       paddingHorizontal: 20,
       paddingTop: 20,
       paddingBottom: 16,
@@ -223,13 +226,15 @@ const createStyles = (colors: ThemeColors) =>
       marginTop: 18,
     },
     button: {
-      ...continuousRadius(14),
+      ...continuousRadius(radius.pill),
       minHeight: 40,
-      paddingHorizontal: 16,
+      paddingHorizontal: 18,
       justifyContent: 'center',
     },
     buttonCancel: {
-      backgroundColor: colors.surfaceMuted ?? colors.surfaceStrong,
+      backgroundColor: colors.glassCardStrong ?? colors.surfaceMuted ?? colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.glassBorderSubtle ?? colors.separator,
     },
     buttonDefault: {
       backgroundColor: colors.primarySoft,

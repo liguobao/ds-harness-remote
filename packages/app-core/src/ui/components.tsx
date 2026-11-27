@@ -17,6 +17,8 @@ import { BlurTargetView, BlurView } from 'expo-blur'
 import { AlertCircle, ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react-native'
 import { floatingShadow, radius, spacing, type } from './theme'
 import { androidRipple, continuousRadius, elevationStyle, monoFontFamily } from './platform-style'
+import { GlassSheen, LiquidCanvasBackground } from './glass'
+import { GlassBackdrop } from './glass-backdrop'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
@@ -100,6 +102,11 @@ export function useHeaderInset(): number {
   return useContext(HeaderInsetContext)
 }
 
+/** Blur target ref provided by the enclosing `BlurHeaderFrame` for live frosted chrome. */
+export function useHeaderBlurTarget(): RefObject<View | null> | undefined {
+  return useContext(HeaderBlurTargetContext)
+}
+
 /**
  * Overlays `header` (normally a `TopBar`) on `children`, which scroll beneath
  * it and show through frosted. Scrollable children pad their content by
@@ -120,8 +127,9 @@ export function BlurHeaderFrame({ header, children, inset = false }: {
   return (
     <View style={styles.screen}>
       <BlurTargetView ref={blurTarget} style={styles.frameContent}>
-        {/* The blur records the target's inner native view, so the opaque background must live inside it. */}
+        {/* The blur records the target's inner native view, so the opaque background and ambient glow must live inside it. */}
         <View style={[styles.screen, inset && { paddingTop: height }]}>
+          <LiquidCanvasBackground />
           <HeaderInsetContext.Provider value={contentInset}>
             {typeof children === 'function' ? children(contentInset) : children}
           </HeaderInsetContext.Provider>
@@ -190,29 +198,23 @@ export function TopBar({
       ]}
     >
       {blurTarget !== undefined && (
-        <BlurView
+        <GlassBackdrop
           blurTarget={blurTarget}
-          blurMethod="dimezisBlurViewSdk31Plus"
-          intensity={50}
-          tint={scheme === 'dark' ? 'dark' : 'light'}
-          style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]}
-          pointerEvents="none"
-        />
-      )}
-      {/* Frosted translucent backdrop (~60% opacity) matching modern iOS/assistant styling */}
-      {blurTarget !== undefined && (
-        <View
-          style={[
-            StyleSheet.absoluteFill,
-            { backgroundColor: scheme === 'dark' ? 'rgba(11, 13, 17, 0.72)' : 'rgba(248, 248, 248, 0.85)' }
-          ]}
-          pointerEvents="none"
+          intensity={62}
+          tintColor={colors.glassChrome ?? (scheme === 'dark' ? 'rgba(11, 15, 23, 0.70)' : 'rgba(244, 247, 252, 0.76)')}
+          prominent={false}
         />
       )}
       {showLeadingSide && (
         <View style={[styles.topBarSide, !compactHeader && !!centered && { width: typeof centered === 'number' ? centered : 48 }]}>
           {onBack !== undefined && (
             <View style={styles.floatingChip}>
+              <GlassBackdrop
+                blurTarget={blurTarget}
+                intensity={55}
+                tintColor={colors.glassPill ?? colors.elevated}
+                borderRadius={radius.pill}
+              />
               <FloatingChipContext.Provider value>
                 <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? (Platform.OS === 'ios' ? ChevronLeft : ArrowLeft)} onPress={onBack} hitSlop={8} />
               </FloatingChipContext.Provider>
@@ -288,6 +290,12 @@ export function TopBar({
         <View style={[styles.topBarSide, styles.topBarTrailing, !compactHeader && !!centered && { width: typeof centered === 'number' ? centered : 48 }]}>
           {action !== undefined && action !== null && (
             <View style={[styles.floatingChip, styles.topBarActions]}>
+              <GlassBackdrop
+                blurTarget={blurTarget}
+                intensity={55}
+                tintColor={colors.glassPill ?? colors.elevated}
+                borderRadius={radius.pill}
+              />
               <FloatingChipContext.Provider value>{action}</FloatingChipContext.Provider>
             </View>
           )}
@@ -383,6 +391,7 @@ export function Button({ label, onPress, icon: Icon, variant = 'primary', loadin
         isDisabled && styles.disabled,
       ]}
     >
+      {variant === 'secondary' && <GlassSheen prominent />}
       {loading
         ? <ActivityIndicator size="small" color={foregroundColor} />
         : Icon !== undefined && <Icon size={19} color={foregroundColor} />}
@@ -536,8 +545,22 @@ export function SuccessNotice({ children }: { children: ReactNode }) {
 export function GroupCard({ children, style, raised = false }: { children: ReactNode; style?: StyleProp<ViewStyle>; raised?: boolean }) {
   const styles = useThemedStyles(createStyles)
   // A raised card casts its shadow from an unclipped shell and clips rows in an inner layer.
-  if (raised) return <View style={[styles.groupCardRaised, style]}><View style={styles.groupCardClip}>{children}</View></View>
-  return <View style={[styles.groupCard, style]}>{children}</View>
+  if (raised) {
+    return (
+      <View style={[styles.groupCardRaised, style]}>
+        <View style={styles.groupCardClip}>
+          <GlassSheen />
+          {children}
+        </View>
+      </View>
+    )
+  }
+  return (
+    <View style={[styles.groupCard, style]}>
+      <GlassSheen />
+      {children}
+    </View>
+  )
 }
 
 /**
@@ -637,18 +660,18 @@ function statusBadgeStyles(colors: ThemeColors) {
 }
 
 function createStyles(colors: ThemeColors) {
-  const raisedLight = colors.card === colors.cardOpaque
+  const raisedLight = colors.shadow !== '#000000'
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.background },
     screenContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl },
     topBar: { minHeight: 60, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.background },
     frameContent: { flex: 1 },
     frameHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
-    topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0 },
+    topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.glassBorderSubtle ?? colors.separator },
     topBarWithSubtitle: { minHeight: 68, paddingVertical: spacing.sm },
     topBarSide: { minWidth: 44, flexDirection: 'row', alignItems: 'center' },
-    // Floating chip: a white disc for one control, a capsule for several.
-    floatingChip: { minWidth: 44, height: 44, ...continuousRadius(radius.pill), backgroundColor: colors.elevated, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
+    // Floating chip: a translucent glass disc for one control, a capsule for several.
+    floatingChip: { minWidth: 44, height: 44, ...continuousRadius(radius.pill), backgroundColor: 'transparent', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, ...(Platform.OS === 'ios' ? floatingShadow(colors) : {}) },
     topBarTrailing: { justifyContent: 'flex-end' },
     topBarActions: { paddingHorizontal: 2, gap: 0 },
     topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
@@ -684,20 +707,20 @@ function createStyles(colors: ThemeColors) {
     iconButtonPressed: { backgroundColor: colors.surfaceStrong },
     iconButtonFilled: { backgroundColor: colors.primary },
     iconButtonFilledPressed: { backgroundColor: colors.primaryPressed },
-    button: { minHeight: 50, paddingHorizontal: spacing.xl, ...continuousRadius(radius.pill), flexDirection: 'row', gap: spacing.xs, alignItems: 'center', justifyContent: 'center' },
-    buttonPrimary: { backgroundColor: colors.primary },
-    buttonSecondary: { backgroundColor: colors.surfaceStrong },
-    buttonDanger: { backgroundColor: colors.danger },
+    button: { minHeight: 50, paddingHorizontal: spacing.xl, ...continuousRadius(radius.pill), flexDirection: 'row', gap: spacing.xs, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    buttonPrimary: { backgroundColor: colors.primary, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255, 255, 255, 0.28)' },
+    buttonSecondary: { backgroundColor: colors.glassCardStrong ?? colors.surfaceStrong, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator },
+    buttonDanger: { backgroundColor: colors.danger, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255, 255, 255, 0.22)' },
     buttonQuiet: { backgroundColor: 'transparent' },
     buttonInverse: { backgroundColor: colors.inverse },
-    buttonPressed: { opacity: 0.82 },
+    buttonPressed: { opacity: 0.84, transform: [{ scale: 0.985 }] },
     buttonText: { ...type.bodyStrong, color: colors.ink },
     buttonTextPrimary: { color: colors.onPrimary ?? colors.white },
     buttonTextOnColor: { color: colors.white },
     disabled: { opacity: 0.52 },
     field: { gap: 7 },
     fieldLabel: { ...type.smallStrong, color: colors.ink },
-    input: { minHeight: 52, ...continuousRadius(radius.lg), borderWidth: 1, borderColor: colors.border, paddingHorizontal: spacing.md, backgroundColor: colors.surface, ...type.body, color: colors.ink },
+    input: { minHeight: 52, ...continuousRadius(radius.lg), borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorderSubtle ?? colors.border, paddingHorizontal: spacing.md, backgroundColor: colors.glassCard ?? colors.surface, ...type.body, color: colors.ink },
     inputMultiline: { minHeight: 104, paddingTop: spacing.sm, textAlignVertical: 'top' },
     inputError: { borderColor: colors.danger },
     fieldHint: { ...type.small, color: colors.muted },
@@ -740,8 +763,8 @@ function createStyles(colors: ThemeColors) {
     skeletonText: { width: '78%', height: 11, borderRadius: 4, backgroundColor: colors.surface },
     successNotice: { padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.successSoft, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     successNoticeText: { ...type.small, color: colors.ink, flex: 1 },
-    groupCard: { ...continuousRadius(radius.xl), backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, overflow: 'hidden' },
-    groupCardRaised: { ...continuousRadius(radius.xl), backgroundColor: colors.cardOpaque, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...(raisedLight ? elevationStyle(colors, 1) : elevationStyle(colors, 0)) },
+    groupCard: { ...continuousRadius(radius.xl), backgroundColor: colors.glassCard ?? colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, overflow: 'hidden', ...(raisedLight ? elevationStyle(colors, 1) : elevationStyle(colors, 0)) },
+    groupCardRaised: { ...continuousRadius(radius.xl), backgroundColor: colors.glassElevated ?? colors.cardOpaque, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, ...(raisedLight ? elevationStyle(colors, 2) : elevationStyle(colors, 0)) },
     groupCardClip: { ...continuousRadius(radius.xl), overflow: 'hidden' },
     groupRow: { minHeight: 58, paddingLeft: spacing.md, flexDirection: 'row', alignItems: 'center' },
     groupRowPressed: { backgroundColor: colors.surfaceStrong },
@@ -753,7 +776,7 @@ function createStyles(colors: ThemeColors) {
     groupRowDetail: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
     groupRowValue: { ...type.small, fontSize: 15, color: colors.muted, maxWidth: '45%' },
     filterChip: { height: 36, paddingHorizontal: 14, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'transparent' },
-    filterChipSelected: { backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
+    filterChipSelected: { backgroundColor: colors.glassElevated ?? colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, ...floatingShadow(colors) },
     filterChipText: { ...type.small, fontSize: 15, color: colors.muted },
     filterChipTextSelected: { color: colors.ink, fontWeight: '600' },
     filterChipCount: { ...type.small, fontSize: 15, color: colors.subtle },

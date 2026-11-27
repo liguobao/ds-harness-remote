@@ -4,6 +4,7 @@ import { AlignJustify, Check, Code2, MessageSquare, MoveHorizontal, Palette, Rot
 import { strings as zhCN } from '../locales/i18n'
 import { useAppStore } from '../state/store'
 import { BlurHeaderFrame, GroupCard, GroupRow, IconButton, TopBar } from '../ui/components'
+import { GlassSheen } from '../ui/glass'
 import { NativeMarkdown } from '../ui/markdown'
 import { androidRipple, continuousRadius } from '../ui/platform-style'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -218,6 +219,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
         <View style={[styles.stickyPreviewArea, scrolled && styles.stickyPreviewAreaScrolled]}>
           <View style={[styles.column, landscape && { maxWidth: contentMaxWidth }]}>
             <View style={styles.previewCanvas}>
+              <GlassSheen />
               <ScrollView
                 style={(landscape || compactHeight) ? styles.previewScrollCompact : styles.previewScroll}
                 contentContainerStyle={styles.previewScrollContent}
@@ -381,11 +383,11 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    flex: { flex: 1, backgroundColor: colors.background },
+    flex: { flex: 1 },
     scrollContent: { paddingHorizontal: spacing.lg },
     column: { width: '100%', alignSelf: 'center' },
     stickyPreviewArea: {
-      backgroundColor: colors.background,
+      backgroundColor: 'transparent',
       paddingHorizontal: spacing.lg,
       paddingTop: 2,
       paddingBottom: 10,
@@ -397,9 +399,9 @@ function createStyles(colors: ThemeColors) {
     },
     previewCanvas: {
       ...continuousRadius(radius.xl),
-      backgroundColor: colors.card,
+      backgroundColor: colors.glassCard ?? colors.card,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
+      borderColor: colors.glassBorder ?? colors.separator,
       overflow: 'hidden',
     },
     previewScroll: {

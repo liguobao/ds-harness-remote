@@ -71,88 +71,131 @@ export interface ThemeColors {
   codeHeader?: string
   /** Foreground text/icon color drawn on top of `primary`. */
   onPrimary?: string
+  /** Liquid Glass optical surface and specular highlight tokens. */
+  glassCanvasGlow?: string
+  glassCanvasSecondaryGlow?: string
+  glassChrome?: string
+  glassSurface?: string
+  glassElevated?: string
+  glassModalSurface?: string
+  glassCard?: string
+  glassCardStrong?: string
+  glassPill?: string
+  glassBorder?: string
+  glassBorderSubtle?: string
+  glassSpecularTop?: string
+  glassSpecularMid?: string
+  glassSpecularBottom?: string
 }
 
 // DeepSeek palette: ink #0F0F0F, DeepSeek blue (#4D6BFE) accents, white cards (#FFFFFF)
 // on a soft canvas (#F8F8F8) with #EDEDED hairline dividers and #59606D readable muted text.
 export const lightColors: ThemeColors = {
-  background: '#F8F8F8',
+  background: '#F4F6FA',
   surface: '#FFFFFF',
-  card: '#FFFFFF',
+  card: 'rgba(255, 255, 255, 0.78)',
   cardOpaque: '#FFFFFF',
-  surfaceStrong: '#ECEFF4',
+  surfaceStrong: 'rgba(232, 237, 246, 0.85)',
   surfaceMuted: '#F1F3F7',
-  grouped: '#FFFFFF',
-  elevated: '#FFFFFF',
+  grouped: 'rgba(255, 255, 255, 0.76)',
+  elevated: 'rgba(255, 255, 255, 0.86)',
   ink: '#0F0F0F',
   muted: '#59606D',
-  subtle: '#7C8492',
-  primary: '#4D6BFE',
-  primaryPressed: '#3A56E6',
-  primarySoft: '#EBEFFF',
-  accent: '#4D6BFE',
-  accentSoft: '#EBEFFF',
+  subtle: '#68707D',
+  primary: '#3E5CF5',
+  primaryPressed: '#2F4CE0',
+  primarySoft: 'rgba(62, 92, 245, 0.10)',
+  accent: '#3E5CF5',
+  accentSoft: 'rgba(62, 92, 245, 0.10)',
   inverse: '#0F0F0F',
   onInverse: '#FFFFFF',
-  success: '#1E8449',
-  successSoft: '#E2F3E9',
-  warning: '#95600A',
-  warningSoft: '#FBEFD5',
-  danger: '#C2362F',
-  dangerSoft: '#FBE7E5',
-  border: '#EDEDED',
-  separator: '#EDEDED',
+  success: '#176E3C',
+  successSoft: 'rgba(23, 110, 60, 0.10)',
+  warning: '#875506',
+  warningSoft: 'rgba(135, 85, 6, 0.10)',
+  danger: '#B42E27',
+  dangerSoft: 'rgba(180, 46, 39, 0.10)',
+  border: 'rgba(15, 23, 42, 0.09)',
+  separator: 'rgba(15, 23, 42, 0.07)',
   disabled: '#B3B9C4',
   white: '#FFFFFF',
-  scrim: 'rgba(15, 15, 15, 0.40)',
-  modalBackdrop: 'rgba(15, 15, 15, 0.42)',
-  menuDismiss: 'rgba(15, 15, 15, 0.14)',
+  scrim: 'rgba(15, 20, 32, 0.34)',
+  modalBackdrop: 'rgba(15, 20, 32, 0.36)',
+  menuDismiss: 'rgba(15, 20, 32, 0.12)',
   shadow: '#1A2638',
-  userBubble: '#ECEFF5',
-  toolSurface: '#F2F4F8',
+  userBubble: 'rgba(232, 238, 248, 0.86)',
+  toolSurface: 'rgba(239, 243, 250, 0.78)',
   codeSurface: '#F6F8FB',
   codeHeader: '#EDF1F7',
   onPrimary: '#FFFFFF',
+  glassCanvasGlow: '#4D6BFE',
+  glassCanvasSecondaryGlow: '#38BDF8',
+  glassChrome: 'rgba(244, 247, 252, 0.72)',
+  glassSurface: 'rgba(255, 255, 255, 0.84)',
+  glassElevated: 'rgba(255, 255, 255, 0.88)',
+  glassModalSurface: 'rgba(250, 252, 255, 0.96)',
+  glassCard: 'rgba(255, 255, 255, 0.76)',
+  glassCardStrong: 'rgba(235, 240, 250, 0.88)',
+  glassPill: 'rgba(255, 255, 255, 0.80)',
+  glassBorder: 'rgba(15, 23, 42, 0.10)',
+  glassBorderSubtle: 'rgba(15, 23, 42, 0.08)',
+  glassSpecularTop: 'rgba(255, 255, 255, 0.64)',
+  glassSpecularMid: 'rgba(255, 255, 255, 0.12)',
+  glassSpecularBottom: 'rgba(255, 255, 255, 0.28)',
 }
 
 export const darkColors: ThemeColors = {
-  background: '#0B0D11',
-  surface: '#161A21',
-  card: 'rgba(255, 255, 255, 0.05)',
-  cardOpaque: '#17191D',
-  surfaceStrong: '#232832',
+  background: '#090C12',
+  surface: '#161B24',
+  card: 'rgba(255, 255, 255, 0.065)',
+  cardOpaque: '#171B24',
+  surfaceStrong: 'rgba(255, 255, 255, 0.10)',
   surfaceMuted: '#1E232D',
-  grouped: 'rgba(255, 255, 255, 0.05)',
-  elevated: '#1D222B',
+  grouped: 'rgba(255, 255, 255, 0.06)',
+  elevated: 'rgba(24, 30, 41, 0.82)',
   ink: '#F2F4F7',
   muted: '#A2A9B6',
-  subtle: '#7A8291',
-  primary: '#6F89FF',
-  primaryPressed: '#5672F5',
-  primarySoft: '#19213F',
-  accent: '#6F89FF',
-  accentSoft: '#19213F',
+  subtle: '#8890A0',
+  primary: '#7D95FF',
+  primaryPressed: '#637DF7',
+  primarySoft: 'rgba(125, 149, 255, 0.15)',
+  accent: '#7D95FF',
+  accentSoft: 'rgba(125, 149, 255, 0.15)',
   inverse: '#F2F4F7',
   onInverse: '#0B0D11',
   success: '#4CC07D',
-  successSoft: '#122A1D',
+  successSoft: 'rgba(76, 192, 125, 0.16)',
   warning: '#E0A53A',
-  warningSoft: '#2C2312',
+  warningSoft: 'rgba(224, 165, 58, 0.16)',
   danger: '#F2736C',
-  dangerSoft: '#2E1618',
-  border: '#2B313C',
-  separator: '#252B35',
+  dangerSoft: 'rgba(242, 115, 108, 0.16)',
+  border: 'rgba(255, 255, 255, 0.12)',
+  separator: 'rgba(255, 255, 255, 0.09)',
   disabled: '#4E5562',
   white: '#FFFFFF',
-  scrim: 'rgba(0, 0, 0, 0.58)',
-  modalBackdrop: 'rgba(0, 0, 0, 0.62)',
-  menuDismiss: 'rgba(0, 0, 0, 0.45)',
+  scrim: 'rgba(0, 0, 0, 0.56)',
+  modalBackdrop: 'rgba(0, 0, 0, 0.58)',
+  menuDismiss: 'rgba(0, 0, 0, 0.42)',
   shadow: '#000000',
-  userBubble: '#1E2430',
-  toolSurface: '#141820',
+  userBubble: 'rgba(36, 44, 60, 0.86)',
+  toolSurface: 'rgba(20, 25, 34, 0.82)',
   codeSurface: '#131720',
   codeHeader: '#1B212E',
   onPrimary: '#FFFFFF',
+  glassCanvasGlow: '#6F89FF',
+  glassCanvasSecondaryGlow: '#38BDF8',
+  glassChrome: 'rgba(11, 15, 23, 0.68)',
+  glassSurface: 'rgba(22, 27, 36, 0.84)',
+  glassElevated: 'rgba(28, 34, 46, 0.86)',
+  glassModalSurface: 'rgba(20, 25, 34, 0.95)',
+  glassCard: 'rgba(255, 255, 255, 0.065)',
+  glassCardStrong: 'rgba(255, 255, 255, 0.12)',
+  glassPill: 'rgba(255, 255, 255, 0.09)',
+  glassBorder: 'rgba(255, 255, 255, 0.16)',
+  glassBorderSubtle: 'rgba(255, 255, 255, 0.08)',
+  glassSpecularTop: 'rgba(255, 255, 255, 0.16)',
+  glassSpecularMid: 'rgba(255, 255, 255, 0.03)',
+  glassSpecularBottom: 'rgba(255, 255, 255, 0.07)',
 }
 
 export function colorsForScheme(scheme: ColorScheme): ThemeColors {
@@ -261,6 +304,7 @@ export function resolveThemeColors(scheme: ColorScheme, accent: ChatAccentPreset
     accent: swatch.primary,
     accentSoft: swatch.primarySoft,
     onPrimary: swatch.onPrimary,
+    glassCanvasGlow: swatch.primary,
   }
 }
 
@@ -380,8 +424,8 @@ export const radius = {
 /** Soft lift for floating controls (header chips, cards, composer). */
 export function floatingShadow(colors: { shadow: string }, strength: 'low' | 'high' = 'low') {
   return strength === 'high'
-    ? { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 8 }
-    : { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 1 }
+    ? { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.14, shadowRadius: 24, elevation: 8 }
+    : { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.09, shadowRadius: 12, elevation: 3 }
 }
 
 /** Soft brand glow for prominent floating call-to-action pills (e.g. create session). */

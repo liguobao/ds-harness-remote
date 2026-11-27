@@ -322,6 +322,15 @@ vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 44, right: 0, bottom: 34, left: 0 }),
 }))
 
+vi.mock('react-native-svg', () => ({
+  default: 'Svg',
+  Defs: 'Defs',
+  LinearGradient: 'LinearGradient',
+  RadialGradient: 'RadialGradient',
+  Rect: 'Rect',
+  Stop: 'Stop',
+}))
+
 vi.mock('../src/ui/theme-context', () => ({
   useTheme: () => ({
     colors: {

@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import type { LucideIcon } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { GlassSheen } from '../../ui/glass'
+import { floatingShadow } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 
@@ -75,6 +77,7 @@ export function BotFloatingPopover({
             { opacity: anim, transform: [{ scale }] },
           ]}
         >
+          <GlassSheen prominent />
           {actions.map(action => {
             const Icon = action.icon
             const inkColor = action.danger ? colors.danger : colors.ink
@@ -120,21 +123,19 @@ const createPopoverStyles = (colors: ThemeColors) =>
       borderRadius: 24,
       paddingVertical: 8,
       paddingHorizontal: 6,
-      shadowColor: '#000',
-      shadowOpacity: 0.14,
-      shadowRadius: 24,
-      shadowOffset: { width: 0, height: 10 },
+      overflow: 'hidden',
+      ...floatingShadow(colors, 'high'),
       elevation: 12,
     },
     cardLight: {
-      backgroundColor: 'rgba(255, 255, 255, 0.96)',
+      backgroundColor: colors.glassModalSurface ?? 'rgba(255, 255, 255, 0.94)',
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: 'rgba(0, 0, 0, 0.05)',
+      borderColor: colors.glassBorder ?? 'rgba(255, 255, 255, 0.85)',
     },
     cardDark: {
-      backgroundColor: colors.surface,
+      backgroundColor: colors.glassModalSurface ?? colors.surface,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
+      borderColor: colors.glassBorder ?? colors.border,
     },
     row: {
       flexDirection: 'row',

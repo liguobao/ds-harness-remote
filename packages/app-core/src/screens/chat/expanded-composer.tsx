@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { CollapseCornerIcon } from '../../ui/composer-expand-icons'
+import { GlassSheen } from '../../ui/glass'
 import { triggerLightHaptic } from '../../ui/haptics'
 import { splitDraftSegments } from '../../ui/mention-popover'
 import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
@@ -156,6 +157,7 @@ function ExpandedComposerContent({
           ],
         }]}
       >
+        <GlassSheen prominent />
         <View style={styles.expandedComposerHeader}>
           <Pressable
             accessibilityRole="button"

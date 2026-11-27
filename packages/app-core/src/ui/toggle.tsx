@@ -104,6 +104,8 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       backgroundColor: colors.disabled,
       overflow: 'hidden',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.glassBorderSubtle ?? colors.separator,
     },
     trackActive: {
       borderRadius: TRACK_HEIGHT / 2,
@@ -115,10 +117,10 @@ function createStyles(colors: ThemeColors) {
       borderRadius: THUMB_SIZE / 2,
       backgroundColor: colors.white,
       shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.14,
-      shadowRadius: 2,
-      elevation: 1,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.16,
+      shadowRadius: 4,
+      elevation: 2,
     },
     disabled: { opacity: 0.5 },
   })

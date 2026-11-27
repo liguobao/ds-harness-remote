@@ -26,6 +26,7 @@ vi.mock('react', async importOriginal => {
 vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
   BackHandler: { addEventListener: () => ({ remove: () => undefined }) },
+  Platform: { OS: 'ios' },
   StyleSheet: { create: <T,>(styles: T) => styles, hairlineWidth: 1 },
   Text: 'Text',
   View: 'View',

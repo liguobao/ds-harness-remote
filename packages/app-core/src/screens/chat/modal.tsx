@@ -3,6 +3,7 @@ import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings as zhCN } from '../../locales/i18n'
 import { easingCurve, resolveMotion } from '../../ui/motion'
+import { GlassSheen } from '../../ui/glass'
 import { DIALOG_SHEET_MAX_WIDTH, useResponsiveLayout } from '../../ui/responsive'
 import { spacing } from '../../ui/theme'
 import { useReduceMotion } from '../../ui/use-reduce-motion'
@@ -108,6 +109,7 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
         ]}
         pointerEvents="box-none"
       >
+        <GlassSheen prominent />
         {children}
       </Animated.View>
     </View>

@@ -3,6 +3,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { BackHandler, Keyboard, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { androidRipple, continuousRadius, elevationStyle } from './platform-style'
 import { radius, spacing, type } from './theme'
+import { GlassSheen } from './glass'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 
@@ -81,6 +82,7 @@ export function MentionPopover({ groups, onDismiss, emptyText, active = true }: 
   const maxHeight = Math.max(80, Math.min(240, Math.round(availableHeight * (landscape ? 0.45 : 0.32))))
   return (
     <View style={[styles.popover, { maxHeight }]} accessibilityRole="list">
+      <GlassSheen prominent />
       <ScrollView
         style={[styles.scroll, { maxHeight }]}
         contentContainerStyle={styles.scrollContent}
@@ -135,16 +137,16 @@ function createStyles(colors: ThemeColors) {
       position: 'relative',
       marginBottom: spacing.xs,
       maxHeight: 260,
-      ...continuousRadius(radius.lg),
+      ...continuousRadius(radius.xl),
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-      backgroundColor: colors.surface,
+      borderColor: colors.glassBorder ?? colors.separator,
+      backgroundColor: colors.glassModalSurface ?? colors.surface,
       overflow: 'hidden',
-      ...elevationStyle(colors, 2),
+      ...elevationStyle(colors, 3),
     },
     scroll: { maxHeight: 260 },
     scrollContent: { paddingBottom: spacing.xxs },
-    groupHeader: { backgroundColor: colors.surface, paddingHorizontal: spacing.sm, paddingVertical: spacing.xxs },
+    groupHeader: { backgroundColor: colors.glassCardStrong ?? colors.surface, paddingHorizontal: spacing.md, paddingVertical: 6 },
     groupTitle: { ...type.caption, color: colors.muted },
     iconWrap: {
       width: 28,
@@ -155,8 +157,8 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       flexShrink: 0,
     },
-    row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, minHeight: 46, paddingVertical: spacing.xxs },
-    rowActive: { backgroundColor: colors.surfaceStrong },
+    row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, minHeight: 46, paddingVertical: spacing.xxs },
+    rowActive: { backgroundColor: colors.glassCardStrong ?? colors.surfaceStrong },
     rowCopy: { flex: 1, minWidth: 0 },
     rowLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     rowTitle: { ...type.small, color: colors.ink, flexShrink: 1 },

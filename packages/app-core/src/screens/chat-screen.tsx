@@ -49,7 +49,9 @@ import type {
 } from '../types'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { ChatImageProvider } from '../ui/chat-image'
-import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
+import { BlurHeaderFrame, IconButton, TopBar, useHeaderBlurTarget } from '../ui/components'
+import { LiquidCanvasBackground } from '../ui/glass'
+import { GlassBackdrop } from '../ui/glass-backdrop'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, openSafeExternalUrl, parseMarkdownBlocks } from '../ui/markdown'
 import { NavigationFocusProvider, useNavigationFocused } from '../ui/mention-popover'
@@ -2079,16 +2081,10 @@ const ChatConversationPane = memo(function ChatConversationPane({
         />
       )}
       {!connected && (
-        <Pressable style={styles.connectionBanner} accessibilityRole="button"
-          accessibilityLabel={connectionRetrying ? strings.chat.reconnecting : strings.chat.offline}
-          accessibilityState={{ disabled: connectionRetrying, busy: connectionRetrying }}
-          accessibilityLiveRegion="polite" disabled={connectionRetrying}
-          onPress={() => void reconnectCurrentSession()}>
-          <View style={styles.connectionDot} />
-          <Text style={styles.connectionBannerText} numberOfLines={1}>
-            {connectionRetrying ? <>{strings.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : strings.chat.offline}
-          </Text>
-        </Pressable>
+        <HeaderConnectionBanner
+          retrying={connectionRetrying}
+          onPress={() => void reconnectCurrentSession()}
+        />
       )}
       {acpReadOnly && (
         <View style={styles.errorBanner} accessibilityRole="alert">
@@ -2126,14 +2122,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
       <View style={styles.splitMain} {...swipeRightTouchProps}>
         {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
         <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary resetKey={session.sessionId}><Animated.View style={[{ flex: 1 }, { opacity: trajectoryMotion, transform: [{ translateY: trajectoryMotion.interpolate({ inputRange: [0, 1], outputRange: [resolveMotion('fullscreen', reduceMotion).translate, 0] }) }] }]}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
-        {showSyncBanner && (
-          <View pointerEvents="none" style={[styles.syncBanner, { position: 'absolute', top: headerHeight, left: 0, right: 0, zIndex: 5 }]} accessibilityRole="summary">
-            <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
-            <Text style={styles.connectionBannerText} numberOfLines={1}>
-              {strings.chat.syncingHistory}
-            </Text>
-          </View>
-        )}
+        {showSyncBanner && <HeaderSyncBanner top={headerHeight} />}
         <FlatList
           ref={listRef}
           style={[styles.list, readableColumn]}
@@ -2188,15 +2177,10 @@ const ChatConversationPane = memo(function ChatConversationPane({
         {awayFromLatest && (
           <View pointerEvents="box-none" style={styles.latestTurnLayer}>
             <View pointerEvents="box-none" style={[readableColumn, styles.latestTurnColumn]}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={newContent ? strings.comfort.newContent : strings.chat.jumpToLatest}
+              <LatestTurnGlassButton
+                label={newContent ? strings.comfort.newContent : strings.chat.jumpToLatest}
                 onPress={jumpToLatest}
-                hitSlop={6}
-                style={({ pressed }) => [styles.latestTurnButton, pressed && styles.latestTurnButtonPressed]}
-              >
-                <ArrowDown size={20} color={colors.primary} strokeWidth={2.4} />
-              </Pressable>
+              />
             </View>
           </View>
         )}
@@ -2498,5 +2482,60 @@ const ChatConversationPane = memo(function ChatConversationPane({
     </ChatImageProvider>
   )
 })
+
+function HeaderConnectionBanner({ retrying, onPress }: { retrying: boolean; onPress: () => void }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const blurTarget = useHeaderBlurTarget()
+  return (
+    <Pressable
+      style={styles.connectionBanner}
+      accessibilityRole="button"
+      accessibilityLabel={retrying ? strings.chat.reconnecting : strings.chat.offline}
+      accessibilityState={{ disabled: retrying, busy: retrying }}
+      accessibilityLiveRegion="polite"
+      disabled={retrying}
+      onPress={onPress}
+    >
+      <GlassBackdrop blurTarget={blurTarget} intensity={55} tintColor={colors.glassSurface ?? colors.surface} borderRadius={999} />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.warningSoft }]} />
+      <View style={styles.connectionDot} />
+      <Text style={styles.connectionBannerText} numberOfLines={1}>
+        {retrying ? <>{strings.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : strings.chat.offline}
+      </Text>
+    </Pressable>
+  )
+}
+
+function HeaderSyncBanner({ top }: { top: number }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return (
+    <View pointerEvents="none" style={[styles.syncBanner, { position: 'absolute', top, left: 0, right: 0, zIndex: 5 }]} accessibilityRole="summary">
+      <GlassBackdrop intensity={50} tintColor={colors.glassCardStrong ?? colors.elevated} borderRadius={999} />
+      <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
+      <Text style={styles.connectionBannerText} numberOfLines={1}>
+        {strings.chat.syncingHistory}
+      </Text>
+    </View>
+  )
+}
+
+function LatestTurnGlassButton({ label, onPress }: { label: string; onPress: () => void }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      hitSlop={6}
+      style={({ pressed }) => [styles.latestTurnButton, pressed && styles.latestTurnButtonPressed]}
+    >
+      <GlassBackdrop intensity={55} tintColor={colors.glassPill ?? colors.elevated} borderRadius={999} />
+      <ArrowDown size={20} color={colors.primary} strokeWidth={2.4} />
+    </Pressable>
+  )
+}
 
 export { ModalSurface,usePickerListMaxHeight } from './chat/modal'

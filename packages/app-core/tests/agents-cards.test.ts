@@ -64,6 +64,10 @@ vi.mock('react-native-svg', () => {
   return {
     default: (props: any) => React.createElement('Svg', props, props.children),
     Svg: (props: any) => React.createElement('Svg', props, props.children),
+    Defs: (props: any) => React.createElement('Defs', props, props.children),
+    LinearGradient: (props: any) => React.createElement('LinearGradient', props, props.children),
+    RadialGradient: (props: any) => React.createElement('RadialGradient', props, props.children),
+    Stop: (props: any) => React.createElement('Stop', props, props.children),
     Circle: (props: any) => React.createElement('Circle', props, props.children),
     Path: (props: any) => React.createElement('Path', props, props.children),
     Rect: (props: any) => React.createElement('Rect', props, props.children),
@@ -113,6 +117,7 @@ const MOCK_THEME_COLORS = {
 vi.mock('../src/ui/theme-context', () => ({
   useTheme: () => ({
     colors: MOCK_THEME_COLORS,
+    scheme: 'light',
     isDark: false,
   }),
 }))

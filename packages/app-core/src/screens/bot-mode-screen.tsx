@@ -23,7 +23,9 @@ import { browseScope } from '../services/browse-memory'
 import { canDeleteBot, objects, resolveBotTargetSessionId, text, type BotRemoteClient } from '../services/bot-catalog'
 import { getConnectionGeneration, requireBotClient, useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
-import { BlurHeaderFrame, Button, EmptyState, IconButton, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, EmptyState, IconButton, TopBar, useHeaderBlurTarget } from '../ui/components'
+import { GlassBackdrop } from '../ui/glass-backdrop'
+import { radius } from '../ui/theme'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -319,59 +321,19 @@ export function BotModeScreen({
   }
 
   const header = selectedId && (bot || room) ? (
-    <View style={[styles.headerBar, { paddingTop: insets.top + 8, minHeight: 54 + insets.top }]}>
-      <View style={styles.headerSide}>
-        {navBack !== undefined && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={onOpenDrawer ? s.chat.openHostSessions : s.common.back}
-            onPress={navBack}
-            hitSlop={8}
-            style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
-          >
-            <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
-          </Pressable>
-        )}
-      </View>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={bot?.name ?? room?.name ?? s.bots.title}
-        onPress={() => setDetailsOpen(true)}
-        style={({ pressed }) => [styles.headerPill, pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] }]}
-      >
-        {bot ? (
-          <BotAvatar bot={bot} size={26} />
-        ) : room && room.members.length > 0 ? (
-          <RoomAvatar members={room.members} bots={state?.bots ?? []} size={26} />
-        ) : roomLeadBot ? (
-          <BotAvatar bot={roomLeadBot} size={26} />
-        ) : (
-          <Users size={18} color={colors.primary} />
-        )}
-        <Text numberOfLines={1} style={styles.headerPillName}>
-          {goalTitle || (bot?.name ?? room?.name ?? s.bots.title)}
-        </Text>
-        {bot && <BotAgentBadge engine={bot.engine ?? engineOfModel(bot.model || bot.appliedModel)} size={14} />}
-        {room?.goal !== undefined && goalSteps.length > 0 && (
-          <Text style={styles.headerPillGoalCount}>
-            {goalDoneCount}/{goalSteps.length}
-          </Text>
-        )}
-      </Pressable>
-
-      <View style={styles.headerSide}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={s.sessions.moreActions}
-          onPress={() => setChatMoreOpen(true)}
-          hitSlop={8}
-          style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
-        >
-          <MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
-        </Pressable>
-      </View>
-    </View>
+    <BotGlassHeaderBar
+      navBack={navBack}
+      navBackLabel={onOpenDrawer ? s.chat.openHostSessions : s.common.back}
+      accessibilityLabel={bot?.name ?? room?.name ?? s.bots.title}
+      title={goalTitle || (bot?.name ?? room?.name ?? s.bots.title)}
+      bot={bot}
+      room={room}
+      roomLeadBot={roomLeadBot}
+      bots={state?.bots ?? []}
+      goalCount={room?.goal !== undefined && goalSteps.length > 0 ? `${goalDoneCount}/${goalSteps.length}` : undefined}
+      onOpenDetails={() => setDetailsOpen(true)}
+      onOpenMore={() => setChatMoreOpen(true)}
+    />
   ) : (
     <TopBar
       title={device?.name ?? s.bots.title}
@@ -484,5 +446,95 @@ export function BotModeScreen({
         {!drawerOpen && <BotModalsHost />}
       </View>
     </KeyboardInset>
+  )
+}
+
+function BotGlassHeaderBar({
+  navBack,
+  navBackLabel,
+  accessibilityLabel,
+  title,
+  bot,
+  room,
+  roomLeadBot,
+  bots,
+  goalCount,
+  onOpenDetails,
+  onOpenMore,
+}: {
+  navBack?: () => void
+  navBackLabel: string
+  accessibilityLabel: string
+  title: string
+  bot?: React.ComponentProps<typeof BotAvatar>['bot']
+  room?: { members: string[] }
+  roomLeadBot?: React.ComponentProps<typeof BotAvatar>['bot']
+  bots: React.ComponentProps<typeof RoomAvatar>['bots']
+  goalCount?: string
+  onOpenDetails: () => void
+  onOpenMore: () => void
+}) {
+  const insets = useSafeAreaInsets()
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createBotStyles)
+  const blurTarget = useHeaderBlurTarget()
+
+  return (
+    <View style={[styles.headerBar, { paddingTop: insets.top + 8, minHeight: 54 + insets.top }]}>
+      <View style={styles.headerSide}>
+        {navBack !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={navBackLabel}
+            onPress={navBack}
+            hitSlop={8}
+            style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
+          >
+            <GlassBackdrop blurTarget={blurTarget} intensity={55} tintColor={colors.glassPill ?? colors.elevated} borderRadius={radius.pill} />
+            <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
+          </Pressable>
+        )}
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        onPress={onOpenDetails}
+        style={({ pressed }) => [styles.headerPill, pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] }]}
+      >
+        <GlassBackdrop blurTarget={blurTarget} intensity={55} tintColor={colors.glassPill ?? colors.elevated} borderRadius={radius.pill} />
+        {bot ? (
+          <BotAvatar bot={bot} size={26} />
+        ) : room && room.members.length > 0 ? (
+          <RoomAvatar members={room.members} bots={bots} size={26} />
+        ) : roomLeadBot ? (
+          <BotAvatar bot={roomLeadBot} size={26} />
+        ) : (
+          <Users size={18} color={colors.primary} />
+        )}
+        <Text numberOfLines={1} style={styles.headerPillName}>
+          {title}
+        </Text>
+        {bot && <BotAgentBadge engine={bot.engine ?? engineOfModel(bot.model || bot.appliedModel)} size={14} />}
+        {goalCount !== undefined && (
+          <Text style={styles.headerPillGoalCount}>
+            {goalCount}
+          </Text>
+        )}
+      </Pressable>
+
+      <View style={styles.headerSide}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={s.sessions.moreActions}
+          onPress={onOpenMore}
+          hitSlop={8}
+          style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
+        >
+          <GlassBackdrop blurTarget={blurTarget} intensity={55} tintColor={colors.glassPill ?? colors.elevated} borderRadius={radius.pill} />
+          <MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
+        </Pressable>
+      </View>
+    </View>
   )
 }

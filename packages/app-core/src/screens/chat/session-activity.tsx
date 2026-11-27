@@ -9,6 +9,7 @@ import { requireSessionTools, useAppStore } from '../../state/store'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ActivityDockMode, type ThemeColors } from '../../ui/theme'
 import { continuousRadius, monoFontFamily } from '../../ui/platform-style'
+import { GlassSheen } from '../../ui/glass'
 import { SheetModal } from '../../ui/sheet'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -465,6 +466,7 @@ export function SessionActivityDock({
             testID="activity-card-modal-backdrop"
           />
           <View style={styles.modalContent} accessibilityViewIsModal>
+            <GlassSheen prominent />
             {openModal === 'jobs' && (
               <BackgroundJobsCard
                 jobs={jobs}
@@ -515,6 +517,7 @@ function Disclosure({ title, icon, open, onPress, children, trailing }: { traili
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return <View style={styles.group}>
+    <GlassSheen />
     <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded: open }} onPress={onPress}
       style={({ pressed }) => [styles.header, pressed && styles.pressed]}>
       {icon}<Text numberOfLines={1} style={styles.summary}>{title}</Text>{trailing}
@@ -531,11 +534,12 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   pill: {
     minHeight: 32,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
+    paddingVertical: 6,
     ...continuousRadius(radius.pill),
-    backgroundColor: colors.surfaceMuted ?? colors.card,
+    backgroundColor: colors.glassPill ?? colors.surfaceMuted ?? colors.card,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separator,
+    borderColor: colors.glassBorder ?? colors.separator,
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -609,13 +613,13 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
-    // Floating popup: must stay opaque (dark `card` is translucent and would let the
-    // transcript bleed through). Inner cards composite their translucent fill over this.
-    backgroundColor: colors.cardOpaque,
+    backgroundColor: colors.glassModalSurface ?? colors.cardOpaque,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder ?? colors.separator,
     borderRadius: radius.xl,
     overflow: 'hidden',
   },
-  group: { borderRadius: radius.xl, backgroundColor: colors.card, overflow: 'hidden' },
+  group: { borderRadius: radius.xl, backgroundColor: colors.glassCard ?? colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, overflow: 'hidden' },
   header: { minHeight: 44, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   pressed: { backgroundColor: colors.surfaceStrong },
   title: { ...typography.smallStrong, color: colors.ink, flexShrink: 1 },

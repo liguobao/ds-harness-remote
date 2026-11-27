@@ -27,6 +27,7 @@ import {
 } from './motion'
 import { DIALOG_SHEET_MAX_WIDTH, useResponsiveLayout } from './responsive'
 import { radius, spacing, type ThemeColors } from './theme'
+import { GlassSheen } from './glass'
 import { useReduceMotion } from './use-reduce-motion'
 import { useThemedStyles } from './use-themed-styles'
 
@@ -362,6 +363,7 @@ export function SheetModal({
           ...(asDialog ? [] : [sheetStyle]),
         ]}
       >
+        <GlassSheen prominent />
         {!asDialog && showHandle && (
           <View style={styles.handleHitArea} {...panResponder.panHandlers} accessible={false}>
             <View style={styles.handleBar} />
@@ -403,19 +405,27 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
   sheet: {
     zIndex: 1,
-    elevation: 1,
-    backgroundColor: colors.surface ?? colors.background,
+    elevation: 6,
+    backgroundColor: colors.glassModalSurface ?? colors.surface ?? colors.background,
     borderTopLeftRadius: radius.xxl,
     borderTopRightRadius: radius.xxl,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder ?? colors.separator,
+    overflow: 'hidden',
     ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
   },
   dialogSheet: {
     zIndex: 1,
-    elevation: 1,
-    backgroundColor: colors.surface ?? colors.background,
+    elevation: 6,
+    backgroundColor: colors.glassModalSurface ?? colors.surface ?? colors.background,
     borderRadius: radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder ?? colors.separator,
+    overflow: 'hidden',
     ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     padding: spacing.lg,
     paddingBottom: spacing.lg,

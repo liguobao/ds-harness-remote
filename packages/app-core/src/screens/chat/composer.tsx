@@ -9,6 +9,7 @@ import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ExpandCornerIcon } from '../../ui/composer-expand-icons'
+import { GlassSheen } from '../../ui/glass'
 import { triggerLightHaptic } from '../../ui/haptics'
 import { nextStackedOverflowLength, shouldShowExpandCorner, shouldUseStackedComposer } from './composer-gate'
 import { createStyles } from './styles'
@@ -128,6 +129,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, headerSlot
         <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={strings.mention.noMatches} />
       )}
       <View style={[styles.composerCard, (hasQuotes || hasHeaderSlot) && styles.composerCardWithQuotes]}>
+        <GlassSheen prominent />
         {(hasHeaderSlot || hasQuotes) && (
           <View style={styles.composerTray}>
             {headerSlot}

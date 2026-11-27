@@ -22,6 +22,7 @@ import { foregroundService } from '../services/foreground-service'
 import { serverSession } from '../services/server-session'
 import type { AccountMembership, OAuthProviderInfo } from '../services/api'
 import { BlurHeaderFrame, Button, Field, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
+import { GlassSheen } from '../ui/glass'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { transportPreferenceOptions } from '../types'
 import type { DefaultPermissionPreset, DeviceIdentity, LoginMethod } from '../types'
@@ -1484,6 +1485,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
           ],
         }]}
       >
+        <GlassSheen prominent />
         <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
           {onPlugins !== undefined && (
             <HomeMenuRow
@@ -1990,7 +1992,7 @@ function createStyles(colors: ThemeColors) {
   heroLead: { ...type.small, color: colors.muted, textAlign: 'center', marginTop: spacing.xs, maxWidth: 340 },
   loginCard: { width: '100%', maxWidth: 400, alignSelf: 'center', marginTop: spacing.xxl, gap: spacing.sm, paddingHorizontal: spacing.lg },
   loginLoading: { minHeight: 172, alignItems: 'center', justifyContent: 'center' },
-  providerButton: { minHeight: 52, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 52, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  providerButton: { minHeight: 52, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 52, backgroundColor: colors.glassCard ?? colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.border, overflow: 'hidden', ...floatingShadow(colors, 'low') },
   providerIcon: { position: 'absolute', left: spacing.md + 2, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   providerButtonText: { ...type.smallStrong, fontSize: 16, color: colors.ink },
   providerButtonPressed: { opacity: 0.7 },
@@ -2002,11 +2004,11 @@ function createStyles(colors: ThemeColors) {
   orLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
   orText: { ...type.caption, color: colors.muted },
   altRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xxs },
-  altButton: { flexGrow: 1, flexBasis: 'auto', minHeight: 44, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, backgroundColor: colors.surfaceStrong },
+  altButton: { flexGrow: 1, flexBasis: 'auto', minHeight: 44, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, backgroundColor: colors.glassCard ?? colors.surfaceStrong, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator },
   altButtonText: { ...type.smallStrong, color: colors.ink },
   emailForm: { gap: spacing.sm },
-  loginInput: { minHeight: 50, borderRadius: radius.md, paddingHorizontal: spacing.md, backgroundColor: colors.surfaceStrong, color: colors.ink, fontSize: 16 },
-  emailSubmit: { minHeight: 50, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', marginTop: spacing.xxs, backgroundColor: colors.surfaceStrong },
+  loginInput: { minHeight: 50, borderRadius: radius.lg, paddingHorizontal: spacing.md, backgroundColor: colors.glassCard ?? colors.surfaceStrong, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorderSubtle ?? colors.border, color: colors.ink, fontSize: 16 },
+  emailSubmit: { minHeight: 50, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', marginTop: spacing.xxs, backgroundColor: colors.glassCardStrong ?? colors.surfaceStrong },
   emailSubmitReady: { backgroundColor: colors.primary },
   emailSubmitText: { ...type.smallStrong, fontSize: 16, color: colors.muted },
   emailSubmitTextReady: { color: colors.onPrimary ?? colors.white },
@@ -2026,7 +2028,7 @@ function createStyles(colors: ThemeColors) {
   methodTabTextActive: { color: colors.primary },
   serverActions: { flexDirection: 'row', gap: spacing.sm },
   serverBackdrop: { flex: 1, justifyContent: 'center', padding: spacing.lg, backgroundColor: colors.modalBackdrop },
-  serverDialog: { width: '100%', maxWidth: 560, alignSelf: 'center', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
+  serverDialog: { width: '100%', maxWidth: 560, alignSelf: 'center', backgroundColor: colors.glassModalSurface ?? colors.surface, borderRadius: radius.xl, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, overflow: 'hidden', padding: spacing.lg, ...floatingShadow(colors, 'high') },
   serverDialogContent: { gap: spacing.md },
   serverDialogTitle: { ...type.heading, color: colors.ink },
   serverLabel: { ...type.smallStrong, color: colors.muted },
@@ -2058,9 +2060,9 @@ function createStyles(colors: ThemeColors) {
   preferenceDescription: { ...type.caption, color: colors.muted, marginTop: 2 },
   preferenceNote: { ...type.caption, fontSize: 13, lineHeight: 18, color: colors.muted, marginTop: spacing.xs, paddingHorizontal: spacing.md },
   appearanceSegments: { marginBottom: spacing.xs },
-  segmentRow: { flexDirection: 'row', padding: 3, borderRadius: radius.pill, backgroundColor: colors.surfaceStrong },
+  segmentRow: { flexDirection: 'row', padding: 3, borderRadius: radius.pill, backgroundColor: colors.glassCardStrong ?? colors.surfaceStrong, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorderSubtle ?? colors.separator },
   segmentButton: { flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, paddingHorizontal: spacing.xs },
-  segmentButtonActive: { backgroundColor: colors.surface, ...floatingShadow(colors) },
+  segmentButtonActive: { backgroundColor: colors.glassElevated ?? colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, ...floatingShadow(colors) },
   segmentButtonText: { ...type.small, fontSize: 15, color: colors.muted, textAlign: 'center' },
   segmentButtonTextActive: { color: colors.ink, fontWeight: '600' },
   keyNote: { flexDirection: 'row', gap: spacing.xs, paddingVertical: spacing.md },
@@ -2083,7 +2085,7 @@ function createStyles(colors: ThemeColors) {
   keyNoteText: { ...type.small, color: colors.muted, flex: 1 },
   homeMenuLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20 },
   homeMenuDismiss: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.menuDismiss },
-  homeMenuCard: { position: 'absolute', right: spacing.md, paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, borderRadius: radius.xl, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, zIndex: 1, ...floatingShadow(colors, 'high') },
+  homeMenuCard: { position: 'absolute', right: spacing.md, paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, borderRadius: radius.xl, backgroundColor: colors.glassModalSurface ?? colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder ?? colors.separator, overflow: 'hidden', zIndex: 1, ...floatingShadow(colors, 'high') },
   // flexGrow 0 keeps the card content-sized in portrait; flexShrink lets the
   // capped landscape card scroll instead of clipping its last row.
   homeMenuScroll: { flexGrow: 0, flexShrink: 1 },
