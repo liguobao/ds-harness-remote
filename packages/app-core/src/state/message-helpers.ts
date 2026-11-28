@@ -1,4 +1,5 @@
 import type {
+  ApprovalOutcome,
   AskUserQuestionItem,
   AskUserQuestionOption,
   ChatFile,
@@ -30,7 +31,7 @@ export function findQuestion(messages: Record<string, ChatItem[]>, itemId: strin
 export function mapApprovalOutcome(
   messages: Record<string, ChatItem[]>,
   itemId: string,
-  outcome: 'allowed-once' | 'rejected',
+  outcome: ApprovalOutcome,
 ): Record<string, ChatItem[]> {
   return mapItems(messages, item => item.kind === 'approval' && item.id === itemId
     ? { ...item, outcome }

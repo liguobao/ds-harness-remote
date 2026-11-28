@@ -616,7 +616,12 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               }
               const prevList = state.messages[session.sessionId]
               const codexMerged = mergeHistoryAndLive(items, browseLive(items, prevList ?? []))
-              const nextList = reuseUnchangedChatItems(prevList, codexMerged)
+              const codexSettled = history.activeTurnId !== undefined
+                ? settleTurnItems(codexMerged, undefined, history.activeTurnId)
+                : nextSession.running === false
+                  ? settleTurnItems(codexMerged)
+                  : codexMerged
+              const nextList = reuseUnchangedChatItems(prevList, codexSettled)
               if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
               syncHandoffOrigin(nextList)
               return {
@@ -644,11 +649,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             }
             set(state => {
               const prevList = state.messages[session.sessionId]
+              const effectiveActiveTurnId = activeTurnId ?? runtime.activeCodexTimeline?.activeTurnId
+              const activeTurnKnown = effectiveActiveTurnId !== undefined
               const codexMerged = mergeHistoryAndLive(items, browseLive(items, prevList ?? []))
-              const nextList = reuseUnchangedChatItems(prevList, codexMerged)
+              const codexSettled = effectiveActiveTurnId !== undefined
+                ? settleTurnItems(codexMerged, undefined, effectiveActiveTurnId)
+                : settleTurnItems(codexMerged)
+              const nextList = reuseUnchangedChatItems(prevList, codexSettled)
               if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
               syncHandoffOrigin(nextList)
-              const activeTurnKnown = activeTurnId !== undefined || runtime.activeCodexTimeline?.activeTurnId !== undefined
               const syncRunning = (item: RemoteSession): RemoteSession => item.sessionId === session.sessionId
                 ? { ...item, running: activeTurnKnown }
                 : item
@@ -867,10 +876,6 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             const merged = hasAcpHistory
               ? mergeAcpHistoryAndLive(historyWithCachedTail, liveDeltas)
               : mergeHistoryAndLive(items, liveDeltas)
-            const paged = storeAcpPagedMessages(session.sessionId, merged)
-            const nextList = reuseUnchangedChatItems(prevList, paged.tail)
-            if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
-            syncHandoffOrigin(merged)
             const currentSession = state.selectedSession?.sessionId === session.sessionId
               ? state.selectedSession
               : state.sessions.find(item => item.sessionId === session.sessionId)
@@ -888,6 +893,11 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 : details.running === true
                   ? (liveTurnSettled || (runtime.acpTerminalRevisions.get(session.sessionId) ?? 0) !== terminalRevision || (preOpenRunning && currentSession?.running === false) ? false : true)
                   : (currentSession?.running ?? session.running)
+            const settled = resolvedRunning === false ? settleTurnItems(merged) : merged
+            const paged = storeAcpPagedMessages(session.sessionId, settled)
+            const nextList = reuseUnchangedChatItems(prevList, paged.tail)
+            if (nextList !== prevList && canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, nextList)
+            syncHandoffOrigin(settled)
             const active = state.selectedSession?.sessionId === session.sessionId
               ? { ...state.selectedSession, ...enrichedSession, running: resolvedRunning }
               : { ...enrichedSession, running: resolvedRunning }
