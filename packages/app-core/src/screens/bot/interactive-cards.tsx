@@ -159,7 +159,7 @@ export function BotSecretRequestCard({
   const styles = useThemedStyles(createInteractiveStyles)
   const { colors } = useTheme()
   const [value, setValue] = useState('')
-  const [scopeMode, setScopeMode] = useState<'all' | 'bot'>('all')
+  const [scopeMode, setScopeMode] = useState<'all' | 'bot'>('bot')
   const needsFill = text(request.kind) === 'fill'
   const delivery = text(request.delivery) || 'vault'
 
@@ -289,7 +289,7 @@ export function BotComputerAskCard({
   perform: BotPerform
 }) {
   const styles = useThemedStyles(createInteractiveStyles)
-  const appName = text(ask.appName) || 'App'
+  const appName = text(ask.appName) || s.bots.computerAppFallback
   return (
     <View style={styles.card}>
       <Text style={styles.kicker}>{s.bots.computer}</Text>

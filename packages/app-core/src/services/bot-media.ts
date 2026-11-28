@@ -135,6 +135,13 @@ function fileTargetPayload(target: BotFileDownloadTarget): Record<string, unknow
   return payload
 }
 
+export const BOT_DOWNLOAD_MAX_BYTES = 64 * 1024 * 1024
+export const BOT_DOWNLOAD_MAX_CHUNKS = 256
+
+function createAbortError(): Error {
+  return Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' })
+}
+
 export async function downloadBotFileChunked(
   client: Pick<BotRemoteClient, 'call'>,
   target: BotFileDownloadTarget,
@@ -144,14 +151,23 @@ export async function downloadBotFileChunked(
     onProgress?: (loaded: number, total: number) => void
   },
 ): Promise<BotDownloadedFile> {
+  if (options?.signal?.aborted) {
+    throw createAbortError()
+  }
   const basePayload = fileTargetPayload(target)
   const fallbackName = sanitizeBotFileName(target.name, 'download')
-  if (options?.chunked === false) {
-    const raw = await client.call('file-download', basePayload, options.signal)
+  if (options?.chunked !== true) {
+    const raw = await client.call('file-download', basePayload, options?.signal)
+    if (options?.signal?.aborted) {
+      throw createAbortError()
+    }
     if (!isBotObject(raw)) throw new Error('Invalid file download response')
     const bytes = base64ToBytes(text(raw.bytes))
+    if (bytes.byteLength > BOT_DOWNLOAD_MAX_BYTES) {
+      throw new Error('Delivered file exceeds maximum download size')
+    }
     const size = typeof raw.size === 'number' && Number.isFinite(raw.size) ? raw.size : bytes.byteLength
-    options.onProgress?.(bytes.byteLength, size)
+    options?.onProgress?.(bytes.byteLength, size)
     return {
       name: sanitizeBotFileName(text(raw.name) || fallbackName, fallbackName),
       mime: text(raw.mime) || 'application/octet-stream',
@@ -167,13 +183,23 @@ export async function downloadBotFileChunked(
   let totalSize = 0
   const chunks: Uint8Array[] = []
   let loaded = 0
+  let chunkCount = 0
 
   for (;;) {
+    if (options?.signal?.aborted) {
+      throw createAbortError()
+    }
+    if (++chunkCount > BOT_DOWNLOAD_MAX_CHUNKS) {
+      throw new Error('Delivered file exceeded maximum chunk limit')
+    }
     const raw = await client.call('file-download', {
       ...basePayload,
       offset,
       ...(lockedVersion !== undefined ? { version: lockedVersion } : {}),
     }, options?.signal)
+    if (options?.signal?.aborted) {
+      throw createAbortError()
+    }
     if (!isBotObject(raw)) throw new Error('Invalid file download chunk')
     const chunkVersion = typeof raw.version === 'string' ? raw.version : undefined
     if (lockedVersion === undefined) {
@@ -184,9 +210,15 @@ export async function downloadBotFileChunked(
     if (text(raw.name)) resolvedName = sanitizeBotFileName(text(raw.name), resolvedName)
     if (text(raw.mime)) resolvedMime = text(raw.mime)
     if (typeof raw.size === 'number' && Number.isFinite(raw.size) && raw.size >= 0) {
+      if (raw.size > BOT_DOWNLOAD_MAX_BYTES) {
+        throw new Error('Delivered file exceeds maximum download size')
+      }
       totalSize = raw.size
     }
     const bytes = base64ToBytes(text(raw.bytes))
+    if (loaded + bytes.byteLength > BOT_DOWNLOAD_MAX_BYTES) {
+      throw new Error('Delivered file exceeds maximum download size')
+    }
     if (bytes.byteLength > 0) {
       chunks.push(bytes)
       loaded += bytes.byteLength

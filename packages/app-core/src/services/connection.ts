@@ -450,7 +450,9 @@ export class AndroidRemoteConnection {
       {
         call: (endpoint, payload, signal) => {
           current()
-          return gateway.call('dsBot/call', { args: { endpoint, payload: payload ?? {} } }, signal)
+          return gateway.call('dsBot/call', { args: { endpoint, payload: payload ?? {} } }, signal, {
+            maxResponseBytes: 32 * 1024 * 1024,
+          })
         },
         openFeed: async signal => {
           current()

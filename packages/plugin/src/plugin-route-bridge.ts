@@ -49,6 +49,9 @@ export const BOT_REMOTE_OPERATIONS = [
   'btw', 'btw-cancel', 'room-continue', 'bot-new-part', 'bot-open-part',
 ] as const
 
+/** Shared allowlist set for both `api/bot` and `dsBot/call` validation. */
+export const BOT_REMOTE_OPERATION_SET = new Set<string>(BOT_REMOTE_OPERATIONS)
+
 export function isAllowedPluginRoute(route: string): route is typeof PLUGIN_ROUTE_ALLOWLIST[number] {
   return PLUGIN_ROUTE_ALLOWLIST.some(allowed => allowed === route)
 }
@@ -85,15 +88,6 @@ const imageUploadCallSchema = z.object({
 
 /** Local plugin route call timeout, mirroring the Harness API bridge budget. */
 const PLUGIN_ROUTE_TIMEOUT_MS = 30_000
-const LONG_POLL_TIMEOUT_MS = 45_000
-const SLOW_BOT_OPERATION_TIMEOUT_MS = 60_000
-const SLOW_BOT_OPERATIONS = new Set([
-  'send',
-  'connector-add',
-  'connector-connect',
-  'connector-retry',
-  'connector-sign-in-code',
-])
 const COMPUTER_APPEARANCE_KEYS = new Set([
   'css', 'mode', 'uiFont', 'codeFont', 'fontSize', 'lineHeight', 'material',
 ])
@@ -101,17 +95,11 @@ const REMOTE_STATE_OMIT_KEYS = new Set([
   'userQuestions', 'sessionQueues', 'api', 'telemetryPrompt', 'releaseNotes',
 ])
 
-function timeoutForEndpoint(endpoint: string): number {
-  if (endpoint === 'im-login-wait') return LONG_POLL_TIMEOUT_MS
-  if (SLOW_BOT_OPERATIONS.has(endpoint)) return SLOW_BOT_OPERATION_TIMEOUT_MS
-  return PLUGIN_ROUTE_TIMEOUT_MS
-}
-
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function sanitizeBotRequestBody(
+export function sanitizeBotRequestBody(
   body: { endpoint: string; payload?: Record<string, unknown> | null },
 ): { endpoint: string; payload?: Record<string, unknown> | null } {
   const payload = isPlainRecord(body.payload) ? body.payload : undefined
@@ -145,16 +133,14 @@ function sanitizeBotRequestBody(
   return body
 }
 
-function sanitizeBotResponseJson(endpoint: string, json: unknown): unknown {
-  if (!isPlainRecord(json) || json.ok !== true || !isPlainRecord(json.value)) return json
+function sanitizeBotPayloadValue(endpoint: string, value: Record<string, unknown>): Record<string, unknown> {
   if (endpoint === 'folders') {
-    if (!Object.hasOwn(json.value, 'data')) return json
-    const nextValue = { ...json.value }
+    if (!Object.hasOwn(value, 'data')) return value
+    const nextValue = { ...value }
     delete nextValue.data
-    return { ...json, value: nextValue }
+    return nextValue
   }
-  if (endpoint !== 'state') return json
-  const value = json.value
+  if (endpoint !== 'state') return value
   let nextValue: Record<string, unknown> | undefined
   const ensureCopy = () => {
     nextValue ??= { ...value }
@@ -180,7 +166,17 @@ function sanitizeBotResponseJson(endpoint: string, json: unknown): unknown {
       }),
     }
   }
-  return nextValue === undefined ? json : { ...json, value: nextValue }
+  return nextValue ?? value
+}
+
+export function sanitizeBotResponseJson(endpoint: string, json: unknown): unknown {
+  if (!isPlainRecord(json)) return json
+  if (typeof json.ok === 'boolean') {
+    if (json.ok !== true || !isPlainRecord(json.value)) return json
+    const nextValue = sanitizeBotPayloadValue(endpoint, json.value)
+    return nextValue === json.value ? json : { ...json, value: nextValue }
+  }
+  return sanitizeBotPayloadValue(endpoint, json)
 }
 
 /**
@@ -207,7 +203,8 @@ const TERMINAL_LOCAL_DS_BOT_CODES = new Set([
 ])
 
 export class PluginRouteBridge {
-  private dsBotRpcAvailable = true
+  private static readonly DS_BOT_RPC_COOLDOWN_MS = 30_000
+  private dsBotRpcRetryAt = 0
 
   constructor(
     private readonly dispatch: PluginRouteDispatcher,
@@ -232,19 +229,22 @@ export class PluginRouteBridge {
       throw new RpcError('INVALID_MESSAGE', `The plugin route call exceeds the ${MAX_SECURE_MESSAGE_BYTES}-byte remote limit.`)
     }
     const dispatchBody = params.route === 'api/bot' ? sanitizeBotRequestBody(params.body) : params.body
-    const timeoutMs = params.route === 'api/bot' ? timeoutForEndpoint(params.body.endpoint) : PLUGIN_ROUTE_TIMEOUT_MS
     const startedAt = performance.now()
-    const signal = AbortSignal.timeout(timeoutMs)
+    const signal = AbortSignal.timeout(PLUGIN_ROUTE_TIMEOUT_MS)
+    const canTryLocalDsBot = params.route === 'api/bot'
+      && this.localDsBotCall !== undefined
+      && Date.now() >= this.dsBotRpcRetryAt
     let result: { status: number; json: unknown } | undefined
     let fallbackToHttp = false
-    if (params.route === 'api/bot' && this.localDsBotCall !== undefined && this.dsBotRpcAvailable) {
+    if (canTryLocalDsBot) {
       try {
         const botBody = dispatchBody as { endpoint: string; payload?: Record<string, unknown> | null }
-        const local = await this.localDsBotCall(botBody.endpoint, botBody.payload ?? null, signal)
+        const local = await this.localDsBotCall!(botBody.endpoint, botBody.payload ?? null, signal)
         if (local.ok) {
+          this.dsBotRpcRetryAt = 0
           result = { status: 200, json: local.value }
         } else if (local.code !== undefined && TERMINAL_LOCAL_DS_BOT_CODES.has(local.code)) {
-          this.dsBotRpcAvailable = false
+          this.dsBotRpcRetryAt = Date.now() + PluginRouteBridge.DS_BOT_RPC_COOLDOWN_MS
           fallbackToHttp = true
         } else {
           this.logger?.warn('plugin route call failed', {
@@ -265,7 +265,7 @@ export class PluginRouteBridge {
         }
       }
     }
-    if (result === undefined && (fallbackToHttp || params.route !== 'api/bot' || this.localDsBotCall === undefined || !this.dsBotRpcAvailable)) {
+    if (result === undefined && (fallbackToHttp || !canTryLocalDsBot)) {
       try {
         result = await this.dispatch(params.route, dispatchBody, signal)
       } catch (error) {

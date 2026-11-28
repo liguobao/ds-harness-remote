@@ -224,6 +224,44 @@ describe('compact group round preservation', () => {
     }
   })
 
+  it('compacts oversized group round payloads inside preserved user/bot/schedule/question-reply records within ROUND_BUDGET', () => {
+    const bigRound = groupRound([
+      groupReply('辛'.repeat(2500), 'Chief'),
+      groupReply('壬'.repeat(2500), 'Monitor'),
+      groupReply('癸'.repeat(2500), 'Scribe'),
+      groupReply('戌'.repeat(2500), 'Reviewer'),
+    ])
+    const preserved = compactHistory({
+      type: 'snapshot',
+      records: [
+        { type: 'event', event: { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'bot', botId: 'b1' }, content: [{ type: 'text', text: bigRound }] } } },
+        { type: 'event', event: { type: 'user/message', seq: 2, time: 2, data: { source: { kind: 'schedule', id: 's1' }, content: [{ type: 'text', text: bigRound }] } } },
+        { type: 'event', event: { type: 'user/message', seq: 3, time: 3, data: { source: { kind: 'user-question-reply', callId: 'c1' }, content: [{ type: 'text', text: bigRound }] } } },
+      ],
+    }) as { records: Array<{ event: { data: { content: Array<{ text: string }> } } }> }
+    for (const row of preserved.records) {
+      const round = parsedRound(row.event.data.content[0]!.text)
+      expect(round.replies).toHaveLength(3)
+      expect(round.truncated).toBe(true)
+      expect(round.replies[0]!.text!.length).toBe(2048)
+    }
+
+    // Exhausting ROUND_BUDGET falls back to bounded truncation instead of leaving huge rounds uncompressed.
+    const huge = groupRound([
+      groupReply('子'.repeat(2000), 'Chief'),
+      groupReply('丑'.repeat(2000), 'Monitor'),
+      groupReply('寅'.repeat(2000), 'Scribe'),
+      groupReply('卯'.repeat(2000), 'Reviewer'),
+    ])
+    const records = Array.from({ length: 40 }, (_, index) => ({
+      type: 'event',
+      event: { type: 'user/message', seq: index + 1, time: index + 1, data: { source: { kind: 'bot', botId: 'b1' }, content: [{ type: 'text', text: huge }] } },
+    }))
+    const bounded = compactHistory({ type: 'snapshot', records }) as { records: Array<{ event: { data: { content: Array<{ text: string }> } } }> }
+    expect(JSON.stringify(bounded).length).toBeLessThan(200 * 1024)
+    expect(bounded.records.some(r => r.event.data.content[0]!.text.endsWith(MARKER))).toBe(true)
+  })
+
   it('projects a Session V3 snapshot fixture while preserving seq continuity, human attachments, model/usage metadata and final markdown', () => {
     const rawJson = readFileSync(v3FixturePath, 'utf8')
     const rawSnapshot = JSON.parse(rawJson) as {

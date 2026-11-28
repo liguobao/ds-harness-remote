@@ -81,16 +81,18 @@ export function useBotTeamLoad(enabled: boolean): void {
   }, [botScope, ensureScope])
 
   useEffect(() => {
-    if (!enabled || !connected) {
+    if (!connected) {
       stopFeed()
       return
     }
+    if (!enabled) return
+    const owner = Symbol('bot-team-load')
     const controller = new AbortController()
     void refresh(false, controller.signal)
-    startFeed()
+    startFeed(owner)
     return () => {
       controller.abort()
-      stopFeed()
+      stopFeed(owner)
     }
   }, [enabled, connected, botScope, refresh, startFeed, stopFeed])
 }

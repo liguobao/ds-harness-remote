@@ -58,7 +58,7 @@ export function BotTaskBar({
       )}
       {tasks.map((task, idx) => {
         const taskId = text(task.id)
-        const label = text(task.name) || text(task.title) || text(task.label) || taskId || `Task ${idx + 1}`
+        const label = text(task.name) || text(task.title) || text(task.label) || taskId || s.bots.taskItem(idx + 1)
         const status = text(task.status)
         const running = ACTIVE_TASK_STATUSES.has(status) || task.running === true
         return (

@@ -1,3 +1,5 @@
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import { apply as applyConnection, type HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import { describe, expect, it, vi } from 'vitest'
@@ -86,6 +88,53 @@ describe('Host plugin route carrier', () => {
       expect(routeSignal?.aborted).toBe(true)
     } finally {
       finish(Response.json({ ok: true }))
+    }
+  })
+
+  it('preserves 401 response bodies when HTTP fallback re-authentication returns no cookie, and retries once when it does', async () => {
+    let issueCookie = false
+    let cookieSeenByPost: string | undefined
+    const server = createServer((req, res) => {
+      if (req.url === '/auth') {
+        res.writeHead(302, issueCookie ? { 'set-cookie': 'dsh_sid=fresh; Path=/', location: '/' } : { location: '/' })
+        res.end()
+        return
+      }
+      if (req.url === '/api/bot') {
+        cookieSeenByPost = req.headers.cookie
+        if (cookieSeenByPost === 'dsh_sid=fresh') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, value: { retried: true } }))
+          return
+        }
+        res.writeHead(401, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'session expired' }))
+        return
+      }
+      res.writeHead(404)
+      res.end()
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const port = (server.address() as AddressInfo).port
+      const dispatch = createPluginRouteDispatcher(
+        () => ({ authenticatedUrl: baseUrl => `${baseUrl}auth` }),
+        () => port,
+      )
+      await expect(dispatch('api/bot', { endpoint: 'state', payload: null }, new AbortController().signal)).resolves.toEqual({
+        status: 401,
+        json: { ok: false, error: 'session expired' },
+      })
+
+      issueCookie = true
+      await expect(dispatch('api/bot', { endpoint: 'state', payload: null }, new AbortController().signal)).resolves.toEqual({
+        status: 200,
+        json: { ok: true, value: { retried: true } },
+      })
+      expect(cookieSeenByPost).toBe('dsh_sid=fresh')
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
     }
   })
 })

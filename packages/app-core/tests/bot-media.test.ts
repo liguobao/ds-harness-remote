@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { BotOperation } from '../src/services/bot-catalog'
 import {
+  BOT_DOWNLOAD_MAX_BYTES,
+  BOT_DOWNLOAD_MAX_CHUNKS,
   base64ToBytes,
   bytesToBase64,
   downloadBotFileChunked,
@@ -67,7 +69,7 @@ describe('bot media upload staging and chunked download', () => {
     const assembled = await downloadBotFileChunked(
       { call: chunkedCall },
       { sessionId: 'bot-s1', seq: 42, index: 0 },
-      { onProgress: (loaded, total) => progress.push([loaded, total]) },
+      { chunked: true, onProgress: (loaded, total) => progress.push([loaded, total]) },
     )
     expect(assembled.name).toBe('report.txt')
     expect(assembled.mime).toBe('text/plain')
@@ -79,7 +81,7 @@ describe('bot media upload staging and chunked download', () => {
     const driftCall = vi.fn()
       .mockResolvedValueOnce({ name: 'a.bin', size: 10, version: 'v1', bytes: bytesToBase64(part1), nextOffset: 6, done: false })
       .mockResolvedValueOnce({ name: 'a.bin', size: 10, version: 'v2', bytes: bytesToBase64(part2), nextOffset: 12, done: true })
-    await expect(downloadBotFileChunked({ call: driftCall }, { sessionId: 'bot-s1', attachmentId: 'att-1' })).rejects.toThrow('changed')
+    await expect(downloadBotFileChunked({ call: driftCall }, { sessionId: 'bot-s1', attachmentId: 'att-1' }, { chunked: true })).rejects.toThrow('changed')
 
     // Non-chunked legacy fallback.
     const legacyCall = vi.fn(async () => ({
@@ -91,7 +93,7 @@ describe('bot media upload staging and chunked download', () => {
     const legacy = await downloadBotFileChunked({ call: legacyCall }, { sessionId: 'bot-s1', attachmentId: 'att-1' }, { chunked: false })
     expect(new TextDecoder().decode(legacy.bytes)).toBe('12345')
 
-    // Implicit legacy Host (chunked: undefined) returning single packet without done/nextOffset stops after 1 call.
+    // Implicit Host (chunked: undefined) defaults to single-packet without sending offset.
     const implicitLegacyCall = vi.fn(async () => ({
       name: 'legacy2.txt',
       mime: 'text/plain',
@@ -100,7 +102,34 @@ describe('bot media upload staging and chunked download', () => {
     }))
     const implicitLegacy = await downloadBotFileChunked({ call: implicitLegacyCall }, { sessionId: 'bot-s1', attachmentId: 'att-2' })
     expect(implicitLegacyCall).toHaveBeenCalledTimes(1)
+    expect(implicitLegacyCall).toHaveBeenCalledWith('file-download', { sessionId: 'bot-s1', attachmentId: 'att-2' }, undefined)
     expect(new TextDecoder().decode(implicitLegacy.bytes)).toBe('67890')
+
+    // Enforces max chunk limit, max total byte limit, and AbortSignal cancellation.
+    let offset = 0
+    const boundedChunkCall = vi.fn(async () => {
+      offset += 1
+      return { name: 'big.bin', bytes: 'AQ==', nextOffset: offset, done: false }
+    })
+    await expect(downloadBotFileChunked({ call: boundedChunkCall }, { sessionId: 'bot-s1', attachmentId: 'att-3' }, { chunked: true }))
+      .rejects.toThrow('chunk limit')
+    expect(boundedChunkCall).toHaveBeenCalledTimes(BOT_DOWNLOAD_MAX_CHUNKS)
+
+    const oversizedCall = vi.fn(async () => ({
+      name: 'huge.bin',
+      size: BOT_DOWNLOAD_MAX_BYTES + 1,
+      bytes: 'AQ==',
+      done: true,
+    }))
+    await expect(downloadBotFileChunked({ call: oversizedCall }, { sessionId: 'bot-s1', attachmentId: 'att-4' }, { chunked: true }))
+      .rejects.toThrow('maximum download size')
+
+    const aborted = new AbortController()
+    aborted.abort()
+    const neverCalled = vi.fn()
+    await expect(downloadBotFileChunked({ call: neverCalled }, { sessionId: 'bot-s1', attachmentId: 'att-5' }, { signal: aborted.signal, chunked: true }))
+      .rejects.toMatchObject({ name: 'AbortError' })
+    expect(neverCalled).not.toHaveBeenCalled()
   })
 
   it('fetches bounded image previews with data URI normalization', async () => {

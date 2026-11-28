@@ -2325,10 +2325,10 @@ describe('HarnessRemoteBridge dsBot/* allowlist', () => {
     }
     const dispatch = vi.fn(async (_method: string, payload: unknown) => {
       const endpoint = (payload as { args?: { endpoint?: string } })?.args?.endpoint
-      if (endpoint === 'fail-native') {
+      if (endpoint === 'diagnostics') {
         return { ok: false as const, error: { code: 'gateway/invocation-unavailable', message: 'unavailable', details: {} } }
       }
-      if (endpoint === 'non-record') {
+      if (endpoint === 'efforts') {
         return { ok: true as const, value: 'plain-string' }
       }
       return { ok: true as const, value: { ok: true, value: { resolved: endpoint } } }
@@ -2356,10 +2356,11 @@ describe('HarnessRemoteBridge dsBot/* allowlist', () => {
     // Direct unary call with omitted payload normalizes payload to null
     await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'state' } } })
 
-    // Failed native result, non-record value, and missing endpoint must be skipped
-    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'fail-native' } } })
-    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'non-record' } } })
-    await bridge.call({ endpoint: 'dsBot/call', payload: { args: {} } })
+    // Failed native result, non-record value, and invalid/missing endpoint must be skipped
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'diagnostics' } } })
+    await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'efforts' } } })
+    await expect(bridge.call({ endpoint: 'dsBot/call', payload: { args: {} } }))
+      .rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
 
     // Observer exception must not disrupt RPC settlement (including chunked transfer commit)
     shouldThrow = true

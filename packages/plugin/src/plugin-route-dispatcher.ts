@@ -70,9 +70,10 @@ export function createPluginRouteDispatcher(
       if (response.status === 401) {
         cookie = undefined
         if (isReadOnlyBotRoute(route, body)) {
-          await response.body?.cancel()
-          cookie = await authenticateCookie()
-          if (cookie !== undefined) {
+          const refreshedCookie = await authenticateCookie()
+          if (refreshedCookie !== undefined) {
+            cookie = refreshedCookie
+            await response.body?.cancel()
             response = await postFallback()
             if (response.status === 401) cookie = undefined
           }

@@ -102,7 +102,7 @@ export function BotChart({ node, scope }: { node: BotObject; scope: Scope }) {
         label={s.bots.copyCsv}
         onPress={() => {
           const escape = (cell: string) => (/[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell)
-          const header = [unit || 'Category', ...series.map(entry => entry.label)].map(escape).join(',')
+          const header = [unit || s.bots.chartCategory, ...series.map(entry => entry.label)].map(escape).join(',')
           const lines = categories.map((label, idx) =>
             [label, ...series.map(entry => (Number.isFinite(entry.values[idx]) ? asText(entry.values[idx]) : ''))].map(escape).join(','),
           )

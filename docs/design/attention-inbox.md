@@ -19,7 +19,7 @@ Host (Harness / CodeX / ACP / DS-Bot)
    - 推送或灵动岛被点击后，Client 携带 `hostDeviceId + attentionToken` 唤醒并完成既有 membership + pinned key + Noise IK 握手，随后在加密隧道内调用 `attention.resolveToken({ token })` 换取 `AttentionTarget`；命中则直达目标会话，过期/已处理/不可达则安全回退 `{ kind: 'inbox' }`。
 2. **统一聚合与排序（Lody 启发）**：
    - Host 侧 `HostAttentionTracker` 汇总 Harness、CodeX、ACP 与 DS-Bot 四类后端的待审批、待问答、运行中及未读完成/失败状态，维护进程内单调递增 `revision`，并限制列表上限 `MAX_ATTENTION_ITEMS = 64`。
-   - **背景观察边界**：在无 Client 连接（0-client）状态下，Host 可持续观察 CodeX、ACP 以及 Harness 被动只读 `session/control`（会话标题与持久化 `userQuestions`，使用 `interactions: 'none'`，严禁注册 `interactions: 'answer'` 抢占本地答题权）；Harness 瞬时 `$events` 审批/运行态与 DS-Bot 路由事件则通过已认证连接的实时桥接（`HarnessRemoteBridge` / `PluginRouteBridge`）旁路汇入 `HostAttentionTracker`。
+   - **背景观察边界**：在无 Client 连接（0-client）状态下，Host 可持续观察 CodeX、ACP 以及 Harness 被动只读 `session/control`（会话标题与持久化 `userQuestions`，使用 `interactions: 'none'`，严禁注册 `interactions: 'answer'` 抢占本地答题权）；Harness 瞬时 `$events` 审批/运行态与 DS-Bot 路由/流事件则通过已认证连接的实时桥接（`HarnessRemoteBridge`（含 `dsBot/call`、`dsBot/feed`）/ `PluginRouteBridge`）旁路汇入 `HostAttentionTracker`。
    - 展示与汇总统一使用纯函数 `compareAttentionItems`：`waiting_question (0) > waiting_approval (1) > running (2) > failed_unread (3) > completed_unread (4)`，同级按 `updatedAt` 降序，再按 `id` 字典序升序。
 3. **Server 能力分层**：
    - 本仓库自部署 `apps/server` 仅实现内存态 `attention.signal.v1`（缓存最新 `AttentionDigest` 并在 `/api/v1/devices` 与 `/presence` 返回可选 `attentionDigest`，另支持可选盲 Webhook），不宣告 `push.wake.v1`。

@@ -165,6 +165,12 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   useEffect(() => () => { if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current) }, [])
   const ready = selected?.sessionId === session.sessionId
   const onLinkPress = useCallback((href: string) => {
+    if (href.startsWith('https://bots.local/')) {
+      if (!ready || !connected) return
+      const target = botMentionTarget(href, state.bots)
+      if (target !== undefined && target !== bot?.id) onSelectBot(target)
+      return
+    }
     // External URLs open in browser regardless of bot readiness or connection state
     if (openSafeExternalUrl(href)) return
 
@@ -185,11 +191,6 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       if (matchedSession !== undefined) {
         void openSession(matchedSession)
       }
-      return
-    }
-    const target = botMentionTarget(href, state.bots)
-    if (target !== undefined) {
-      if (target !== bot?.id) onSelectBot(target)
       return
     }
     const path = markdownFilePath(href)
@@ -385,20 +386,25 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
 
   const onDownloadPresented = useCallback(async (file: BotObject, fallbackSessionId?: string) => {
     if (!client) return
+    const activeRequest = request.current
+    const signal = activeRequest.signal
     const fileSessionId = text(file.sessionId) || fallbackSessionId || session.sessionId
     const seq = typeof file.seq === 'number' ? file.seq : undefined
     const index = typeof file.index === 'number' ? file.index : 0
     const attachmentId = text(file.attachmentId) || undefined
     const name = text(file.name) || text(file.path).split(/[\\/]/).pop() || 'file'
     try {
-      await client.negotiate()
+      await client.negotiate(signal)
+      if (!mounted.current || signal.aborted) return
       const downloaded = await downloadBotFileChunked(
         client,
         { sessionId: fileSessionId, attachmentId, seq, index, name },
-        { chunked: client.hasCapability('file-download-chunks') },
+        { chunked: client.hasCapability('file-download-chunks'), signal },
       )
+      if (!mounted.current || signal.aborted) return
       await saveBotDownloadedFile(downloaded)
     } catch (reason) {
+      if (!mounted.current || signal.aborted) return
       setError(reason instanceof Error ? reason.message : s.bots.unavailable)
     }
   }, [client, session.sessionId])

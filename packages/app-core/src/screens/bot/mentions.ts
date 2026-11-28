@@ -56,8 +56,13 @@ export function linkBotMentions(text: string, bots: BotEntry[], selfId?: string)
   let result = ''
   let cursor = 0
   for (const span of spans) {
-    const label = text.slice(span.start, span.end).replace(/[\[\]\\]/g, '\\$&')
-    result += `${text.slice(cursor, span.start)}[${label}](${origin}${encodeURIComponent(span.bot.id)})`
+    if (span.kind === 'all') {
+      const raw = text.slice(span.start, span.end).replace(/([*_~`\\\[\]])/g, '\\$1')
+      result += `${text.slice(cursor, span.start)}**${raw}**`
+    } else {
+      const label = text.slice(span.start, span.end).replace(/[\[\]\\]/g, '\\$&')
+      result += `${text.slice(cursor, span.start)}[${label}](${origin}${encodeURIComponent(span.bot.id)})`
+    }
     cursor = span.end
   }
   return result + text.slice(cursor)

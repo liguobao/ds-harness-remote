@@ -332,19 +332,29 @@ export function DsBotSettingsModal({
   useEffect(() => {
     if (!visible || subpage !== 'usage' || !usageView.scanning || !clientInstance) return
     const control = new AbortController()
-    const timer = setTimeout(() => {
-      void clientInstance
-        .call('usage', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }, control.signal)
-        .then(res => {
-          if (!control.signal.aborted) setUsageData(object(res))
-        })
-        .catch(() => {})
-    }, 2_000)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const scheduleTick = () => {
+      if (control.signal.aborted) return
+      timer = setTimeout(() => {
+        void clientInstance
+          .call('usage', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }, control.signal)
+          .then(res => {
+            if (!control.signal.aborted) {
+              setUsageData(object(res))
+              scheduleTick()
+            }
+          })
+          .catch(() => {
+            if (!control.signal.aborted) scheduleTick()
+          })
+      }, 2_000)
+    }
+    scheduleTick()
     return () => {
       control.abort()
-      clearTimeout(timer)
+      if (timer !== undefined) clearTimeout(timer)
     }
-  }, [visible, subpage, usageView.scanning, usageData, clientInstance])
+  }, [visible, subpage, usageView.scanning, clientInstance])
 
   const [contentMounted, setContentMounted] = useState(visible)
   useEffect(() => {

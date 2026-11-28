@@ -43,7 +43,9 @@ describe('where a message mentions a Bot', () => {
     expect(botMentionSpans('@Chief hi', roster, 'probe')).toHaveLength(1)
   })
 
-  it('links the same spans it hands to the renderer', () => {
+  it('links the same spans it hands to the renderer without turning @all into a bots.local URL', () => {
     expect(linkBotMentions('@Probe 1+1 is 2.', roster)).toBe('[@Probe](https://bots.local/probe) 1+1 is 2.')
+    expect(linkBotMentions('@all please review with @Probe', roster)).toBe('**@all** please review with [@Probe](https://bots.local/probe)')
+    expect(linkBotMentions('@everyone check', roster)).toBe('**@everyone** check')
   })
 })

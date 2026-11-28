@@ -21,19 +21,21 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 
 type Budget = { remaining: number }
 
-/** Keep a recognised group round inside the document budget, else fall back. */
-function preservedRound(text: string, budget: Budget): string | undefined {
-  if (budget.remaining < LIMIT) return undefined
+/** Keep a recognised group round inside the document budget, else fall back to a bounded prefix. */
+function preservedRound(text: string, budget: Budget): { text: string; preserved: boolean } | undefined {
   const round = compactBotRound(text)
-  if (round === undefined || round.length > budget.remaining) return undefined
-  budget.remaining -= round.length
-  return round
+  if (round === undefined) return undefined
+  if (budget.remaining >= LIMIT && round.length <= budget.remaining) {
+    budget.remaining -= round.length
+    return { text: round, preserved: true }
+  }
+  return { text: text.slice(0, LIMIT) + MARKER, preserved: false }
 }
 
 function summary(value: unknown, budget: Budget): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
   if (text.length <= LIMIT) return text
-  return preservedRound(text, budget) ?? text.slice(0, LIMIT) + MARKER
+  return preservedRound(text, budget)?.text ?? text.slice(0, LIMIT) + MARKER
 }
 
 function toolValue(value: unknown, budget: Budget): unknown {
@@ -54,7 +56,7 @@ function toolValue(value: unknown, budget: Budget): unknown {
         // through summary(), which preserves the same shape.
         const round = typeof preview === 'string' && preview.length > LIMIT && previews >= 2
           ? preservedRound(preview, budget) : undefined
-        if (round !== undefined) return [{ type: 'text', text: round }]
+        if (round?.preserved) return [{ type: 'text', text: round.text }]
         if (previews++ >= 2) return []
         return [{ type: 'text', text: summary(preview, budget) }]
       })
@@ -101,8 +103,10 @@ function messageValue(value: unknown, budget: Budget, isInjectedUser = false): u
   if (Array.isArray(value)) return value.map(item => messageValue(item, budget, isInjectedUser))
   if (!object(value)) return value
   if (value.type === 'tool-call' || value.type === 'tool-result') return toolValue(value, budget)
-  if (isInjectedUser && value.type === 'text' && typeof value.text === 'string' && value.text.length > LIMIT) {
-    return { ...value, text: summary(value.text, budget) }
+  if (value.type === 'text' && typeof value.text === 'string' && value.text.length > LIMIT) {
+    if (isInjectedUser) return { ...value, text: summary(value.text, budget) }
+    const round = preservedRound(value.text, budget)
+    if (round !== undefined) return { ...value, text: round.text }
   }
   const out: Record<string, unknown> = {}
   for (const [key, child] of Object.entries(value)) {

@@ -289,4 +289,140 @@ describe('PluginRouteBridge', () => {
     expect(localCall).toHaveBeenCalledTimes(2)
     expect(httpDispatch).not.toHaveBeenCalled()
   })
+
+  it('keeps a fixed 30s timeout budget across all bot endpoints and retries local dsBot/call after cooldown', async () => {
+    vi.useFakeTimers()
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      let localHealthy = false
+      const localCall = vi.fn(async (endpoint: string) => (
+        localHealthy ? { ok: true as const, value: { ok: true, value: { endpoint } } } : { ok: false as const, code: 'gateway/not-found' }
+      ))
+      const httpDispatch = dispatcher({ json: { ok: true, value: { source: 'http' } } })
+      const bridge = new PluginRouteBridge(httpDispatch, undefined, undefined, localCall)
+
+      await bridge.call({ route: 'api/bot', body: { endpoint: 'send', payload: { sessionId: 'bot', text: 'hi' } } })
+      expect(timeoutSpy).toHaveBeenLastCalledWith(30_000)
+      expect(localCall).toHaveBeenCalledTimes(1)
+
+      // Within the 30s cooldown window, im-login-wait skips local RPC and still uses 30s timeout.
+      await bridge.call({ route: 'api/bot', body: { endpoint: 'im-login-wait', payload: {} } })
+      expect(timeoutSpy).toHaveBeenLastCalledWith(30_000)
+      expect(localCall).toHaveBeenCalledTimes(1)
+      expect(httpDispatch).toHaveBeenCalledTimes(2)
+
+      // After 30s cooldown, local dsBot/call is retried and recovers.
+      localHealthy = true
+      vi.advanceTimersByTime(30_000)
+      const recovered = await bridge.call({ route: 'api/bot', body: { endpoint: 'state' } })
+      expect(recovered).toEqual({ status: 200, json: { ok: true, value: { endpoint: 'state' } } })
+      expect(localCall).toHaveBeenCalledTimes(2)
+    } finally {
+      timeoutSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('enforces DS-Bot allowlist and request/response sanitization on HarnessRemoteBridge dsBot/call', async () => {
+    const dispatch = vi.fn(async (_endpoint: string, payload: unknown) => {
+      const args = (payload as { args?: { endpoint?: string } }).args ?? (payload as { endpoint?: string })
+      if (args.endpoint === 'folders') {
+        return { ok: true as const, value: { ok: true, value: { workspace: '/repo', data: '/Users/dev/.dsh' } } }
+      }
+      if (args.endpoint === 'state') {
+        return {
+          ok: true as const,
+          value: {
+            ok: true,
+            value: {
+              bots: [],
+              phone: { pairing: { secret: 'hide' } },
+              work: { approvals: [{ id: 'a1', alwaysAllow: true }] },
+            },
+          },
+        }
+      }
+      return { ok: true as const, value: { ok: true, value: true } }
+    })
+    const onDsBotCall = vi.fn()
+    const bridge = new HarnessRemoteBridge({
+      supportsCarrier: true,
+      dispatch,
+      open: async () => (async function* () {})(),
+      invoke: async () => undefined,
+      failure: () => ({ code: 'FAILED', message: 'fail', details: {} }),
+    } as never, async () => undefined,
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    { onFrame: vi.fn(), onDsBotCall })
+    try {
+      await expect(bridge.call({
+        endpoint: 'dsBot/call',
+        payload: { args: { endpoint: 'computer-shot', payload: {} } },
+      })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+
+      await expect(bridge.call({
+        endpoint: 'dsBot/call',
+        payload: { args: { endpoint: 'approval-answer', payload: { id: 'a1', choice: 'always' } } },
+      })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+
+      await expect(bridge.call({
+        endpoint: 'dsBot/call',
+        payload: { args: { endpoint: 'image', payload: { parent: '/Users/dev/.dsh/secret.log' } } },
+      })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      expect(dispatch).not.toHaveBeenCalled()
+
+      await bridge.call({
+        endpoint: 'dsBot/call',
+        payload: {
+          args: {
+            endpoint: 'set-prefs',
+            payload: { css: 'body{}', layout: 'flat', appearance: { mode: 'dark', compact: true } },
+          },
+        },
+      })
+      expect(dispatch).toHaveBeenLastCalledWith('dsBot/call', {
+        args: { endpoint: 'set-prefs', payload: { layout: 'flat', appearance: { compact: true } } },
+      }, expect.any(AbortSignal))
+
+      const folders = await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'folders', payload: null } } })
+      expect(folders).toEqual({ ok: true, value: { ok: true, value: { workspace: '/repo' } } })
+
+      // Also sanitizes unwrapped dsBot/call values returned without an outer `{ ok, value }` wrapper.
+      dispatch.mockResolvedValueOnce({ ok: true as const, value: { workspace: '/repo', data: '/Users/dev/.dsh' } as never })
+      const unwrappedFolders = await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'folders', payload: null } } })
+      expect(unwrappedFolders).toEqual({ ok: true, value: { workspace: '/repo' } })
+
+      // Smuggled `request` / `_request` properties cannot bypass post-dispatch sanitization or leak to dispatch.
+      const smuggledState = await bridge.call({
+        endpoint: 'dsBot/call',
+        payload: {
+          args: { endpoint: 'state', payload: null, request: { endpoint: 'efforts' }, _request: { endpoint: 'models' } },
+          request: { endpoint: 'efforts' },
+        },
+      })
+      expect(dispatch).toHaveBeenLastCalledWith('dsBot/call', {
+        args: { endpoint: 'state', payload: null },
+      }, expect.any(AbortSignal))
+      expect(smuggledState).toEqual({
+        ok: true,
+        value: { ok: true, value: { bots: [], phone: {}, work: { approvals: [{ id: 'a1' }] } } },
+      })
+      expect(onDsBotCall).toHaveBeenLastCalledWith(
+        { endpoint: 'state', payload: null },
+        { ok: true, value: { bots: [], phone: {}, work: { approvals: [{ id: 'a1' }] } } },
+      )
+
+      const state = await bridge.call({ endpoint: 'dsBot/call', payload: { args: { endpoint: 'state', payload: null } } })
+      expect(state).toEqual({
+        ok: true,
+        value: { ok: true, value: { bots: [], phone: {}, work: { approvals: [{ id: 'a1' }] } } },
+      })
+      expect(onDsBotCall).toHaveBeenLastCalledWith(
+        { endpoint: 'state', payload: null },
+        { ok: true, value: { bots: [], phone: {}, work: { approvals: [{ id: 'a1' }] } } },
+      )
+    } finally {
+      await bridge.closeAll()
+    }
+  })
 })

@@ -79,8 +79,8 @@ interface BotTeamStoreState {
   setReport: (report?: BotReportTarget) => void
   setContextMenu: (target?: BotContextMenuTarget) => void
   clearErrors: () => void
-  startFeed: () => void
-  stopFeed: () => void
+  startFeed: (owner?: symbol) => void
+  stopFeed: (owner?: symbol) => void
   refresh: (force?: boolean, signal?: AbortSignal) => Promise<void>
   refreshLive: (options?: { forceFull?: boolean }) => Promise<void>
   syncSelectedSession: (options?: { selectedId?: string; force?: boolean; signal?: AbortSignal }) => Promise<RemoteSession | undefined>
@@ -110,6 +110,10 @@ let activeFeedRevision = 0
 let activeFeedAbort: AbortController | undefined
 let activeFeedKey: string | undefined
 let feedDebounceTimer: ReturnType<typeof setTimeout> | undefined
+const activeFeedOwners = new Set<symbol>()
+const DEFAULT_FEED_OWNER = Symbol('default-feed-owner')
+const MAX_ROOM_FEED_SEQ_ENTRIES = 128
+const FORBIDDEN_ROOM_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 const FEED_BACKOFF_MS = [2_000, 5_000, 15_000, 30_000]
 const TERMINAL_FEED_CODES = new Set([
   'METHOD_NOT_FOUND',
@@ -258,12 +262,19 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
   setContextMenu: (contextMenu?: BotContextMenuTarget) => set({ contextMenu }),
   clearErrors: () => set({ error: undefined, actionError: undefined, openError: undefined }),
 
-  stopFeed: () => {
+  stopFeed: (owner?: symbol) => {
+    if (owner === undefined) {
+      activeFeedOwners.clear()
+    } else {
+      activeFeedOwners.delete(owner)
+      if (activeFeedOwners.size > 0) return
+    }
     stopFeedTracking()
     if (get().feedConnected) set({ feedConnected: false })
   },
 
-  startFeed: () => {
+  startFeed: (owner: symbol = DEFAULT_FEED_OWNER) => {
+    activeFeedOwners.add(owner)
     const { scope, connected, epoch } = observeAppConnection()
     get().ensureScope(scope)
     if (!connected) return
@@ -301,13 +312,21 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
             if (control.signal.aborted || activeFeedRevision !== feedRev || get().scope !== scope) break
             if (frame.event === 'room') {
               const roomId = text(object(frame.data).roomId)
-              if (roomId) {
-                set(state => ({
-                  roomFeedSeq: {
-                    ...state.roomFeedSeq,
-                    [roomId]: (state.roomFeedSeq[roomId] ?? 0) + 1,
-                  },
-                }))
+              if (roomId && !FORBIDDEN_ROOM_KEYS.has(roomId)) {
+                set(state => {
+                  const entries = Object.entries(state.roomFeedSeq)
+                  const exists = Object.hasOwn(state.roomFeedSeq, roomId)
+                  const start = !exists && entries.length >= MAX_ROOM_FEED_SEQ_ENTRIES
+                    ? entries.length - (MAX_ROOM_FEED_SEQ_ENTRIES - 1)
+                    : 0
+                  const nextSeq: Record<string, number> = {}
+                  for (let i = start; i < entries.length; i++) {
+                    const [key, val] = entries[i]!
+                    nextSeq[key] = val
+                  }
+                  nextSeq[roomId] = (exists ? state.roomFeedSeq[roomId]! : 0) + 1
+                  return { roomFeedSeq: nextSeq }
+                })
               }
               continue
             }
@@ -734,6 +753,7 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
 useAppStore.subscribe(appState => {
   if (appState.connection.phase !== 'connected') {
     lastObservedConnected = false
+    activeFeedOwners.clear()
     stopFeedTracking()
     if (useBotTeamStore.getState().openedSessionKey !== undefined || useBotTeamStore.getState().feedConnected) {
       resetOpenTracking()

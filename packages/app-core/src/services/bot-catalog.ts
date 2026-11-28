@@ -362,16 +362,22 @@ export class BotRemoteClient {
     for (const room of state.rooms) seedOrCollect(true, room.id, room.avatar)
 
     if (missing.length > 0) {
+      let nextIndex = 0
+      const workerCount = Math.min(4, missing.length)
       await Promise.all(
-        missing.map(async item => {
-          try {
-            const payload = item.isRoom ? { roomId: item.id } : { botId: item.id }
-            const res = object(await this.call('avatar', payload, signal))
-            const image = text(res.image)
-            const ref = text(res.ref) || item.ref
-            if (image) this.avatarCache.set(ref, image)
-          } catch {
-            // Avatar hydration is best-effort and must never fail state loading.
+        Array.from({ length: workerCount }, async () => {
+          while (nextIndex < missing.length) {
+            if (signal?.aborted) return
+            const item = missing[nextIndex++]!
+            try {
+              const payload = item.isRoom ? { roomId: item.id } : { botId: item.id }
+              const res = object(await this.call('avatar', payload, signal))
+              const image = text(res.image)
+              const ref = text(res.ref) || item.ref
+              if (image) this.avatarCache.set(ref, image)
+            } catch {
+              // Avatar hydration is best-effort and must never fail state loading.
+            }
           }
         }),
       )

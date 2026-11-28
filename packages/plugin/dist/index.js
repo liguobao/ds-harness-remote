@@ -85416,6 +85416,7 @@ var BOT_REMOTE_OPERATIONS = [
   "bot-new-part",
   "bot-open-part"
 ];
+var BOT_REMOTE_OPERATION_SET = new Set(BOT_REMOTE_OPERATIONS);
 function isAllowedPluginRoute(route) {
   return PLUGIN_ROUTE_ALLOWLIST.some((allowed) => allowed === route);
 }
@@ -85442,15 +85443,6 @@ var imageUploadCallSchema = external_exports.object({
   ])
 }).strict();
 var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
-var LONG_POLL_TIMEOUT_MS = 45e3;
-var SLOW_BOT_OPERATION_TIMEOUT_MS = 6e4;
-var SLOW_BOT_OPERATIONS = /* @__PURE__ */ new Set([
-  "send",
-  "connector-add",
-  "connector-connect",
-  "connector-retry",
-  "connector-sign-in-code"
-]);
 var COMPUTER_APPEARANCE_KEYS = /* @__PURE__ */ new Set([
   "css",
   "mode",
@@ -85467,11 +85459,6 @@ var REMOTE_STATE_OMIT_KEYS = /* @__PURE__ */ new Set([
   "telemetryPrompt",
   "releaseNotes"
 ]);
-function timeoutForEndpoint(endpoint) {
-  if (endpoint === "im-login-wait") return LONG_POLL_TIMEOUT_MS;
-  if (SLOW_BOT_OPERATIONS.has(endpoint)) return SLOW_BOT_OPERATION_TIMEOUT_MS;
-  return PLUGIN_ROUTE_TIMEOUT_MS;
-}
 function isPlainRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -85505,16 +85492,14 @@ function sanitizeBotRequestBody(body) {
   }
   return body;
 }
-function sanitizeBotResponseJson(endpoint, json2) {
-  if (!isPlainRecord2(json2) || json2.ok !== true || !isPlainRecord2(json2.value)) return json2;
+function sanitizeBotPayloadValue(endpoint, value) {
   if (endpoint === "folders") {
-    if (!Object.hasOwn(json2.value, "data")) return json2;
-    const nextValue2 = { ...json2.value };
+    if (!Object.hasOwn(value, "data")) return value;
+    const nextValue2 = { ...value };
     delete nextValue2.data;
-    return { ...json2, value: nextValue2 };
+    return nextValue2;
   }
-  if (endpoint !== "state") return json2;
-  const value = json2.value;
+  if (endpoint !== "state") return value;
   let nextValue;
   const ensureCopy = () => {
     nextValue ??= { ...value };
@@ -85539,21 +85524,31 @@ function sanitizeBotResponseJson(endpoint, json2) {
       })
     };
   }
-  return nextValue === void 0 ? json2 : { ...json2, value: nextValue };
+  return nextValue ?? value;
+}
+function sanitizeBotResponseJson(endpoint, json2) {
+  if (!isPlainRecord2(json2)) return json2;
+  if (typeof json2.ok === "boolean") {
+    if (json2.ok !== true || !isPlainRecord2(json2.value)) return json2;
+    const nextValue = sanitizeBotPayloadValue(endpoint, json2.value);
+    return nextValue === json2.value ? json2 : { ...json2, value: nextValue };
+  }
+  return sanitizeBotPayloadValue(endpoint, json2);
 }
 var TERMINAL_LOCAL_DS_BOT_CODES = /* @__PURE__ */ new Set([
   "gateway/not-found",
   "gateway/invocation-unavailable",
   "METHOD_NOT_FOUND"
 ]);
-var PluginRouteBridge = class {
+var PluginRouteBridge = class _PluginRouteBridge {
   constructor(dispatch, logger2, observer, localDsBotCall) {
     this.dispatch = dispatch;
     this.logger = logger2;
     this.observer = observer;
     this.localDsBotCall = localDsBotCall;
   }
-  dsBotRpcAvailable = true;
+  static DS_BOT_RPC_COOLDOWN_MS = 3e4;
+  dsBotRpcRetryAt = 0;
   async call(input4, transferred = false) {
     let params;
     try {
@@ -85568,19 +85563,20 @@ var PluginRouteBridge = class {
       throw new RpcError("INVALID_MESSAGE", `The plugin route call exceeds the ${MAX_SECURE_MESSAGE_BYTES}-byte remote limit.`);
     }
     const dispatchBody = params.route === "api/bot" ? sanitizeBotRequestBody(params.body) : params.body;
-    const timeoutMs = params.route === "api/bot" ? timeoutForEndpoint(params.body.endpoint) : PLUGIN_ROUTE_TIMEOUT_MS;
     const startedAt = performance.now();
-    const signal = AbortSignal.timeout(timeoutMs);
+    const signal = AbortSignal.timeout(PLUGIN_ROUTE_TIMEOUT_MS);
+    const canTryLocalDsBot = params.route === "api/bot" && this.localDsBotCall !== void 0 && Date.now() >= this.dsBotRpcRetryAt;
     let result;
     let fallbackToHttp = false;
-    if (params.route === "api/bot" && this.localDsBotCall !== void 0 && this.dsBotRpcAvailable) {
+    if (canTryLocalDsBot) {
       try {
         const botBody = dispatchBody;
         const local = await this.localDsBotCall(botBody.endpoint, botBody.payload ?? null, signal);
         if (local.ok) {
+          this.dsBotRpcRetryAt = 0;
           result = { status: 200, json: local.value };
         } else if (local.code !== void 0 && TERMINAL_LOCAL_DS_BOT_CODES.has(local.code)) {
-          this.dsBotRpcAvailable = false;
+          this.dsBotRpcRetryAt = Date.now() + _PluginRouteBridge.DS_BOT_RPC_COOLDOWN_MS;
           fallbackToHttp = true;
         } else {
           this.logger?.warn("plugin route call failed", {
@@ -85601,7 +85597,7 @@ var PluginRouteBridge = class {
         }
       }
     }
-    if (result === void 0 && (fallbackToHttp || params.route !== "api/bot" || this.localDsBotCall === void 0 || !this.dsBotRpcAvailable)) {
+    if (result === void 0 && (fallbackToHttp || !canTryLocalDsBot)) {
       try {
         result = await this.dispatch(params.route, dispatchBody, signal);
       } catch (error62) {
@@ -97045,16 +97041,18 @@ var TOOL_EVENT_TYPES = /* @__PURE__ */ new Set([
 ]);
 var object3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 function preservedRound(text, budget) {
-  if (budget.remaining < LIMIT) return void 0;
   const round = compactBotRound(text);
-  if (round === void 0 || round.length > budget.remaining) return void 0;
-  budget.remaining -= round.length;
-  return round;
+  if (round === void 0) return void 0;
+  if (budget.remaining >= LIMIT && round.length <= budget.remaining) {
+    budget.remaining -= round.length;
+    return { text: round, preserved: true };
+  }
+  return { text: text.slice(0, LIMIT) + MARKER, preserved: false };
 }
 function summary2(value, budget) {
   const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
   if (text.length <= LIMIT) return text;
-  return preservedRound(text, budget) ?? text.slice(0, LIMIT) + MARKER;
+  return preservedRound(text, budget)?.text ?? text.slice(0, LIMIT) + MARKER;
 }
 function toolValue(value, budget) {
   if (Array.isArray(value)) return value.map((item) => toolValue(item, budget));
@@ -97069,7 +97067,7 @@ function toolValue(value, budget) {
         if (object3(block) && (block.type === "tool-call" || block.type === "tool-result")) return [toolValue(block, budget)];
         const preview = object3(block) ? block.text ?? block : block;
         const round = typeof preview === "string" && preview.length > LIMIT && previews >= 2 ? preservedRound(preview, budget) : void 0;
-        if (round !== void 0) return [{ type: "text", text: round }];
+        if (round?.preserved) return [{ type: "text", text: round.text }];
         if (previews++ >= 2) return [];
         return [{ type: "text", text: summary2(preview, budget) }];
       });
@@ -97107,8 +97105,10 @@ function messageValue(value, budget, isInjectedUser = false) {
   if (Array.isArray(value)) return value.map((item) => messageValue(item, budget, isInjectedUser));
   if (!object3(value)) return value;
   if (value.type === "tool-call" || value.type === "tool-result") return toolValue(value, budget);
-  if (isInjectedUser && value.type === "text" && typeof value.text === "string" && value.text.length > LIMIT) {
-    return { ...value, text: summary2(value.text, budget) };
+  if (value.type === "text" && typeof value.text === "string" && value.text.length > LIMIT) {
+    if (isInjectedUser) return { ...value, text: summary2(value.text, budget) };
+    const round = preservedRound(value.text, budget);
+    if (round !== void 0) return { ...value, text: round.text };
   }
   const out = {};
   for (const [key, child] of Object.entries(value)) {
@@ -115242,7 +115242,7 @@ var HarnessRemoteBridge = class {
   warnedMissingRemoteEvents = false;
   terminalCarrier;
   async call(input4) {
-    const params = callSchema3.parse(input4);
+    let params = callSchema3.parse(input4);
     if ((params.endpoint === "remoteUploads/upload" || params.endpoint === "remoteImages/upload") && this.uploadAttachment !== void 0) {
       const payload = external_exports.object({ args: external_exports.unknown() }).strict().parse(params.payload);
       return { ok: true, value: await this.uploadAttachment(payload.args) };
@@ -115251,8 +115251,31 @@ var HarnessRemoteBridge = class {
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
     if (params.endpoint === "speech/follow") throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this speech endpoint.");
     if (params.endpoint === "dsBot/feed") throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this DS Bot feed endpoint.");
-    if (params.endpoint === "dsBot/call" && requestArgs(params.payload).endpoint === "dsh-update-install") {
-      throw new RpcError("INVALID_MESSAGE", "Host upgrades are not permitted over the remote channel.");
+    let validatedDsBotBody;
+    if (params.endpoint === "dsBot/call") {
+      const root2 = record11(params.payload);
+      const wrappedArgs = isRecord27(root2.args) ? root2.args : void 0;
+      const botArgs = wrappedArgs ?? root2;
+      const endpoint = typeof botArgs.endpoint === "string" ? botArgs.endpoint : "";
+      if (endpoint === "dsh-update-install") {
+        throw new RpcError("INVALID_MESSAGE", "Host upgrades are not permitted over the remote channel.");
+      }
+      if (!BOT_REMOTE_OPERATION_SET.has(endpoint)) {
+        throw new RpcError("INVALID_MESSAGE", "The DS-Bot operation is invalid for the remote channel.");
+      }
+      if (botArgs.payload !== void 0 && botArgs.payload !== null && !isRecord27(botArgs.payload)) {
+        throw new RpcError("INVALID_MESSAGE", "The DS-Bot payload is invalid for the remote channel.");
+      }
+      const sanitizedBody = sanitizeBotRequestBody({
+        endpoint,
+        payload: isRecord27(botArgs.payload) ? botArgs.payload : null
+      });
+      const nextBotArgs = { endpoint: sanitizedBody.endpoint, payload: sanitizedBody.payload ?? null };
+      validatedDsBotBody = nextBotArgs;
+      params = {
+        ...params,
+        payload: wrappedArgs !== void 0 ? { args: nextBotArgs } : nextBotArgs
+      };
     }
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
       const args = requestArgs(params.payload);
@@ -115307,7 +115330,13 @@ var HarnessRemoteBridge = class {
       } else if (this.resolveWorkspaceRoot !== void 0 && (WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || OFFICE_RENDER_ENDPOINTS.has(params.endpoint))) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
-      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.dispatchWithOfficeFallback(params.endpoint, nativePayload, signal);
+      let nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.dispatchWithOfficeFallback(params.endpoint, nativePayload, signal);
+      if (validatedDsBotBody !== void 0 && nativeResult.ok) {
+        nativeResult = {
+          ...nativeResult,
+          value: sanitizeBotResponseJson(validatedDsBotBody.endpoint, nativeResult.value)
+        };
+      }
       if (params.endpoint === "session/page" && nativeResult.ok) {
         const sessionId = journalSessionId(nativePayload);
         if (sessionId !== void 0) this.messageFiles.observe(sessionId, nativeResult.value);
@@ -115323,16 +115352,10 @@ var HarnessRemoteBridge = class {
           }
         }
       }
-      if (params.endpoint === "dsBot/call" && nativeResult.ok && isRecord27(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== void 0) {
-        const root2 = record11(params.payload);
-        const args = isRecord27(root2.args) ? root2.args : root2;
-        const botEndpoint = typeof args.endpoint === "string" && args.endpoint.length > 0 ? args.endpoint : void 0;
-        if (botEndpoint !== void 0) {
-          const botPayload = isRecord27(args.payload) ? args.payload : null;
-          try {
-            this.forwardedEventsObserver.onDsBotCall({ endpoint: botEndpoint, payload: botPayload }, nativeResult.value);
-          } catch {
-          }
+      if (validatedDsBotBody !== void 0 && nativeResult.ok && isRecord27(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== void 0) {
+        try {
+          this.forwardedEventsObserver.onDsBotCall(validatedDsBotBody, nativeResult.value);
+        } catch {
         }
       }
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : filterRemotePluginInventory(params.endpoint, nativeResult);
@@ -117764,9 +117787,10 @@ function createPluginRouteDispatcher(readConnection, readPort, peer) {
       if (response.status === 401) {
         cookie = void 0;
         if (isReadOnlyBotRoute(route, body)) {
-          await response.body?.cancel();
-          cookie = await authenticateCookie();
-          if (cookie !== void 0) {
+          const refreshedCookie = await authenticateCookie();
+          if (refreshedCookie !== void 0) {
+            cookie = refreshedCookie;
+            await response.body?.cancel();
             response = await postFallback();
             if (response.status === 401) cookie = void 0;
           }
