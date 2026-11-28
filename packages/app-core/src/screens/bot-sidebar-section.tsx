@@ -18,6 +18,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  ChevronUp,
   CircleAlert,
   Copy,
   CopyPlus,
@@ -41,6 +42,8 @@ import {
   canDeleteBot,
   object,
   objects,
+  pausedWorksList,
+  pendingBotRequests,
   text,
   type BotEntry,
   type BotRemoteClient,
@@ -59,7 +62,7 @@ import { ModalSurface } from './chat/modal'
 import { ConfirmDialog } from './chat/confirm-dialog'
 import { resolveSessionDisplayTitle } from './session-title'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
-import { BotAvatar, BotAvatarWithBadge } from './bot/avatar'
+import { BotAvatar, BotAvatarWithBadge, RoomAvatar } from './bot/avatar'
 import { BotEditor, type BotPerform } from './bot/editor'
 import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
 import { BotProfilePage } from './bot/profile-page'
@@ -70,23 +73,46 @@ export function useBotTeamLoad(enabled: boolean): void {
   const botScope = useAppStore(browseScope)
   const ensureScope = useBotTeamStore(state => state.ensureScope)
   const refresh = useBotTeamStore(state => state.refresh)
+  const startFeed = useBotTeamStore(state => state.startFeed)
+  const stopFeed = useBotTeamStore(state => state.stopFeed)
 
   useEffect(() => {
     ensureScope(botScope)
   }, [botScope, ensureScope])
 
   useEffect(() => {
-    if (!enabled || !connected) return
+    if (!connected) {
+      stopFeed()
+      return
+    }
+    if (!enabled) return
+    const owner = Symbol('bot-team-load')
     const controller = new AbortController()
     void refresh(false, controller.signal)
-    return () => controller.abort()
-  }, [enabled, connected, botScope, refresh])
+    startFeed(owner)
+    return () => {
+      controller.abort()
+      stopFeed(owner)
+    }
+  }, [enabled, connected, botScope, refresh, startFeed, stopFeed])
 }
 
 export function botLiveStatus(state: BotState, bot: BotEntry): { kind: 'idle' | 'working' | 'away' | 'waiting'; label: string } {
-  const hasQuestion = state.questions[bot.sessionId] !== undefined
-  const hasApproval = state.approvals.some(entry => entry.botId === bot.id || entry.sessionId === bot.sessionId)
-  if (hasQuestion || hasApproval || state.activity[bot.id] === 'alert' || bot.waiting) {
+  const hasQuestion = state.questions[bot.sessionId] !== undefined || state.questions[bot.id] !== undefined
+  const hasApproval = state.approvals.some(
+    entry => entry.roomId === undefined
+      && entry.answerable !== false
+      && text(object(entry.review).status) !== 'reviewing'
+      && (entry.botId === bot.id || entry.sessionId === bot.sessionId),
+  )
+  const hasView = state.views[bot.id] !== undefined || state.views[bot.sessionId] !== undefined
+  const hasWorkWait = state.work.waiting?.[bot.id] !== undefined || state.work.waiting?.[bot.sessionId] !== undefined
+    || pausedWorksList(state.work.paused, bot.id, bot.sessionId).length > 0
+  const hasHoldOrRequest = Object.keys(object(state.browserHolds?.[bot.id] ?? state.browserHolds?.[bot.sessionId])).length > 0
+    || pendingBotRequests(state.secretRequests, bot.id, bot.sessionId).length > 0
+    || pendingBotRequests(state.connectorRequests, bot.id, bot.sessionId).length > 0
+    || pendingBotRequests(state.mailRequests, bot.id, bot.sessionId).length > 0
+  if (hasQuestion || hasApproval || hasView || hasWorkWait || hasHoldOrRequest || state.activity[bot.id] === 'alert' || bot.waiting || bot.blocked !== undefined || Boolean(bot.sessionMissing)) {
     return { kind: 'waiting', label: s.bots.waiting }
   }
   const ownTurn = state.work.bots[bot.id] ?? state.activity[bot.id]
@@ -111,12 +137,18 @@ export function botLiveStatus(state: BotState, bot: BotEntry): { kind: 'idle' | 
 }
 
 export function roomLiveStatus(state: BotState, room: BotRoom): { working: boolean; waiting: boolean; label: string } {
-  const hasApproval = state.approvals.some(entry => entry.roomId === room.id)
+  const hasApproval = state.approvals.some(
+    entry => entry.roomId === room.id
+      && entry.answerable !== false
+      && text(object(entry.review).status) !== 'reviewing',
+  )
+  const hasView = state.views[room.id] !== undefined || state.views[room.sessionId] !== undefined
+  const hasQuestion = state.questions[room.id] !== undefined || state.questions[room.sessionId] !== undefined
   const roomWork = state.work.rooms[room.id]
   const activeMembers = (Array.isArray(roomWork) ? roomWork : [])
     .map(entry => text(object(entry).botId))
     .filter(Boolean)
-  if (hasApproval) {
+  if (hasApproval || hasView || hasQuestion || room.paused || room.idlePaused) {
     return { working: activeMembers.length > 0, waiting: true, label: s.bots.waiting }
   }
   if (activeMembers.length > 0) {
@@ -125,7 +157,8 @@ export function roomLiveStatus(state: BotState, room: BotRoom): { working: boole
     return { working: true, waiting: false, label: `${firstBot}${extra} · ${s.bots.busy}` }
   }
   const goalObj = room.goal
-  if (goalObj && text(goalObj.status) === 'running') {
+  const goalStatus = goalObj ? text(goalObj.status) : ''
+  if (goalObj && (goalStatus === 'active' || goalStatus === 'running')) {
     return { working: true, waiting: false, label: text(goalObj.title) || s.bots.busy }
   }
   return {
@@ -187,9 +220,12 @@ export function BotSidebarSection({
   const [filter, setFilter] = useState<RosterFilter>('all')
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const [inboxCollapsed, setInboxCollapsed] = useState(false)
+  const [inboxExpandedAll, setInboxExpandedAll] = useState(false)
 
   const query = searchQuery.trim().toLocaleLowerCase()
   const visibleError = actionError ?? error
+  const inboxItems = useMemo(() => objects(state?.inbox?.items), [state?.inbox])
 
   const sessionMap = useMemo(() => {
     const map = new Map<string, (typeof sessions)[number]>()
@@ -390,6 +426,78 @@ export function BotSidebarSection({
           </View>
         )}
 
+        {state !== undefined && !query && inboxItems.length > 0 && (
+          <View style={styles.unifiedInboxCard}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setInboxCollapsed(c => !c)}
+              style={styles.unifiedInboxHeader}
+            >
+              <View style={styles.unifiedInboxHeaderLeft}>
+                <CircleAlert size={15} color={colors.warning} />
+                <Text style={styles.unifiedInboxTitle}>{s.bots.inboxTitle}</Text>
+                <View style={styles.unifiedInboxCountPill}>
+                  <Text style={styles.unifiedInboxCountText}>{inboxItems.length}</Text>
+                </View>
+              </View>
+              {inboxCollapsed ? <ChevronDown size={15} color={colors.muted} /> : <ChevronUp size={15} color={colors.muted} />}
+            </Pressable>
+            {!inboxCollapsed && (
+              <View style={styles.unifiedInboxList}>
+                {(inboxExpandedAll ? inboxItems : inboxItems.slice(0, 5)).map((item, idx) => {
+                  const targetRoomId = text(item.roomId)
+                  const targetBotId = text(item.botId)
+                  const targetId = targetRoomId || targetBotId
+                  const targetName = targetRoomId
+                    ? state.rooms.find(r => r.id === targetRoomId)?.name ?? targetRoomId
+                    : state.bots.find(b => b.id === targetBotId)?.name ?? targetBotId
+                  const kindKey = text(item.kind)
+                  const kindLabel = (s.bots.inboxKindLabels as Record<string, string>)[kindKey] ?? kindKey
+                  const summary = text(item.text) || text(item.tool) || text(item.note) || kindLabel
+                  return (
+                    <Pressable
+                      key={text(item.id) || `inbox-${idx}`}
+                      accessibilityRole="button"
+                      disabled={!targetId}
+                      onPress={() => {
+                        if (targetId) onSelectBot(targetId)
+                      }}
+                      style={({ pressed }) => [
+                        styles.unifiedInboxRow,
+                        idx > 0 && styles.rowDivider,
+                        pressed && styles.rowPressed,
+                      ]}
+                    >
+                      <View style={styles.unifiedInboxKindBadge}>
+                        <Text style={styles.unifiedInboxKindText}>{kindLabel}</Text>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.unifiedInboxTarget} numberOfLines={1}>
+                          {targetName}
+                        </Text>
+                        <Text style={styles.unifiedInboxSummary} numberOfLines={1}>
+                          {summary}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  )
+                })}
+                {!inboxExpandedAll && inboxItems.length > 5 && (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setInboxExpandedAll(true)}
+                    style={[styles.unifiedInboxRow, styles.rowDivider, { justifyContent: 'center' }]}
+                  >
+                    <Text style={[styles.retryPillText, { fontSize: 12.5 }]}>
+                      {s.bots.inboxShowAll(inboxItems.length)}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
         {loading && state === undefined && visibleError === undefined && (
           <View style={styles.loadingWrap}>
             <ActivityIndicator color={colors.primary} />
@@ -512,15 +620,21 @@ export function BotSidebarSection({
               ]}
             >
               <View style={[styles.groupAvatarBox, { backgroundColor: filterPillBg }]}>
-                {entry.members.slice(0, 3).map((id, idx) => {
-                  const member = state.bots.find(b => b.id === id)
-                  return member ? (
-                    <View key={id} style={{ position: 'absolute', left: 5 + idx * 8, top: 7 + (idx % 2) * 11 }}>
-                      <BotAvatar bot={member} size={24} />
-                    </View>
-                  ) : null
-                })}
-                {entry.members.length === 0 && <Users color={colors.muted} size={22} />}
+                {entry.avatar?.image ? (
+                  <RoomAvatar members={entry.members} bots={state.bots} avatar={entry.avatar} size={46} />
+                ) : (
+                  <>
+                    {entry.members.slice(0, 3).map((id, idx) => {
+                      const member = state.bots.find(b => b.id === id)
+                      return member ? (
+                        <View key={id} style={{ position: 'absolute', left: 5 + idx * 8, top: 7 + (idx % 2) * 11 }}>
+                          <BotAvatar bot={member} size={24} />
+                        </View>
+                      ) : null
+                    })}
+                    {entry.members.length === 0 && <Users color={colors.muted} size={22} />}
+                  </>
+                )}
               </View>
 
               <View style={styles.rowBody}>
@@ -1203,6 +1317,74 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.surfaceStrong,
     },
     readOnlyText: { ...type.caption, color: colors.muted },
+    unifiedInboxCard: {
+      marginHorizontal: 6,
+      marginBottom: 6,
+      borderRadius: 16,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      overflow: 'hidden',
+    },
+    unifiedInboxHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    unifiedInboxHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    unifiedInboxTitle: {
+      fontSize: 13.5,
+      fontWeight: '700',
+      color: colors.ink,
+    },
+    unifiedInboxCountPill: {
+      paddingHorizontal: 7,
+      paddingVertical: 1,
+      borderRadius: radius.pill,
+      backgroundColor: colors.warningSoft,
+    },
+    unifiedInboxCountText: {
+      fontSize: 11.5,
+      fontWeight: '700',
+      color: colors.warning,
+    },
+    unifiedInboxList: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+    },
+    unifiedInboxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+    },
+    unifiedInboxKindBadge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: colors.grouped,
+    },
+    unifiedInboxKindText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    unifiedInboxTarget: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.ink,
+    },
+    unifiedInboxSummary: {
+      fontSize: 12,
+      color: colors.muted,
+    },
     loadingWrap: { paddingVertical: spacing.xxl, alignItems: 'center' },
     emptyWrap: { paddingVertical: spacing.lg, paddingHorizontal: 8 },
     sectionBlock: { gap: 4, marginTop: 4, paddingHorizontal: 6 },

@@ -2,12 +2,15 @@ import { AbortController as NativeAbortController } from 'abort-controller'
 import { describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import {
+  BOT_OPERATIONS,
   BotRemoteClient,
   botMessageRequest,
   canDeleteBot,
   formatBotSubmission,
   isScopedKnownBotSessionId,
   parseBotState,
+  pausedWorksList,
+  pendingBotRequests,
   trackScopedBotStateSessions,
   type BotOperation,
 } from '../src/services/bot-catalog'
@@ -218,7 +221,8 @@ describe('Android Bot client authority', () => {
       { name: 'one time', endpoint: 'approval-answer', payload: { id: 'approval', choice: 'allow' }, allowed: true },
       { name: 'reject', endpoint: 'approval-answer', payload: { id: 'approval', choice: 'reject' }, allowed: true },
       { name: 'broad approval', endpoint: 'approval-answer', payload: { choice: 'allow_session' }, allowed: false },
-      { name: 'credential write', endpoint: 'secret-set', payload: {}, allowed: false },
+      { name: 'secret request fill', endpoint: 'secret-set', payload: { requestId: 'req-1', value: 'sk-test', scope: 'bot' }, allowed: true },
+      { name: 'direct vault store', endpoint: 'secret-store', payload: {}, allowed: false },
       { name: 'local agent registration (0.3.0)', endpoint: 'local-agent-add', payload: {}, allowed: false },
       { name: 'im pairing (0.3.0)', endpoint: 'im-pair', payload: {}, allowed: false },
       { name: 'connector command (0.3.0)', endpoint: 'connector-add', payload: {}, allowed: false },
@@ -269,7 +273,7 @@ describe('Android Bot client authority', () => {
     const dispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
       expect(body.endpoint).toBe('state')
       if (stage === 'initial') {
-        expect(body.payload).toBeNull()
+        expect(body.payload).toEqual({ avatars: 'ref' })
         return envelope({
           ...botState(),
           revision: 10,
@@ -278,7 +282,7 @@ describe('Android Bot client authority', () => {
           btwCards: {},
         })
       }
-      expect(body.payload).toEqual({ since: 10, models: 'm1', live: 'run1:1' })
+      expect(body.payload).toEqual({ since: 10, models: 'm1', live: 'run1:1', avatars: 'ref' })
       if (stage === 'unchanged') {
         return envelope({ revision: 10, unchanged: true, liveKey: 'run1:1' })
       }
@@ -337,9 +341,9 @@ describe('Android Bot client authority', () => {
     expect(questionUpdated.defaultModel).toBe('deepseek/deepseek-chat')
     expect(questionUpdated.bots[0]?.preview).toBe('Cached preview')
 
-    // Legacy Host without liveKey falls back to full query (null) so non-revision updates aren't missed.
+    // Legacy Host without liveKey falls back to full query ({ avatars: 'ref' }) so non-revision updates aren't missed.
     const legacyDispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
-      expect(body.payload).toBeNull()
+      expect(body.payload).toEqual({ avatars: 'ref' })
       return envelope({ ...botState(), revision: 5 })
     })
     const legacyClient = new BotRemoteClient(legacyDispatch, async () => [], () => {})
@@ -357,5 +361,268 @@ describe('Android Bot client authority', () => {
       endpoint: 'send',
       payload: { sessionId: 'bot', text: '@[Other](dsh-session:abc) hello' },
     })
+  })
+
+  it('hydrates v0.4 avatars on demand and preserves inbox, paused rooms, extraDirs, and delta state', async () => {
+    const avatarPng = 'data:image/png;base64,iVBORw0KGgo='
+    let poll = 0
+    const dispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
+      if (body.endpoint === 'avatar') {
+        if (body.payload?.botId === 'bot') return envelope({ botId: 'bot', ref: 'av-bot-1', image: avatarPng })
+        if (body.payload?.roomId === 'room-1') return envelope({ roomId: 'room-1', ref: 'av-room-1', image: avatarPng })
+        return envelope({ image: null })
+      }
+      expect(body.endpoint).toBe('state')
+      poll += 1
+      if (poll === 1) {
+        return envelope({
+          revision: 1,
+          liveKey: 'live-1',
+          bots: [{
+            id: 'bot',
+            sessionId: 'bot-part-1',
+            name: 'Bot',
+            extraDirs: ['/tmp/extra'],
+            tasks: [{ id: 'task-1', sessionId: 'task-sess-1', name: 'Worker' }],
+            avatar: { shape: 'cat', imageRef: 'av-bot-1' },
+          }],
+          rooms: [{
+            id: 'room-1',
+            sessionId: 'room-part-1',
+            name: 'Room',
+            members: ['bot'],
+            idlePaused: { reason: 'idle' },
+            avatar: { imageRef: 'av-room-1' },
+          }],
+          agents: [],
+          inbox: { items: [{ id: 'in-1', kind: 'approval' }] },
+          browserHolds: { bot: { hold: true } },
+          secretRequests: { bot: { secret: 'API_KEY' } },
+          approvalReviews: [{ id: 'rev-1', status: 'reviewing' }],
+          work: { bots: {}, rooms: {}, waiting: {}, turns: {}, steered: {}, paused: { 'room-1': true } },
+        })
+      }
+      return envelope({
+        revision: 1,
+        unchanged: true,
+        liveKey: 'live-2',
+        readOnly: 'other-host',
+        inbox: { items: [{ id: 'in-2', kind: 'view' }] },
+        work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
+      })
+    })
+    const client = new BotRemoteClient(dispatch, async () => [], () => {})
+    const first = await client.state(undefined, true)
+    expect(first.bots[0]?.avatar).toEqual({ shape: 'cat', imageRef: 'av-bot-1', image: avatarPng })
+    expect(first.bots[0]?.extraDirs).toEqual(['/tmp/extra'])
+    expect(first.bots[0]?.tasks).toHaveLength(1)
+    expect(first.rooms[0]?.paused).toBe(true)
+    expect(first.rooms[0]?.idlePaused).toEqual({ reason: 'idle' })
+    expect(first.rooms[0]?.avatar).toEqual({ imageRef: 'av-room-1', image: avatarPng })
+    expect(first.inbox).toEqual({ items: [{ id: 'in-1', kind: 'approval' }] })
+    expect(first.browserHolds).toEqual({ bot: { hold: true } })
+    expect(first.secretRequests).toEqual({ bot: { secret: 'API_KEY' } })
+    expect(first.approvalReviews).toEqual([{ id: 'rev-1', status: 'reviewing' }])
+    expect(dispatch).toHaveBeenCalledWith({ endpoint: 'avatar', payload: { botId: 'bot' } }, undefined)
+    expect(dispatch).toHaveBeenCalledWith({ endpoint: 'avatar', payload: { roomId: 'room-1' } }, undefined)
+
+    const second = await client.state(undefined, false, first)
+    expect(second.readOnly).toBe('other-host')
+    expect(second.inbox).toEqual({ items: [{ id: 'in-2', kind: 'view' }] })
+    expect(second.bots[0]?.avatar).toEqual({ shape: 'cat', imageRef: 'av-bot-1', image: avatarPng })
+    expect(dispatch).toHaveBeenCalledTimes(4)
+  })
+
+  it('negotiates hello capabilities, upgrades to dsBot/call + dsBot/feed, falls back on legacy hosts, and routes /side + v0.4 /btw', async () => {
+    async function* emptyFeed() {
+      yield { event: 'hello', data: { seq: 1 } }
+    }
+    const dispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
+      expect(body.endpoint).toBe('hello')
+      return envelope({
+        api: 1,
+        capabilities: ['state', 'rpc', 'file-download-chunks'],
+        rpc: { call: 'dsBot/call', feed: 'dsBot/feed' },
+        revision: 3,
+      })
+    })
+    const rpcCall = vi.fn(async (endpoint: BotOperation, payload: Record<string, unknown> | null) => {
+      if (endpoint === 'models') return { ok: true, value: { modelsKey: 'm-rpc' } }
+      return { ok: true, value: { endpoint, payload } }
+    })
+    const openFeedSpy = vi.fn(async () => emptyFeed())
+    const client = new BotRemoteClient(dispatch, async () => [], () => {}, {
+      call: rpcCall,
+      openFeed: openFeedSpy,
+    })
+
+    const hello = await client.negotiate()
+    expect(hello?.capabilities.has('file-download-chunks')).toBe(true)
+    expect(client.hasCapability('rpc')).toBe(true)
+    expect(client.supportsFeed()).toBe(true)
+
+    await expect(client.call('models')).resolves.toEqual({ modelsKey: 'm-rpc' })
+    expect(rpcCall).toHaveBeenCalledWith('models', null, undefined)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+
+    const stream = await client.openFeed()
+    expect(stream).toBeDefined()
+    expect(openFeedSpy).toHaveBeenCalledTimes(1)
+
+    // Legacy host without hello falls back cleanly without breaking callers.
+    const legacyDispatch = vi.fn(async () => ({
+      status: 200,
+      json: { ok: false, error: { code: 'bot/not-found', message: 'Unknown endpoint' } },
+    }))
+    const legacyClient = new BotRemoteClient(legacyDispatch, async () => [], () => {}, {
+      call: rpcCall,
+      openFeed: openFeedSpy,
+    })
+    expect(await legacyClient.negotiate()).toBeNull()
+    expect(legacyClient.supportsFeed()).toBe(false)
+    expect(await legacyClient.openFeed()).toBeUndefined()
+
+    const v4State = {
+      ...parseBotState({ ...botState(), sideChats: {} }),
+      btwSupported: false,
+      sideChatsSupported: true,
+    }
+    expect(formatBotSubmission('/side check latest', ['@[Other](dsh-session:abc)'])).toBe('/side @[Other](dsh-session:abc) check latest')
+    expect(botMessageRequest(v4State, 'bot', '/side check latest')).toEqual({
+      endpoint: 'side-ask',
+      payload: { sessionId: 'bot', recent: true, text: 'check latest' },
+    })
+    expect(botMessageRequest(v4State, 'bot', '/btw quick check')).toEqual({
+      endpoint: 'side-ask',
+      payload: { sessionId: 'bot', recent: true, text: 'quick check' },
+    })
+    for (const op of [
+      'connector-disconnect',
+      'connector-retry',
+      'secret-delete',
+      'secret-refresh-external',
+      'secret-set',
+      'learning-answer',
+      'schedule-pause',
+      'browser-frame',
+      'resume-work',
+      'cancel-work',
+    ] as const) {
+      expect(BOT_OPERATIONS).toContain(op)
+    }
+  })
+
+  it('normalizes work.paused arrays from DS-Bot v0.4 and legacy paused maps', () => {
+    const parsed = parseBotState({
+      bots: [{ id: 'chief', sessionId: 's-1', name: 'Chief' }],
+      rooms: [{ id: 'room-1', name: 'Group', members: ['chief'] }],
+      work: {
+        paused: [
+          { id: 'w-1', from: 'chief', to: 'coder', question: 'Continue?' },
+          { id: 'w-2', room: 'room-1', goal: 'Fix bug' },
+        ],
+      },
+    })
+    expect(pausedWorksList(parsed.work.paused, 'chief')).toHaveLength(1)
+    expect(pausedWorksList(parsed.work.paused, 'chief')[0]?.id).toBe('w-1')
+    expect(pausedWorksList(parsed.work.paused, undefined, undefined, 'room-1')[0]?.id).toBe('w-2')
+    expect(pausedWorksList({ chief: { id: 'legacy-1', from: 'chief' } }, 'chief')[0]?.id).toBe('legacy-1')
+  })
+
+  it('lazily negotiates dsBot/call on media/transfer call(), preserves work.activeRooms, failures/sessionMissing, and delta secrets', async () => {
+    const dispatch = vi.fn(async (body: { endpoint: BotOperation }) => {
+      expect(body.endpoint).toBe('hello')
+      return envelope({ api: 1, capabilities: ['rpc', 'file-download-chunks'], rpc: { call: 'dsBot/call', feed: 'dsBot/feed' } })
+    })
+    const rpcCall = vi.fn(async (endpoint: BotOperation) => {
+      if (endpoint === 'stage-image') return { ok: true, value: { id: 'img-1' } }
+      return {
+        ok: true,
+        value: {
+          revision: 4,
+          liveKey: 'lk-4',
+          bots: [{
+            id: 'chief',
+            sessionId: 's-1',
+            name: 'Chief',
+            sessionMissing: true,
+            failures: { 's-1': { code: 'OVERFLOW', message: 'Context full' } },
+          }],
+          rooms: [{ id: 'room-1', name: 'Group', members: ['chief'] }],
+          work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {}, activeRooms: ['room-1'] },
+        },
+      }
+    })
+    const client = new BotRemoteClient(dispatch, async () => [], () => {}, {
+      call: rpcCall,
+      openFeed: vi.fn(async () => { throw new Error('unused') }),
+    })
+
+    await expect(client.call('stage-image', { mediaType: 'image/png', data: 'AQID' })).resolves.toEqual({ id: 'img-1' })
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(rpcCall).toHaveBeenCalledWith('stage-image', { mediaType: 'image/png', data: 'AQID' }, undefined)
+
+    const initial = await client.state()
+    expect(rpcCall).toHaveBeenCalledWith('state', { avatars: 'ref' }, undefined)
+    expect(initial.work.activeRooms).toEqual(['room-1'])
+    expect(initial.bots[0]?.sessionMissing).toBe(true)
+    expect(initial.bots[0]?.failures?.['s-1']).toEqual({ code: 'OVERFLOW', message: 'Context full' })
+
+    const updated = parseBotState({
+      bots: [{ id: 'chief', sessionId: 's-1', name: 'Chief' }],
+      rooms: [{ id: 'room-1', name: 'Group', members: ['chief'] }],
+      secrets: [{ name: 'EXISTING', scope: 'all' }],
+    })
+    const delta = await client.state(undefined, false, updated)
+    expect(delta).toBeDefined()
+    expect(initial.bots[0]?.id).toBe('chief')
+
+    const merged = (await import('../src/services/bot-catalog')).mergeBotStateDelta(updated, {
+      unchanged: true,
+      secrets: [{ name: 'OPENAI_KEY', scope: ['chief'] }],
+      secretStore: { unlocked: true },
+    })
+    expect(merged?.secrets).toEqual([{ name: 'OPENAI_KEY', scope: ['chief'] }])
+    expect(merged?.secretStore).toEqual({ unlocked: true })
+  })
+
+  it('retries negotiate() after transient errors, preserves string sessionMissing, and normalizes pendingBotRequests across arrays/maps', async () => {
+    let calls = 0
+    const rpcCall = vi.fn(async (endpoint: BotOperation) => ({ ok: true, value: { endpoint } }))
+    const retryClient = new BotRemoteClient(
+      async () => {
+        calls += 1
+        if (calls === 1) throw new Error('temporary network blip')
+        return envelope({ api: 1, capabilities: ['rpc'], rpc: { call: 'dsBot/call', feed: 'dsBot/feed' } })
+      },
+      async () => [],
+      () => {},
+      { call: rpcCall, openFeed: vi.fn(async () => { throw new Error('unused') }) },
+    )
+    expect(await retryClient.negotiate()).toBeNull()
+    expect(retryClient.hasCapability('rpc')).toBe(false)
+    const negotiated = await retryClient.negotiate()
+    expect(negotiated?.capabilities.has('rpc')).toBe(true)
+    await expect(retryClient.call('models')).resolves.toEqual({ endpoint: 'models' })
+    expect(rpcCall).toHaveBeenCalledTimes(1)
+
+    const parsedMissing = parseBotState({
+      bots: [{ id: 'chief', sessionId: 's-1', name: 'Chief', sessionMissing: 's-1' }],
+      rooms: [],
+    })
+    expect(parsedMissing.bots[0]?.sessionMissing).toBe('s-1')
+
+    expect(pendingBotRequests({
+      chief: [
+        { id: 'r1', status: 'answered' },
+        { id: 'r2', status: 'pending', name: 'OPENAI_KEY' },
+      ],
+    }, 'chief', 's-1').map(r => r.id)).toEqual(['r2'])
+    expect(pendingBotRequests({
+      's-1': { reqMapKey: { id: 'r3', status: 'pending' }, doneKey: { id: 'r4', status: 'cancelled' } },
+    }, 'chief', 's-1').map(r => r.id)).toEqual(['r3'])
+    expect(pendingBotRequests({
+      chief: { id: 'r5', kind: 'fill' },
+    }, 'chief').map(r => r.id)).toEqual(['r5'])
   })
 })

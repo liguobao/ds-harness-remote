@@ -42,4 +42,43 @@ describe('Android Bot view trust boundary', () => {
     // No local edit changes the Host blueprint's initial values.
     expect(resolve({ '=': 'total' }, viewScope(view))).toBe(24)
   })
+
+  it('accepts deep-view v0.4 extensions including form fields/cancelLabel, shorthand options, chart.data, and markdown text/callout', () => {
+    const view = checkedBotView({
+      title: 'v0.4 View',
+      view: {
+        type: 'stack',
+        children: [
+          { type: 'text', title: 'Summary', text: '**Ready**', markdown: true, tone: 'info' },
+          { type: 'callout', title: 'Heads up', text: 'Use *safe* mode', tone: 'good', markdown: true },
+          { type: 'choice', id: 'mode', label: 'Mode', options: ['Fast', 'Thorough'] },
+          { type: 'options', id: 'picks', options: ['Alpha', 'Beta'], submitLabel: 'Go' },
+          {
+            type: 'chart',
+            kind: 'bar',
+            categories: ['Mon', 'Tue'],
+            series: [{ name: 'Calls', data: ['3', '5'] }],
+          },
+          {
+            type: 'form',
+            id: 'details',
+            submitLabel: 'Save',
+            cancelLabel: 'Dismiss',
+            fields: [
+              { id: 'notes', label: 'Notes', value: 'initial', multiline: true, readOnly: false, kind: 'text', required: true },
+            ],
+          },
+        ],
+      },
+    })!
+    expect(view).toBeDefined()
+    expect(validateViewAnswer(view, 'picks', { inputs: { mode: 'Fast' }, selected: ['Beta'] })).toEqual({
+      selected: ['Beta'],
+      inputs: { mode: 'Fast' },
+    })
+    expect(validateViewAnswer(view, 'details', { inputs: { mode: 'Thorough' }, fields: { notes: 'updated' } })).toEqual({
+      fields: { notes: 'updated' },
+      inputs: { mode: 'Thorough' },
+    })
+  })
 })

@@ -35,6 +35,7 @@ import { workspaceFileFailure, workspaceFileFailureReason } from './safe-error.j
 import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contract.js'
 import { isMessageFilePath, MessageFileAttachments, type MessageFileAttachment } from './message-file-attachment.js'
 import { CodexWorkspaceBridge } from './codex-workspace-bridge.js'
+import { BOT_REMOTE_OPERATION_SET, sanitizeBotRequestBody, sanitizeBotResponseJson } from './plugin-route-bridge.js'
 
 type PublishRemoteFrame = (
   event: 'harness.remote.frame' | 'harness.remote.stream.closed',
@@ -360,7 +361,7 @@ export class HarnessRemoteBridge {
   }
 
   async call(input: unknown): Promise<TypertRpcResult> {
-    const params = callSchema.parse(input) as HarnessRemoteCallParams
+    let params = callSchema.parse(input) as HarnessRemoteCallParams
     if ((params.endpoint === 'remoteUploads/upload' || params.endpoint === 'remoteImages/upload') && this.uploadAttachment !== undefined) {
       const payload = z.object({ args: z.unknown() }).strict().parse(params.payload)
       return { ok: true, value: await this.uploadAttachment(payload.args) }
@@ -369,6 +370,32 @@ export class HarnessRemoteBridge {
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
     if (params.endpoint === 'speech/follow') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this speech endpoint.')
     if (params.endpoint === 'dsBot/feed') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this DS Bot feed endpoint.')
+    let validatedDsBotBody: { endpoint: string; payload: Record<string, unknown> | null } | undefined
+    if (params.endpoint === 'dsBot/call') {
+      const root = record(params.payload)
+      const wrappedArgs = isRecord(root.args) ? root.args : undefined
+      const botArgs = wrappedArgs ?? root
+      const endpoint = typeof botArgs.endpoint === 'string' ? botArgs.endpoint : ''
+      if (endpoint === 'dsh-update-install') {
+        throw new RpcError('INVALID_MESSAGE', 'Host upgrades are not permitted over the remote channel.')
+      }
+      if (!BOT_REMOTE_OPERATION_SET.has(endpoint)) {
+        throw new RpcError('INVALID_MESSAGE', 'The DS-Bot operation is invalid for the remote channel.')
+      }
+      if (botArgs.payload !== undefined && botArgs.payload !== null && !isRecord(botArgs.payload)) {
+        throw new RpcError('INVALID_MESSAGE', 'The DS-Bot payload is invalid for the remote channel.')
+      }
+      const sanitizedBody = sanitizeBotRequestBody({
+        endpoint,
+        payload: isRecord(botArgs.payload) ? botArgs.payload : null,
+      })
+      const nextBotArgs = { endpoint: sanitizedBody.endpoint, payload: sanitizedBody.payload ?? null }
+      validatedDsBotBody = nextBotArgs
+      params = {
+        ...params,
+        payload: wrappedArgs !== undefined ? { args: nextBotArgs } : nextBotArgs,
+      }
+    }
     if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {
       const args = requestArgs(params.payload)
       if (args.ns === 'ds-harness-remote' || args.ns === 'dsh-remote') {
@@ -425,11 +452,17 @@ export class HarnessRemoteBridge {
         && (WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || OFFICE_RENDER_ENDPOINTS.has(params.endpoint))) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal)
       }
-      const nativeResult = params.endpoint === 'commands/execute'
+      let nativeResult = params.endpoint === 'commands/execute'
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
         : this.terminalCarrier !== undefined && (params.endpoint === 'terminal/write' || params.endpoint === 'terminal/resize')
           ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal)
           : await this.dispatchWithOfficeFallback(params.endpoint, nativePayload, signal)
+      if (validatedDsBotBody !== undefined && nativeResult.ok) {
+        nativeResult = {
+          ...nativeResult,
+          value: sanitizeBotResponseJson(validatedDsBotBody.endpoint, nativeResult.value),
+        }
+      }
       if (params.endpoint === 'session/page' && nativeResult.ok) {
         const sessionId = journalSessionId(nativePayload)
         if (sessionId !== undefined) this.messageFiles.observe(sessionId, nativeResult.value)
@@ -446,17 +479,11 @@ export class HarnessRemoteBridge {
           }
         }
       }
-      if (params.endpoint === 'dsBot/call' && nativeResult.ok && isRecord(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== undefined) {
-        const root = record(params.payload)
-        const args = isRecord(root.args) ? root.args : root
-        const botEndpoint = typeof args.endpoint === 'string' && args.endpoint.length > 0 ? args.endpoint : undefined
-        if (botEndpoint !== undefined) {
-          const botPayload = isRecord(args.payload) ? args.payload : null
-          try {
-            this.forwardedEventsObserver.onDsBotCall({ endpoint: botEndpoint, payload: botPayload }, nativeResult.value)
-          } catch {
-            // Read-only event observation must never disrupt RPC settlement.
-          }
+      if (validatedDsBotBody !== undefined && nativeResult.ok && isRecord(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== undefined) {
+        try {
+          this.forwardedEventsObserver.onDsBotCall(validatedDsBotBody, nativeResult.value)
+        } catch {
+          // Read-only event observation must never disrupt RPC settlement.
         }
       }
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)

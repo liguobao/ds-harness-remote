@@ -920,6 +920,140 @@ describe('HostAttentionTracker', () => {
     await tracker.close()
   })
 
+  it('handles DS-Bot v0.4.1 incremental unchanged polls, review/answerable filtering, room/task approvals, inbox, botId questions, and mobile.js notices', async () => {
+    const digests: AttentionDigest[] = []
+    const tracker = new HostAttentionTracker({
+      logger: silentLogger(),
+      onDigest: digest => { digests.push(digest) },
+      debounceMs: 20,
+    })
+
+    // 1. Initial full state with bot, task, room, filtered approvals, and inbox items
+    tracker.observeBotResponse('api/bot', { endpoint: 'state', payload: null }, {
+      status: 200,
+      json: {
+        ok: true,
+        value: {
+          workspaceId: 'bot-ws',
+          bots: [
+            {
+              id: 'b1',
+              sessionId: 'bot-sess-1',
+              name: 'Ops Bot',
+              tasks: [{ id: 't1', sessionId: 'task-sess-1', status: 'running' }],
+            },
+          ],
+          rooms: [
+            { id: 'r1', sessionId: 'room-sess-1', name: 'Core Room' },
+          ],
+          work: {
+            bots: { b1: { active: true } },
+            rooms: {},
+            approvals: [
+              { id: 'apr-non-answerable', botId: 'b1', sessionId: 'bot-sess-1', tool: 'bash', reason: 'hidden', answerable: false },
+              { id: 'apr-reviewing', botId: 'b1', sessionId: 'bot-sess-1', tool: 'bash', reason: 'auto', answerable: true, review: { status: 'reviewing' } },
+              { id: 'apr-task', botId: 'b1', sessionId: 'task-sess-1', tool: 'write', reason: 'task write', answerable: true },
+              { id: 'apr-room', botId: 'b1', roomId: 'r1', sessionId: 'hidden-member-sess', tool: 'bash', reason: 'room cmd', answerable: true },
+            ],
+          },
+          questions: {
+            'bot-sess-1': { id: 'q-1', question: 'Confirm?' },
+          },
+          inbox: {
+            items: [
+              { kind: 'view', id: 'v-1', botId: 'b1', sessionId: 'bot-sess-1', title: 'Select option' },
+              { kind: 'secret', id: 'sec-1', botId: 'b1', reason: 'Need API key' },
+            ],
+          },
+        },
+      },
+    })
+
+    const initialItems = tracker.list().items
+    expect(initialItems.some(i => i.id === 'ds-bot:approval:apr-non-answerable')).toBe(false)
+    expect(initialItems.some(i => i.id === 'ds-bot:approval:apr-reviewing')).toBe(false)
+    expect(initialItems.find(i => i.id === 'ds-bot:approval:apr-task')).toMatchObject({
+      sessionId: 'bot-sess-1',
+      sessionTitle: 'Ops Bot',
+      status: 'waiting_approval',
+    })
+    expect(initialItems.find(i => i.id === 'ds-bot:approval:apr-room')).toMatchObject({
+      sessionId: 'room-sess-1',
+      sessionTitle: 'Core Room',
+      status: 'waiting_approval',
+    })
+    expect(initialItems.find(i => i.id === 'ds-bot:inbox:view:v-1')).toMatchObject({
+      sessionId: 'bot-sess-1',
+      sessionTitle: 'Ops Bot',
+      status: 'waiting_question',
+    })
+    expect(initialItems.find(i => i.id === 'ds-bot:inbox:secret:sec-1')).toMatchObject({
+      sessionId: 'bot-sess-1',
+      sessionTitle: 'Ops Bot',
+      status: 'waiting_approval',
+    })
+
+    // 2. Incremental `unchanged: true` poll preserves bot/room mappings and does NOT fire false completion or phantom `b1` session
+    tracker.observeBotResponse('api/bot', { endpoint: 'state', payload: { since: 1, live: 'k1' } }, {
+      status: 200,
+      json: {
+        ok: true,
+        value: {
+          unchanged: true,
+          revision: 1,
+          liveKey: 'k1',
+          work: {
+            bots: { b1: { active: true } },
+            rooms: {},
+            approvals: [
+              { id: 'apr-task', botId: 'b1', sessionId: 'task-sess-1', tool: 'write', reason: 'task write', answerable: true },
+              { id: 'apr-room', botId: 'b1', roomId: 'r1', sessionId: 'hidden-member-sess', tool: 'bash', reason: 'room cmd', answerable: true },
+            ],
+          },
+        },
+      },
+    })
+    const runningItems = tracker.list().items.filter(i => i.status === 'running')
+    expect(runningItems).toHaveLength(1)
+    expect(runningItems[0]).toMatchObject({ sessionId: 'bot-sess-1', sessionTitle: 'Ops Bot' })
+    expect(tracker.list().items.some(i => i.status === 'completed_unread')).toBe(false)
+
+    // 3. `answer-question` with `botId` and `view-reply` resolve matching items
+    tracker.observeBotResponse('api/bot', { endpoint: 'answer-question', payload: { botId: 'b1', questionId: 'q-1', answer: 'yes' } }, {
+      status: 200,
+      json: { ok: true, value: true },
+    })
+    expect(tracker.list().items.some(i => i.id === 'ds-bot:question:bot-sess-1:q-1')).toBe(false)
+
+    tracker.observeBotResponse('api/bot', { endpoint: 'view-reply', payload: { sessionId: 'bot-sess-1', viewId: 'v-1' } }, {
+      status: 200,
+      json: { ok: true, value: true },
+    })
+    expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:view:v-1')).toBe(false)
+
+    // 4. `mobile.js` notices use `entry.name`, `done`, `blocked`, and do not create orphan duplicates for existing state-backed approvals
+    tracker.observeBotResponse('api/bot', { endpoint: 'notices', payload: null }, {
+      status: 200,
+      json: {
+        ok: true,
+        value: {
+          notices: [
+            { kind: 'approval', botId: 'b1', sessionId: 'bot-sess-1', name: 'Ops Bot', text: 'Run cmd' },
+            { kind: 'done', botId: 'b1', sessionId: 'bot-sess-1', name: 'Ops Bot', text: 'Finished task' },
+          ],
+        },
+      },
+    })
+    expect(tracker.list().items.some(i => i.id === 'ds-bot:approval:bot-sess-1')).toBe(false)
+    expect(tracker.list().items.find(i => i.status === 'completed_unread')).toMatchObject({
+      sessionId: 'bot-sess-1',
+      sessionTitle: 'Ops Bot',
+      summary: 'Finished task',
+    })
+
+    await tracker.close()
+  })
+
   it('enforces priority ordering, truncation, 64-item cap, opaque token TTL/resolve/LRU, ackUnread, and digest debounce/dedupe', async () => {
     vi.useFakeTimers()
     try {
@@ -1318,5 +1452,210 @@ describe('HostAttentionTracker', () => {
     })
     await sub.stop()
     await tracker.close()
+  })
+
+  it('subscribes to in-process dsBot/feed on 0 connected clients and ingests live state and notices', async () => {
+    const feedStream = createManualEventStream()
+    let livePoll = 0
+    const digests: AttentionDigest[] = []
+    const tracker = new HostAttentionTracker({
+      onDigest: digest => { digests.push(digest) },
+      logger: silentLogger(),
+      debounceMs: 20,
+      observerBackoffMs: [5, 5],
+      localGateway: {
+        supportsCarrier: true,
+        invoke: vi.fn(),
+        dispatch: vi.fn(),
+        open: vi.fn(),
+        failure: error => ({ code: (error as { code?: string }).code ?? 'internal', message: 'fail', details: {} }),
+        createPeer: () => ({
+          supportsCarrier: true,
+          invoke: vi.fn(),
+          dispatch: vi.fn(async (endpoint, payload) => {
+            if (endpoint !== 'dsBot/call') {
+              return { ok: false as const, error: { code: 'gateway/not-found', message: 'missing', details: {} } }
+            }
+            const args = (payload as { args?: { endpoint?: string; payload?: Record<string, unknown> } })?.args
+            if (args?.endpoint === 'hello') {
+              return { ok: true as const, value: { ok: true, value: { api: 1, capabilities: ['rpc', 'feed'], rpc: { call: 'dsBot/call', feed: 'dsBot/feed' } } } }
+            }
+            if (args?.endpoint === 'state') {
+              livePoll += 1
+              if (livePoll === 1) {
+                return {
+                  ok: true as const,
+                  value: {
+                    ok: true,
+                    value: {
+                      revision: 1,
+                      liveKey: 'lk-1',
+                      bots: [{ id: 'bot-a', sessionId: 'sess-bot-a', name: 'Ops Bot' }],
+                      rooms: [],
+                      work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
+                      inbox: { items: [{ id: 'in-1', kind: 'secret', botId: 'bot-a', sessionId: 'sess-bot-a', summary: 'Approve token' }] },
+                    },
+                  },
+                }
+              }
+              return {
+                ok: true as const,
+                value: {
+                  ok: true,
+                  value: {
+                    revision: 1,
+                    unchanged: true,
+                    liveKey: 'lk-2',
+                    bots: [{ id: 'bot-a', sessionId: 'sess-bot-a', name: 'Ops Bot' }],
+                    rooms: [],
+                    work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
+                    inbox: { items: [] },
+                  },
+                },
+              }
+            }
+            return { ok: false as const, error: { code: 'gateway/not-found', message: 'missing', details: {} } }
+          }),
+          open: vi.fn(async endpoint => {
+            if (endpoint === 'session/control') {
+              throw Object.assign(new Error('not found'), { code: 'gateway/not-found' })
+            }
+            if (endpoint === 'dsBot/feed') return feedStream.stream
+            throw Object.assign(new Error('not found'), { code: 'gateway/not-found' })
+          }),
+          failure: error => ({ code: (error as { code?: string }).code ?? 'internal', message: 'fail', details: {} }),
+          dispose: vi.fn(async () => undefined),
+        }),
+      },
+    })
+
+    tracker.start('0.2.2')
+    tracker.startBotFeed()
+    try {
+      await vi.waitFor(() => {
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:secret:in-1')).toBe(true)
+      })
+      feedStream.push({ event: 'live', data: {} })
+      await vi.waitFor(() => {
+        expect(livePoll).toBeGreaterThanOrEqual(2)
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:secret:in-1')).toBe(false)
+      })
+      feedStream.push({
+        event: 'notice',
+        data: { kind: 'blocked', botId: 'bot-a', sessionId: 'sess-bot-a', name: 'Ops Bot', text: 'Needs model key' },
+      })
+      await vi.waitFor(() => {
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:session:sess-bot-a' && i.status === 'failed_unread')).toBe(true)
+      })
+      expect(digests.length).toBeGreaterThan(0)
+    } finally {
+      await tracker.close()
+      expect(feedStream.wasReturned()).toBe(true)
+    }
+  })
+
+  it('handles revision frames, ref-based inbox resolution, startup retry, and mid-sync live frames on dsBot/feed', async () => {
+    const feedStream = createManualEventStream()
+    let mounted = false
+    let stateCalls = 0
+    let releaseSecondSync!: () => void
+    const secondSyncGate = new Promise<void>(resolve => {
+      releaseSecondSync = resolve
+    })
+    const tracker = new HostAttentionTracker({
+      logger: silentLogger(),
+      debounceMs: 10,
+      observerBackoffMs: [10, 20],
+      localGateway: {
+        supportsCarrier: true,
+        invoke: vi.fn(),
+        dispatch: vi.fn(),
+        open: vi.fn(),
+        failure: error => ({ code: (error as { code?: string }).code ?? 'internal', message: 'fail', details: {} }),
+        createPeer: () => ({
+          supportsCarrier: true,
+          invoke: vi.fn(),
+          dispatch: vi.fn(async (endpoint, payload) => {
+            if (endpoint !== 'dsBot/call') {
+              return { ok: false as const, error: { code: 'gateway/not-found', message: 'missing', details: {} } }
+            }
+            const args = (payload as { args?: { endpoint?: string; payload?: Record<string, unknown> } })?.args
+            if (args?.endpoint === 'hello') {
+              if (!mounted) {
+                return { ok: false as const, error: { code: 'gateway/invocation-unavailable', message: 'mounting', details: {} } }
+              }
+              return { ok: true as const, value: { ok: true, value: { api: 1, capabilities: ['rpc', 'feed'], rpc: { call: 'dsBot/call', feed: 'dsBot/feed' } } } }
+            }
+            if (args?.endpoint === 'state') {
+              stateCalls += 1
+              if (stateCalls === 2) {
+                await secondSyncGate
+              }
+              return {
+                ok: true as const,
+                value: {
+                  ok: true,
+                  value: {
+                    revision: stateCalls,
+                    liveKey: `lk-${stateCalls}`,
+                    bots: [{ id: 'bot-a', sessionId: 'sess-a', name: 'Alpha' }],
+                    rooms: [],
+                    work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
+                    inbox: {
+                      items: stateCalls === 1
+                        ? [
+                            { id: 'view:v-1', kind: 'view', ref: 'v-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'Form' },
+                            { id: 'learning:lp-1', kind: 'learning', ref: 'lp-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'skills/helper/SKILL.md' },
+                          ]
+                        : stateCalls === 2
+                          ? [{ id: 'secret:s-1', kind: 'secret', ref: 's-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'API key' }]
+                          : [],
+                    },
+                  },
+                },
+              }
+            }
+            return { ok: false as const, error: { code: 'gateway/not-found', message: 'missing', details: {} } }
+          }),
+          open: vi.fn(async endpoint => {
+            if (endpoint === 'dsBot/feed') return feedStream.stream
+            throw Object.assign(new Error('not found'), { code: 'gateway/not-found' })
+          }),
+          failure: error => ({ code: (error as { code?: string }).code ?? 'internal', message: 'fail', details: {} }),
+          dispose: vi.fn(async () => undefined),
+        }),
+      },
+    })
+
+    setTimeout(() => { mounted = true }, 15)
+    tracker.startBotFeed()
+    try {
+      await vi.waitFor(() => {
+        expect(stateCalls).toBeGreaterThanOrEqual(1)
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:view:v-1')).toBe(true)
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:learning:lp-1')).toBe(true)
+      })
+      // View reply and learning answer resolve prefixed inbox items via stripped `ref`.
+      tracker.observeBotResponse('api/bot', { endpoint: 'view-reply', payload: { sessionId: 'sess-a', viewId: 'v-1' } }, { status: 200, json: { ok: true, value: true } })
+      expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:view:v-1')).toBe(false)
+      tracker.observeBotResponse('api/bot', { endpoint: 'learning-answer', payload: { id: 'lp-1', approve: true } }, { status: 200, json: { ok: true, value: true } })
+      expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:learning:lp-1')).toBe(false)
+
+      // DS-Bot emits `'revision'` on rt.save() instead of `'state'`.
+      feedStream.push({ event: 'revision', data: { revision: 2 } })
+      await vi.waitFor(() => {
+        expect(stateCalls).toBe(2)
+      })
+      // Push `'live'` while sync #2 is still in flight; follow-up sync #3 must run once #2 settles.
+      feedStream.push({ event: 'live', data: {} })
+      await new Promise(resolve => setTimeout(resolve, 180))
+      releaseSecondSync()
+      await vi.waitFor(() => {
+        expect(stateCalls).toBeGreaterThanOrEqual(3)
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:secret:s-1')).toBe(false)
+      })
+    } finally {
+      await tracker.close()
+    }
   })
 })

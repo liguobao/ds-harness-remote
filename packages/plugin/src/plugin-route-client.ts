@@ -239,8 +239,10 @@ export function createPluginRouteCatalogGuard(
     const sessions = await readSessions()
     const containsSessions = () => {
       const snapshot = sessions.list.getSnapshot()
+      if (snapshot.phase !== 'ready') return false
+      if (snapshot.ids.length >= 2048) return true
       const known = new Set(snapshot.ids)
-      return snapshot.phase === 'ready' && [...required].every(id => known.has(id))
+      return [...required].every(id => known.has(id))
     }
     // A first refresh may join a pull that started before the Bot mutation.
     // One further pull lets that in-flight baseline finish without an unbounded retry loop.

@@ -24,6 +24,18 @@ describe('where a message mentions a Bot', () => {
     expect(botMentionSpans('`@Probe`', roster)).toHaveLength(0)
     expect(botMentionSpans('mail me@Probe.example', roster)).toHaveLength(0)
     expect(botMentionSpans('[@Probe](https://example.com)', roster)).toHaveLength(0)
+    expect(botMentionSpans('[see](https://example.com) @Probe (done)', roster)).toHaveLength(1)
+  })
+
+  it('recognizes group-wide @all aliases', () => {
+    const spans = botMentionSpans('@all @everyone @所有人 @全体 please check', roster)
+    expect(spans.map(span => ({ id: span.bot.id, kind: span.kind, label: span.bot.name }))).toEqual([
+      { id: 'all', kind: 'all', label: 'all' },
+      { id: 'all', kind: 'all', label: 'everyone' },
+      { id: 'all', kind: 'all', label: '所有人' },
+      { id: 'all', kind: 'all', label: '全体' },
+    ])
+    expect(botMentionSpans('@alligator ignore', roster)).toHaveLength(0)
   })
 
   it('skips the sender itself', () => {
@@ -31,7 +43,9 @@ describe('where a message mentions a Bot', () => {
     expect(botMentionSpans('@Chief hi', roster, 'probe')).toHaveLength(1)
   })
 
-  it('links the same spans it hands to the renderer', () => {
+  it('links the same spans it hands to the renderer without turning @all into a bots.local URL', () => {
     expect(linkBotMentions('@Probe 1+1 is 2.', roster)).toBe('[@Probe](https://bots.local/probe) 1+1 is 2.')
+    expect(linkBotMentions('@all please review with @Probe', roster)).toBe('**@all** please review with [@Probe](https://bots.local/probe)')
+    expect(linkBotMentions('@everyone check', roster)).toBe('**@everyone** check')
   })
 })

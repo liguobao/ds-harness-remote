@@ -33,8 +33,25 @@ const replayableReads = new Set([
   'officeKit/render', 'officeToPdf/render',
 ])
 
-export function canReplayOversizedResponse(endpoint: string): boolean {
-  return replayableReads.has(endpoint)
+const replayableDsBotReads = new Set([
+  'state', 'image', 'markdown-image', 'file-download', 'file-text', 'avatar',
+  'avatar-library', 'background-picture', 'usage', 'usage-summary', 'chat',
+  'room-chat', 'earlier', 'exchange', 'exchange-text', 'group-rows', 'group-search',
+  'group-relay-replies', 'room-progress', 'agent-chat', 'bot-task-read',
+  'browser-frame', 'memory-view', 'memory-history', 'diagnostics', 'diagnostics-log',
+  'models', 'presets', 'providers', 'schedules', 'folders', 'folder-list', 'notices', 'hello',
+])
+
+export function canReplayOversizedResponse(endpoint: string, payload?: unknown): boolean {
+  if (replayableReads.has(endpoint)) return true
+  if (endpoint === 'dsBot/call' && typeof payload === 'object' && payload !== null && !Array.isArray(payload)) {
+    const args = (payload as { args?: unknown }).args
+    if (typeof args === 'object' && args !== null && !Array.isArray(args)) {
+      const innerEndpoint = (args as { endpoint?: unknown }).endpoint
+      return typeof innerEndpoint === 'string' && replayableDsBotReads.has(innerEndpoint)
+    }
+  }
+  return false
 }
 
 const DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024
@@ -264,7 +281,7 @@ export class RemoteTypertGateway {
       try {
         response = await this.client.rpc<unknown>('harness.remote.call', request, activeSignal, directOptions)
       } catch (error) {
-        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE') || !canReplayOversizedResponse(endpoint)) throw error
+        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE') || !canReplayOversizedResponse(endpoint, payload)) throw error
         response = await this.callTransferred(encoded, activeSignal, options, defaultCommitTimeoutMs)
       }
     }

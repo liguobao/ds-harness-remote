@@ -118,9 +118,9 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
   - **仅认 `gateway/arguments-invalid`**（零调用、5s 预算，禁换合法空请求扫库；余错或意外成功均 fail-closed）。
 - `session/list` 超 2,048 行时 Host 只留最新根会话并提升 `projections.values.title`，Client 先过滤再截断。
 - Harness v1 审批限 `allow_once | deny`（禁 `allow_session`）；问答限 `userQuestions/answer|attachWait`（断线释 claim）。
-- `packages/plugin/src/plugin-route-bridge.ts` 仅放行 `api/session/uploadFileBinary` 与 `packages/plugin/tests/fixtures/ds-bot-v0.3.8-endpoints.json` 175 端点 + `btw`/`btw-cancel`/`room-continue`：
-  - 保持 30s 预算与不重放 mutation。
-  - 管理/凭据/电脑控制/审批 `choice` 交认证后 DS-Bot handler 校验。
+- `packages/plugin/src/plugin-route-bridge.ts`（并与 `HarnessRemoteBridge` `dsBot/call` 共享白名单与脱敏边界）仅放行 `api/session/uploadFileBinary` 与 `packages/plugin/tests/fixtures/ds-bot-v0.4.1-endpoints.json` 177 端点 + 旧版兼容（`btw`/`btw-cancel`/`room-continue`/`bot-new-part`/`bot-open-part`）：
+  - 保持固定 30s 预算与不重放 mutation（`localDsBotCall` 仅在终端不可用错误码时进入 30s 冷却并回落 HTTP）；拒绝 `dsh-update-install`、`phone-*` 与电脑控制专有端点。
+  - 请求校验 `approval-answer.choice` 仅限 `'allow'|'reject'`、拒绝 `image.parent` 并剥离 `set-prefs` 桌面外观键；响应剥离 `folders.data` 与 `state` 敏感/桌面私有字段，其余业务校验交认证后 DS-Bot handler 执行。
 - 仅六类受限写入例外（禁通用 fs 写或远程桌面 RPC）：
   1. `workspace.upload(.lan).v1` 写会话验证根（排他 tmp+`fsync`+原子不覆盖；直连 1 GiB / 中继普通用户 20 MiB、有效会员 100 MiB，动态复检 `channel.mode`；LAN 限 `>=1 MiB`，发 `open` 后禁换通道重放）。
   2. 官方 `workspace/create` 递归建非根无 NUL 绝对目录。

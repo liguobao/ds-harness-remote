@@ -24,6 +24,7 @@ export interface UsageBucket {
 
 export interface UsageGroupRow {
   key: string
+  bucketKey: string
   name: string
   sub?: string
   kind?: string
@@ -298,6 +299,7 @@ export function buildDsBotUsageView(
         || (kind === 'other' ? strings.dsBotSettings.otherOwner : kind === 'room' ? strings.dsBotSettings.deletedGroup : strings.dsBotSettings.deletedBot)
       return {
         key: text(metaObj.key) || `owner-${idx}`,
+        bucketKey: String(idx),
         name,
         kind,
         id: text(metaObj.id) || undefined,
@@ -317,6 +319,7 @@ export function buildDsBotUsageView(
       const providerName = text(metaObj.providerName) || text(metaObj.provider)
       return {
         key: text(metaObj.key) || `model-${idx}`,
+        bucketKey: String(idx),
         name: modelName,
         sub: providerName || undefined,
         color: CHART_COLORS[i % CHART_COLORS.length]!,
@@ -345,7 +348,7 @@ export function buildDsBotUsageView(
   }
 }
 
-export function buildDsBotActivityYear(rawUsage: BotObject | null | undefined, weeksCount = 24): ActivityYearSummary {
+export function buildDsBotActivityYear(rawUsage: BotObject | null | undefined, weeksCount = 53): ActivityYearSummary {
   const usage = object(rawUsage)
   const rawRows = Array.isArray(usage.rows) ? usage.rows.filter(Array.isArray) : []
   const nowStr = text(usage.now)
@@ -493,7 +496,7 @@ export interface ImPlatformCatalogItem {
  */
 export const DS_BOT_IM_PLATFORMS: ImPlatformCatalogItem[] = [
   { id: 'telegram', name: 'Telegram', get sub() { return strings.dsBotSettings.imDescriptions.telegram }, color: '#26A5E4', glyph: 'TG', fieldsHint: 'Bot Token' },
-  { id: 'wechat', get name() { return strings.dsBotSettings.imNames.wechat }, get sub() { return strings.dsBotSettings.imDescriptions.wechat }, color: '#07C160', glyph: '微', get fieldsHint() { return strings.dsBotSettings.wechatFieldsHint } },
+  { id: 'weixin', get name() { return strings.dsBotSettings.imNames.wechat }, get sub() { return strings.dsBotSettings.imDescriptions.wechat }, color: '#07C160', glyph: '微', get fieldsHint() { return strings.dsBotSettings.wechatFieldsHint } },
   { id: 'feishu', get name() { return strings.dsBotSettings.imNames.feishu }, get sub() { return strings.dsBotSettings.imDescriptions.feishu }, color: '#3370FF', glyph: '飞', fieldsHint: 'App ID + App Secret' },
   { id: 'dingtalk', get name() { return strings.dsBotSettings.imNames.dingtalk }, get sub() { return strings.dsBotSettings.imDescriptions.dingtalk }, color: '#0089FF', glyph: '钉', fieldsHint: 'Client ID + Client Secret' },
   { id: 'wecom', get name() { return strings.dsBotSettings.imNames.wecom }, get sub() { return strings.dsBotSettings.imDescriptions.wecom }, color: '#2B7FD9', glyph: '企', fieldsHint: 'Bot ID + Secret' },

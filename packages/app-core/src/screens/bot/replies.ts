@@ -19,12 +19,16 @@ export interface BotReplyPayload {
   truncated: boolean
 }
 
+function stripRelayPrefix(raw: string): string {
+  return raw.replace(/^\s*§\d+§\s*/u, '')
+}
+
 export function parseBotReplyPayload(raw: string | undefined | null): BotReplyPayload | undefined {
   if (typeof raw !== 'string' || raw.length === 0) return undefined
   const seen = new Set<string>()
-  const queue = [raw]
+  const queue = [stripRelayPrefix(raw)]
   while (queue.length > 0) {
-    const candidate = queue.shift()!
+    const candidate = stripRelayPrefix(queue.shift()!)
     const direct = parseReplyArray(candidate)
     if (direct !== undefined) return { rows: direct, complete: true, truncated: hostTruncated(candidate) }
     for (const inner of unwrapEnvelopes(candidate, seen)) queue.push(inner)
@@ -66,13 +70,19 @@ function isReplyEnvelope(parsed: unknown): parsed is { replies: unknown[] } {
     && Array.isArray((parsed as { replies?: unknown }).replies)
 }
 
-const REPLY_KINDS = new Set(['user', 'failed', 'approval', 'working', 'missed', 'done', 'stopped', 'cut', 'resumed', 'schedule', 'lookup', 'folder', 'admin-passed', 'paused'])
+const REPLY_KINDS = new Set([
+  'user', 'failed', 'helper-failed', 'approval', 'working', 'missed',
+  'done', 'stopped', 'cut', 'resumed', 'schedule', 'lookup', 'folder',
+  'admin-passed', 'paused', 'goal',
+])
 
-/** ds-bot reply entries always carry a spoken text or a known status kind. */
+/** ds-bot reply entries always carry spoken text, a known status kind, or presented files. */
 function isReplyEntry(entry: unknown): entry is BotObject {
   if (typeof entry !== 'object' || entry === null) return false
   const record = entry as Record<string, unknown>
-  return typeof record.text === 'string' || (typeof record.kind === 'string' && REPLY_KINDS.has(record.kind))
+  return typeof record.text === 'string'
+    || (typeof record.kind === 'string' && REPLY_KINDS.has(record.kind))
+    || (Array.isArray(record.presented) && record.presented.length > 0)
 }
 
 /** Peel common detail envelopes (text fields, nested content blocks). */
@@ -150,22 +160,55 @@ function salvageReplyArray(truncated: string): BotObject[] | undefined {
 
 export function parseRelayRange(raw: string | undefined): { from: number; to?: number; anchor?: string } | undefined {
   try {
-    const value = JSON.parse(raw ?? '')
+    const value = JSON.parse(stripRelayPrefix(raw ?? ''))
     if (!Number.isInteger(value?.from)) return undefined
     return { from: value.from, ...(Number.isInteger(value.to) ? { to: value.to } : {}), ...(typeof value.anchor === 'string' ? { anchor: value.anchor } : {}) }
   } catch { return undefined }
 }
 
-/** DS-Bot stacks only adjacent spoken messages by the same identified member. */
+function mergePresented(existing: unknown, incoming: unknown): unknown[] | undefined {
+  const combined = [
+    ...(Array.isArray(existing) ? existing : []),
+    ...(Array.isArray(incoming) ? incoming : []),
+  ]
+  if (combined.length === 0) return undefined
+  const seen = new Set<string>()
+  const deduped: unknown[] = []
+  for (const item of combined) {
+    const key = typeof item === 'string'
+      ? `s:${item}`
+      : typeof item === 'object' && item !== null
+        ? JSON.stringify(item)
+        : String(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(item)
+  }
+  return deduped
+}
+
+/** DS-Bot stacks adjacent spoken messages or consecutive working notices by the same identified member. */
 export function stackBotReplies(rows: BotObject[]): { reply: BotObject; texts: string[] }[] {
   const result: { reply: BotObject; texts: string[] }[] = []
   for (const reply of rows) {
     const previous = result.at(-1)
-    if (reply.kind === undefined && typeof reply.botId === 'string'
-      && previous?.reply.kind === undefined && previous?.reply.botId === reply.botId) {
-      previous.texts.push(typeof reply.text === 'string' ? reply.text : '')
-      previous.reply = reply
-    } else result.push({ reply, texts: [typeof reply.text === 'string' ? reply.text : ''] })
+    const sameSpoken = reply.kind === undefined && typeof reply.botId === 'string'
+      && previous?.reply.kind === undefined && previous?.reply.botId === reply.botId
+    const sameWorking = reply.kind === 'working' && typeof reply.botId === 'string'
+      && previous?.reply.kind === 'working' && previous?.reply.botId === reply.botId
+    if (sameSpoken || sameWorking) {
+      const mergedPresented = mergePresented(previous.reply.presented, reply.presented)
+      if (sameSpoken) {
+        previous.texts.push(typeof reply.text === 'string' ? reply.text : '')
+      } else if (typeof reply.text === 'string' && reply.text.length > 0 && !previous.texts.includes(reply.text)) {
+        previous.texts = previous.texts[0] === '' ? [reply.text] : [...previous.texts, reply.text]
+      }
+      previous.reply = mergedPresented !== undefined ? { ...reply, presented: mergedPresented } : reply
+    } else {
+      const mergedPresented = mergePresented(undefined, reply.presented)
+      const normalizedReply = mergedPresented !== undefined ? { ...reply, presented: mergedPresented } : reply
+      result.push({ reply: normalizedReply, texts: [typeof reply.text === 'string' ? reply.text : ''] })
+    }
   }
   return result
 }

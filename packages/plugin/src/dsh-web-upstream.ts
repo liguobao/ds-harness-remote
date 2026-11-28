@@ -24,6 +24,7 @@ export interface DshWebContextLike {
   get?(name: string, required?: boolean): unknown
   emit?(...args: unknown[]): void
   events?: unknown
+  readonly registry?: { values(): Iterable<{ readonly name?: unknown } | undefined> }
 }
 
 export type DshWebRuntime =
@@ -44,6 +45,24 @@ function safeGetService(ctx: DshWebContextLike | undefined, name: string): unkno
   } catch {
     return undefined
   }
+}
+
+function hasMountedPlugin(ctx: DshWebContextLike | undefined, pluginName: string): boolean {
+  if (ctx?.registry === undefined) return false
+  try {
+    for (const fiber of ctx.registry.values()) {
+      if (fiber?.name === pluginName) return true
+    }
+  } catch {
+    return false
+  }
+  return false
+}
+
+function hasWebGuiSurface(ctx: DshWebContextLike, rootCtx?: DshWebContextLike): boolean {
+  return Boolean(safeGetService(ctx, 'webApp') ?? safeGetService(rootCtx, 'webApp'))
+    || hasMountedPlugin(ctx, 'dsbot-engine')
+    || hasMountedPlugin(rootCtx, 'dsbot-engine')
 }
 
 function isValidEntryUrl(url: URL, origin: URL): boolean {
@@ -68,7 +87,7 @@ export function resolveDshWebRuntime(
   ctx: DshWebContextLike,
   rootCtx?: DshWebContextLike,
 ): DshWebRuntime | undefined {
-  if (!safeGetService(ctx, 'webApp')) return
+  if (!hasWebGuiSurface(ctx, rootCtx)) return
   const listener = safeGetService(ctx, 'webServer') as { getOrigin?(): string } | undefined
   const auth = safeGetService(ctx, 'connection') as (Partial<DshWebBrowserAuth> & { admit?: DshWebEntryUrlAuth['admit'] }) | undefined
   if (typeof listener?.getOrigin !== 'function') return

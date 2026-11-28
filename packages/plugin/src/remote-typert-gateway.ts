@@ -133,7 +133,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
           ? await this.client.rpc<unknown>('harness.remote.call', request, signal)
           : await this.client.rpc<unknown>('harness.remote.call', request, signal, rpcOptions)
       } catch (error) {
-        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE') || !canReplayOversizedResponse(endpoint)) throw error
+        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE') || !canReplayOversizedResponse(endpoint, payload)) throw error
         response = await this.callTransferred(encoded, signal, rpcOptions)
       }
     }

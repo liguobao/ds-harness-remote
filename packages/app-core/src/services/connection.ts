@@ -92,6 +92,7 @@ export class AndroidRemoteConnection {
   private attentionInboxSupported = false
   private pushWakeSupported = false
   private attentionClient?: RemoteAttentionClient
+  private botClient?: { core: RemoteClientCore; proxy: RemoteHarnessClient; client: BotRemoteClient }
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
   private codex?: CodexRemoteClient
@@ -365,6 +366,7 @@ export class AndroidRemoteConnection {
     this.sessionEventsSupported = features.sessionEvents
     this.workspaceGitSupported = features.capabilities.includes(WORKSPACE_GIT_CAPABILITY)
     this.pluginRouteSupported = features.pluginRoute
+    if (!this.pluginRouteSupported) this.botClient = undefined
     this.lanWeb = features.capabilities.includes(DSH_WEB_LAN_CAPABILITY)
     this.lanWebIpv6 = features.capabilities.includes(DSH_WEB_LAN_IPV6_CAPABILITY)
     this.sameLinkIpv6Endpoints = features.sameLinkIpv6Endpoints?.map(endpoint => endpoint.toLowerCase()) ?? []
@@ -433,15 +435,47 @@ export class AndroidRemoteConnection {
     const proxy = this.proxy
     if (core === undefined || proxy === undefined) throw new Error(strings.runtime.connectHostFirst)
     if (!this.pluginRouteSupported) throw new Error(strings.bots.unsupported)
+    if (this.botClient !== undefined && this.botClient.core === core && this.botClient.proxy === proxy) {
+      return this.botClient.client
+    }
     const current = () => {
       if (this.core !== core || this.proxy !== proxy) throw new Error(strings.runtime.connectHostFirst)
       if (!this.pluginRouteSupported) throw new Error(strings.bots.unsupported)
     }
-    return new BotRemoteClient(
+    const gateway = new RemoteTypertGateway(core)
+    const client = new BotRemoteClient(
       (body, signal) => { current(); return core.rpc('plugin.route.call', { route: 'api/bot', body }, signal) },
       () => { current(); return proxy.sessionList() },
       current,
+      {
+        call: (endpoint, payload, signal) => {
+          current()
+          return gateway.call('dsBot/call', { args: { endpoint, payload: payload ?? {} } }, signal, {
+            maxResponseBytes: 32 * 1024 * 1024,
+          })
+        },
+        openFeed: async signal => {
+          current()
+          const stream = await gateway.open('dsBot/feed', { args: {} }, signal)
+          return (async function* () {
+            try {
+              for await (const frame of stream) {
+                current()
+                if (typeof frame !== 'object' || frame === null || !('event' in frame)) continue
+                const record = frame as { event?: unknown; data?: unknown }
+                if (typeof record.event === 'string') {
+                  yield { event: record.event, data: record.data }
+                }
+              }
+            } finally {
+              await stream.close()
+            }
+          })()
+        },
+      },
     )
+    this.botClient = { core, proxy, client }
+    return client
   }
 
   openLanWeb(onFailure: () => void) {
@@ -740,6 +774,8 @@ export class AndroidRemoteConnection {
     this.unsubscribeArchived = undefined
     this.transport = undefined
     this.proxy = undefined
+    this.pluginRouteSupported = false
+    this.botClient = undefined
     this.codex = undefined
     this.codexAvailable = false
     this.workspaceGitSupported = false

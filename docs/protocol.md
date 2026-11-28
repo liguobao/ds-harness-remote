@@ -854,18 +854,16 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 对象或 `null`（数组与原始值拒绝）；额外顶层字段拒绝。Host 在进入任何本机 carrier 前
 按 `endpoint` 执行编译期固定操作白名单，新增上游操作默认拒绝。
 
-2026-11-18 对齐 [DS-Bot v0.3.8](https://github.com/Fei2411/DS-Bot/tree/v0.3.8)：
-完整暴露其 `channel.js` 的命名 endpoint 与 `computer/index.js` 的 `computer-*` endpoint，
-包括模型供应商、密钥、连接器、IM、手机配对、电脑控制、更新、诊断、头像、分组、记忆编辑与 Side Chat。
-精确清单见 `packages/plugin/src/plugin-route-bridge.ts` 的 `BOT_REMOTE_OPERATIONS`；
-独立上游快照见 `packages/plugin/tests/fixtures/ds-bot-v0.3.8-endpoints.json`。
-v0.3.8 新增的变更审查、文件下载、Markdown 图片、群聊搜索/待办、任务批注/取消、
-供应商模型保存及密钥存储/解锁/加解密端点均通过相同的认证转发入口，业务校验由 DS-Bot 执行。
-旧 Host 的 `btw`、`btw-cancel`、`room-continue` 仍放行。
-`approval-answer` 的 choice 不再限制为单次允许/拒绝，交由 DS-Bot 自身校验。
-这些管理操作仅能通过既有认证 Remote 通道调用；不新增 HTTP 路径或通用 endpoint 通配符。
-原有消息/响应大小与 30 秒调用预算保持不变，超大图片或长操作仍受此边界限制。
-这表示 Host 接口透传覆盖，不表示 Android 原生界面已支持所有功能。
+2026-11-28 对齐 [DS-Bot v0.4.1](https://github.com/Fei2411/DS-Bot/tree/v0.4.1)：
+暴露团队与会话相关命名 endpoint（含模型供应商、密钥、连接器、IM、部分电脑/浏览器辅助动作、诊断、头像、分组、记忆编辑与 Side Chat），并保留旧 Host 兼容端点 `btw`、`btw-cancel`、`room-continue`、`bot-new-part`、`bot-open-part`。
+精确清单见 `packages/plugin/src/plugin-route-bridge.ts` 的 `BOT_REMOTE_OPERATIONS`（由 `PluginRouteBridge` 与 `HarnessRemoteBridge` `dsBot/call` 共享）；
+独立上游快照见 `packages/plugin/tests/fixtures/ds-bot-v0.4.1-endpoints.json`（共 177 个端点，加上上述 5 个旧 Host 兼容端点）。
+安全与宿主专有端点（如 `dsh-update-install`、`phone-*`、大部分 `computer-*` 如截屏/键鼠抢占/系统权限/前置允许、本地 `folder-pick`、`browser-wait`/`browser-result`、`connector-import*`）不在远程白名单中，调用直接返回 `INVALID_MESSAGE`。
+- 请求归一化：`approval-answer` 的 `choice` 严格限制为 `'allow' | 'reject'`；`image` 禁止携带非空 `parent`；`set-prefs` 剥离 `css` 及桌面端外观键（`mode`、`uiFont`、`codeFont`、`fontSize`、`lineHeight`、`material`）。
+- 响应脱敏（200 JSON / `dsBot/call` 成功值）：`folders` 剥离 `data`；`state` 剥离 `userQuestions`、`sessionQueues`、`api`、`telemetryPrompt`、`releaseNotes`、`phone.pairing` 以及 `work.approvals[*].alwaysAllow`。
+其余已放行操作仅能通过既有认证 Remote 通道调用，业务校验由 DS-Bot 执行；不新增 HTTP 路径或通用 endpoint 通配符。
+原有消息/响应大小（`MAX_SECURE_MESSAGE_BYTES`）与固定 30 秒调用预算保持不变，超大图片或长操作仍受此边界限制；Client 可在支持的 `dsBot/call` 文件下载上按 `file-download-chunks` 能力分块拉取。
+这表示 Host 命名接口受控转发覆盖，不表示 Android 原生界面已支持所有功能。
 
 `group-rows { roomId, from, to?, anchor? }` 读取群聊账簿中某轮的行，`open` 表示该轮仍在增长；
 它也是轮次结束后仍能显示成员回复正文的唯一读取入口。该 operation 于 0.6.4 加入白名单：
@@ -888,26 +886,22 @@ DS Bot 0.2.1 旁问：`btw { sessionId, text }` 返回卡片 ID，`btw-cancel { 
 前识别精确的 `/btw` 命令；空问题、群聊或旧 Bot 不支持时保留草稿并拒绝，不降级为普通 Prompt。
 `room-continue { roomId }` 由原生 Host 恢复达到接力上限的群聊，Android 依据 `room.paused`
 展示继续入口；不在 Client 实现接力计数或重放。所有 mutation 继续遵循原有不自动重试规则。
-Android 卡片使用固定 0.2.1 schema 和受限表达式解释器，支持本地计算与 SVG 图表；
+Android 卡片使用固定声明式 schema（已扩展支持 DS-Bot v0.4.1 图表与视图节点）和受限表达式解释器，支持本地计算与 SVG 图表；
 HTML 仅展示摘要和主机打开提示，不执行 HTML/脚本，不增加网络访问或通用 RPC。
 
-未知 endpoint 返回 `INVALID_MESSAGE`，浏览器兼容入口显示
-`remote-plugin/operation-not-allowed` 原生错误封装。DS-Bot v0.3.8 的管理接口
-已按上述完整白名单开放，旧版本文档中的“仅单次审批/本地管理”限制不再适用。
+未知或未放行 endpoint 返回 `INVALID_MESSAGE`，浏览器兼容入口显示
+`remote-plugin/operation-not-allowed` 原生错误封装。
 
 ```json
 { "params": { "route": "api/bot", "body": { "endpoint": "state", "payload": null } } }
 ```
 
-Result 为 `{ "status": number, "json": unknown }`，即本机路由的 HTTP 状态码与解析后的 JSON
-响应体。请求与响应序列化后都不得超过 `MAX_SECURE_MESSAGE_BYTES`；单次调用超时 30s。
+Result 为 `{ "status": number, "json": unknown }`，即本机路由的 HTTP 状态码与经上述规则脱敏后的 JSON
+响应体。请求与响应序列化后都不得超过 `MAX_SECURE_MESSAGE_BYTES`（`api/session/uploadFileBinary` 转传路径按传输上限校验）；单次调用超时 30s。
 Host 未注入本机路由服务时不得宣告 `plugin.route.v1`，此时 `plugin.route.call` 返回
 `FEATURE_NOT_SUPPORTED`。
 
-Host 优先通过官方 Connection 的 `createSharedFetchHandler('/api')` 调用已注册的本机
-Fetch 路由；进入此处的 peer 已通过 Remote channel 的账号、信任与加密校验。此路径无需
-HTTP listener 或浏览器 Cookie，适用于 Desktop。仅旧版缺少该 carrier 时使用认证后的
-loopback HTTP；不存在可用 carrier 时返回 503，未注册路由保留官方 404。
+对于 `api/bot`，`PluginRouteBridge` 在注入了 `localDsBotCall` 且未处于 30s 终端不可用冷却期时，优先直调本机 `dsBot/call` RPC；仅当返回终端不可用错误码（`gateway/not-found`、`gateway/invocation-unavailable`、`METHOD_NOT_FOUND`）时切换 30s HTTP 冷却并回落到本地 HTTP / Shared Fetch 路径（非终端失败直接报错，不重放 mutation）。在 Shared Fetch 路径下，Host 优先通过官方 Connection 的 `createSharedFetchHandler('/api')` 调用已注册的本机 Fetch 路由；进入此处的 peer 已通过 Remote channel 的账号、信任与加密校验，无需 HTTP listener 或浏览器 Cookie，适用于 Desktop。仅旧版缺少该 carrier 时使用认证后的 loopback HTTP（401 仅当只读操作且重新换取 Cookie 成功时取消原响应体并重试一次）；不存在可用 carrier 时返回 503，未注册路由保留官方 404。
 
 浏览器兼容入口在 Client bundle 注册时安装，仅拦截同源 `POST api/bot`（含文档代理前缀）。
 每次请求先通过本机控制接口读取当前 authority；控制 HTTP 请求必须使用官方

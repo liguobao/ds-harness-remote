@@ -19,21 +19,21 @@ const INPUTS = new Set(INPUT_TYPES)
 const PROPS = {
   stack: ['children', 'let'],
   row: ['children', 'let'],
-  text: ['text', 'tone'],
+  text: ['text', 'tone', 'markdown', 'title'],
   metric: ['label', 'value', 'tone', 'caption'],
   table: ['columns', 'rows'],
-  chart: ['kind', 'categories', 'series', 'unit', 'caption'],
+  chart: ['kind', 'categories', 'series', 'unit', 'caption', 'stacked', 'showValues', 'colors'],
   progress: ['label', 'percent', 'value', 'max', 'valueLabel', 'tone'],
-  callout: ['text', 'tone'],
+  callout: ['text', 'tone', 'title', 'markdown'],
   sources: ['items'],
   html: ['html', 'summary', 'height'],
   slider: ['id', 'label', 'min', 'max', 'step', 'value', 'unit'],
   choice: ['id', 'label', 'options', 'value'],
   toggle: ['id', 'label', 'value'],
   number: ['id', 'label', 'min', 'max', 'step', 'value', 'unit'],
-  options: ['id', 'options', 'multi'],
+  options: ['id', 'options', 'multi', 'submitLabel'],
   confirm: ['id', 'confirmLabel', 'cancelLabel'],
-  form: ['id', 'fields', 'submitLabel'],
+  form: ['id', 'fields', 'submitLabel', 'cancelLabel'],
   submit: ['id', 'label'],
 }
 const MAX_DEPTH = 8
@@ -89,6 +89,16 @@ export function normalizeView(value) {
   for (const key of keys) Object.defineProperty(out, key, { value: normalizeView(value[key]), writable: true, enumerable: true, configurable: true })
   for (const field of NUMERIC) if (Object.hasOwn(out, field)) out[field] = numeric(out[field])
   if (Array.isArray(out.values)) out.values = out.values.map(numeric)
+  if (Array.isArray(out.options)) {
+    out.options = out.options.map(option => (typeof option === 'string' ? { label: option } : option))
+  }
+  if (out.type === 'chart' && Array.isArray(out.series)) {
+    out.series = out.series.map((entry) => {
+      if (!isRecord(entry) || entry.values !== undefined || !Array.isArray(entry.data)) return entry
+      const { data, ...rest } = entry
+      return { ...rest, values: data.map(numeric) }
+    })
+  }
   return out
 }
 
@@ -188,8 +198,10 @@ function checkValue(node, key, path, ctx, kind, { required = false, max = MAX_TE
 const expected = kind => (kind === 'number' ? 'expected a number' : kind === 'string' ? 'expected a string' : Array.isArray(kind) ? `expected one of ${allowed(kind)}` : 'expected a string or a number')
 
 function checkText(node, path, ctx) {
+  if (node.title !== undefined && typeof node.title !== 'string') return `${path}.title: expected a string`
+  if (node.markdown !== undefined && typeof node.markdown !== 'boolean') return `${path}.markdown: expected a boolean`
   return checkValue(node, 'text', path, ctx, 'string', { required: true })
-    ?? checkValue(node, 'tone', path, ctx, TEXT_TONES)
+    ?? checkValue(node, 'tone', path, ctx, [...TEXT_TONES, ...CALLOUT_TONES])
 }
 
 function checkMetric(node, path, ctx) {
@@ -243,7 +255,7 @@ function checkChart(node, path, ctx) {
     const at = `${path}.series[${index}]`
     if (!isRecord(series)) return `${at}: expected a series object`
     for (const key of Object.keys(series)) {
-      if (key !== 'name' && key !== 'values') return `${at}.${key}: unknown property ${quoted(key)}; allowed: name, values`
+      if (key !== 'name' && key !== 'values' && key !== 'color') return `${at}.${key}: unknown property ${quoted(key)}; allowed: name, values`
     }
     if (series.name !== undefined && typeof series.name !== 'string') return `${at}.name: expected a string`
     if (!Array.isArray(series.values)) return `${at}.values: expected an array of numbers`
@@ -275,6 +287,8 @@ function checkProgress(node, path, ctx) {
 }
 
 function checkCallout(node, path, ctx) {
+  if (node.title !== undefined && typeof node.title !== 'string') return `${path}.title: expected a string`
+  if (node.markdown !== undefined && typeof node.markdown !== 'boolean') return `${path}.markdown: expected a boolean`
   return checkValue(node, 'text', path, ctx, 'string', { required: true })
     ?? checkValue(node, 'tone', path, ctx, CALLOUT_TONES)
 }
@@ -364,6 +378,7 @@ function checkOptions(node, path, ctx) {
   const idError = checkId(node, path, ctx)
   if (idError !== undefined) return idError
   if (node.multi !== undefined && typeof node.multi !== 'boolean') return `${path}.multi: expected a boolean`
+  if (node.submitLabel !== undefined && typeof node.submitLabel !== 'string') return `${path}.submitLabel: expected a string`
   if (!Array.isArray(node.options)) return `${path}.options: expected an array of 1 to ${MAX_OPTIONS} options`
   if (node.options.length < 1 || node.options.length > MAX_OPTIONS) return `${path}.options: expected 1 to ${MAX_OPTIONS} options; got ${node.options.length}`
   const labels = new Set()
@@ -390,10 +405,13 @@ function checkConfirm(node, path, ctx) {
   return undefined
 }
 
+const FORM_FIELD_PROPS = new Set(['id', 'label', 'placeholder', 'value', 'readOnly', 'multiline', 'kind', 'required', 'options'])
+
 function checkForm(node, path, ctx) {
   const idError = checkId(node, path, ctx)
   if (idError !== undefined) return idError
   if (node.submitLabel !== undefined && typeof node.submitLabel !== 'string') return `${path}.submitLabel: expected a string`
+  if (node.cancelLabel !== undefined && typeof node.cancelLabel !== 'string') return `${path}.cancelLabel: expected a string`
   if (!Array.isArray(node.fields)) return `${path}.fields: expected an array of at most ${MAX_FIELDS} fields`
   if (node.fields.length > MAX_FIELDS) return `${path}.fields: ${node.fields.length} fields exceeds the limit of ${MAX_FIELDS}`
   const seen = new Set()
@@ -402,7 +420,7 @@ function checkForm(node, path, ctx) {
     const at = `${path}.fields[${index}]`
     if (!isRecord(field)) return `${at}: expected a field object`
     for (const key of Object.keys(field)) {
-      if (key !== 'id' && key !== 'label' && key !== 'placeholder') return `${at}.${key}: unknown property ${quoted(key)}; allowed: id, label, placeholder`
+      if (!FORM_FIELD_PROPS.has(key)) return `${at}.${key}: unknown property ${quoted(key)}; allowed: id, label, placeholder`
     }
     if (typeof field.id !== 'string' || field.id === '') return `${at}.id: expected a non-empty string`
     if (field.id === '__proto__') return `${at}.id: "__proto__" cannot be an id`
@@ -410,6 +428,11 @@ function checkForm(node, path, ctx) {
     seen.add(field.id)
     if (typeof field.label !== 'string') return `${at}.label: expected a string`
     if (field.placeholder !== undefined && typeof field.placeholder !== 'string') return `${at}.placeholder: expected a string`
+    if (field.value !== undefined && typeof field.value !== 'string') return `${at}.value: expected a string`
+    if (field.readOnly !== undefined && typeof field.readOnly !== 'boolean') return `${at}.readOnly: expected a boolean`
+    if (field.multiline !== undefined && typeof field.multiline !== 'boolean') return `${at}.multiline: expected a boolean`
+    if (field.required !== undefined && typeof field.required !== 'boolean') return `${at}.required: expected a boolean`
+    if (field.kind !== undefined && typeof field.kind !== 'string') return `${at}.kind: expected a string`
   }
   return undefined
 }

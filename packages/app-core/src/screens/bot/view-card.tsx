@@ -17,15 +17,22 @@ import { BotChart } from './view-chart'
 type Reply = (action: string, values: BotObject) => void
 
 /** Native components and a bounded expression interpreter; HTML never executes. */
-export function BotViewCard({ pending, busy, reply }: { pending: BotObject; busy: boolean; reply: Reply }) {
+export function BotViewCard({ pending, busy, reply, dismiss }: { pending: BotObject; busy: boolean; reply: Reply; dismiss?: () => void }) {
   const styles = useThemedStyles(createBotStyles)
   const blueprint = useMemo(() => checkedBotView(pending), [pending.view, pending.title])
   return <View style={styles.card}>
-    {!!text(pending.title) && <Text style={styles.heading}>{text(pending.title)}</Text>}
-    {blueprint ? <ViewContent key={JSON.stringify(blueprint)} view={blueprint} busy={busy} reply={reply} /> : <Text style={styles.muted}>{s.bots.unknownCard}</Text>}
+    {(!!text(pending.title) || dismiss !== undefined) && (
+      <View style={styles.row}>
+        <Text style={[styles.heading, styles.grow]}>{text(pending.title)}</Text>
+        {dismiss !== undefined && (
+          <Button variant="quiet" label={s.bots.dismiss} disabled={busy} onPress={dismiss} />
+        )}
+      </View>
+    )}
+    {blueprint ? <ViewContent key={JSON.stringify(blueprint)} view={blueprint} busy={busy} reply={reply} dismiss={dismiss} /> : <Text style={styles.muted}>{s.bots.unknownCard}</Text>}
   </View>
 }
-function ViewContent({ view, busy, reply }: { view: BotObject; busy: boolean; reply: Reply }) {
+function ViewContent({ view, busy, reply, dismiss }: { view: BotObject; busy: boolean; reply: Reply; dismiss?: () => void }) {
   const styles = useThemedStyles(createBotStyles)
   const [inputs, setInputs] = useState<BotObject>({})
   const [error, setError] = useState(false)
@@ -38,32 +45,76 @@ function ViewContent({ view, busy, reply }: { view: BotObject; busy: boolean; re
     reply(action, values)
   }
   return <View style={styles.section}>
-    <ViewNode node={view} busy={busy} reply={answer} scope={scope} inputs={inputs} change={(id, value) => { setInputs(current => ({ ...current, [id]: value })); setError(false) }} />
+    <ViewNode node={view} busy={busy} reply={answer} dismiss={dismiss} scope={scope} inputs={inputs} change={(id, value) => { setInputs(current => ({ ...current, [id]: value })); setError(false) }} />
     {error && <Text accessibilityRole="alert" style={styles.error}>{s.bots.invalidViewAnswer}</Text>}
   </View>
 }
-type NodeProps = { node: BotObject; busy: boolean; reply: Reply; scope: Scope; inputs: BotObject; change: (id: string, value: unknown) => void }
+type NodeProps = { node: BotObject; busy: boolean; reply: Reply; dismiss?: () => void; scope: Scope; inputs: BotObject; change: (id: string, value: unknown) => void }
 function ViewNode(props: NodeProps) {
-  const { node, busy, reply, scope, inputs, change } = props
+  const { node, busy, reply, dismiss, scope, inputs, change } = props
   const styles = useThemedStyles(createBotStyles)
   const { colors } = useTheme()
   const [selected, setSelected] = useState<string[]>([])
-  const [fields, setFields] = useState<Record<string, string>>({})
+  const [fields, setFields] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {}
+    for (const field of objects(node.fields)) {
+      const fid = text(field.id)
+      if (fid && typeof field.value === 'string') initial[fid] = field.value
+    }
+    return initial
+  })
   const id = text(node.id)
   const value = (item: unknown) => resolve(item, scope, '')
   const display = (item: unknown) => asText(value(item))
   const input = Object.hasOwn(inputs, id) ? inputs[id] : inputDefault(node)
   const resolvedTone = value(node.tone)
-  const tone = resolvedTone === 'bad' ? colors.danger : resolvedTone === 'warn' ? colors.warning : resolvedTone === 'good' ? colors.success : resolvedTone === 'muted' ? colors.muted : colors.ink
+  const tone = resolvedTone === 'bad'
+    ? colors.danger
+    : resolvedTone === 'warn'
+      ? colors.warning
+      : resolvedTone === 'good'
+        ? colors.success
+        : resolvedTone === 'info'
+          ? colors.primary
+          : resolvedTone === 'muted'
+            ? colors.muted
+            : colors.ink
   switch (node.type) {
     // Rows wrap on narrow screens instead of compressing labels and controls.
     case 'stack': case 'row': return <View style={node.type === 'row' ? styles.wrap : styles.section}>{objects(node.children).map((child, index) => <View key={index} style={node.type === 'row' ? { flexGrow: 1, flexBasis: 140 } : undefined}><ViewNode {...props} node={child} /></View>)}</View>
-    case 'text': case 'callout': return <Text selectable style={[styles.body, { color: tone }]}>{display(node.text)}</Text>
+    case 'text': return (
+      <View style={styles.section}>
+        {!!text(node.title) && <Text style={styles.heading}>{text(node.title)}</Text>}
+        <NativeMarkdown text={display(node.text)} />
+      </View>
+    )
+    case 'callout': return (
+      <View style={{
+        borderLeftWidth: 3,
+        borderLeftColor: tone,
+        backgroundColor: colors.surfaceStrong,
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        gap: 4,
+      }}>
+        {!!text(node.title) && <Text style={[styles.heading, { color: tone }]}>{text(node.title)}</Text>}
+        <NativeMarkdown text={display(node.text)} />
+      </View>
+    )
     case 'metric': return <View><Text style={styles.muted}>{text(node.label)}</Text><Text selectable style={[styles.title, { color: tone }]}>{display(node.value)}</Text>{!!node.caption && <Text style={styles.muted}>{display(node.caption)}</Text>}</View>
     case 'progress': {
       const percent = node.percent !== undefined ? Number(value(node.percent)) : Number(value(node.max)) > 0 ? Number(value(node.value)) / Number(value(node.max)) * 100 : 0
       const bounded = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0
-      return <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: bounded }}><Text style={styles.body}>{text(node.label)} · {Math.round(bounded)}%{node.valueLabel ? ` · ${display(node.valueLabel)}` : ''}</Text></View>
+      const barColor = resolvedTone === 'bad' || resolvedTone === 'warn' || resolvedTone === 'good' ? tone : colors.primary
+      return (
+        <View style={{ gap: 6 }} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: bounded }}>
+          <Text style={styles.body}>{text(node.label)} · {Math.round(bounded)}%{node.valueLabel ? ` · ${display(node.valueLabel)}` : ''}</Text>
+          <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.surfaceStrong, overflow: 'hidden' }}>
+            <View style={{ width: `${bounded}%`, height: '100%', backgroundColor: barColor, borderRadius: 3 }} />
+          </View>
+        </View>
+      )
     }
     case 'table': return <ScrollView horizontal><View>
       <View style={styles.tableRow}>{objects(node.columns).map((column, i) => <Text key={i} style={styles.cell}>{text(column.label) || text(column.key)}</Text>)}</View>
@@ -78,19 +129,65 @@ function ViewNode(props: NodeProps) {
     case 'options': return <View style={styles.section}>
       {objects(node.options).map((option, i) => {
         const label = text(option.label)
-        return <BotChoice key={i} label={label} description={text(option.description)} multiple={node.multi === true} checked={selected.includes(label)} disabled={busy} onPress={() => setSelected(current => node.multi === true ? current.includes(label) ? current.filter(item => item !== label) : [...current, label] : [label])} />
+        return (
+          <BotChoice
+            key={i}
+            label={label}
+            description={text(option.description)}
+            multiple={node.multi === true}
+            checked={selected.includes(label)}
+            disabled={busy}
+            onPress={() => {
+              if (node.multi === true) {
+                setSelected(current => current.includes(label) ? current.filter(item => item !== label) : [...current, label])
+              } else {
+                setSelected([label])
+                reply(id, { selected: [label] })
+              }
+            }}
+          />
+        )
       })}
-      <View style={styles.actions}><Button label={s.bots.submit} disabled={busy || selected.length === 0} onPress={() => reply(id, { selected })} /></View>
+      {node.multi === true && (
+        <View style={styles.actions}>
+          <Button label={text(node.submitLabel) || s.bots.submit} disabled={busy || selected.length === 0} onPress={() => reply(id, { selected })} />
+        </View>
+      )}
     </View>
     case 'confirm': return <View style={styles.actions}>
       <Button variant="secondary" label={text(node.cancelLabel) || s.bots.reject} disabled={busy} onPress={() => reply(id, { confirmed: false })} />
       <Button label={text(node.confirmLabel) || s.bots.confirm} disabled={busy} onPress={() => reply(id, { confirmed: true })} />
     </View>
     case 'form': return <View style={styles.section}>
-      {objects(node.fields).map((field, i) => <View style={styles.field} key={i}>
-        <Text style={styles.body}>{text(field.label)}</Text><TextInput accessibilityLabel={text(field.label)} placeholder={text(field.placeholder)} placeholderTextColor={colors.muted} style={styles.input} maxLength={2000} editable={!busy} value={fields[text(field.id)] ?? ''} onChangeText={value => setFields(current => ({ ...current, [text(field.id)]: value }))} />
-      </View>)}
-      <View style={styles.actions}><Button label={text(node.submitLabel) || s.bots.submit} disabled={busy} onPress={() => reply(id, { fields })} /></View>
+      {objects(node.fields).map((field, i) => {
+        const fid = text(field.id)
+        const isMultiline = field.multiline === true
+        const isReadOnly = field.readOnly === true
+        const isSecret = text(field.kind) === 'password'
+        return (
+          <View style={styles.field} key={i}>
+            <Text style={styles.body}>{text(field.label)}</Text>
+            <TextInput
+              accessibilityLabel={text(field.label)}
+              placeholder={text(field.placeholder)}
+              placeholderTextColor={colors.muted}
+              style={[styles.input, isMultiline && styles.multiline]}
+              maxLength={2000}
+              multiline={isMultiline}
+              editable={!busy && !isReadOnly}
+              secureTextEntry={isSecret}
+              value={fields[fid] ?? ''}
+              onChangeText={val => setFields(current => ({ ...current, [fid]: val }))}
+            />
+          </View>
+        )
+      })}
+      <View style={styles.actions}>
+        {!!text(node.cancelLabel) && dismiss !== undefined && (
+          <Button variant="secondary" label={text(node.cancelLabel)} disabled={busy} onPress={dismiss} />
+        )}
+        <Button label={text(node.submitLabel) || s.bots.submit} disabled={busy} onPress={() => reply(id, { fields })} />
+      </View>
     </View>
     case 'submit': return <View style={styles.actions}><Button label={text(node.label) || s.bots.submit} disabled={busy} onPress={() => reply(id, {})} /></View>
     default: return <Text style={styles.muted}>{s.bots.unknownCard}</Text>

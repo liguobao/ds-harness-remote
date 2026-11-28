@@ -1146,6 +1146,81 @@ describe('DSH 0.2.3 token auth integration', () => {
     }
   })
 
+  it('resolves DS-Bot standalone dsbot-engine runtime without webApp while still rejecting absent web surfaces', async () => {
+    const localGui = await listenHttp((req, res) => {
+      if (req.url === '/?token=launch-secret') {
+        res.writeHead(303, { location: './', 'set-cookie': 'dsh-auth-test=signed; Path=/' })
+        res.end()
+        return
+      }
+      if (req.url === '/' && req.headers.cookie === 'dsh-auth-test=signed') {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end('<html>ds-bot</html>')
+        return
+      }
+      res.writeHead(401)
+      res.end()
+    })
+    try {
+      // Legacy DshWebBrowserAuth on dsbot-engine (no webApp)
+      const legacyCtx = new Context()
+      await legacyCtx.plugin({ name: 'dsbot-engine', apply() {} })
+      legacyCtx.provide('webServer', { getOrigin: () => localGui.origin.href } as never)
+      legacyCtx.provide('connection', {
+        authenticatedUrl: (origin: string) => `${origin}?token=launch-secret`,
+        authorizeIndex: (
+          req: { url: string },
+          res: { writeHead(status: number, headers?: Record<string, string>): void; end(): void },
+        ) => {
+          if (req.url === '/?token=launch-secret') {
+            res.writeHead(303, { 'set-cookie': 'dsh-auth-test=signed; Path=/' })
+            res.end()
+            return true
+          }
+          return false
+        },
+        requestRejection: (req: { headers: Record<string, string> }) =>
+          req.headers.cookie === 'dsh-auth-test=signed' ? undefined : 401,
+      } as never)
+      try {
+        const upstream = await openDshWebUpstream(() => resolveDshWebRuntime(legacyCtx), AbortSignal.timeout(5_000))
+        expect(upstream.isCurrent()).toBe(true)
+        expect(upstream.authorize({ method: 'GET', path: '/', headers: [], body: false }, localGui.origin)?.headers)
+          .toContainEqual(['cookie', 'dsh-auth-test=signed'])
+      } finally {
+        await legacyCtx.fiber.dispose()
+      }
+
+      // DSH 0.2.3 entryAuth on dsbot-engine mounted on rootCtx (no webApp)
+      const rootCtx = new Context()
+      await rootCtx.plugin({ name: 'dsbot-engine', apply() {} })
+      const pluginCtx = new Context()
+      pluginCtx.provide('webServer', { getOrigin: () => localGui.origin.href } as never)
+      pluginCtx.provide('connection', {
+        admit: (req: { headers: Record<string, string> }) => (
+          req.headers.cookie === 'dsh-auth-test=signed'
+            ? { peer: { signal: new AbortController().signal } }
+            : { rejection: 401 }
+        ),
+      } as never)
+      rootCtx.on('webserver/entry-url' as never, ((baseUrl: string, entries: Array<{ url: string }>) => {
+        entries.push({ url: `${baseUrl}?token=launch-secret` })
+      }) as never)
+      try {
+        const upstream = await openDshWebUpstream(
+          () => resolveDshWebRuntime(pluginCtx, rootCtx),
+          AbortSignal.timeout(5_000),
+        )
+        expect(upstream.isCurrent()).toBe(true)
+      } finally {
+        await pluginCtx.fiber.dispose()
+        await rootCtx.fiber.dispose()
+      }
+    } finally {
+      await localGui.close()
+    }
+  })
+
   it('fails closed on invalid entry-url discovery and token exchange boundaries', async () => {
     const { runScenarios } = await import('../../../scripts/test-scenarios.mjs')
     type BoundaryScenario =

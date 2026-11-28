@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import * as Clipboard from 'expo-clipboard'
-import { Check, Copy } from 'lucide-react-native'
+import { Check, Copy, Download, FileText } from 'lucide-react-native'
 import { StyleSheet, Text, View, Pressable } from 'react-native'
 import { strings as s } from '../../locales/i18n'
 import { text, type BotObject } from '../../services/bot-catalog'
@@ -48,13 +48,15 @@ type AvatarBot = { id: string; avatar?: { shape?: string; image?: string }; colo
 /** What a mention needs: the roster to resolve names against and where a tap goes. */
 export interface BotMentionContext { bots: BotEntry[]; selfId?: string; onPress: (botId: string) => void }
 
-export function BotReplies({ rows, botOf, mentions, adminId }: {
+export function BotReplies({ rows, botOf, mentions, adminId, onDownloadPresented }: {
   rows: BotObject[]; botOf?: (botId: string) => AvatarBot | undefined; mentions?: BotMentionContext
   /** The room's admin, badged as on the Host's own chat. */
   adminId?: string
+  onDownloadPresented?: (file: BotObject) => void
 }) {
   const styles = useThemedStyles(createBotStyles)
   const localStyles = useThemedStyles(createReplyStyles)
+  const { colors } = useTheme()
   return (
     <View style={styles.section}>
       {stackBotReplies(rows).map(({ reply, texts }, i) => {
@@ -97,7 +99,38 @@ export function BotReplies({ rows, botOf, mentions, adminId }: {
                 {via !== '' && <BotViaPill platform={via} />}
               </View>}
               <View style={reply.kind === 'user' ? undefined : localStyles.memberBubble}>
-                {texts.map((body, index) => <MentionBody key={index} body={body} mentions={mentions} />)}
+                {texts.map((body, index) => (body ? <MentionBody key={index} body={body} mentions={mentions} /> : null))}
+                {Array.isArray(reply.presented) && reply.presented.length > 0 && (
+                  <View style={localStyles.presentedList}>
+                    {(reply.presented as unknown[]).map((rawFile, fileIdx) => {
+                      if (typeof rawFile !== 'object' || rawFile === null) return null
+                      const file = rawFile as BotObject
+                      const rawPath = text(file.path)
+                      const label = text(file.name) || rawPath.split(/[\\/]/).pop() || 'file'
+                      const desc = text(file.description)
+                      const downloadable = typeof file.seq === 'number' || typeof file.attachmentId === 'string'
+                      return (
+                        <Pressable
+                          key={`${fileIdx}:${label}`}
+                          disabled={!onDownloadPresented || !downloadable}
+                          onPress={() => onDownloadPresented?.(file)}
+                          accessibilityRole="button"
+                          accessibilityLabel={label}
+                          style={({ pressed }) => [localStyles.presentedCard, pressed && { opacity: 0.72 }]}
+                        >
+                          <FileText size={16} color={colors.primary} />
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text numberOfLines={1} style={[styles.body, { fontWeight: '600' }]}>{label}</Text>
+                            {desc !== '' && <Text numberOfLines={2} style={styles.muted}>{desc}</Text>}
+                          </View>
+                          {downloadable && onDownloadPresented !== undefined && (
+                            <Download size={15} color={colors.primary} />
+                          )}
+                        </Pressable>
+                      )
+                    })}
+                  </View>
+                )}
               </View>
               <View style={localStyles.footerRow}>
                 <ReplyCopy text={texts.join('\n\n')} />
@@ -124,19 +157,27 @@ function MentionBody({ body, mentions }: { body: string; mentions?: BotMentionCo
   let cursor = 0
   spans.forEach((span, index) => {
     if (span.start > cursor) runs.push(<Text key={`t${index}`} style={styles.body}>{body.slice(cursor, span.start)}</Text>)
-    runs.push(
-      <Pressable
-        key={`m${index}`}
-        onPress={() => mentions.onPress(span.bot.id)}
-        accessibilityRole="link"
-        accessibilityLabel={`@${span.bot.name}`}
-      >
-        <View style={localStyles.mention}>
-          <BotAvatar bot={span.bot} size={16} />
-          <Text style={[styles.body, localStyles.mentionName]}>{span.bot.name}</Text>
-        </View>
-      </Pressable>,
-    )
+    if (span.kind === 'all') {
+      runs.push(
+        <Text key={`m${index}`} style={[styles.body, localStyles.mentionName]}>
+          @{span.bot.name}
+        </Text>,
+      )
+    } else {
+      runs.push(
+        <Pressable
+          key={`m${index}`}
+          onPress={() => mentions.onPress(span.bot.id)}
+          accessibilityRole="link"
+          accessibilityLabel={`@${span.bot.name}`}
+        >
+          <View style={localStyles.mention}>
+            <BotAvatar bot={span.bot} size={16} />
+            <Text style={[styles.body, localStyles.mentionName]}>{span.bot.name}</Text>
+          </View>
+        </Pressable>,
+      )
+    }
     cursor = span.end
   })
   if (cursor < body.length) runs.push(<Text key="tail" style={styles.body}>{body.slice(cursor)}</Text>)
@@ -198,6 +239,21 @@ const createReplyStyles = (colors: ThemeColors) =>
     },
     eventTextError: {
       color: colors.danger,
+    },
+    presentedList: {
+      gap: spacing.xs,
+      marginTop: spacing.xs,
+    },
+    presentedCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 8,
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      backgroundColor: colors.surface,
     },
   })
 

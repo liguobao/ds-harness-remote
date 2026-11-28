@@ -35,6 +35,7 @@ const TERMINAL_OBSERVER_ERROR_CODES = new Set([
   'gateway/invocation-unavailable',
 ])
 const MAX_SESSION_METADATA_ENTRIES = 512
+const MAX_TRACKED_TITLES = 2048
 
 export interface AttentionSessionInfo {
   backend: AttentionBackend
@@ -112,6 +113,11 @@ export class HostAttentionTracker implements AttentionBackendObserver {
   private readonly harnessQuestionProjectionSeqs = new Map<string, number>()
   private readonly harnessQuestionEventToItemId = new Map<string, string>()
   private readonly criticalNotifiedIds = new Set<string>()
+  private readonly botNamesById = new Map<string, { name: string; sessionId: string }>()
+  private readonly roomNamesById = new Map<string, { name: string; sessionId: string }>()
+  private readonly titleBySessionId = new Map<string, string>()
+  private readonly taskOwnerBySessionId = new Map<string, { botId: string; sessionId: string; name: string }>()
+  private botWorkspaceId: string | undefined
   private readonly now: () => number
   private readonly tokenTtlMs: number
   private readonly maxTokens: number
@@ -129,11 +135,24 @@ export class HostAttentionTracker implements AttentionBackendObserver {
   private closed = false
   private started = false
   private observerGateway?: LocalTypertGateway
+  private activeObserverTasks = 0
   private observerController?: AbortController
   private observerIterator?: AsyncIterator<unknown>
   private observerTask?: Promise<void>
   private observerRetryTimer?: ReturnType<typeof setTimeout>
   private observerRetryWake?: () => void
+  private botObserverStarted = false
+  private botObserverController?: AbortController
+  private botObserverIterator?: AsyncIterator<unknown>
+  private botObserverTask?: Promise<void>
+  private botObserverRetryTimer?: ReturnType<typeof setTimeout>
+  private botObserverRetryWake?: () => void
+  private botStateSyncTimer?: ReturnType<typeof setTimeout>
+  private botStateSyncInFlight = false
+  private botStateSyncPendingFull = false
+  private botStateSyncPendingLive = false
+  private botStateRevision: number | undefined
+  private botStateLiveKey: string | undefined
 
   constructor(private readonly options: AttentionTrackerOptions = {}) {
     this.now = options.now ?? (() => Date.now())
@@ -156,9 +175,41 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     if (observerGateway === undefined || observerGateway === gateway) return
     this.started = true
     this.observerGateway = observerGateway
+    this.activeObserverTasks += 1
     this.observerTask = this.runHarnessObserver(observerGateway).finally(() => {
       if (this.observerTask !== undefined) this.observerTask = undefined
+      void this.releaseObserverGatewayIfIdle(observerGateway)
     })
+  }
+
+  /** Start passive local `dsBot/feed` observation for 0-client DS-Bot attention updates. */
+  startBotFeed(): void {
+    if (this.closed || this.botObserverStarted) return
+    const gateway = this.options.localGateway
+    if (gateway?.supportsCarrier !== true) return
+    const observerGateway = this.observerGateway ?? gateway.createPeer?.({ interactions: 'none' })
+    if (observerGateway === undefined || observerGateway === gateway) return
+    this.observerGateway = observerGateway
+    this.startBotObserver(observerGateway)
+  }
+
+  private startBotObserver(observerGateway: LocalTypertGateway): void {
+    if (this.closed || this.botObserverStarted) return
+    this.botObserverStarted = true
+    this.activeObserverTasks += 1
+    this.botObserverTask = this.runDsBotObserver(observerGateway).finally(() => {
+      if (this.botObserverTask !== undefined) this.botObserverTask = undefined
+      void this.releaseObserverGatewayIfIdle(observerGateway)
+    })
+  }
+
+  private async releaseObserverGatewayIfIdle(gateway: LocalTypertGateway): Promise<void> {
+    this.activeObserverTasks = Math.max(0, this.activeObserverTasks - 1)
+    if (this.activeObserverTasks > 0) return
+    if (this.observerGateway === gateway) {
+      this.observerGateway = undefined
+      await gateway.dispose?.().catch(() => undefined)
+    }
   }
 
   /** Observe live Harness `$events` frames forwarded through an authenticated client bridge. */
@@ -463,7 +514,9 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     }
 
     if (body.endpoint === 'answer-question' || body.endpoint === 'dismiss-question') {
-      const sessionId = isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined
+      const botId = isRecord(body.payload) && typeof body.payload.botId === 'string' ? body.payload.botId : undefined
+      const sessionId = (isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined)
+        ?? (botId !== undefined ? this.botNamesById.get(botId)?.sessionId : undefined)
       const questionId = isRecord(body.payload) && typeof body.payload.questionId === 'string' ? body.payload.questionId : undefined
       if (sessionId !== undefined && questionId !== undefined) {
         this.onInteractionResolved(botQuestionItemId(sessionId, questionId))
@@ -471,6 +524,71 @@ export class HostAttentionTracker implements AttentionBackendObserver {
         const prefix = `ds-bot:question:${sessionId}:`
         for (const id of [...this.items.keys()]) {
           if (id.startsWith(prefix)) this.onInteractionResolved(id)
+        }
+      }
+      return
+    }
+
+    if (body.endpoint === 'view-reply' || body.endpoint === 'dismiss-view') {
+      const viewId = isRecord(body.payload) && typeof body.payload.viewId === 'string' ? body.payload.viewId : undefined
+      const sessionId = isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined
+      if (viewId !== undefined) {
+        this.onInteractionResolved(botInboxItemId('view', viewId))
+      } else if (sessionId !== undefined) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith('ds-bot:inbox:view:') && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id)
+          }
+        }
+      }
+      return
+    }
+
+    if (body.endpoint === 'computer-app-answer') {
+      const askId = isRecord(body.payload)
+        ? firstNonEmptyString(body.payload.askId, body.payload.id)
+        : undefined
+      if (askId !== undefined) {
+        this.onInteractionResolved(botInboxItemId('computer', askId))
+      }
+      return
+    }
+
+    if (body.endpoint === 'learning-answer') {
+      const proposalId = isRecord(body.payload) ? firstNonEmptyString(body.payload.id) : undefined
+      const botId = isRecord(body.payload) && typeof body.payload.botId === 'string' ? body.payload.botId : undefined
+      const sessionId = (isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined)
+        ?? (botId !== undefined ? this.botNamesById.get(botId)?.sessionId : undefined)
+      if (proposalId !== undefined) {
+        this.onInteractionResolved(botInboxItemId('learning', proposalId))
+      } else if (sessionId !== undefined) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith('ds-bot:inbox:learning:') && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id)
+          }
+        }
+      }
+      return
+    }
+
+    if (
+      body.endpoint === 'secret-set'
+      || body.endpoint === 'secret-allow'
+      || body.endpoint === 'secret-cancel'
+      || body.endpoint === 'mail-send-answer'
+    ) {
+      const kind = body.endpoint === 'mail-send-answer' ? 'mail' : 'secret'
+      const requestId = isRecord(body.payload) ? firstNonEmptyString(body.payload.id, body.payload.requestId) : undefined
+      const botId = isRecord(body.payload) && typeof body.payload.botId === 'string' ? body.payload.botId : undefined
+      const sessionId = (isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined)
+        ?? (botId !== undefined ? this.botNamesById.get(botId)?.sessionId : undefined)
+      if (requestId !== undefined) {
+        this.onInteractionResolved(botInboxItemId(kind, requestId))
+      } else if (sessionId !== undefined) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith(`ds-bot:inbox:${kind}:`) && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id)
+          }
         }
       }
       return
@@ -487,17 +605,26 @@ export class HostAttentionTracker implements AttentionBackendObserver {
   }
 
   private observeBotState(state: Record<string, unknown>): void {
-    const botNamesById = new Map<string, { name: string; sessionId: string }>()
-    const roomNamesById = new Map<string, { name: string; sessionId: string }>()
-    const titleBySessionId = new Map<string, string>()
-    const workspaceId = typeof state.workspaceId === 'string' && state.workspaceId.length > 0 ? state.workspaceId : undefined
+    if (typeof state.workspaceId === 'string' && state.workspaceId.length > 0) {
+      this.botWorkspaceId = state.workspaceId
+    }
+    const workspaceId = this.botWorkspaceId
 
     if (Array.isArray(state.bots)) {
+      this.botNamesById.clear()
+      this.taskOwnerBySessionId.clear()
       for (const entry of state.bots) {
         if (!isRecord(entry) || typeof entry.id !== 'string' || typeof entry.sessionId !== 'string') continue
         const name = typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : entry.id
-        botNamesById.set(entry.id, { name, sessionId: entry.sessionId })
-        titleBySessionId.set(entry.sessionId, name)
+        this.botNamesById.set(entry.id, { name, sessionId: entry.sessionId })
+        this.rememberTitle(entry.sessionId, name)
+        if (Array.isArray(entry.tasks)) {
+          for (const task of entry.tasks) {
+            if (isRecord(task) && typeof task.sessionId === 'string' && task.sessionId.length > 0) {
+              this.taskOwnerBySessionId.set(task.sessionId, { botId: entry.id, sessionId: entry.sessionId, name })
+            }
+          }
+        }
         this.rememberMeta(sessionItemId('ds-bot', entry.sessionId), {
           backend: 'ds-bot',
           mode: 'bot',
@@ -509,12 +636,13 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     }
 
     if (Array.isArray(state.rooms)) {
+      this.roomNamesById.clear()
       for (const entry of state.rooms) {
         if (!isRecord(entry) || typeof entry.id !== 'string') continue
         const sessionId = typeof entry.sessionId === 'string' && entry.sessionId.length > 0 ? entry.sessionId : entry.id
         const name = typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : entry.id
-        roomNamesById.set(entry.id, { name, sessionId })
-        titleBySessionId.set(sessionId, name)
+        this.roomNamesById.set(entry.id, { name, sessionId })
+        this.rememberTitle(sessionId, name)
         this.rememberMeta(sessionItemId('ds-bot', sessionId), {
           backend: 'ds-bot',
           mode: 'bot',
@@ -536,10 +664,18 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       const activeApprovalIds = new Set<string>()
       for (const approval of rawApprovals) {
         if (!isRecord(approval) || typeof approval.id !== 'string' || approval.id.length === 0) continue
-        const bot = typeof approval.botId === 'string' ? botNamesById.get(approval.botId) : undefined
-        const sessionId = (typeof approval.sessionId === 'string' && approval.sessionId.length > 0 ? approval.sessionId : undefined)
-          ?? bot?.sessionId
-          ?? (typeof approval.botId === 'string' && approval.botId.length > 0 ? approval.botId : approval.id)
+        if (approval.answerable === false) continue
+        if (isRecord(approval.review) && approval.review.status === 'reviewing') continue
+        const room = typeof approval.roomId === 'string' ? this.roomNamesById.get(approval.roomId) : undefined
+        const taskOwner = typeof approval.sessionId === 'string' ? this.taskOwnerBySessionId.get(approval.sessionId) : undefined
+        const bot = typeof approval.botId === 'string' ? this.botNamesById.get(approval.botId) : undefined
+        const sessionId = room !== undefined
+          ? room.sessionId
+          : taskOwner !== undefined
+            ? taskOwner.sessionId
+            : bot?.sessionId
+              ?? (typeof approval.sessionId === 'string' && approval.sessionId.length > 0 ? approval.sessionId : undefined)
+              ?? (typeof approval.botId === 'string' && approval.botId.length > 0 ? approval.botId : approval.id)
         const itemId = botApprovalItemId(approval.id)
         activeApprovalIds.add(itemId)
         const tool = typeof approval.tool === 'string' ? approval.tool.trim() : ''
@@ -551,7 +687,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           mode: 'bot',
           ...(workspaceId === undefined ? {} : { workspaceId }),
           sessionId,
-          sessionTitle: bot?.name ?? titleBySessionId.get(sessionId) ?? 'DS-Bot',
+          sessionTitle: room?.name ?? taskOwner?.name ?? bot?.name ?? this.titleBySessionId.get(sessionId) ?? 'DS-Bot',
           status: 'waiting_approval',
           ...(summary === undefined ? {} : { summary }),
         })
@@ -577,7 +713,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           mode: 'bot',
           ...(workspaceId === undefined ? {} : { workspaceId }),
           sessionId,
-          sessionTitle: titleBySessionId.get(sessionId) ?? 'DS-Bot',
+          sessionTitle: this.titleBySessionId.get(sessionId) ?? 'DS-Bot',
           status: 'waiting_question',
           ...(summary === undefined ? {} : { summary }),
         })
@@ -589,13 +725,61 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       }
     }
 
+    // Reconcile DS-Bot v0.4.x unified `state.inbox` items (views, secrets, connectors, mail, computer, handoff, goal, blocked, model, paused).
+    if (isRecord(state.inbox) && Array.isArray(state.inbox.items)) {
+      const activeInboxIds = new Set<string>()
+      for (const entry of state.inbox.items) {
+        if (!isRecord(entry) || typeof entry.kind !== 'string') continue
+        const kind = entry.kind
+        const isInboxApproval = BOT_INBOX_APPROVAL_KINDS.has(kind)
+        const isInboxQuestion = BOT_INBOX_QUESTION_KINDS.has(kind)
+        if (!isInboxApproval && !isInboxQuestion) continue
+        const rawFromId = typeof entry.id === 'string' && entry.id.startsWith(`${kind}:`)
+          ? entry.id.slice(kind.length + 1)
+          : entry.id
+        const rawItemId = firstNonEmptyString(entry.ref, rawFromId, entry.callId, entry.requestId, entry.askId, entry.sessionId, entry.roomId, entry.botId)
+        if (rawItemId === undefined) continue
+        const room = typeof entry.roomId === 'string' ? this.roomNamesById.get(entry.roomId) : undefined
+        const taskOwner = typeof entry.sessionId === 'string' ? this.taskOwnerBySessionId.get(entry.sessionId) : undefined
+        const bot = typeof entry.botId === 'string' ? this.botNamesById.get(entry.botId) : undefined
+        const sessionId = room?.sessionId
+          ?? taskOwner?.sessionId
+          ?? bot?.sessionId
+          ?? firstNonEmptyString(entry.sessionId, entry.roomId, entry.botId, rawItemId)!
+        const sessionTitle = room?.name
+          ?? taskOwner?.name
+          ?? bot?.name
+          ?? firstNonEmptyString(entry.title, entry.name)
+          ?? this.titleBySessionId.get(sessionId)
+          ?? 'DS-Bot'
+        const summary = firstNonEmptyString(entry.summary, entry.reason, entry.text, entry.title)
+        const itemId = botInboxItemId(kind, rawItemId)
+        activeInboxIds.add(itemId)
+        this.onInteractionPending({
+          id: itemId,
+          backend: 'ds-bot',
+          mode: 'bot',
+          ...(workspaceId === undefined ? {} : { workspaceId }),
+          sessionId,
+          sessionTitle,
+          status: isInboxApproval ? 'waiting_approval' : 'waiting_question',
+          ...(summary === undefined ? {} : { summary }),
+        })
+      }
+      for (const id of [...this.items.keys()]) {
+        if (id.startsWith('ds-bot:inbox:') && !activeInboxIds.has(id)) {
+          this.onInteractionResolved(id)
+        }
+      }
+    }
+
     // Reconcile active bot/room work when work maps are present.
     if (work !== undefined && (isRecord(work.bots) || isRecord(work.rooms))) {
       const activeSessionIds = new Set<string>()
       if (isRecord(work.bots)) {
         for (const [botId, workEntry] of Object.entries(work.bots)) {
           if (!isBotWorkActive(workEntry)) continue
-          const bot = botNamesById.get(botId)
+          const bot = this.botNamesById.get(botId)
           const sessionId = bot?.sessionId ?? botId
           activeSessionIds.add(sessionId)
           this.onSessionRunning({
@@ -603,14 +787,14 @@ export class HostAttentionTracker implements AttentionBackendObserver {
             mode: 'bot',
             ...(workspaceId === undefined ? {} : { workspaceId }),
             sessionId,
-            sessionTitle: bot?.name ?? titleBySessionId.get(sessionId) ?? botId,
+            sessionTitle: bot?.name ?? this.titleBySessionId.get(sessionId) ?? botId,
           })
         }
       }
       if (isRecord(work.rooms)) {
         for (const [roomId, workEntry] of Object.entries(work.rooms)) {
           if (!isBotWorkActive(workEntry)) continue
-          const room = roomNamesById.get(roomId)
+          const room = this.roomNamesById.get(roomId)
           const sessionId = room?.sessionId ?? roomId
           activeSessionIds.add(sessionId)
           this.onSessionRunning({
@@ -618,7 +802,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
             mode: 'bot',
             ...(workspaceId === undefined ? {} : { workspaceId }),
             sessionId,
-            sessionTitle: room?.name ?? titleBySessionId.get(sessionId) ?? roomId,
+            sessionTitle: room?.name ?? this.titleBySessionId.get(sessionId) ?? roomId,
           })
         }
       }
@@ -646,13 +830,25 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           : []
     for (const entry of entries) {
       if (!isRecord(entry)) continue
-      const sessionId = firstNonEmptyString(entry.sessionId, entry.botId, entry.roomId, entry.id)
+      const room = typeof entry.roomId === 'string' ? this.roomNamesById.get(entry.roomId) : undefined
+      const bot = typeof entry.botId === 'string' ? this.botNamesById.get(entry.botId) : undefined
+      const sessionId = room?.sessionId
+        ?? bot?.sessionId
+        ?? firstNonEmptyString(entry.sessionId, entry.botId, entry.roomId, entry.id)
       if (sessionId === undefined) continue
-      const title = firstNonEmptyString(entry.title, entry.botName, entry.roomName) ?? 'DS-Bot'
+      const title = firstNonEmptyString(entry.title, entry.name, entry.botName, entry.roomName)
+        ?? room?.name
+        ?? bot?.name
+        ?? this.titleBySessionId.get(sessionId)
+        ?? 'DS-Bot'
       const summary = firstNonEmptyString(entry.summary, entry.message, entry.reason, entry.text)
       const kind = typeof entry.kind === 'string' ? entry.kind : typeof entry.type === 'string' ? entry.type : ''
       if (kind === 'approval' || kind === 'waiting_approval') {
-        const noticeId = firstNonEmptyString(entry.approvalId, entry.id) ?? sessionId
+        const explicitId = firstNonEmptyString(entry.approvalId, entry.id)
+        if (explicitId === undefined && [...this.items.values()].some(i => i.id.startsWith('ds-bot:approval:') && i.sessionId === sessionId)) {
+          continue
+        }
+        const noticeId = explicitId ?? sessionId
         this.onInteractionPending({
           id: botApprovalItemId(noticeId),
           backend: 'ds-bot',
@@ -663,7 +859,11 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           ...(summary === undefined ? {} : { summary }),
         })
       } else if (kind === 'question' || kind === 'waiting_question') {
-        const questionId = firstNonEmptyString(entry.questionId, entry.id) ?? 'notice'
+        const explicitId = firstNonEmptyString(entry.questionId, entry.id)
+        if (explicitId === undefined && [...this.items.values()].some(i => i.id.startsWith(`ds-bot:question:${sessionId}:`))) {
+          continue
+        }
+        const questionId = explicitId ?? 'notice'
         this.onInteractionPending({
           id: botQuestionItemId(sessionId, questionId),
           backend: 'ds-bot',
@@ -673,7 +873,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           status: 'waiting_question',
           ...(summary === undefined ? {} : { summary }),
         })
-      } else if (kind === 'error' || kind === 'failed' || kind === 'turn_failed') {
+      } else if (kind === 'blocked' || kind === 'error' || kind === 'failed' || kind === 'turn_failed') {
         this.onSessionCompleted({
           backend: 'ds-bot',
           mode: 'bot',
@@ -682,7 +882,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           failed: true,
           ...(summary === undefined ? {} : { summary }),
         })
-      } else if (kind === 'completed' || kind === 'turn_completed') {
+      } else if (kind === 'done' || kind === 'completed' || kind === 'turn_completed') {
         this.onSessionCompleted({
           backend: 'ds-bot',
           mode: 'bot',
@@ -710,19 +910,39 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     this.observerRetryWake?.()
     this.observerRetryWake = undefined
 
+    if (this.botObserverRetryTimer !== undefined) {
+      clearTimeout(this.botObserverRetryTimer)
+      this.botObserverRetryTimer = undefined
+    }
+    this.botObserverRetryWake?.()
+    this.botObserverRetryWake = undefined
+    if (this.botStateSyncTimer !== undefined) {
+      clearTimeout(this.botStateSyncTimer)
+      this.botStateSyncTimer = undefined
+    }
+
     const controller = this.observerController
     const iterator = this.observerIterator
     const task = this.observerTask
+    const botController = this.botObserverController
+    const botIterator = this.botObserverIterator
+    const botTask = this.botObserverTask
     const gateway = this.observerGateway
     this.observerController = undefined
     this.observerIterator = undefined
     this.observerTask = undefined
+    this.botObserverController = undefined
+    this.botObserverIterator = undefined
+    this.botObserverTask = undefined
     this.observerGateway = undefined
 
-    // Strict lifecycle sequence: abort signal -> iterator.return() -> peer.dispose()
+    // Strict lifecycle sequence: abort signals -> iterator.return() -> tasks -> peer.dispose()
     controller?.abort('attention-tracker-closed')
+    botController?.abort('attention-tracker-closed')
     await iterator?.return?.().catch(() => undefined)
+    await botIterator?.return?.().catch(() => undefined)
     await task?.catch(() => undefined)
+    await botTask?.catch(() => undefined)
     await gateway?.dispose?.().catch(() => undefined)
 
     this.followers.clear()
@@ -735,6 +955,16 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     this.harnessQuestionProjectionSeqs.clear()
     this.harnessQuestionEventToItemId.clear()
     this.criticalNotifiedIds.clear()
+    this.botNamesById.clear()
+    this.roomNamesById.clear()
+    this.titleBySessionId.clear()
+    this.taskOwnerBySessionId.clear()
+    this.botWorkspaceId = undefined
+    this.botStateRevision = undefined
+    this.botStateLiveKey = undefined
+    this.botStateSyncInFlight = false
+    this.botStateSyncPendingFull = false
+    this.botStateSyncPendingLive = false
     this.activeHarnessEventStreams = 0
   }
 
@@ -785,9 +1015,161 @@ export class HostAttentionTracker implements AttentionBackendObserver {
         await this.waitBackoff(delayMs)
       }
     } finally {
-      if (this.observerGateway === gateway) {
-        this.observerGateway = undefined
-        await gateway.dispose?.().catch(() => undefined)
+      // Shared observerGateway cleanup runs in releaseObserverGatewayIfIdle/close.
+    }
+  }
+
+  private async runDsBotObserver(gateway: LocalTypertGateway): Promise<void> {
+    let attempt = 0
+    while (!this.closed) {
+      const controller = new AbortController()
+      this.botObserverController = controller
+      let iterator: AsyncIterator<unknown> | undefined
+      let terminal = false
+      try {
+        // Probe hello before opening dsBot/feed so Hosts without DS-Bot v0.4 do not open redundant streams.
+        const helloRpc = await gateway.dispatch('dsBot/call', {
+          args: { endpoint: 'hello', payload: { api: [1] } },
+        }, controller.signal)
+        if (this.closed || controller.signal.aborted) break
+        if (!isRecord(helloRpc) || helloRpc.ok !== true) {
+          const code = isRecord(helloRpc) && isRecord(helloRpc.error) && typeof helloRpc.error.code === 'string'
+            ? helloRpc.error.code
+            : undefined
+          const retryableRpc = code === 'gateway/invocation-unavailable' || code === 'gateway/service-unavailable'
+          if (
+            code === undefined
+            || (retryableRpc && attempt >= this.observerBackoffMs.length)
+            || (!retryableRpc && TERMINAL_OBSERVER_ERROR_CODES.has(code))
+          ) {
+            terminal = true
+            break
+          }
+          throw Object.assign(new Error('dsBot/call hello failed'), { code })
+        }
+        const helloEnvelope = unwrapDsBotEnvelope(helloRpc.value)
+        if (!isRecord(helloEnvelope) || helloEnvelope.ok !== true || !isRecord(helloEnvelope.value)) {
+          terminal = true
+          break
+        }
+        const stream = await gateway.open('dsBot/feed', { args: {} }, controller.signal)
+        if (this.closed || controller.signal.aborted) break
+        iterator = stream[Symbol.asyncIterator]()
+        this.botObserverIterator = iterator
+        this.scheduleBotStateSync(gateway, true)
+        while (!this.closed && !controller.signal.aborted) {
+          const next = await iterator.next()
+          if (next.done || this.closed || controller.signal.aborted) break
+          attempt = 0
+          this.handleDsBotFeedFrame(gateway, next.value)
+        }
+      } catch (error) {
+        if (this.closed || controller.signal.aborted) break
+        const failure = gateway.failure(error)
+        this.options.logger?.debug('ds-bot attention feed observer degraded', {
+          code: failure.code,
+          attempt,
+        })
+        if (failure.code === 'gateway/invocation-unavailable' || failure.code === 'gateway/service-unavailable') {
+          if (attempt >= this.observerBackoffMs.length) terminal = true
+        } else if (TERMINAL_OBSERVER_ERROR_CODES.has(failure.code)) {
+          terminal = true
+        }
+      } finally {
+        if (this.botObserverIterator === iterator) this.botObserverIterator = undefined
+        if (this.botObserverController === controller) this.botObserverController = undefined
+        controller.abort()
+        await iterator?.return?.().catch(() => undefined)
+      }
+      if (this.closed || terminal) break
+      const delayMs = this.observerBackoffMs[Math.min(attempt, this.observerBackoffMs.length - 1)] ?? 60_000
+      attempt += 1
+      await this.waitBotBackoff(delayMs)
+    }
+  }
+
+  private waitBotBackoff(delayMs: number): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    return new Promise(resolve => {
+      const done = () => {
+        if (this.botObserverRetryTimer !== undefined) {
+          clearTimeout(this.botObserverRetryTimer)
+          this.botObserverRetryTimer = undefined
+        }
+        if (this.botObserverRetryWake === done) {
+          this.botObserverRetryWake = undefined
+        }
+        resolve()
+      }
+      this.botObserverRetryWake = done
+      this.botObserverRetryTimer = setTimeout(done, delayMs)
+      this.botObserverRetryTimer.unref?.()
+    })
+  }
+
+  private handleDsBotFeedFrame(gateway: LocalTypertGateway, frame: unknown): void {
+    if (!isRecord(frame) || typeof frame.event !== 'string') return
+    const { event, data } = frame
+    if (event === 'hello' || event === 'state' || event === 'revision') {
+      this.scheduleBotStateSync(gateway, true)
+      return
+    }
+    if (event === 'live') {
+      this.scheduleBotStateSync(gateway, false)
+      return
+    }
+    if (event === 'notice' && isRecord(data)) {
+      this.observeBotResponse(
+        'api/bot',
+        { endpoint: 'notices', payload: {} },
+        { status: 200, json: { ok: true, value: { notices: [data] } } },
+      )
+    }
+  }
+
+  private scheduleBotStateSync(gateway: LocalTypertGateway, forceFull: boolean): void {
+    if (this.closed) return
+    if (forceFull) this.botStateSyncPendingFull = true
+    else this.botStateSyncPendingLive = true
+    if (this.botStateSyncTimer !== undefined) return
+    this.botStateSyncTimer = setTimeout(() => {
+      this.botStateSyncTimer = undefined
+      void this.syncBotStateFromRpc(gateway)
+    }, 150)
+    this.botStateSyncTimer.unref?.()
+  }
+
+  private async syncBotStateFromRpc(gateway: LocalTypertGateway): Promise<void> {
+    if (this.closed || this.botStateSyncInFlight) return
+    this.botStateSyncInFlight = true
+    const wantFull = this.botStateSyncPendingFull
+      || this.botStateRevision === undefined
+      || this.botStateLiveKey === undefined
+    this.botStateSyncPendingFull = false
+    this.botStateSyncPendingLive = false
+    const payload: Record<string, unknown> = wantFull
+      ? { avatars: 'ref' }
+      : { since: this.botStateRevision, live: this.botStateLiveKey, avatars: 'ref' }
+    try {
+      const rpcResult = await gateway.dispatch('dsBot/call', {
+        args: { endpoint: 'state', payload },
+      }, this.botObserverController?.signal ?? AbortSignal.timeout(15_000))
+      if (this.closed || !isRecord(rpcResult) || rpcResult.ok !== true) return
+      const envelope = unwrapDsBotEnvelope(rpcResult.value)
+      if (!isRecord(envelope) || envelope.ok !== true || !isRecord(envelope.value)) return
+      if (typeof envelope.value.revision === 'number') this.botStateRevision = envelope.value.revision
+      if (typeof envelope.value.liveKey === 'string') this.botStateLiveKey = envelope.value.liveKey
+      this.observeBotResponse(
+        'api/bot',
+        { endpoint: 'state', payload },
+        { status: 200, json: envelope },
+      )
+    } catch {
+      // Transient local sync errors recover on subsequent feed events or reconnect.
+    } finally {
+      this.botStateSyncInFlight = false
+      if (!this.closed && (this.botStateSyncPendingFull || this.botStateSyncPendingLive)) {
+        this.scheduleBotStateSync(gateway, this.botStateSyncPendingFull)
       }
     }
   }
@@ -1093,6 +1475,16 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       const oldest = this.harnessQuestionProjectionSeqs.keys().next().value
       if (oldest === undefined) break
       this.harnessQuestionProjectionSeqs.delete(oldest)
+    }
+  }
+
+  private rememberTitle(sessionId: string, title: string): void {
+    this.titleBySessionId.delete(sessionId)
+    this.titleBySessionId.set(sessionId, title)
+    while (this.titleBySessionId.size > MAX_TRACKED_TITLES) {
+      const oldest = this.titleBySessionId.keys().next().value
+      if (oldest === undefined) break
+      this.titleBySessionId.delete(oldest)
     }
   }
 
@@ -1402,12 +1794,19 @@ function harnessProjectedQuestionItemId(sessionId: string, callId: string): stri
   return truncateId(`harness:question:${sessionId}:${callId}`, 256)
 }
 
+const BOT_INBOX_APPROVAL_KINDS = new Set(['secret', 'connector', 'mail', 'computer', 'handoff', 'learning'])
+const BOT_INBOX_QUESTION_KINDS = new Set(['view', 'goal', 'blocked', 'model', 'paused', 'room-paused'])
+
 function botApprovalItemId(approvalId: string): string {
   return truncateId(`ds-bot:approval:${approvalId}`, 256)
 }
 
 function botQuestionItemId(sessionId: string, questionId: string): string {
   return truncateId(`ds-bot:question:${sessionId}:${questionId}`, 256)
+}
+
+function botInboxItemId(kind: string, itemId: string): string {
+  return truncateId(`ds-bot:inbox:${kind}:${itemId}`, 256)
 }
 
 function truncateText(value: string, maxChars: number): string {
@@ -1468,4 +1867,10 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function unwrapDsBotEnvelope(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined
+  if (typeof value.ok === 'boolean') return value
+  return { ok: true, value }
 }

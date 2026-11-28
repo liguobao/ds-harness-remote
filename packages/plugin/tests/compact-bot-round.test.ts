@@ -76,10 +76,67 @@ describe('compact group round projection', () => {
           const entryJson = `${JSON.stringify(reply('x')).slice(0, -1)},"colour":"pink","__proto__":{"polluted":true}}`
           const result = parsed(compactBotRound(`{"replies":[${entryJson}],"passed":1,"meta":{"secret":"x"}}`))
           const entry = result.replies[0]!
-          expect(Object.keys(entry).sort()).toEqual(['botId', 'name', 'text', 'time'])
+          expect(Object.keys(entry).sort()).toEqual(['botId', 'color', 'name', 'text', 'time'])
           expect(Object.getPrototypeOf(entry)).toBe(Object.prototype)
           expect(({} as Record<string, unknown>).polluted).toBeUndefined()
           expect(result).not.toHaveProperty('meta')
+        },
+      },
+      {
+        name: 'v0.4.x presented files, changes, claims, notice metadata, and save-token suffix survive',
+        run: () => {
+          const raw = `${round([
+            {
+              botId: 'b1',
+              name: 'Analyst',
+              color: 'blue',
+              duration: 1200,
+              presented: [{ path: 'out/report.md', description: 'Summary', sessionId: 's1', seq: 4, index: 0 }],
+              claims: ['out/report.md'],
+              changes: { sessionId: 's1', turn: 2, count: 1 },
+              time: 10,
+            },
+            {
+              kind: 'paused',
+              cause: 'idle',
+              idle: true,
+              count: 3,
+              limit: 5,
+              names: ['Chief', 'Analyst'],
+              time: 11,
+            },
+            {
+              kind: 'helper-failed',
+              helper: 'Searcher',
+              stopReason: 'timeout',
+              text: 'Timed out',
+              time: 12,
+            },
+          ])}\n\n[save-token #1: saved 200 chars]`
+          const result = parsed(compactBotRound(raw))
+          expect(result.replies).toHaveLength(3)
+          expect(result.replies[0]).toMatchObject({
+            botId: 'b1',
+            color: 'blue',
+            duration: 1200,
+            presented: [{ path: 'out/report.md', description: 'Summary', sessionId: 's1', seq: 4, index: 0 }],
+            claims: ['out/report.md'],
+            changes: { sessionId: 's1', turn: 2, count: 1 },
+          })
+          expect(result.replies[1]).toMatchObject({
+            kind: 'paused',
+            cause: 'idle',
+            idle: true,
+            count: 3,
+            limit: 5,
+            names: ['Chief', 'Analyst'],
+          })
+          expect(result.replies[2]).toMatchObject({
+            kind: 'helper-failed',
+            helper: 'Searcher',
+            stopReason: 'timeout',
+            text: 'Timed out',
+          })
         },
       },
       {
