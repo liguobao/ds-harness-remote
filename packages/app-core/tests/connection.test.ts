@@ -238,7 +238,7 @@ afterEach(async () => {
         if (outcome === 'current') {
           vi.spyOn(core, 'rpc').mockResolvedValueOnce({ status: 200, json: { ok: true, value: { bots: [], rooms: [] } } })
           await expect(client.state()).resolves.toMatchObject({ bots: [], rooms: [] })
-          expect(core.rpc).toHaveBeenCalledWith('plugin.route.call', { route: 'api/bot', body: { endpoint: 'state', payload: null } }, undefined)
+          expect(core.rpc).toHaveBeenCalledWith('plugin.route.call', { route: 'api/bot', body: { endpoint: 'state', payload: { avatars: 'ref' } } }, undefined)
         } else {
           if (outcome === 'replaced') await connection.connect('https://server.example.com', identity, { ...host, deviceId: 'host-2' }, 'synthetic', () => undefined)
           else { testState.capabilities = ['harness.remote.v1']; await connection.refreshBackends() }

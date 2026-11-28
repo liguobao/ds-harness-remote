@@ -269,7 +269,7 @@ describe('Android Bot client authority', () => {
     const dispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
       expect(body.endpoint).toBe('state')
       if (stage === 'initial') {
-        expect(body.payload).toBeNull()
+        expect(body.payload).toEqual({ avatars: 'ref' })
         return envelope({
           ...botState(),
           revision: 10,
@@ -278,7 +278,7 @@ describe('Android Bot client authority', () => {
           btwCards: {},
         })
       }
-      expect(body.payload).toEqual({ since: 10, models: 'm1', live: 'run1:1' })
+      expect(body.payload).toEqual({ since: 10, models: 'm1', live: 'run1:1', avatars: 'ref' })
       if (stage === 'unchanged') {
         return envelope({ revision: 10, unchanged: true, liveKey: 'run1:1' })
       }
@@ -337,9 +337,9 @@ describe('Android Bot client authority', () => {
     expect(questionUpdated.defaultModel).toBe('deepseek/deepseek-chat')
     expect(questionUpdated.bots[0]?.preview).toBe('Cached preview')
 
-    // Legacy Host without liveKey falls back to full query (null) so non-revision updates aren't missed.
+    // Legacy Host without liveKey falls back to full query ({ avatars: 'ref' }) so non-revision updates aren't missed.
     const legacyDispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
-      expect(body.payload).toBeNull()
+      expect(body.payload).toEqual({ avatars: 'ref' })
       return envelope({ ...botState(), revision: 5 })
     })
     const legacyClient = new BotRemoteClient(legacyDispatch, async () => [], () => {})
@@ -357,5 +357,75 @@ describe('Android Bot client authority', () => {
       endpoint: 'send',
       payload: { sessionId: 'bot', text: '@[Other](dsh-session:abc) hello' },
     })
+  })
+
+  it('hydrates v0.4 avatars on demand and preserves inbox, paused rooms, extraDirs, and delta state', async () => {
+    const avatarPng = 'data:image/png;base64,iVBORw0KGgo='
+    let poll = 0
+    const dispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
+      if (body.endpoint === 'avatar') {
+        if (body.payload?.botId === 'bot') return envelope({ botId: 'bot', ref: 'av-bot-1', image: avatarPng })
+        if (body.payload?.roomId === 'room-1') return envelope({ roomId: 'room-1', ref: 'av-room-1', image: avatarPng })
+        return envelope({ image: null })
+      }
+      expect(body.endpoint).toBe('state')
+      poll += 1
+      if (poll === 1) {
+        return envelope({
+          revision: 1,
+          liveKey: 'live-1',
+          bots: [{
+            id: 'bot',
+            sessionId: 'bot-part-1',
+            name: 'Bot',
+            extraDirs: ['/tmp/extra'],
+            tasks: [{ id: 'task-1', sessionId: 'task-sess-1', name: 'Worker' }],
+            avatar: { shape: 'cat', imageRef: 'av-bot-1' },
+          }],
+          rooms: [{
+            id: 'room-1',
+            sessionId: 'room-part-1',
+            name: 'Room',
+            members: ['bot'],
+            idlePaused: { reason: 'idle' },
+            avatar: { imageRef: 'av-room-1' },
+          }],
+          agents: [],
+          inbox: { items: [{ id: 'in-1', kind: 'approval' }] },
+          browserHolds: { bot: { hold: true } },
+          secretRequests: { bot: { secret: 'API_KEY' } },
+          approvalReviews: [{ id: 'rev-1', status: 'reviewing' }],
+          work: { bots: {}, rooms: {}, waiting: {}, turns: {}, steered: {}, paused: { 'room-1': true } },
+        })
+      }
+      return envelope({
+        revision: 1,
+        unchanged: true,
+        liveKey: 'live-2',
+        readOnly: 'other-host',
+        inbox: { items: [{ id: 'in-2', kind: 'view' }] },
+        work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
+      })
+    })
+    const client = new BotRemoteClient(dispatch, async () => [], () => {})
+    const first = await client.state(undefined, true)
+    expect(first.bots[0]?.avatar).toEqual({ shape: 'cat', imageRef: 'av-bot-1', image: avatarPng })
+    expect(first.bots[0]?.extraDirs).toEqual(['/tmp/extra'])
+    expect(first.bots[0]?.tasks).toHaveLength(1)
+    expect(first.rooms[0]?.paused).toBe(true)
+    expect(first.rooms[0]?.idlePaused).toEqual({ reason: 'idle' })
+    expect(first.rooms[0]?.avatar).toEqual({ imageRef: 'av-room-1', image: avatarPng })
+    expect(first.inbox).toEqual({ items: [{ id: 'in-1', kind: 'approval' }] })
+    expect(first.browserHolds).toEqual({ bot: { hold: true } })
+    expect(first.secretRequests).toEqual({ bot: { secret: 'API_KEY' } })
+    expect(first.approvalReviews).toEqual([{ id: 'rev-1', status: 'reviewing' }])
+    expect(dispatch).toHaveBeenCalledWith({ endpoint: 'avatar', payload: { botId: 'bot' } }, undefined)
+    expect(dispatch).toHaveBeenCalledWith({ endpoint: 'avatar', payload: { roomId: 'room-1' } }, undefined)
+
+    const second = await client.state(undefined, false, first)
+    expect(second.readOnly).toBe('other-host')
+    expect(second.inbox).toEqual({ items: [{ id: 'in-2', kind: 'view' }] })
+    expect(second.bots[0]?.avatar).toEqual({ shape: 'cat', imageRef: 'av-bot-1', image: avatarPng })
+    expect(dispatch).toHaveBeenCalledTimes(4)
   })
 })

@@ -1,5 +1,5 @@
 import { isSubagentSession } from '../../lib/session-kind'
-import type { BotEntry, BotRoom, BotState } from '../../services/bot-catalog'
+import { objects, text, type BotEntry, type BotRoom, type BotState } from '../../services/bot-catalog'
 import type { RemoteSession, WorkspaceView } from '../../types'
 import { filterByQuery, maskPersonalPath, sessionMentionText } from '../../ui/mention-helpers'
 import { resolveSessionDisplayTitle } from '../session-title'
@@ -136,10 +136,20 @@ export function buildReferenceChatGroups({
   for (const bot of state?.bots ?? []) {
     if (bot.id) teamIds.add(bot.id)
     if (bot.sessionId) teamIds.add(bot.sessionId)
+    for (const part of bot.parts ?? []) {
+      if (part) teamIds.add(part)
+    }
+    for (const task of objects(bot.tasks)) {
+      const sid = text(task.sessionId)
+      if (sid) teamIds.add(sid)
+    }
   }
   for (const room of state?.rooms ?? []) {
     if (room.id) teamIds.add(room.id)
     if (room.sessionId) teamIds.add(room.sessionId)
+    for (const part of room.parts ?? []) {
+      if (part) teamIds.add(part)
+    }
     for (const part of room.ownParts ?? []) {
       if (part) teamIds.add(part)
     }

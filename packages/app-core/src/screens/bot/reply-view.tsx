@@ -124,19 +124,27 @@ function MentionBody({ body, mentions }: { body: string; mentions?: BotMentionCo
   let cursor = 0
   spans.forEach((span, index) => {
     if (span.start > cursor) runs.push(<Text key={`t${index}`} style={styles.body}>{body.slice(cursor, span.start)}</Text>)
-    runs.push(
-      <Pressable
-        key={`m${index}`}
-        onPress={() => mentions.onPress(span.bot.id)}
-        accessibilityRole="link"
-        accessibilityLabel={`@${span.bot.name}`}
-      >
-        <View style={localStyles.mention}>
-          <BotAvatar bot={span.bot} size={16} />
-          <Text style={[styles.body, localStyles.mentionName]}>{span.bot.name}</Text>
-        </View>
-      </Pressable>,
-    )
+    if (span.kind === 'all') {
+      runs.push(
+        <Text key={`m${index}`} style={[styles.body, localStyles.mentionName]}>
+          @{span.bot.name}
+        </Text>,
+      )
+    } else {
+      runs.push(
+        <Pressable
+          key={`m${index}`}
+          onPress={() => mentions.onPress(span.bot.id)}
+          accessibilityRole="link"
+          accessibilityLabel={`@${span.bot.name}`}
+        >
+          <View style={localStyles.mention}>
+            <BotAvatar bot={span.bot} size={16} />
+            <Text style={[styles.body, localStyles.mentionName]}>{span.bot.name}</Text>
+          </View>
+        </Pressable>,
+      )
+    }
     cursor = span.end
   })
   if (cursor < body.length) runs.push(<Text key="tail" style={styles.body}>{body.slice(cursor)}</Text>)

@@ -1040,6 +1040,8 @@ export function BotMemoryPanel({
   const [asking, setAsking] = useState(false)
   const [replyText, setReplyText] = useState<string | null>(null)
 
+  const ownerPayload = isGroup ? { roomId: ownerId } : { botId: ownerId }
+
   const loadMemory = useCallback(async () => {
     if (!client) {
       setLoading(false)
@@ -1047,14 +1049,14 @@ export function BotMemoryPanel({
     }
     setLoading(true)
     try {
-      const res = await client.call('memory-view', { id: ownerId })
+      const res = await client.call('memory-view', ownerPayload)
       setView(object(res))
     } catch {
       setView({ entries: [], sizes: {}, limits: { main: 2200 } })
     } finally {
       setLoading(false)
     }
-  }, [client, ownerId])
+  }, [client, ownerId, isGroup])
 
   useEffect(() => {
     void loadMemory()
@@ -1069,10 +1071,11 @@ export function BotMemoryPanel({
     setAsking(true)
     setReplyText(null)
     try {
-      const res = await client.call('memory-ask', { id: ownerId, text: askDraft.trim() })
+      const res = await client.call('memory-ask', { ...ownerPayload, text: askDraft.trim() })
       const out = object(res)
       setAskDraft('')
-      if (text(out.answer)) setReplyText(text(out.answer))
+      const answerText = text(out.reply) || text(out.answer)
+      if (answerText) setReplyText(answerText)
       if (out.view) setView(object(out.view))
       else await loadMemory()
     } catch (err) {
@@ -1086,13 +1089,14 @@ export function BotMemoryPanel({
     if (!client) return
     try {
       const res = await client.call('memory-forget', {
-        id: ownerId,
+        ...ownerPayload,
         scope: text(entry.scope) || (isGroup ? 'group' : 'own'),
         topic: entry.topic ?? null,
         text: text(entry.text),
       })
       const out = object(res)
       if (out.view) setView(object(out.view))
+      else if (Array.isArray(out.entries)) setView(out)
       else await loadMemory()
     } catch {
       // ignore

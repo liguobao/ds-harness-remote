@@ -118,17 +118,19 @@ function messageValue(value: unknown, budget: Budget, isInjectedUser = false): u
   return out
 }
 
+const PRESERVED_USER_SOURCE_KINDS = new Set(['user', 'user-question-reply', 'bot', 'schedule'])
+
 /**
  * Only non-human context injections carry an explicit `source.kind` other than
- * `'user'` (e.g. `'agent-instructions'`, `'skill-catalog'`, `'runtime-context'`).
- * Human prompts (`source.kind === 'user'` or legacy records without `source.kind`)
- * are never truncated, even when the person pasted `<system-reminder>` literals.
+ * preserved conversational user/bot/schedule/question-reply records (e.g.
+ * `'agent-instructions'`, `'skill-catalog'`, `'runtime-context'`).
+ * Human prompts and structured DS-Bot replies are never truncated.
  */
 function isInjectedUserEvent(event: Record<string, unknown>): boolean {
   const data = object(event.data) ? event.data : undefined
   const msg = data && object(data.message) ? data.message : data
   const src = msg && object(msg.source) ? msg.source : undefined
-  return Boolean(src && typeof src.kind === 'string' && src.kind !== 'user')
+  return Boolean(src && typeof src.kind === 'string' && !PRESERVED_USER_SOURCE_KINDS.has(src.kind))
 }
 
 function requestHeaderEvent(event: Record<string, unknown>): Record<string, unknown> {

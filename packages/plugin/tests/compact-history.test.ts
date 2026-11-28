@@ -199,12 +199,19 @@ describe('compact group round preservation', () => {
 
   it('never truncates human user prompts containing literal <system-reminder> tags (with or without source metadata)', () => {
     const literalReminder = '<system-reminder>\n' + 'Human pasted prompt '.repeat(80) + '</system-reminder>'
+    const longJsonReply = JSON.stringify({ action: 'form', fields: { summary: 'A'.repeat(900) } })
+    const longBotPost = 'Bot report body '.repeat(60)
+    const longSchedulePrompt = 'Daily briefing task '.repeat(60)
     const cases = [
       { source: { kind: 'user', rpcId: 'r1' }, content: [{ type: 'text', text: literalReminder }] },
+      { source: { kind: 'user-question-reply', callId: 'c1' }, content: [{ type: 'text', text: longJsonReply }] },
+      { source: { kind: 'bot', botId: 'b1' }, content: [{ type: 'text', text: longBotPost }] },
+      { source: { kind: 'schedule', id: 's1' }, content: [{ type: 'text', text: longSchedulePrompt }] },
       { message: { role: 'user', source: { kind: 'user', requestId: 'req-1' }, content: [{ type: 'text', text: literalReminder }] } },
       { content: [{ type: 'text', text: literalReminder }] },
     ]
-    for (const data of cases) {
+    const expectedTexts = [literalReminder, longJsonReply, longBotPost, longSchedulePrompt, literalReminder, literalReminder]
+    for (const [idx, data] of cases.entries()) {
       const projected = compactHistory({
         type: 'snapshot',
         records: [{ type: 'event', event: { type: 'user/message', seq: 1, time: 1, data } }],
@@ -213,7 +220,7 @@ describe('compact group round preservation', () => {
       const content = Array.isArray(d.content)
         ? d.content
         : ((d.message as { content: unknown[] }).content)
-      expect((content[0] as { text: string }).text).toBe(literalReminder)
+      expect((content[0] as { text: string }).text).toBe(expectedTexts[idx])
     }
   })
 

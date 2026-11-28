@@ -60,7 +60,7 @@ import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ModalSurface } from '../chat/modal'
 import { createModalActionQueue } from '../chat/modal-action-queue'
 import { BotAgentBadge, engineOfModel } from './agent-badge'
-import { BotAvatar, BotAvatarWithBadge } from './avatar'
+import { BotAvatar, BotAvatarWithBadge, RoomAvatar } from './avatar'
 import { BotFloatingPopover, type BotPopoverAction } from './popover-menu'
 import {
   BotBrowserPane,
@@ -392,7 +392,7 @@ export function BotProfilePage({
     let cancelled = false
     setMemoryCount(null)
     void client
-      .call('memory-view', { id: ownerId })
+      .call('memory-view', room ? { roomId: ownerId } : { botId: ownerId })
       .then(res => {
         if (!cancelled) setMemoryCount(objects(object(res).entries).length)
       })
@@ -481,24 +481,26 @@ export function BotProfilePage({
       label: s.bots.browser,
       onPress: () => setTopTab('browser'),
     })
-    popoverActions.push({
-      key: 'sessions',
-      icon: FolderOpen,
-      label: `${s.bots.sessions} (${allParts.length})`,
-      onPress: () => openSubPage('sessions'),
-    })
-    popoverActions.push({
-      key: 'new-part',
-      icon: Plus,
-      label: s.bots.newSession,
-      disabled: busy || Boolean(state.readOnly),
-      onPress: () => {
-        const botId = bot.id
-        runAfterClose(() => {
-          void perform('bot-new-part', { botId })
-        })
-      },
-    })
+    if (state.parallelSessionsSupported !== false) {
+      popoverActions.push({
+        key: 'sessions',
+        icon: FolderOpen,
+        label: `${s.bots.sessions} (${allParts.length})`,
+        onPress: () => openSubPage('sessions'),
+      })
+      popoverActions.push({
+        key: 'new-part',
+        icon: Plus,
+        label: s.bots.newSession,
+        disabled: busy || Boolean(state.readOnly),
+        onPress: () => {
+          const botId = bot.id
+          runAfterClose(() => {
+            void perform('bot-new-part', { botId })
+          })
+        },
+      })
+    }
     if (!bot.main || mainCount > 1) {
       popoverActions.push({
         key: 'main',
@@ -580,25 +582,41 @@ export function BotProfilePage({
   // Usage summary (`600.9K tok · 缓存命中 74%`)
   const usageInlineText = (() => {
     const tu = runStats ? object(runStats.tokenUsage) : {}
-    let input = Number(tu.inputTokens ?? 0)
+    let input = Number(tu.inputTokens ?? tu.uncachedInputTokens ?? 0)
     let output = Number(tu.outputTokens ?? 0)
     let cacheRead = Number(tu.cacheReadTokens ?? tu.cachedInputTokens ?? 0)
+    let cacheWrite = Number(tu.cacheWriteTokens ?? 0)
 
-    if (input + output <= 0 && Array.isArray(usageData?.rows)) {
+    if (input + cacheRead + cacheWrite + output <= 0 && Array.isArray(usageData?.rows)) {
+      const owners = objects(usageData?.owners)
+      const targetId = bot?.id ?? room?.id ?? ''
       const targetName = bot?.name ?? room?.name ?? ''
       for (const r of usageData!.rows) {
         if (!Array.isArray(r)) continue
-        const rowOwner = text(r[0])
-        if (!targetName || rowOwner === targetName || rowOwner === (bot?.id ?? room?.id)) {
-          input += Number(r[3] ?? 0)
-          output += Number(r[4] ?? 0)
-          cacheRead += Number(r[5] ?? 0)
+        if (typeof r[1] === 'number' && r.length >= 9) {
+          const ownerMeta = owners[Number(r[1])]
+          const ownerId = text(ownerMeta?.id)
+          const ownerName = text(ownerMeta?.name)
+          if (!targetId || ownerId === targetId || ownerName === targetName) {
+            input += Math.max(0, Number(r[4] ?? 0))
+            cacheRead += Math.max(0, Number(r[5] ?? 0))
+            cacheWrite += Math.max(0, Number(r[6] ?? 0))
+            output += Math.max(0, Number(r[7] ?? 0))
+          }
+        } else {
+          const rowOwner = text(r[0])
+          if (!targetName || rowOwner === targetName || rowOwner === targetId) {
+            input += Math.max(0, Number(r[3] ?? 0))
+            output += Math.max(0, Number(r[4] ?? 0))
+            cacheRead += Math.max(0, Number(r[5] ?? 0))
+          }
         }
       }
     }
-    const total = input + output + cacheRead
+    const promptInput = input + cacheRead + cacheWrite
+    const total = promptInput + output
     if (total <= 0) return '0 tok'
-    const hit = input + cacheRead > 0 ? Math.round((cacheRead / (input + cacheRead)) * 100) : 0
+    const hit = promptInput > 0 ? Math.round((cacheRead / promptInput) * 100) : 0
     return s.bots.usageSummary(formatCompactTokens(total), hit)
   })()
 
@@ -686,17 +704,21 @@ export function BotProfilePage({
                 badgeBorderColor={canvasBg}
               />
             ) : room ? (
-              <View style={[styles.roomHeroAvatar, { backgroundColor: cardBg }]}>
-                {room.members.slice(0, 3).map((id, idx) => {
-                  const member = state.bots.find(b => b.id === id)
-                  return member ? (
-                    <View key={id} style={{ position: 'absolute', left: 10 + idx * 13, top: 14 + (idx % 2) * 14 }}>
-                      <BotAvatar bot={member} size={32} />
-                    </View>
-                  ) : null
-                })}
-                {room.members.length === 0 && <Users size={34} color={colors.muted} />}
-              </View>
+              room.avatar?.image ? (
+                <RoomAvatar members={room.members} bots={state.bots} avatar={room.avatar} size={68} />
+              ) : (
+                <View style={[styles.roomHeroAvatar, { backgroundColor: cardBg }]}>
+                  {room.members.slice(0, 3).map((id, idx) => {
+                    const member = state.bots.find(b => b.id === id)
+                    return member ? (
+                      <View key={id} style={{ position: 'absolute', left: 10 + idx * 13, top: 14 + (idx % 2) * 14 }}>
+                        <BotAvatar bot={member} size={32} />
+                      </View>
+                    ) : null
+                  })}
+                  {room.members.length === 0 && <Users size={34} color={colors.muted} />}
+                </View>
+              )
             ) : null}
 
             <View style={styles.heroNameRow}>
@@ -1024,29 +1046,33 @@ export function BotProfilePage({
                   </View>
 
                   {/* 会话分段快捷入口 + 置顶开关 */}
-                  <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => openSubPage('sessions')}
-                      style={({ pressed }) => [styles.cardRow, pressed && styles.cardRowPressed]}
-                    >
-                      <FolderOpen size={19} color={colors.ink} />
-                      <Text style={styles.rowLabel}>{s.bots.sessions}</Text>
-                      <Text style={styles.rowValue}>{s.bots.sessionsCount(allParts.length)}</Text>
-                      <ChevronRight size={18} color={colors.subtle} />
-                    </Pressable>
-                    {!bot.tile && (
-                      <View style={[styles.toggleRow, styles.cardRowDivider]}>
-                        <Text style={styles.rowLabel}>{s.bots.pinChat}</Text>
-                        <Toggle
-                          value={Boolean(bot.pinned)}
-                          disabled={busy || Boolean(state.readOnly)}
-                          accessibilityLabel={s.bots.pinChat}
-                          onValueChange={() => void perform('set-flags', { id: bot.id, pinned: !bot.pinned })}
-                        />
-                      </View>
-                    )}
-                  </View>
+                  {(state.parallelSessionsSupported !== false || !bot.tile) && (
+                    <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                      {state.parallelSessionsSupported !== false && (
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => openSubPage('sessions')}
+                          style={({ pressed }) => [styles.cardRow, pressed && styles.cardRowPressed]}
+                        >
+                          <FolderOpen size={19} color={colors.ink} />
+                          <Text style={styles.rowLabel}>{s.bots.sessions}</Text>
+                          <Text style={styles.rowValue}>{s.bots.sessionsCount(allParts.length)}</Text>
+                          <ChevronRight size={18} color={colors.subtle} />
+                        </Pressable>
+                      )}
+                      {!bot.tile && (
+                        <View style={[styles.toggleRow, state.parallelSessionsSupported !== false && styles.cardRowDivider]}>
+                          <Text style={styles.rowLabel}>{s.bots.pinChat}</Text>
+                          <Toggle
+                            value={Boolean(bot.pinned)}
+                            disabled={busy || Boolean(state.readOnly)}
+                            accessibilityLabel={s.bots.pinChat}
+                            onValueChange={() => void perform('set-flags', { id: bot.id, pinned: !bot.pinned })}
+                          />
+                        </View>
+                      )}
+                    </View>
+                  )}
 
                   {canDeleteBot(state, bot) && (
                     <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
@@ -1075,7 +1101,7 @@ export function BotProfilePage({
                         {s.sessionActivity.goal}: {text(room.goal.title) || text(room.goal.status)}
                       </Text>
                       <View style={styles.goalBtnRow}>
-                        {text(room.goal.status) === 'running' ? (
+                        {(text(room.goal.status) === 'active' || text(room.goal.status) === 'running') ? (
                           <Button
                             variant="secondary"
                             icon={Pause}
@@ -1231,7 +1257,7 @@ export function BotProfilePage({
                         : s.bots.scheduledTasks}
                 </Text>
 
-                {mountedSubPage === 'sessions' && bot ? (
+                {mountedSubPage === 'sessions' && bot && state.parallelSessionsSupported !== false ? (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={s.bots.newSession}
@@ -1348,23 +1374,48 @@ export function BotProfilePage({
                       <Text style={styles.memberRole}>{usageInlineText}</Text>
                     </View>
                     {(() => {
-                      const rows = Array.isArray(usageData?.rows) ? usageData!.rows.filter(Array.isArray) : []
+                      const rawRows = Array.isArray(usageData?.rows) ? usageData!.rows.filter(Array.isArray) : []
+                      const owners = objects(usageData?.owners)
+                      const models = objects(usageData?.models)
+                      const targetId = bot?.id ?? room?.id ?? ''
+                      const targetName = bot?.name ?? room?.name ?? ''
+                      const rows = rawRows.filter(row => {
+                        const cells = row as unknown[]
+                        if (typeof cells[1] === 'number' && cells.length >= 9) {
+                          if (!targetId) return true
+                          const ownerMeta = owners[Number(cells[1])]
+                          return text(ownerMeta?.id) === targetId || text(ownerMeta?.name) === targetName
+                        }
+                        return true
+                      })
                       if (rows.length === 0) return null
                       return (
                         <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
-                          {rows.map((row, i) => {
+                          {rows.slice(0, 50).map((row, i) => {
                             const cells = row as unknown[]
+                            const isOfficialTuple = typeof cells[1] === 'number' && cells.length >= 9
+                            const ownerMeta = isOfficialTuple ? owners[Number(cells[1])] : undefined
+                            const modelMeta = isOfficialTuple ? models[Number(cells[2])] : undefined
+                            const primaryTitle = isOfficialTuple
+                              ? (text(modelMeta?.name) || text(modelMeta?.model) || text(ownerMeta?.name) || text(cells[0]) || s.bots.title)
+                              : (text(cells[0]) || s.bots.title)
+                            const secondaryTitle = isOfficialTuple ? text(cells[0]) : text(cells[1])
+                            const calls = isOfficialTuple ? Number(cells[8] ?? 0) : Number(cells[2] ?? 0)
+                            const inputTok = isOfficialTuple
+                              ? Number(cells[4] ?? 0) + Number(cells[5] ?? 0) + Number(cells[6] ?? 0)
+                              : Number(cells[3] ?? 0)
+                            const outputTok = isOfficialTuple ? Number(cells[7] ?? 0) : Number(cells[4] ?? 0)
                             return (
                               <View key={i} style={[styles.partRow, i > 0 && styles.cardRowDivider]}>
                                 <View style={styles.memberBody}>
                                   <Text style={styles.rowLabel}>
-                                    {text(cells[0]) || s.bots.title}
-                                    {text(cells[1]) ? ` · ${text(cells[1])}` : ''}
+                                    {primaryTitle}
+                                    {secondaryTitle ? ` · ${secondaryTitle}` : ''}
                                   </Text>
                                   <Text style={styles.memberRole}>
-                                    {s.bots.calls}: {Number(cells[2] ?? 0).toLocaleString()} · {s.bots.inputTokens}:{' '}
-                                    {Number(cells[3] ?? 0).toLocaleString()} · {s.bots.outputTokens}:{' '}
-                                    {Number(cells[4] ?? 0).toLocaleString()}
+                                    {s.bots.calls}: {calls.toLocaleString()} · {s.bots.inputTokens}:{' '}
+                                    {inputTok.toLocaleString()} · {s.bots.outputTokens}:{' '}
+                                    {outputTok.toLocaleString()}
                                   </Text>
                                 </View>
                               </View>

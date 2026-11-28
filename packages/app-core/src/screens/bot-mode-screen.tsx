@@ -305,7 +305,7 @@ export function BotModeScreen({
 
   const insets = useSafeAreaInsets()
   const navBack = splitView ? undefined : (onOpenDrawer ?? (selectedId ? () => handleSelect(undefined) : onBack))
-  const goalSteps = objects(room?.goal?.steps)
+  const goalSteps = objects(room?.goal?.stages ?? room?.goal?.steps)
   const goalDoneCount = goalSteps.filter(step => text(step.status) === 'done').length
   const goalTitle = text(room?.goal?.title)
   const roomLeadBot = room && state ? state.bots.find(entry => entry.id === room.members[0]) : undefined
@@ -319,7 +319,7 @@ export function BotModeScreen({
       label: s.bots.details,
       onPress: () => setDetailsOpen(true),
     })
-    if (bot) {
+    if (bot && state?.parallelSessionsSupported !== false) {
       headerMoreActions.push({
         key: 'new-session',
         icon: Plus,

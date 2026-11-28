@@ -73,11 +73,11 @@ export function DsBotConnectorsSubpage({
   const [customConnectorGuideOpen, setCustomConnectorGuideOpen] = useState(false)
 
   const renderConnectorRow = (conn: ConnectorCatalogItem, first: boolean) => {
-    const remoteItems = objects(effectiveState.connectors?.items)
+    const remoteItems = objects(effectiveState.connectors?.connectors ?? effectiveState.connectors?.items)
     const live = remoteItems.find(
       it => text(it.id) === conn.id || text(it.name).toLowerCase() === conn.name.toLowerCase(),
     )
-    const isConnected = Boolean(live && (live.connected === true || text(live.status) === 'connected'))
+    const isConnected = Boolean(live && (live.connected === true || text(live.status) === 'connected' || text(live.state) === 'ready'))
     const toolCount = Number(live?.toolCount ?? live?.tools ?? 0)
     return (
       <View key={conn.id} style={[styles.connectorRow, !first && styles.topHairline]}>
@@ -306,10 +306,12 @@ export function DsBotImSubpage({
             {connectedImList.map((conn, idx) => {
               const cid = text(conn.id) || `im-${idx}`
               const platId = text(conn.platform)
-              const plat = DS_BOT_IM_PLATFORMS.find(p => p.id === platId)
+              const plat = DS_BOT_IM_PLATFORMS.find(
+                p => p.id === platId || (platId === 'wechat' && p.id === 'weixin') || (platId === 'weixin' && p.id === 'wechat'),
+              )
               const botTarget = effectiveState.bots.find(b => b.id === text(conn.botId))?.name ?? mainBotName
               const statusObj = object(effectiveState.imStatus?.[cid])
-              const online = statusObj.connected === true || text(statusObj.state) === 'connected'
+              const online = statusObj.connected === true || text(statusObj.state) === 'connected' || text(statusObj.state) === 'ready'
               return (
                 <GroupRow
                   key={cid}
@@ -408,7 +410,8 @@ export function DsBotCapabilitiesSubpage({
 
   const targetBot =
     effectiveState.bots.find(b => b.id === capabilityBotId) ?? effectiveState.bots[0]
-  const currentPerm = targetBot?.permission || 'default'
+  const rawPerm = targetBot?.permission || 'read-only'
+  const currentPerm = rawPerm === 'default' ? 'read-only' : rawPerm
 
   return (
     <>
@@ -438,11 +441,35 @@ export function DsBotCapabilitiesSubpage({
 
       <SectionTitle>{s.dsBotSettings.sectionToolPermissions}</SectionTitle>
       <GroupCard>
-        {([
-          { id: 'default', label: s.dsBotSettings.permDefault, desc: s.dsBotSettings.permDefaultDetail },
-          { id: 'workspace-write', label: s.dsBotSettings.permWorkspaceWrite, desc: s.dsBotSettings.permWorkspaceWriteDetail },
-          { id: 'danger-full-access', label: s.dsBotSettings.permFullAccess, desc: s.dsBotSettings.permFullAccessDetail },
-        ] as const).map((opt, idx) => {
+        {(() => {
+          const baseOptions: { id: string; label: string; desc: string }[] = [
+            { id: 'read-only', label: s.dsBotSettings.permDefault, desc: s.dsBotSettings.permDefaultDetail },
+            { id: 'workspace-write', label: s.dsBotSettings.permWorkspaceWrite, desc: s.dsBotSettings.permWorkspaceWriteDetail },
+            { id: 'danger-full-access', label: s.dsBotSettings.permFullAccess, desc: s.dsBotSettings.permFullAccessDetail },
+          ]
+          const remoteOpts = Array.isArray(object(effectiveState.permissions).options)
+            ? (object(effectiveState.permissions).options as unknown[])
+            : []
+          const optionList: { id: string; label: string; desc: string }[] = remoteOpts.length > 0
+            ? remoteOpts
+                .map(raw => {
+                  const id = typeof raw === 'string' ? raw : text(object(raw).id)
+                  const normalizedId = id === 'default' ? 'read-only' : id
+                  const matched = baseOptions.find(opt => opt.id === normalizedId)
+                  if (matched) return matched
+                  const obj = object(raw)
+                  return normalizedId
+                    ? {
+                        id: normalizedId,
+                        label: text(obj.label) || normalizedId,
+                        desc: text(obj.description) || text(obj.desc) || normalizedId,
+                      }
+                    : null
+                })
+                .filter((opt): opt is { id: string; label: string; desc: string } => opt !== null)
+            : baseOptions
+          return optionList
+        })().map((opt, idx) => {
           const chosen = currentPerm === opt.id
           return (
             <GroupRow
@@ -503,9 +530,11 @@ export function DsBotCapabilitiesSubpage({
           <SectionTitle>{s.dsBotSettings.sectionSharedCapabilities}</SectionTitle>
           <GroupCard>
             {(effectiveState.capabilities ?? []).map((cap, idx) => {
-              const cid = text(cap.id) || `cap-${idx}`
-              const statusObj = object(effectiveState.capabilityStatuses?.[cid])
-              const statusText = text(statusObj.state) || text(cap.kind) || s.dsBotSettings.ready
+              const cid = text(cap.id) || text(cap.name) || `cap-${idx}`
+              const botStatuses = targetBot ? object(effectiveState.capabilityStatuses?.[targetBot.id]) : {}
+              const perBotCap = object(botStatuses[cid] ?? botStatuses[text(cap.name)])
+              const statusObj = Object.keys(perBotCap).length > 0 ? perBotCap : object(effectiveState.capabilityStatuses?.[cid])
+              const statusText = text(statusObj.state) || text(statusObj.status) || text(cap.kind) || s.dsBotSettings.ready
               return (
                 <GroupRow
                   key={cid}
@@ -898,10 +927,16 @@ export function DsBotSecretsSubpage({
         ) : (
           (effectiveState.secrets ?? []).map((sec, idx) => {
             const name = text(sec.name) || `SECRET_${idx}`
+            const scope = text(sec.scope)
+            const botList = Array.isArray(sec.bots) ? sec.bots : []
             const scopeText =
-              Array.isArray(sec.bots) && sec.bots.length > 0
-                ? s.dsBotSettings.secretBotsOnly(sec.bots.length)
-                : s.dsBotSettings.secretAllBots
+              scope === 'all'
+                ? s.dsBotSettings.secretAllBots
+                : botList.length > 0
+                  ? s.dsBotSettings.secretBotsOnly(botList.length)
+                  : scope
+                    ? scope
+                    : s.dsBotSettings.secretAllBots
             return (
               <GroupRow
                 key={name}

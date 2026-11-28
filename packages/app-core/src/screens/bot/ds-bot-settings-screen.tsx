@@ -352,8 +352,8 @@ export function DsBotSettingsModal({
     ?? effectiveState.bots[0]
   const mainBotName = mainBot?.name ?? 'Chief'
 
-  const connectedConnectorItems = objects(effectiveState.connectors?.items).filter(
-    it => it.connected === true || text(it.status) === 'connected',
+  const connectedConnectorItems = objects(effectiveState.connectors?.connectors ?? effectiveState.connectors?.items).filter(
+    it => it.connected === true || text(it.status) === 'connected' || text(it.state) === 'ready',
   )
   const connectedImList = objects(effectiveState.im?.connections ?? effectiveState.im?.bots)
   const totalBrowserGrants = effectiveState.bots.reduce(
@@ -380,7 +380,8 @@ export function DsBotSettingsModal({
       case 'models':
         return configuredProviderCount > 0 ? s.dsBotSettings.providersCount(configuredProviderCount) : s.dsBotSettings.modelsCount(effectiveState.models.length)
       case 'local-agents': {
-        const det = objects(localAgentsData?.detected).filter(d => d.installed === true || d.available === true).length
+        const detList = objects(localAgentsData?.detected)
+        const det = detList.filter(d => d.installed === true || d.available === true || d.route === true).length
         const dshCount = effectiveState.agents.length
         return det + dshCount > 0 ? s.dsBotSettings.enabledCount(det + dshCount) : s.dsBotSettings.agentsCount(KNOWN_LOCAL_AGENTS.length)
       }
@@ -820,26 +821,48 @@ export function DsBotSettingsModal({
 
                   <SectionTitle>{s.dsBotSettings.sectionLocalAgents}</SectionTitle>
                   <GroupCard>
-                    {KNOWN_LOCAL_AGENTS.map((agent, idx) => {
+                    {(() => {
                       const detectedList = objects(localAgentsData?.detected)
-                      const matched = detectedList.find(d => text(d.id) === agent.id)
-                      const hasModels = effectiveState.models.some(
-                        m => text(m.provider) === agent.id || text(m.ref).startsWith(`${agent.id}/`),
-                      )
-                      const ready = Boolean(matched?.available ?? matched?.installed ?? hasModels)
-                      const ver = text(matched?.version)
-                      return (
-                        <GroupRow
-                          key={agent.id}
-                          first={idx === 0}
-                          icon={Terminal}
-                          label={agent.name}
-                          detail={ver ? `${agent.desc} · ${ver}` : `${agent.desc} (${text(matched?.command) || agent.cmd})`}
-                          value={ready ? s.dsBotSettings.ready : s.dsBotSettings.notDetected}
-                          chevron={false}
-                        />
-                      )
-                    })}
+                      if (detectedList.length > 0) {
+                        return detectedList.map((entry, idx) => {
+                          const id = text(entry.id) || `agent-${idx}`
+                          const label = text(entry.label) || text(entry.name) || id
+                          const matchedKnown = KNOWN_LOCAL_AGENTS.find(agent => agent.id === id)
+                          const cmd = text(entry.path) || text(entry.command) || matchedKnown?.cmd || id
+                          const ver = text(entry.version)
+                          const ready = Boolean(entry.available ?? entry.installed ?? entry.route)
+                          const signedMark = entry.signedIn === true ? ' · ✓' : ''
+                          return (
+                            <GroupRow
+                              key={id}
+                              first={idx === 0}
+                              icon={Terminal}
+                              label={label}
+                              detail={ver ? `${cmd} · ${ver}${signedMark}` : `${cmd}${signedMark}`}
+                              value={ready ? s.dsBotSettings.ready : s.dsBotSettings.notDetected}
+                              chevron={false}
+                            />
+                          )
+                        })
+                      }
+                      return KNOWN_LOCAL_AGENTS.map((agent, idx) => {
+                        const hasModels = effectiveState.models.some(
+                          m => text(m.provider) === agent.id || text(m.ref).startsWith(`${agent.id}/`),
+                        )
+                        const ready = Boolean(hasModels)
+                        return (
+                          <GroupRow
+                            key={agent.id}
+                            first={idx === 0}
+                            icon={Terminal}
+                            label={agent.name}
+                            detail={`${agent.desc} (${agent.cmd})`}
+                            value={ready ? s.dsBotSettings.ready : s.dsBotSettings.notDetected}
+                            chevron={false}
+                          />
+                        )
+                      })
+                    })()}
                   </GroupCard>
                 </>
               )}

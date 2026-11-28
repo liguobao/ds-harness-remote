@@ -3,7 +3,7 @@ import { AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, Pressable, Te
 import { Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { BUILT_IN_PROMPTS, type CustomPrompt } from '../../services/storage'
-import { botMessageRequest, formatBotSubmission, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
+import { botMessageRequest, formatBotSubmission, isBotObject, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
 import { pollRoomRows, preferredRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
 import { useAppStore } from '../../state/store'
 import { useBotTeamStore } from '../../state/bot-store'
@@ -411,17 +411,32 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const question = object(state.questions[session.sessionId])
   const view = object(state.views[session.sessionId])
   const closedCards = object(state.closedCards[session.sessionId])
-  const approvals = state.approvals.filter(entry => entry.answerable === true && (room ? entry.roomId === room.id : entry.sessionId === session.sessionId))
+  const approvals = state.approvals.filter(entry => {
+    if (entry.answerable !== true || text(object(entry.review).status) === 'reviewing') return false
+    if (room) return entry.roomId === room.id
+    return entry.roomId === undefined && (entry.sessionId === session.sessionId || (bot !== undefined && entry.botId === bot.id))
+  })
   const hasDesktopPendingRequest = useMemo(() => {
-    const hasConnector = Object.keys(object(state.connectorRequests[session.sessionId])).length > 0
-    const hasMail = Object.keys(object(state.mailRequests[session.sessionId])).length > 0
+    const ownerId = bot?.id ?? session.sessionId
+    const hasConnector = Object.keys(object(state.connectorRequests[ownerId] ?? state.connectorRequests[session.sessionId])).length > 0
+    const hasMail = Object.keys(object(state.mailRequests[ownerId] ?? state.mailRequests[session.sessionId])).length > 0
+    const hasSecret = Object.keys(object(state.secretRequests?.[ownerId] ?? state.secretRequests?.[session.sessionId])).length > 0
+    const hasBrowser = Object.keys(object(state.browserHolds?.[ownerId] ?? state.browserHolds?.[session.sessionId])).length > 0
+    const matchesComputerTarget = (entry: unknown): boolean => {
+      if (!isBotObject(entry)) return false
+      if (bot && text(entry.botId) === bot.id) return true
+      if (room && text(entry.roomId) === room.id) return true
+      return false
+    }
     const computerAsks = object(state.computerLive?.asks)
     const computerHolds = object(state.computerLive?.holds)
     const hasComputer = Boolean(
-      bot && (Object.keys(object(computerAsks[bot.id])).length > 0 || Object.keys(object(computerHolds[bot.id])).length > 0),
+      (bot && (Object.keys(object(computerAsks[bot.id])).length > 0 || Object.keys(object(computerHolds[bot.id])).length > 0))
+      || Object.values(computerAsks).some(matchesComputerTarget)
+      || Object.values(computerHolds).some(matchesComputerTarget),
     )
-    return hasConnector || hasMail || hasComputer
-  }, [state.connectorRequests, state.mailRequests, state.computerLive, session.sessionId, bot])
+    return hasConnector || hasMail || hasSecret || hasBrowser || hasComputer
+  }, [state.connectorRequests, state.mailRequests, state.secretRequests, state.browserHolds, state.computerLive, session.sessionId, bot, room])
   const activeBtwCards = useMemo(
     () => (bot ? objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId) : []),
     [bot, state.btwCards, session.sessionId],
@@ -809,7 +824,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       ListFooterComponent={<View style={styles.section}>
         {room && progress.length > 0 && <BotReplies rows={progress} botOf={botById} mentions={mentions} adminId={text(room?.admin)} />}
         {room && speaking.map(id => <View key={id} style={styles.row}><ActivityIndicator size="small" /><Text style={styles.muted}>{state.bots.find(bot => bot.id === id)?.name ?? id} · {s.bots.relayTyping}</Text></View>)}
-        {room?.paused && <View style={styles.section}><Text style={styles.body}>{s.bots.roomPaused}</Text><Button label={s.bots.roomContinue} disabled={disabled} onPress={() => void perform('room-continue', { roomId: room.id })} /></View>}
+        {room?.paused && <View style={styles.section}><Text style={styles.body}>{s.bots.roomPaused}</Text><Button label={s.bots.roomContinue} disabled={disabled} onPress={() => void perform(room.idlePaused ? 'resume-room-pause' : 'room-continue', { roomId: room.id })} /></View>}
         {bot && objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId).slice().reverse().map(card => <BotAsideCard key={text(card.id)} card={card} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot.id, id: card.id })} onDelete={() => void perform('btw-delete', { sessionId: bot.id, cardId: card.id })} />)}
         {approvals.map(approval => <View key={text(approval.id)} style={styles.card}><Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text><Text style={styles.body}>{text(approval.reason)}</Text><View style={styles.actions}><Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} /><Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} /></View></View>)}
         {text(question.id) !== '' && <BotQuestion key={text(question.id)} question={question} busy={disabled} answer={answer => void perform('answer-question', { sessionId: session.sessionId, questionId: question.id, answer })} dismiss={() => void perform('dismiss-question', { sessionId: session.sessionId })} />}

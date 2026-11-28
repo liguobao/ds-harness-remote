@@ -493,7 +493,7 @@ export interface ImPlatformCatalogItem {
  */
 export const DS_BOT_IM_PLATFORMS: ImPlatformCatalogItem[] = [
   { id: 'telegram', name: 'Telegram', get sub() { return strings.dsBotSettings.imDescriptions.telegram }, color: '#26A5E4', glyph: 'TG', fieldsHint: 'Bot Token' },
-  { id: 'wechat', get name() { return strings.dsBotSettings.imNames.wechat }, get sub() { return strings.dsBotSettings.imDescriptions.wechat }, color: '#07C160', glyph: '微', get fieldsHint() { return strings.dsBotSettings.wechatFieldsHint } },
+  { id: 'weixin', get name() { return strings.dsBotSettings.imNames.wechat }, get sub() { return strings.dsBotSettings.imDescriptions.wechat }, color: '#07C160', glyph: '微', get fieldsHint() { return strings.dsBotSettings.wechatFieldsHint } },
   { id: 'feishu', get name() { return strings.dsBotSettings.imNames.feishu }, get sub() { return strings.dsBotSettings.imDescriptions.feishu }, color: '#3370FF', glyph: '飞', fieldsHint: 'App ID + App Secret' },
   { id: 'dingtalk', get name() { return strings.dsBotSettings.imNames.dingtalk }, get sub() { return strings.dsBotSettings.imDescriptions.dingtalk }, color: '#0089FF', glyph: '钉', fieldsHint: 'Client ID + Client Secret' },
   { id: 'wecom', get name() { return strings.dsBotSettings.imNames.wecom }, get sub() { return strings.dsBotSettings.imDescriptions.wecom }, color: '#2B7FD9', glyph: '企', fieldsHint: 'Bot ID + Secret' },

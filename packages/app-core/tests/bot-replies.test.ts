@@ -110,3 +110,28 @@ it('stacks adjacent member messages but preserves user and event boundaries', ()
   const rows = [message('one'), message('two'), {kind: 'user', text: 'hello'}, message('three'), {kind: 'done', botId: 'session-1'}, message('four')]
   expect(stackBotReplies(rows).map(row => row.texts)).toEqual([['one', 'two'], ['hello'], ['three'], [''], ['four']])
 })
+
+it('parses v0.4 relay prefixes, helper-failed/goal/presented entries, and folds working notices', async () => {
+  const { parseRelayRange } = await import('../src/screens/bot/replies')
+  expect(parseRelayRange('§12§ {"from":3,"to":8,"anchor":"a1"}')).toEqual({ from: 3, to: 8, anchor: 'a1' })
+  const payload = parseBotReplyPayload(
+    '§5§ ' + JSON.stringify({
+      replies: [
+        { kind: 'helper-failed', botId: 'helper-1', text: 'Subagent timed out' },
+        { kind: 'goal', botId: 'room-1', text: 'Milestone 1' },
+        { botId: 'bot-1', presented: [{ path: '/tmp/report.pdf', name: 'report.pdf' }] },
+      ],
+    }),
+  )
+  expect(payload?.rows).toHaveLength(3)
+  expect(payload?.rows[2]?.presented).toHaveLength(1)
+
+  const stacked = stackBotReplies([
+    { kind: 'working', botId: 'bot-1', text: 'step 1', presented: [{ path: '/a.txt' }] },
+    { kind: 'working', botId: 'bot-1', text: 'step 2', presented: [{ path: '/a.txt' }, { path: '/b.txt' }] },
+    { kind: 'done', botId: 'bot-1' },
+  ])
+  expect(stacked).toHaveLength(2)
+  expect(stacked[0]?.texts).toEqual(['step 1', 'step 2'])
+  expect(stacked[0]?.reply.presented).toEqual([{ path: '/a.txt' }, { path: '/b.txt' }])
+})

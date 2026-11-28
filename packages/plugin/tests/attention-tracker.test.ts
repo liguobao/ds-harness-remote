@@ -920,6 +920,140 @@ describe('HostAttentionTracker', () => {
     await tracker.close()
   })
 
+  it('handles DS-Bot v0.4.1 incremental unchanged polls, review/answerable filtering, room/task approvals, inbox, botId questions, and mobile.js notices', async () => {
+    const digests: AttentionDigest[] = []
+    const tracker = new HostAttentionTracker({
+      logger: silentLogger(),
+      onDigest: digest => { digests.push(digest) },
+      debounceMs: 20,
+    })
+
+    // 1. Initial full state with bot, task, room, filtered approvals, and inbox items
+    tracker.observeBotResponse('api/bot', { endpoint: 'state', payload: null }, {
+      status: 200,
+      json: {
+        ok: true,
+        value: {
+          workspaceId: 'bot-ws',
+          bots: [
+            {
+              id: 'b1',
+              sessionId: 'bot-sess-1',
+              name: 'Ops Bot',
+              tasks: [{ id: 't1', sessionId: 'task-sess-1', status: 'running' }],
+            },
+          ],
+          rooms: [
+            { id: 'r1', sessionId: 'room-sess-1', name: 'Core Room' },
+          ],
+          work: {
+            bots: { b1: { active: true } },
+            rooms: {},
+            approvals: [
+              { id: 'apr-non-answerable', botId: 'b1', sessionId: 'bot-sess-1', tool: 'bash', reason: 'hidden', answerable: false },
+              { id: 'apr-reviewing', botId: 'b1', sessionId: 'bot-sess-1', tool: 'bash', reason: 'auto', answerable: true, review: { status: 'reviewing' } },
+              { id: 'apr-task', botId: 'b1', sessionId: 'task-sess-1', tool: 'write', reason: 'task write', answerable: true },
+              { id: 'apr-room', botId: 'b1', roomId: 'r1', sessionId: 'hidden-member-sess', tool: 'bash', reason: 'room cmd', answerable: true },
+            ],
+          },
+          questions: {
+            'bot-sess-1': { id: 'q-1', question: 'Confirm?' },
+          },
+          inbox: {
+            items: [
+              { kind: 'view', id: 'v-1', botId: 'b1', sessionId: 'bot-sess-1', title: 'Select option' },
+              { kind: 'secret', id: 'sec-1', botId: 'b1', reason: 'Need API key' },
+            ],
+          },
+        },
+      },
+    })
+
+    const initialItems = tracker.list().items
+    expect(initialItems.some(i => i.id === 'ds-bot:approval:apr-non-answerable')).toBe(false)
+    expect(initialItems.some(i => i.id === 'ds-bot:approval:apr-reviewing')).toBe(false)
+    expect(initialItems.find(i => i.id === 'ds-bot:approval:apr-task')).toMatchObject({
+      sessionId: 'bot-sess-1',
+      sessionTitle: 'Ops Bot',
+      status: 'waiting_approval',
+    })
+    expect(initialItems.find(i => i.id === 'ds-bot:approval:apr-room')).toMatchObject({
+      sessionId: 'room-sess-1',
+      sessionTitle: 'Core Room',
+      status: 'waiting_approval',
+    })
+    expect(initialItems.find(i => i.id === 'ds-bot:inbox:view:v-1')).toMatchObject({
+      sessionId: 'bot-sess-1',
+      sessionTitle: 'Ops Bot',
+      status: 'waiting_question',
+    })
+    expect(initialItems.find(i => i.id === 'ds-bot:inbox:secret:sec-1')).toMatchObject({
+      sessionId: 'bot-sess-1',
+      sessionTitle: 'Ops Bot',
+      status: 'waiting_approval',
+    })
+
+    // 2. Incremental `unchanged: true` poll preserves bot/room mappings and does NOT fire false completion or phantom `b1` session
+    tracker.observeBotResponse('api/bot', { endpoint: 'state', payload: { since: 1, live: 'k1' } }, {
+      status: 200,
+      json: {
+        ok: true,
+        value: {
+          unchanged: true,
+          revision: 1,
+          liveKey: 'k1',
+          work: {
+            bots: { b1: { active: true } },
+            rooms: {},
+            approvals: [
+              { id: 'apr-task', botId: 'b1', sessionId: 'task-sess-1', tool: 'write', reason: 'task write', answerable: true },
+              { id: 'apr-room', botId: 'b1', roomId: 'r1', sessionId: 'hidden-member-sess', tool: 'bash', reason: 'room cmd', answerable: true },
+            ],
+          },
+        },
+      },
+    })
+    const runningItems = tracker.list().items.filter(i => i.status === 'running')
+    expect(runningItems).toHaveLength(1)
+    expect(runningItems[0]).toMatchObject({ sessionId: 'bot-sess-1', sessionTitle: 'Ops Bot' })
+    expect(tracker.list().items.some(i => i.status === 'completed_unread')).toBe(false)
+
+    // 3. `answer-question` with `botId` and `view-reply` resolve matching items
+    tracker.observeBotResponse('api/bot', { endpoint: 'answer-question', payload: { botId: 'b1', questionId: 'q-1', answer: 'yes' } }, {
+      status: 200,
+      json: { ok: true, value: true },
+    })
+    expect(tracker.list().items.some(i => i.id === 'ds-bot:question:bot-sess-1:q-1')).toBe(false)
+
+    tracker.observeBotResponse('api/bot', { endpoint: 'view-reply', payload: { sessionId: 'bot-sess-1', viewId: 'v-1' } }, {
+      status: 200,
+      json: { ok: true, value: true },
+    })
+    expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:view:v-1')).toBe(false)
+
+    // 4. `mobile.js` notices use `entry.name`, `done`, `blocked`, and do not create orphan duplicates for existing state-backed approvals
+    tracker.observeBotResponse('api/bot', { endpoint: 'notices', payload: null }, {
+      status: 200,
+      json: {
+        ok: true,
+        value: {
+          notices: [
+            { kind: 'approval', botId: 'b1', sessionId: 'bot-sess-1', name: 'Ops Bot', text: 'Run cmd' },
+            { kind: 'done', botId: 'b1', sessionId: 'bot-sess-1', name: 'Ops Bot', text: 'Finished task' },
+          ],
+        },
+      },
+    })
+    expect(tracker.list().items.some(i => i.id === 'ds-bot:approval:bot-sess-1')).toBe(false)
+    expect(tracker.list().items.find(i => i.status === 'completed_unread')).toMatchObject({
+      sessionId: 'bot-sess-1',
+      sessionTitle: 'Ops Bot',
+      summary: 'Finished task',
+    })
+
+    await tracker.close()
+  })
+
   it('enforces priority ordering, truncation, 64-item cap, opaque token TTL/resolve/LRU, ackUnread, and digest debounce/dedupe', async () => {
     vi.useFakeTimers()
     try {

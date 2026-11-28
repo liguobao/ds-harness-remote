@@ -112,6 +112,11 @@ export class HostAttentionTracker implements AttentionBackendObserver {
   private readonly harnessQuestionProjectionSeqs = new Map<string, number>()
   private readonly harnessQuestionEventToItemId = new Map<string, string>()
   private readonly criticalNotifiedIds = new Set<string>()
+  private readonly botNamesById = new Map<string, { name: string; sessionId: string }>()
+  private readonly roomNamesById = new Map<string, { name: string; sessionId: string }>()
+  private readonly titleBySessionId = new Map<string, string>()
+  private readonly taskOwnerBySessionId = new Map<string, { botId: string; sessionId: string; name: string }>()
+  private botWorkspaceId: string | undefined
   private readonly now: () => number
   private readonly tokenTtlMs: number
   private readonly maxTokens: number
@@ -463,7 +468,9 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     }
 
     if (body.endpoint === 'answer-question' || body.endpoint === 'dismiss-question') {
-      const sessionId = isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined
+      const botId = isRecord(body.payload) && typeof body.payload.botId === 'string' ? body.payload.botId : undefined
+      const sessionId = (isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined)
+        ?? (botId !== undefined ? this.botNamesById.get(botId)?.sessionId : undefined)
       const questionId = isRecord(body.payload) && typeof body.payload.questionId === 'string' ? body.payload.questionId : undefined
       if (sessionId !== undefined && questionId !== undefined) {
         this.onInteractionResolved(botQuestionItemId(sessionId, questionId))
@@ -471,6 +478,49 @@ export class HostAttentionTracker implements AttentionBackendObserver {
         const prefix = `ds-bot:question:${sessionId}:`
         for (const id of [...this.items.keys()]) {
           if (id.startsWith(prefix)) this.onInteractionResolved(id)
+        }
+      }
+      return
+    }
+
+    if (body.endpoint === 'view-reply' || body.endpoint === 'dismiss-view') {
+      const viewId = isRecord(body.payload) && typeof body.payload.viewId === 'string' ? body.payload.viewId : undefined
+      const sessionId = isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined
+      if (viewId !== undefined) {
+        this.onInteractionResolved(botInboxItemId('view', viewId))
+      } else if (sessionId !== undefined) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith('ds-bot:inbox:view:') && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id)
+          }
+        }
+      }
+      return
+    }
+
+    if (body.endpoint === 'computer-app-answer') {
+      const askId = isRecord(body.payload)
+        ? firstNonEmptyString(body.payload.askId, body.payload.id)
+        : undefined
+      if (askId !== undefined) {
+        this.onInteractionResolved(botInboxItemId('computer', askId))
+      }
+      return
+    }
+
+    if (body.endpoint === 'secret-allow' || body.endpoint === 'secret-cancel' || body.endpoint === 'mail-send-answer') {
+      const kind = body.endpoint === 'mail-send-answer' ? 'mail' : 'secret'
+      const requestId = isRecord(body.payload) ? firstNonEmptyString(body.payload.id, body.payload.requestId) : undefined
+      const botId = isRecord(body.payload) && typeof body.payload.botId === 'string' ? body.payload.botId : undefined
+      const sessionId = (isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined)
+        ?? (botId !== undefined ? this.botNamesById.get(botId)?.sessionId : undefined)
+      if (requestId !== undefined) {
+        this.onInteractionResolved(botInboxItemId(kind, requestId))
+      } else if (sessionId !== undefined) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith(`ds-bot:inbox:${kind}:`) && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id)
+          }
         }
       }
       return
@@ -487,17 +537,26 @@ export class HostAttentionTracker implements AttentionBackendObserver {
   }
 
   private observeBotState(state: Record<string, unknown>): void {
-    const botNamesById = new Map<string, { name: string; sessionId: string }>()
-    const roomNamesById = new Map<string, { name: string; sessionId: string }>()
-    const titleBySessionId = new Map<string, string>()
-    const workspaceId = typeof state.workspaceId === 'string' && state.workspaceId.length > 0 ? state.workspaceId : undefined
+    if (typeof state.workspaceId === 'string' && state.workspaceId.length > 0) {
+      this.botWorkspaceId = state.workspaceId
+    }
+    const workspaceId = this.botWorkspaceId
 
     if (Array.isArray(state.bots)) {
+      this.botNamesById.clear()
+      this.taskOwnerBySessionId.clear()
       for (const entry of state.bots) {
         if (!isRecord(entry) || typeof entry.id !== 'string' || typeof entry.sessionId !== 'string') continue
         const name = typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : entry.id
-        botNamesById.set(entry.id, { name, sessionId: entry.sessionId })
-        titleBySessionId.set(entry.sessionId, name)
+        this.botNamesById.set(entry.id, { name, sessionId: entry.sessionId })
+        this.titleBySessionId.set(entry.sessionId, name)
+        if (Array.isArray(entry.tasks)) {
+          for (const task of entry.tasks) {
+            if (isRecord(task) && typeof task.sessionId === 'string' && task.sessionId.length > 0) {
+              this.taskOwnerBySessionId.set(task.sessionId, { botId: entry.id, sessionId: entry.sessionId, name })
+            }
+          }
+        }
         this.rememberMeta(sessionItemId('ds-bot', entry.sessionId), {
           backend: 'ds-bot',
           mode: 'bot',
@@ -509,12 +568,13 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     }
 
     if (Array.isArray(state.rooms)) {
+      this.roomNamesById.clear()
       for (const entry of state.rooms) {
         if (!isRecord(entry) || typeof entry.id !== 'string') continue
         const sessionId = typeof entry.sessionId === 'string' && entry.sessionId.length > 0 ? entry.sessionId : entry.id
         const name = typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : entry.id
-        roomNamesById.set(entry.id, { name, sessionId })
-        titleBySessionId.set(sessionId, name)
+        this.roomNamesById.set(entry.id, { name, sessionId })
+        this.titleBySessionId.set(sessionId, name)
         this.rememberMeta(sessionItemId('ds-bot', sessionId), {
           backend: 'ds-bot',
           mode: 'bot',
@@ -536,10 +596,18 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       const activeApprovalIds = new Set<string>()
       for (const approval of rawApprovals) {
         if (!isRecord(approval) || typeof approval.id !== 'string' || approval.id.length === 0) continue
-        const bot = typeof approval.botId === 'string' ? botNamesById.get(approval.botId) : undefined
-        const sessionId = (typeof approval.sessionId === 'string' && approval.sessionId.length > 0 ? approval.sessionId : undefined)
-          ?? bot?.sessionId
-          ?? (typeof approval.botId === 'string' && approval.botId.length > 0 ? approval.botId : approval.id)
+        if (approval.answerable === false) continue
+        if (isRecord(approval.review) && approval.review.status === 'reviewing') continue
+        const room = typeof approval.roomId === 'string' ? this.roomNamesById.get(approval.roomId) : undefined
+        const taskOwner = typeof approval.sessionId === 'string' ? this.taskOwnerBySessionId.get(approval.sessionId) : undefined
+        const bot = typeof approval.botId === 'string' ? this.botNamesById.get(approval.botId) : undefined
+        const sessionId = room !== undefined
+          ? room.sessionId
+          : taskOwner !== undefined
+            ? taskOwner.sessionId
+            : bot?.sessionId
+              ?? (typeof approval.sessionId === 'string' && approval.sessionId.length > 0 ? approval.sessionId : undefined)
+              ?? (typeof approval.botId === 'string' && approval.botId.length > 0 ? approval.botId : approval.id)
         const itemId = botApprovalItemId(approval.id)
         activeApprovalIds.add(itemId)
         const tool = typeof approval.tool === 'string' ? approval.tool.trim() : ''
@@ -551,7 +619,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           mode: 'bot',
           ...(workspaceId === undefined ? {} : { workspaceId }),
           sessionId,
-          sessionTitle: bot?.name ?? titleBySessionId.get(sessionId) ?? 'DS-Bot',
+          sessionTitle: room?.name ?? taskOwner?.name ?? bot?.name ?? this.titleBySessionId.get(sessionId) ?? 'DS-Bot',
           status: 'waiting_approval',
           ...(summary === undefined ? {} : { summary }),
         })
@@ -577,7 +645,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           mode: 'bot',
           ...(workspaceId === undefined ? {} : { workspaceId }),
           sessionId,
-          sessionTitle: titleBySessionId.get(sessionId) ?? 'DS-Bot',
+          sessionTitle: this.titleBySessionId.get(sessionId) ?? 'DS-Bot',
           status: 'waiting_question',
           ...(summary === undefined ? {} : { summary }),
         })
@@ -589,13 +657,58 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       }
     }
 
+    // Reconcile DS-Bot v0.4.x unified `state.inbox` items (views, secrets, connectors, mail, computer, handoff, goal, blocked, model, paused).
+    if (isRecord(state.inbox) && Array.isArray(state.inbox.items)) {
+      const activeInboxIds = new Set<string>()
+      for (const entry of state.inbox.items) {
+        if (!isRecord(entry) || typeof entry.kind !== 'string') continue
+        const kind = entry.kind
+        const isInboxApproval = BOT_INBOX_APPROVAL_KINDS.has(kind)
+        const isInboxQuestion = BOT_INBOX_QUESTION_KINDS.has(kind)
+        if (!isInboxApproval && !isInboxQuestion) continue
+        const rawItemId = firstNonEmptyString(entry.id, entry.callId, entry.requestId, entry.askId, entry.sessionId, entry.roomId, entry.botId)
+        if (rawItemId === undefined) continue
+        const room = typeof entry.roomId === 'string' ? this.roomNamesById.get(entry.roomId) : undefined
+        const taskOwner = typeof entry.sessionId === 'string' ? this.taskOwnerBySessionId.get(entry.sessionId) : undefined
+        const bot = typeof entry.botId === 'string' ? this.botNamesById.get(entry.botId) : undefined
+        const sessionId = room?.sessionId
+          ?? taskOwner?.sessionId
+          ?? bot?.sessionId
+          ?? firstNonEmptyString(entry.sessionId, entry.roomId, entry.botId, rawItemId)!
+        const sessionTitle = room?.name
+          ?? taskOwner?.name
+          ?? bot?.name
+          ?? firstNonEmptyString(entry.title, entry.name)
+          ?? this.titleBySessionId.get(sessionId)
+          ?? 'DS-Bot'
+        const summary = firstNonEmptyString(entry.summary, entry.reason, entry.text, entry.title)
+        const itemId = botInboxItemId(kind, rawItemId)
+        activeInboxIds.add(itemId)
+        this.onInteractionPending({
+          id: itemId,
+          backend: 'ds-bot',
+          mode: 'bot',
+          ...(workspaceId === undefined ? {} : { workspaceId }),
+          sessionId,
+          sessionTitle,
+          status: isInboxApproval ? 'waiting_approval' : 'waiting_question',
+          ...(summary === undefined ? {} : { summary }),
+        })
+      }
+      for (const id of [...this.items.keys()]) {
+        if (id.startsWith('ds-bot:inbox:') && !activeInboxIds.has(id)) {
+          this.onInteractionResolved(id)
+        }
+      }
+    }
+
     // Reconcile active bot/room work when work maps are present.
     if (work !== undefined && (isRecord(work.bots) || isRecord(work.rooms))) {
       const activeSessionIds = new Set<string>()
       if (isRecord(work.bots)) {
         for (const [botId, workEntry] of Object.entries(work.bots)) {
           if (!isBotWorkActive(workEntry)) continue
-          const bot = botNamesById.get(botId)
+          const bot = this.botNamesById.get(botId)
           const sessionId = bot?.sessionId ?? botId
           activeSessionIds.add(sessionId)
           this.onSessionRunning({
@@ -603,14 +716,14 @@ export class HostAttentionTracker implements AttentionBackendObserver {
             mode: 'bot',
             ...(workspaceId === undefined ? {} : { workspaceId }),
             sessionId,
-            sessionTitle: bot?.name ?? titleBySessionId.get(sessionId) ?? botId,
+            sessionTitle: bot?.name ?? this.titleBySessionId.get(sessionId) ?? botId,
           })
         }
       }
       if (isRecord(work.rooms)) {
         for (const [roomId, workEntry] of Object.entries(work.rooms)) {
           if (!isBotWorkActive(workEntry)) continue
-          const room = roomNamesById.get(roomId)
+          const room = this.roomNamesById.get(roomId)
           const sessionId = room?.sessionId ?? roomId
           activeSessionIds.add(sessionId)
           this.onSessionRunning({
@@ -618,7 +731,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
             mode: 'bot',
             ...(workspaceId === undefined ? {} : { workspaceId }),
             sessionId,
-            sessionTitle: room?.name ?? titleBySessionId.get(sessionId) ?? roomId,
+            sessionTitle: room?.name ?? this.titleBySessionId.get(sessionId) ?? roomId,
           })
         }
       }
@@ -646,13 +759,25 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           : []
     for (const entry of entries) {
       if (!isRecord(entry)) continue
-      const sessionId = firstNonEmptyString(entry.sessionId, entry.botId, entry.roomId, entry.id)
+      const room = typeof entry.roomId === 'string' ? this.roomNamesById.get(entry.roomId) : undefined
+      const bot = typeof entry.botId === 'string' ? this.botNamesById.get(entry.botId) : undefined
+      const sessionId = room?.sessionId
+        ?? bot?.sessionId
+        ?? firstNonEmptyString(entry.sessionId, entry.botId, entry.roomId, entry.id)
       if (sessionId === undefined) continue
-      const title = firstNonEmptyString(entry.title, entry.botName, entry.roomName) ?? 'DS-Bot'
+      const title = firstNonEmptyString(entry.title, entry.name, entry.botName, entry.roomName)
+        ?? room?.name
+        ?? bot?.name
+        ?? this.titleBySessionId.get(sessionId)
+        ?? 'DS-Bot'
       const summary = firstNonEmptyString(entry.summary, entry.message, entry.reason, entry.text)
       const kind = typeof entry.kind === 'string' ? entry.kind : typeof entry.type === 'string' ? entry.type : ''
       if (kind === 'approval' || kind === 'waiting_approval') {
-        const noticeId = firstNonEmptyString(entry.approvalId, entry.id) ?? sessionId
+        const explicitId = firstNonEmptyString(entry.approvalId, entry.id)
+        if (explicitId === undefined && [...this.items.values()].some(i => i.id.startsWith('ds-bot:approval:') && i.sessionId === sessionId)) {
+          continue
+        }
+        const noticeId = explicitId ?? sessionId
         this.onInteractionPending({
           id: botApprovalItemId(noticeId),
           backend: 'ds-bot',
@@ -663,7 +788,11 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           ...(summary === undefined ? {} : { summary }),
         })
       } else if (kind === 'question' || kind === 'waiting_question') {
-        const questionId = firstNonEmptyString(entry.questionId, entry.id) ?? 'notice'
+        const explicitId = firstNonEmptyString(entry.questionId, entry.id)
+        if (explicitId === undefined && [...this.items.values()].some(i => i.id.startsWith(`ds-bot:question:${sessionId}:`))) {
+          continue
+        }
+        const questionId = explicitId ?? 'notice'
         this.onInteractionPending({
           id: botQuestionItemId(sessionId, questionId),
           backend: 'ds-bot',
@@ -673,7 +802,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           status: 'waiting_question',
           ...(summary === undefined ? {} : { summary }),
         })
-      } else if (kind === 'error' || kind === 'failed' || kind === 'turn_failed') {
+      } else if (kind === 'blocked' || kind === 'error' || kind === 'failed' || kind === 'turn_failed') {
         this.onSessionCompleted({
           backend: 'ds-bot',
           mode: 'bot',
@@ -682,7 +811,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           failed: true,
           ...(summary === undefined ? {} : { summary }),
         })
-      } else if (kind === 'completed' || kind === 'turn_completed') {
+      } else if (kind === 'done' || kind === 'completed' || kind === 'turn_completed') {
         this.onSessionCompleted({
           backend: 'ds-bot',
           mode: 'bot',
@@ -735,6 +864,11 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     this.harnessQuestionProjectionSeqs.clear()
     this.harnessQuestionEventToItemId.clear()
     this.criticalNotifiedIds.clear()
+    this.botNamesById.clear()
+    this.roomNamesById.clear()
+    this.titleBySessionId.clear()
+    this.taskOwnerBySessionId.clear()
+    this.botWorkspaceId = undefined
     this.activeHarnessEventStreams = 0
   }
 
@@ -1402,12 +1536,19 @@ function harnessProjectedQuestionItemId(sessionId: string, callId: string): stri
   return truncateId(`harness:question:${sessionId}:${callId}`, 256)
 }
 
+const BOT_INBOX_APPROVAL_KINDS = new Set(['secret', 'connector', 'mail', 'computer', 'handoff'])
+const BOT_INBOX_QUESTION_KINDS = new Set(['view', 'goal', 'blocked', 'model', 'paused', 'room-paused'])
+
 function botApprovalItemId(approvalId: string): string {
   return truncateId(`ds-bot:approval:${approvalId}`, 256)
 }
 
 function botQuestionItemId(sessionId: string, questionId: string): string {
   return truncateId(`ds-bot:question:${sessionId}:${questionId}`, 256)
+}
+
+function botInboxItemId(kind: string, itemId: string): string {
+  return truncateId(`ds-bot:inbox:${kind}:${itemId}`, 256)
 }
 
 function truncateText(value: string, maxChars: number): string {

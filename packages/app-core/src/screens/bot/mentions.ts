@@ -11,12 +11,14 @@ export function botMentionTarget(href: string, bots: BotEntry[]): string | undef
   } catch { return undefined }
 }
 
-export interface MentionSpan { start: number; end: number; bot: BotEntry }
+export interface MentionSpan { start: number; end: number; bot: BotEntry; kind?: 'bot' | 'all' }
+
+const ALL_MENTION_ALIASES = ['everyone', '所有人', 'all', '全体']
 
 /** Where each `@Name` sits in a message, skipping code, links and file references. */
 export function botMentionSpans(text: string, bots: BotEntry[], selfId?: string): MentionSpan[] {
   if (!text.includes('@')) return []
-  const literal = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`|\[[^\]\n]*\]\([^)\n]*\)/g
+  const literal = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`|\[[^\]\n]*\]\([^)\s]*(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\)/g
   const excluded = [...text.matchAll(literal)].map(match => [match.index, match.index + match[0].length])
   const candidates = bots.filter(bot => bot.name).slice().sort((a, b) => b.name.length - a.name.length)
   const spans: MentionSpan[] = []
@@ -27,9 +29,21 @@ export function botMentionSpans(text: string, bots: BotEntry[], selfId?: string)
       return text.slice(at + 1, end).toLowerCase() === candidate.name.toLowerCase()
         && !/^(?:[a-z0-9_\-/\\]|\.[a-z0-9_-])/i.test(text.slice(end))
     })
-    if (!bot) continue
-    const end = at + 1 + bot.name.length
-    if (bot.id !== selfId) spans.push({ start: at, end, bot })
+    if (bot) {
+      const end = at + 1 + bot.name.length
+      if (bot.id !== selfId) spans.push({ start: at, end, bot, kind: 'bot' })
+      at = end - 1
+      continue
+    }
+    const alias = ALL_MENTION_ALIASES.find(candidate => {
+      const end = at + 1 + candidate.length
+      return text.slice(at + 1, end).toLowerCase() === candidate.toLowerCase()
+        && !/^(?:[a-z0-9_\-/\\]|\.[a-z0-9_-])/i.test(text.slice(end))
+    })
+    if (!alias) continue
+    const end = at + 1 + alias.length
+    const matchedLabel = text.slice(at + 1, end)
+    spans.push({ start: at, end, bot: { id: 'all', name: matchedLabel } as BotEntry, kind: 'all' })
     at = end - 1
   }
   return spans

@@ -87,7 +87,20 @@ export function BotAvatarWithBadge({
   return (
     <View style={{ width: size, height: size, position: 'relative' }}>
       <BotAvatar bot={bot} size={size} />
-      {isMain ? (
+      {statusColor !== undefined ? (
+        <View
+          style={[
+            badgeStyles.statusDot,
+            {
+              width: dotSize,
+              height: dotSize,
+              borderRadius: dotSize / 2,
+              backgroundColor: statusColor,
+              borderColor: borderCol,
+            },
+          ]}
+        />
+      ) : isMain ? (
         <View
           style={[
             badgeStyles.starBadge,
@@ -102,19 +115,6 @@ export function BotAvatarWithBadge({
         >
           <Star size={starSize} color="#FFFFFF" fill="#FFFFFF" strokeWidth={1.8} />
         </View>
-      ) : statusColor !== undefined ? (
-        <View
-          style={[
-            badgeStyles.statusDot,
-            {
-              width: dotSize,
-              height: dotSize,
-              borderRadius: dotSize / 2,
-              backgroundColor: statusColor,
-              borderColor: borderCol,
-            },
-          ]}
-        />
       ) : null}
     </View>
   )
@@ -141,12 +141,17 @@ const badgeStyles = StyleSheet.create({
 export function RoomAvatar({
   members,
   bots,
+  avatar,
   size = 26,
 }: {
   members: string[]
   bots: Pick<BotEntry, 'id' | 'avatar' | 'color' | 'engine' | 'model' | 'appliedModel'>[]
+  avatar?: { image?: string }
   size?: number
 }) {
+  if (typeof avatar?.image === 'string' && /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(avatar.image)) {
+    return <Image source={{ uri: avatar.image }} style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }} />
+  }
   const shown = members.slice(0, 3)
   if (shown.length === 0) return null
   const inner = Math.max(16, Math.round(size * 0.72))

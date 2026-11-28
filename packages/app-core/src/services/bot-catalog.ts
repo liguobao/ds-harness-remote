@@ -6,6 +6,11 @@ export interface BotEntry {
   id: string
   sessionId: string
   parts?: string[]
+  tasks?: BotObject[]
+  extraDirs?: string[]
+  blocked?: BotObject
+  agentPreset?: string
+  packs?: BotObject
   name: string
   role: string
   instructions: string
@@ -19,7 +24,7 @@ export interface BotEntry {
   browserGrants?: BotObject[]
   capabilities?: string[]
   color?: string
-  avatar?: { shape?: string; image?: string }
+  avatar?: { shape?: string; image?: string; imageRef?: string }
   preview?: string
   main: boolean
   tile?: boolean
@@ -40,11 +45,15 @@ export interface BotRoom {
   admin: string
   mode?: string
   workDir?: string
+  extraDirs?: string[]
   permission?: string
+  avatar?: { image?: string; imageRef?: string }
+  idlePaused?: BotObject
   paused?: boolean
   pinned?: boolean
   hidden?: boolean
   goal?: BotObject
+  todos?: BotObject[]
   createdAt?: number
 }
 export interface BotAgent {
@@ -63,9 +72,11 @@ export interface BotState {
   bots: BotEntry[]
   rooms: BotRoom[]
   agents: BotAgent[]
+  sections?: BotObject[]
   exchangeTurns: BotObject
   btwCards: BotObject
   btwSupported: boolean
+  parallelSessionsSupported?: boolean
   sideChats: BotObject
   activity: BotObject
   work: {
@@ -74,6 +85,9 @@ export interface BotState {
     waiting: BotObject
     turns: BotObject
     steered: BotObject
+    paused?: BotObject
+    canBackground?: BotObject
+    activeRooms?: BotObject
   }
   questions: BotObject
   views: BotObject
@@ -81,6 +95,12 @@ export interface BotState {
   imVia: BotObject
   connectorRequests: BotObject
   mailRequests: BotObject
+  secretRequests?: BotObject
+  browserHolds?: BotObject
+  learning?: BotObject
+  approvalReviews?: BotObject[]
+  botTails?: BotObject
+  inbox?: BotObject
   computer?: BotObject
   computerLive?: BotObject
   prefs?: BotObject
@@ -103,21 +123,35 @@ export interface BotState {
 
 // Android only exposes the reviewed Bot workflows, never arbitrary plugin routes.
 export const BOT_OPERATIONS = [
-  'state', 'models', 'efforts', 'providers', 'local-agents',
-  'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress', 'group-rows',
-  'schedules', 'schedule-create', 'schedule-delete',
+  'state', 'hello', 'avatar', 'avatar-library', 'avatar-import', 'avatar-delete',
+  'models', 'efforts', 'presets', 'providers', 'local-agents',
+  'exchange', 'exchange-text', 'file-text', 'file-download', 'image', 'markdown-image',
+  'earlier', 'chat', 'room-chat', 'run-stats', 'thinking', 'usage', 'usage-summary',
+  'room-progress', 'group-rows', 'group-relay-replies', 'room-todo',
+  'schedules', 'schedule-create', 'schedule-delete', 'schedule-pause',
   'memory-view', 'memory-history', 'memory-ask', 'memory-forget', 'memory-restore',
+  'memory-add', 'memory-edit', 'memory-pin', 'memory-layer', 'memory-move', 'memory-tidy-undo',
   'folders', 'folder-list', 'team-workspace', 'set-prefs',
-  'browser-takeover', 'browser-give-back', 'browser-stop',
-  'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags', 'resume', 'bot-new-part', 'bot-open-part',
-  'create-room', 'update-room', 'delete-room', 'stop-room-work', 'goal-draft', 'goal-control',
+  'browser-frame', 'browser-takeover', 'browser-give-back', 'browser-stop',
+  'computer-stop', 'computer-app-answer',
+  'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags',
+  'resume', 'new-part', 'recover-session', 'private-release',
+  'bot-move-to-background', 'bot-steer-queue', 'bot-stop-task', 'bot-task-send', 'bot-task-read',
+  'create-room', 'update-room', 'delete-room', 'stop-room-work', 'resume-room-pause',
+  'resume-work', 'cancel-work', 'goal-draft', 'goal-control',
   'add-agent', 'agent-session', 'agent-adopt', 'agent-archive', 'agent-rename', 'remove-agent',
-  'send', 'btw', 'btw-cancel', 'btw-delete', 'side-new', 'side-ask', 'side-cancel', 'side-close',
-  'room-continue', 'answer-question', 'dismiss-question', 'dismiss-view', 'view-reply', 'approval-answer', 'stop-member-work',
+  'send', 'stage-image', 'stage-file',
+  'btw-delete', 'side-new', 'side-ask', 'side-cancel', 'side-close',
+  'answer-question', 'dismiss-question', 'dismiss-view', 'view-reply', 'approval-answer', 'stop-member-work',
+  'learning-answer', 'secret-allow', 'secret-cancel', 'mail-send-answer', 'connector-request-cancel',
+  // Legacy compat for DS-Bot <0.4.0 Hosts.
+  'btw', 'btw-cancel', 'room-continue', 'bot-new-part', 'bot-open-part',
 ] as const
 export type BotOperation = typeof BOT_OPERATIONS[number]
 
 export class BotRemoteClient {
+  private readonly avatarCache = new Map<string, string>()
+
   constructor(
     private readonly dispatch: (body: { endpoint: BotOperation; payload: BotObject | null }, signal?: AbortSignal) => Promise<unknown>,
     private readonly readSessions: () => Promise<RemoteSession[]>,
@@ -150,13 +184,14 @@ export class BotRemoteClient {
 
   async state(signal?: AbortSignal, withPreviews = false, previous?: BotState): Promise<BotState> {
     const canIncremental = previous?.revision !== undefined && previous?.liveKey !== undefined
-    const query = canIncremental
+    const query: BotObject = canIncremental
       ? {
           since: previous.revision,
           ...(previous.modelsKey !== undefined ? { models: previous.modelsKey } : {}),
           live: previous.liveKey,
+          avatars: 'ref',
         }
-      : null
+      : { avatars: 'ref' }
     const raw = await this.call('state', query, signal)
     if (canIncremental) {
       const merged = mergeBotStateDelta(previous, raw)
@@ -169,14 +204,68 @@ export class BotRemoteClient {
       }
     }
     const parsed = parseBotState(raw)
-    const state = previous !== undefined
+    const preserved = previous !== undefined
       ? preserveIncrementalFields(parsed, previous, raw, !withPreviews)
       : parsed
-    if (!withPreviews) return state
-    return attachStatePreviews(state, await this.readSessions(), () => {
+    const hydrated = await this.hydrateAvatars(preserved, signal)
+    if (!withPreviews) return hydrated
+    return attachStatePreviews(hydrated, await this.readSessions(), () => {
       this.assertCurrent()
       checkAborted(signal)
     })
+  }
+
+  private async hydrateAvatars(state: BotState, signal?: AbortSignal): Promise<BotState> {
+    const missing: Array<{ isRoom: boolean; id: string; ref: string }> = []
+    const seenRefs = new Set<string>()
+    const seedOrCollect = (isRoom: boolean, id: string, avatar?: { image?: string; imageRef?: string }) => {
+      if (!avatar?.imageRef) return
+      if (avatar.image) {
+        this.avatarCache.set(avatar.imageRef, avatar.image)
+        return
+      }
+      if (!this.avatarCache.has(avatar.imageRef) && !seenRefs.has(avatar.imageRef)) {
+        seenRefs.add(avatar.imageRef)
+        missing.push({ isRoom, id, ref: avatar.imageRef })
+      }
+    }
+    for (const bot of state.bots) seedOrCollect(false, bot.id, bot.avatar)
+    for (const room of state.rooms) seedOrCollect(true, room.id, room.avatar)
+
+    if (missing.length > 0) {
+      await Promise.all(
+        missing.map(async item => {
+          try {
+            const payload = item.isRoom ? { roomId: item.id } : { botId: item.id }
+            const res = object(await this.call('avatar', payload, signal))
+            const image = text(res.image)
+            const ref = text(res.ref) || item.ref
+            if (image) this.avatarCache.set(ref, image)
+          } catch {
+            // Avatar hydration is best-effort and must never fail state loading.
+          }
+        }),
+      )
+    }
+
+    let changed = false
+    const bots = state.bots.map(bot => {
+      const ref = bot.avatar?.imageRef
+      if (!ref || bot.avatar?.image) return bot
+      const cached = this.avatarCache.get(ref)
+      if (!cached) return bot
+      changed = true
+      return { ...bot, avatar: { ...bot.avatar, image: cached } }
+    })
+    const rooms = state.rooms.map(room => {
+      const ref = room.avatar?.imageRef
+      if (!ref || room.avatar?.image) return room
+      const cached = this.avatarCache.get(ref)
+      if (!cached) return room
+      changed = true
+      return { ...room, avatar: { ...room.avatar, image: cached } }
+    })
+    return changed ? { ...state, bots, rooms } : state
   }
 
   /** Resolve only a current Bot/group returned by this Host, against its official catalog. */
@@ -212,9 +301,19 @@ export function parseBotState(value: unknown): BotState {
       id: entry.id,
       sessionId: entry.sessionId,
       ...(Array.isArray(entry.parts) ? { parts: entry.parts.filter(nonempty) } : {}),
+      ...(Array.isArray(entry.tasks) ? { tasks: objects(entry.tasks) } : {}),
+      ...(Array.isArray(entry.extraDirs) ? { extraDirs: entry.extraDirs.filter(nonempty) } : {}),
+      ...(isBotObject(entry.blocked) ? { blocked: entry.blocked } : {}),
+      ...(nonempty(entry.agentPreset) ? { agentPreset: entry.agentPreset } : {}),
+      ...(isBotObject(entry.packs) ? { packs: entry.packs } : {}),
       name: text(entry.name) || entry.id,
       color: text(entry.color),
-      avatar: { shape: text(avatarObj.shape), ...(nonempty(avatarObj.image) ? { image: avatarObj.image } : {}) },
+      avatar: {
+        shape: text(avatarObj.shape),
+        ...(nonempty(avatarObj.image) ? { image: avatarObj.image } : {}),
+        ...(nonempty(avatarObj.imageRef) ? { imageRef: avatarObj.imageRef } : {}),
+      },
+      ...(nonempty(entry.preview) ? { preview: compactPreview(text(entry.preview)) } : {}),
       role: text(entry.role),
       instructions: text(entry.instructions),
       model: text(entry.model),
@@ -237,6 +336,13 @@ export function parseBotState(value: unknown): BotState {
   const rooms = value.rooms.map(entry => {
     if (!isBotObject(entry) || !nonempty(entry.id) || !Array.isArray(entry.members) || !entry.members.every(nonempty)) throw new Error(strings.bots.invalid)
     const sessionId = text(entry.sessionId) || entry.id
+    const roomAvatarObj = isBotObject(entry.avatar) ? entry.avatar : undefined
+    const roomAvatar = roomAvatarObj && (nonempty(roomAvatarObj.image) || nonempty(roomAvatarObj.imageRef))
+      ? {
+          ...(nonempty(roomAvatarObj.image) ? { image: roomAvatarObj.image } : {}),
+          ...(nonempty(roomAvatarObj.imageRef) ? { imageRef: roomAvatarObj.imageRef } : {}),
+        }
+      : undefined
     return {
       preview: compactPreview(text(entry.preview)),
       id: entry.id,
@@ -249,11 +355,15 @@ export function parseBotState(value: unknown): BotState {
       admin: text(entry.admin),
       ...(nonempty(entry.mode) ? { mode: entry.mode } : {}),
       ...(nonempty(entry.workDir) ? { workDir: entry.workDir } : {}),
+      ...(Array.isArray(entry.extraDirs) ? { extraDirs: entry.extraDirs.filter(nonempty) } : {}),
       ...(nonempty(entry.permission) ? { permission: entry.permission } : {}),
-      paused: objects(entry.paused).length > 0 || entry.paused === true,
+      ...(roomAvatar !== undefined ? { avatar: roomAvatar } : {}),
+      ...(isBotObject(entry.idlePaused) ? { idlePaused: entry.idlePaused } : {}),
+      paused: isBotObject(entry.idlePaused) || objects(entry.paused).length > 0 || entry.paused === true,
       ...(entry.pinned === true ? { pinned: true } : {}),
       ...(entry.hidden === true ? { hidden: true } : {}),
       ...(isBotObject(entry.goal) ? { goal: entry.goal } : {}),
+      ...(Array.isArray(entry.todos) ? { todos: objects(entry.todos) } : {}),
       ...(typeof entry.createdAt === 'number' ? { createdAt: entry.createdAt } : {}),
     }
   })
@@ -268,6 +378,8 @@ export function parseBotState(value: unknown): BotState {
   const ids = [...bots, ...rooms].map(entry => entry.id)
   if (new Set(ids).size !== ids.length) throw new Error(strings.bots.invalid)
   const workObj = object(value.work)
+  const hasUnifiedInbox = isBotObject(value.inbox)
+  const hasTasks = bots.some(b => Array.isArray(b.tasks))
   return {
     ...(typeof value.revision === 'number' ? { revision: value.revision } : {}),
     ...(nonempty(value.liveKey) ? { liveKey: value.liveKey } : {}),
@@ -278,8 +390,10 @@ export function parseBotState(value: unknown): BotState {
     bots,
     rooms,
     agents,
+    ...(Array.isArray(value.sections) ? { sections: objects(value.sections) } : {}),
     btwCards: object(value.btwCards),
-    btwSupported: isBotObject(value.btwCards),
+    btwSupported: isBotObject(value.btwCards) && !hasUnifiedInbox,
+    parallelSessionsSupported: !(hasUnifiedInbox || hasTasks),
     sideChats: object(value.sideChats),
     exchangeTurns: object(value.exchangeTurns),
     activity: object(value.activity),
@@ -289,6 +403,9 @@ export function parseBotState(value: unknown): BotState {
       waiting: object(workObj.waiting),
       turns: object(workObj.turns),
       steered: object(workObj.steered),
+      ...(isBotObject(workObj.paused) ? { paused: workObj.paused } : {}),
+      ...(isBotObject(workObj.canBackground) ? { canBackground: workObj.canBackground } : {}),
+      ...(isBotObject(workObj.activeRooms) ? { activeRooms: workObj.activeRooms } : {}),
     },
     questions: object(value.questions),
     views: object(value.views),
@@ -296,6 +413,12 @@ export function parseBotState(value: unknown): BotState {
     imVia: object(value.imVia),
     connectorRequests: object(value.connectorRequests),
     mailRequests: object(value.mailRequests),
+    ...(isBotObject(value.secretRequests) ? { secretRequests: value.secretRequests } : {}),
+    ...(isBotObject(value.browserHolds) ? { browserHolds: value.browserHolds } : {}),
+    ...(isBotObject(value.learning) ? { learning: value.learning } : {}),
+    ...(Array.isArray(value.approvalReviews) ? { approvalReviews: objects(value.approvalReviews) } : {}),
+    ...(isBotObject(value.botTails) ? { botTails: value.botTails } : {}),
+    ...(hasUnifiedInbox ? { inbox: value.inbox as BotObject } : {}),
     ...(isBotObject(value.computer) ? { computer: value.computer } : {}),
     ...(isBotObject(value.computerLive) ? { computerLive: value.computerLive } : {}),
     ...(isBotObject(value.prefs) ? { prefs: value.prefs } : {}),
@@ -313,7 +436,7 @@ export function parseBotState(value: unknown): BotState {
     approvals: objects(workObj.approvals),
     models: objects(value.models),
     ...(nonempty(value.defaultModel) ? { defaultModel: value.defaultModel } : {}),
-    ...(typeof value.readOnly === 'string' ? { readOnly: value.readOnly } : {}),
+    ...(typeof value.readOnly === 'string' && value.readOnly.length > 0 ? { readOnly: value.readOnly } : {}),
   }
 }
 
@@ -324,7 +447,7 @@ function attachStatePreviews(state: BotState, sessions: RemoteSession[], verify:
     ...state,
     bots: state.bots.map(bot => ({
       ...bot,
-      preview: sessionPreview(catalog.get(bot.sessionId), state.exchangeTurns[bot.sessionId]),
+      preview: bot.preview || sessionPreview(catalog.get(bot.sessionId), state.exchangeTurns[bot.sessionId]),
     })),
     rooms: state.rooms.map(room => ({
       ...room,
@@ -341,8 +464,8 @@ function preserveIncrementalFields(
 ): BotState {
   const rawObj = isBotObject(raw) ? raw : {}
   const omitModels = !Array.isArray(rawObj.models)
-  const prevBotPreviews = keepPreviews ? new Map(previous.bots.map(b => [b.id, b.preview])) : undefined
-  const prevRoomPreviews = keepPreviews ? new Map(previous.rooms.map(r => [r.id, r.preview])) : undefined
+  const prevBots = new Map(previous.bots.map(b => [b.id, b]))
+  const prevRooms = new Map(previous.rooms.map(r => [r.id, r]))
   return {
     ...next,
     ...(omitModels ? {
@@ -350,18 +473,38 @@ function preserveIncrementalFields(
       ...(next.modelsKey === undefined && previous.modelsKey !== undefined ? { modelsKey: previous.modelsKey } : {}),
       ...(next.defaultModel === undefined && previous.defaultModel !== undefined ? { defaultModel: previous.defaultModel } : {}),
     } : {}),
-    ...(prevBotPreviews ? {
-      bots: next.bots.map(bot => ({
+    bots: next.bots.map(bot => {
+      const prev = prevBots.get(bot.id)
+      const keepPhoto = Boolean(
+        !bot.avatar?.image
+        && bot.avatar?.imageRef
+        && prev?.avatar?.image
+        && prev.avatar.imageRef === bot.avatar.imageRef,
+      )
+      const nextPreview = keepPreviews ? (bot.preview || prev?.preview) : bot.preview
+      if (!keepPhoto && nextPreview === bot.preview) return bot
+      return {
         ...bot,
-        preview: bot.preview || prevBotPreviews.get(bot.id),
-      })),
-    } : {}),
-    ...(prevRoomPreviews ? {
-      rooms: next.rooms.map(room => ({
+        ...(nextPreview !== undefined ? { preview: nextPreview } : {}),
+        ...(keepPhoto && prev?.avatar?.image ? { avatar: { ...bot.avatar, image: prev.avatar.image } } : {}),
+      }
+    }),
+    rooms: next.rooms.map(room => {
+      const prev = prevRooms.get(room.id)
+      const keepPhoto = Boolean(
+        !room.avatar?.image
+        && room.avatar?.imageRef
+        && prev?.avatar?.image
+        && prev.avatar.imageRef === room.avatar.imageRef,
+      )
+      const nextPreview = keepPreviews ? (room.preview || prev?.preview) : room.preview
+      if (!keepPhoto && nextPreview === room.preview) return room
+      return {
         ...room,
-        preview: room.preview || prevRoomPreviews.get(room.id),
-      })),
-    } : {}),
+        ...(nextPreview !== undefined ? { preview: nextPreview } : {}),
+        ...(keepPhoto && prev?.avatar?.image ? { avatar: { ...room.avatar, image: prev.avatar.image } } : {}),
+      }
+    }),
   }
 }
 
@@ -379,11 +522,24 @@ export function mergeBotStateDelta(previous: BotState, raw: unknown): BotState |
     || raw.capabilityStatuses !== undefined
     || raw.imStatus !== undefined
     || raw.imVia !== undefined
+    || raw.inbox !== undefined
+    || raw.browserHolds !== undefined
+    || raw.secretRequests !== undefined
+    || raw.learning !== undefined
+    || raw.approvalReviews !== undefined
+    || raw.botTails !== undefined
+    || raw.readOnly !== undefined
   if (!hasLiveFields && nextRevision === previous.revision && nextLiveKey === previous.liveKey) {
     return previous
   }
   const nextWorkObj = raw.work !== undefined ? object(raw.work) : undefined
-  return {
+  const hasInbox = isBotObject(raw.inbox) || isBotObject(previous.inbox)
+  const nextReadOnly = raw.readOnly === null || raw.readOnly === ''
+    ? undefined
+    : typeof raw.readOnly === 'string'
+      ? raw.readOnly
+      : previous.readOnly
+  const nextState: BotState = {
     ...previous,
     ...(nextRevision !== undefined ? { revision: nextRevision } : {}),
     ...(nextLiveKey !== undefined ? { liveKey: nextLiveKey } : {}),
@@ -395,17 +551,29 @@ export function mergeBotStateDelta(previous: BotState, raw: unknown): BotState |
         waiting: object(nextWorkObj.waiting),
         turns: object(nextWorkObj.turns),
         steered: object(nextWorkObj.steered),
+        ...(isBotObject(nextWorkObj.paused) ? { paused: nextWorkObj.paused } : {}),
+        ...(isBotObject(nextWorkObj.canBackground) ? { canBackground: nextWorkObj.canBackground } : {}),
+        ...(isBotObject(nextWorkObj.activeRooms) ? { activeRooms: nextWorkObj.activeRooms } : {}),
       },
       approvals: objects(nextWorkObj.approvals),
     } : {}),
     ...(raw.computerLive !== undefined ? { computerLive: object(raw.computerLive) } : {}),
-    ...(raw.btwCards !== undefined ? { btwCards: object(raw.btwCards), btwSupported: isBotObject(raw.btwCards) } : {}),
+    ...(raw.btwCards !== undefined ? { btwCards: object(raw.btwCards), btwSupported: isBotObject(raw.btwCards) && !hasInbox } : {}),
     ...(raw.sideChats !== undefined ? { sideChats: object(raw.sideChats) } : {}),
     ...(raw.connectors !== undefined ? { connectors: object(raw.connectors) } : {}),
     ...(raw.capabilityStatuses !== undefined ? { capabilityStatuses: object(raw.capabilityStatuses) } : {}),
     ...(raw.imStatus !== undefined ? { imStatus: object(raw.imStatus) } : {}),
     ...(raw.imVia !== undefined ? { imVia: object(raw.imVia) } : {}),
+    ...(isBotObject(raw.inbox) ? { inbox: raw.inbox, btwSupported: false, parallelSessionsSupported: false } : {}),
+    ...(isBotObject(raw.browserHolds) ? { browserHolds: raw.browserHolds } : {}),
+    ...(isBotObject(raw.secretRequests) ? { secretRequests: raw.secretRequests } : {}),
+    ...(isBotObject(raw.learning) ? { learning: raw.learning } : {}),
+    ...(Array.isArray(raw.approvalReviews) ? { approvalReviews: objects(raw.approvalReviews) } : {}),
+    ...(isBotObject(raw.botTails) ? { botTails: raw.botTails } : {}),
   }
+  if (nextReadOnly !== undefined) nextState.readOnly = nextReadOnly
+  else delete nextState.readOnly
+  return nextState
 }
 export function isBotObject(value: unknown): value is BotObject { return value !== null && typeof value === 'object' && !Array.isArray(value) }
 export function object(value: unknown): BotObject { return isBotObject(value) ? value : {} }
@@ -499,6 +667,11 @@ export function trackScopedBotStateSessions(state: BotState | undefined, scope: 
     if (bot.parts) {
       for (const part of bot.parts) {
         if (part) target.add(part)
+      }
+    }
+    if (bot.tasks) {
+      for (const task of bot.tasks) {
+        if (typeof task.sessionId === 'string' && task.sessionId) target.add(task.sessionId)
       }
     }
   }

@@ -21,7 +21,7 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
   const [custom, setCustom] = useState('')
   const options = (Array.isArray(question.options) ? question.options : []).map(option => typeof option === 'string' ? { label: option } : object(option))
   const isMulti = question.multiSelect === true
-  const needsCustomInput = options.length === 0
+  const needsCustomInput = options.length === 0 || question.allowCustom === true || isMulti
   const promptTitle = text(question.question) || text(question.header) || s.bots.question
   const subHeader = text(question.question) && text(question.header) ? text(question.header) : ''
   const detailText = text(question.detail)

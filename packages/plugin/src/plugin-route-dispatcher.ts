@@ -5,6 +5,19 @@ export interface PluginRouteConnectionLike {
   authenticatedUrl?(baseUrl: string): string
 }
 
+const READ_ONLY_BOT_ENDPOINTS = new Set([
+  'state', 'hello', 'models', 'efforts', 'providers', 'local-agents',
+  'folders', 'folder-list', 'schedules', 'usage', 'usage-summary',
+  'memory-view', 'memory-history', 'chat', 'room-chat', 'group-rows',
+  'room-progress', 'earlier', 'notices', 'avatar', 'avatar-library',
+])
+
+function isReadOnlyBotRoute(route: string, body: unknown): boolean {
+  if (route !== 'api/bot' || typeof body !== 'object' || body === null) return false
+  const endpoint = (body as { endpoint?: unknown }).endpoint
+  return typeof endpoint === 'string' && READ_ONLY_BOT_ENDPOINTS.has(endpoint)
+}
+
 /** Resolve lazily: Connection may activate after the Remote plugin. */
 export function createPluginRouteDispatcher(
   readConnection: () => PluginRouteConnectionLike | undefined,
@@ -38,18 +51,33 @@ export function createPluginRouteDispatcher(
         return { status: 503, json: { ok: false, error: { code: 'gateway/unavailable', message: 'The local plugin route carrier is unavailable.' } } }
       }
       const origin = `http://127.0.0.1:${port}`
-      if (cookie === undefined) {
-        const launch = await fetch(connection.authenticatedUrl(`${origin}/`), { redirect: 'manual', signal })
+      const authenticateCookie = async (): Promise<string | undefined> => {
+        const launch = await fetch(connection.authenticatedUrl!(`${origin}/`), { redirect: 'manual', signal })
+        await launch.body?.cancel()
         const setCookie = typeof launch.headers.getSetCookie === 'function' ? launch.headers.getSetCookie() : []
-        cookie = setCookie.map(item => item.split(';', 1)[0]).join('; ') || undefined
+        return setCookie.map(item => item.split(';', 1)[0]).join('; ') || undefined
       }
-      response = await fetch(`${origin}/${route}${query}`, {
+      const postFallback = async (): Promise<Response> => fetch(`${origin}/${route}${query}`, {
         method: 'POST',
         headers: { 'content-type': contentType, ...(cookie === undefined ? {} : { cookie }) },
         body: requestBody,
         signal,
       })
-      if (response.status === 401) cookie = undefined
+      if (cookie === undefined) {
+        cookie = await authenticateCookie()
+      }
+      response = await postFallback()
+      if (response.status === 401) {
+        cookie = undefined
+        if (isReadOnlyBotRoute(route, body)) {
+          await response.body?.cancel()
+          cookie = await authenticateCookie()
+          if (cookie !== undefined) {
+            response = await postFallback()
+            if (response.status === 401) cookie = undefined
+          }
+        }
+      }
     }
     const text = await response.text()
     let json: unknown = null

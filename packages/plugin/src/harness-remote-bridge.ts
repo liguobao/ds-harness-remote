@@ -369,6 +369,9 @@ export class HarnessRemoteBridge {
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
     if (params.endpoint === 'speech/follow') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this speech endpoint.')
     if (params.endpoint === 'dsBot/feed') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this DS Bot feed endpoint.')
+    if (params.endpoint === 'dsBot/call' && requestArgs(params.payload).endpoint === 'dsh-update-install') {
+      throw new RpcError('INVALID_MESSAGE', 'Host upgrades are not permitted over the remote channel.')
+    }
     if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {
       const args = requestArgs(params.payload)
       if (args.ns === 'ds-harness-remote' || args.ns === 'dsh-remote') {

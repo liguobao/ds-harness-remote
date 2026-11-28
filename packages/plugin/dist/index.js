@@ -75834,6 +75834,20 @@ function safeGetService(ctx, name2) {
     return void 0;
   }
 }
+function hasMountedPlugin(ctx, pluginName) {
+  if (ctx?.registry === void 0) return false;
+  try {
+    for (const fiber of ctx.registry.values()) {
+      if (fiber?.name === pluginName) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+function hasWebGuiSurface(ctx, rootCtx) {
+  return Boolean(safeGetService(ctx, "webApp") ?? safeGetService(rootCtx, "webApp")) || hasMountedPlugin(ctx, "dsbot-engine") || hasMountedPlugin(rootCtx, "dsbot-engine");
+}
 function isValidEntryUrl(url2, origin) {
   const tokens = url2.searchParams.getAll("token");
   return url2.origin === origin.origin && url2.pathname === "/" && tokens.length === 1 && Boolean(tokens[0]);
@@ -75852,7 +75866,7 @@ function findValidEntryUrl(entries, origin) {
   return void 0;
 }
 function resolveDshWebRuntime(ctx, rootCtx) {
-  if (!safeGetService(ctx, "webApp")) return;
+  if (!hasWebGuiSurface(ctx, rootCtx)) return;
   const listener = safeGetService(ctx, "webServer");
   const auth = safeGetService(ctx, "connection");
   if (typeof listener?.getOrigin !== "function") return;
@@ -85164,6 +85178,7 @@ var BOT_REMOTE_OPERATIONS = [
   "add-agent",
   "agent-adopt",
   "agent-archive",
+  "agent-chat",
   "agent-rename",
   "agent-session",
   "answer-question",
@@ -85172,46 +85187,36 @@ var BOT_REMOTE_OPERATIONS = [
   "avatar-delete",
   "avatar-import",
   "avatar-library",
+  "background-add",
+  "background-picture",
   "bot-capability",
-  "bot-new-part",
-  "bot-open-part",
+  "bot-move-to-background",
+  "bot-steer-queue",
+  "bot-stop-task",
+  "bot-task-read",
+  "bot-task-send",
   "browser-frame",
   "browser-give-back",
-  "browser-result",
   "browser-stop",
   "browser-takeover",
-  "browser-wait",
   "btw-delete",
+  "cancel-work",
   "capability-approve",
   "capability-delete",
   "capability-save",
   "changes-check",
-  "changes-diff",
-  "changes-summary",
   "chat",
-  "computer-allow-foreground",
+  "chatgpt",
+  "chatgpt-cancel",
+  "chatgpt-models",
+  "chatgpt-sign-out",
   "computer-app-answer",
-  "computer-cursor-wait",
-  "computer-handback",
-  "computer-hold-answer",
-  "computer-open-settings",
-  "computer-permission",
-  "computer-provider-retry",
-  "computer-revoke-app",
-  "computer-set-enabled",
-  "computer-set-level",
-  "computer-shot",
   "computer-stop",
-  "computer-system-status",
-  "computer-takeover",
-  "computer-user-active",
   "connector-add",
   "connector-cancel",
   "connector-client",
   "connector-connect",
   "connector-disconnect",
-  "connector-import",
-  "connector-import-scan",
   "connector-remove",
   "connector-request-cancel",
   "connector-retry",
@@ -85219,6 +85224,9 @@ var BOT_REMOTE_OPERATIONS = [
   "connector-sign-in-code",
   "create-bot",
   "create-room",
+  "deepseek-services",
+  "deepseek-services-config",
+  "deepseek-synthesize",
   "delete-bot",
   "delete-room",
   "diagnostics",
@@ -85226,7 +85234,6 @@ var BOT_REMOTE_OPERATIONS = [
   "diagnostics-log",
   "dismiss-question",
   "dismiss-view",
-  "dsh-update-install",
   "duplicate-bot",
   "earlier",
   "efforts",
@@ -85235,10 +85242,10 @@ var BOT_REMOTE_OPERATIONS = [
   "file-download",
   "file-text",
   "folder-list",
-  "folder-pick",
   "folders",
   "goal-control",
   "goal-draft",
+  "group-relay-replies",
   "group-rows",
   "group-search",
   "hello",
@@ -85255,6 +85262,9 @@ var BOT_REMOTE_OPERATIONS = [
   "learning-answer",
   "local-agent-add",
   "local-agent-models",
+  "local-agent-profile-add",
+  "local-agent-profile-remove",
+  "local-agent-profile-update",
   "local-agent-refresh",
   "local-agent-remove",
   "local-agent-update",
@@ -85277,11 +85287,9 @@ var BOT_REMOTE_OPERATIONS = [
   "memory-tidy-undo",
   "memory-view",
   "models",
+  "new-part",
   "notices",
-  "phone-pair",
-  "phone-pair-cancel",
-  "phone-remove",
-  "phone-set",
+  "presets",
   "private-release",
   "provider-add",
   "provider-key",
@@ -85289,21 +85297,26 @@ var BOT_REMOTE_OPERATIONS = [
   "provider-models-save",
   "provider-remove",
   "providers",
+  "recover-session",
   "remove-agent",
   "repo-stars",
   "resume",
+  "resume-room-pause",
+  "resume-work",
   "room-chat",
   "room-progress",
   "room-todo",
   "run-stats",
   "schedule-create",
   "schedule-delete",
+  "schedule-pause",
   "schedules",
   "secret-allow",
   "secret-cancel",
   "secret-decrypt",
   "secret-delete",
   "secret-encrypt",
+  "secret-refresh-external",
   "secret-set",
   "secret-store",
   "secret-unlock",
@@ -85312,6 +85325,7 @@ var BOT_REMOTE_OPERATIONS = [
   "section-order",
   "section-save",
   "send",
+  "set-chat-background",
   "set-flags",
   "set-main",
   "set-prefs",
@@ -85319,8 +85333,10 @@ var BOT_REMOTE_OPERATIONS = [
   "side-cancel",
   "side-close",
   "side-new",
+  "stage-file",
   "stage-image",
   "state",
+  "stop-agent",
   "stop-chat",
   "stop-member-work",
   "stop-room-work",
@@ -85335,10 +85351,12 @@ var BOT_REMOTE_OPERATIONS = [
   "usage",
   "usage-summary",
   "view-reply",
-  // Older DS-Bot Hosts still implement these operations.
+  // Legacy compat for DS-Bot <0.4.0 Hosts.
   "btw",
   "btw-cancel",
-  "room-continue"
+  "room-continue",
+  "bot-new-part",
+  "bot-open-part"
 ];
 function isAllowedPluginRoute(route) {
   return PLUGIN_ROUTE_ALLOWLIST.some((allowed) => allowed === route);
@@ -85366,6 +85384,105 @@ var imageUploadCallSchema = external_exports.object({
   ])
 }).strict();
 var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
+var LONG_POLL_TIMEOUT_MS = 45e3;
+var SLOW_BOT_OPERATION_TIMEOUT_MS = 6e4;
+var SLOW_BOT_OPERATIONS = /* @__PURE__ */ new Set([
+  "send",
+  "connector-add",
+  "connector-connect",
+  "connector-retry",
+  "connector-sign-in-code"
+]);
+var COMPUTER_APPEARANCE_KEYS = /* @__PURE__ */ new Set([
+  "css",
+  "mode",
+  "uiFont",
+  "codeFont",
+  "fontSize",
+  "lineHeight",
+  "material"
+]);
+var REMOTE_STATE_OMIT_KEYS = /* @__PURE__ */ new Set([
+  "userQuestions",
+  "sessionQueues",
+  "api",
+  "telemetryPrompt",
+  "releaseNotes"
+]);
+function timeoutForEndpoint(endpoint) {
+  if (endpoint === "im-login-wait") return LONG_POLL_TIMEOUT_MS;
+  if (SLOW_BOT_OPERATIONS.has(endpoint)) return SLOW_BOT_OPERATION_TIMEOUT_MS;
+  return PLUGIN_ROUTE_TIMEOUT_MS;
+}
+function isPlainRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function sanitizeBotRequestBody(body) {
+  const payload = isPlainRecord2(body.payload) ? body.payload : void 0;
+  if (body.endpoint === "approval-answer") {
+    const choice = payload?.choice;
+    if (choice !== "allow" && choice !== "reject") {
+      throw new RpcError("INVALID_MESSAGE", "The approval choice is invalid for the remote channel.");
+    }
+  }
+  if (body.endpoint === "image" && typeof payload?.parent === "string" && payload.parent.trim() !== "") {
+    throw new RpcError("INVALID_MESSAGE", "Session logs are read on the computer.");
+  }
+  if (body.endpoint === "set-prefs" && payload !== void 0) {
+    const hasCss = Object.hasOwn(payload, "css");
+    const rawAppearance = isPlainRecord2(payload.appearance) ? payload.appearance : void 0;
+    const hasRestrictedAppearance = rawAppearance !== void 0 && Object.keys(rawAppearance).some((key) => COMPUTER_APPEARANCE_KEYS.has(key));
+    if (hasCss || hasRestrictedAppearance) {
+      const nextPayload = { ...payload };
+      delete nextPayload.css;
+      if (rawAppearance !== void 0) {
+        const nextAppearance = {};
+        for (const [key, value] of Object.entries(rawAppearance)) {
+          if (!COMPUTER_APPEARANCE_KEYS.has(key)) nextAppearance[key] = value;
+        }
+        nextPayload.appearance = nextAppearance;
+      }
+      return { ...body, payload: nextPayload };
+    }
+  }
+  return body;
+}
+function sanitizeBotResponseJson(endpoint, json2) {
+  if (!isPlainRecord2(json2) || json2.ok !== true || !isPlainRecord2(json2.value)) return json2;
+  if (endpoint === "folders") {
+    if (!Object.hasOwn(json2.value, "data")) return json2;
+    const nextValue2 = { ...json2.value };
+    delete nextValue2.data;
+    return { ...json2, value: nextValue2 };
+  }
+  if (endpoint !== "state") return json2;
+  const value = json2.value;
+  let nextValue;
+  const ensureCopy = () => {
+    nextValue ??= { ...value };
+    return nextValue;
+  };
+  for (const key of REMOTE_STATE_OMIT_KEYS) {
+    if (Object.hasOwn(value, key)) delete ensureCopy()[key];
+  }
+  if (isPlainRecord2(value.phone) && Object.hasOwn(value.phone, "pairing")) {
+    const nextPhone = { ...value.phone };
+    delete nextPhone.pairing;
+    ensureCopy().phone = nextPhone;
+  }
+  if (isPlainRecord2(value.work) && Array.isArray(value.work.approvals) && value.work.approvals.some((entry) => isPlainRecord2(entry) && Object.hasOwn(entry, "alwaysAllow"))) {
+    ensureCopy().work = {
+      ...value.work,
+      approvals: value.work.approvals.map((entry) => {
+        if (!isPlainRecord2(entry) || !Object.hasOwn(entry, "alwaysAllow")) return entry;
+        const copy = { ...entry };
+        delete copy.alwaysAllow;
+        return copy;
+      })
+    };
+  }
+  return nextValue === void 0 ? json2 : { ...json2, value: nextValue };
+}
 var PluginRouteBridge = class {
   constructor(dispatch, logger2, observer) {
     this.dispatch = dispatch;
@@ -85385,10 +85502,12 @@ var PluginRouteBridge = class {
     if (serializedBytes(params) > (transferred && params.route === "api/session/uploadFileBinary" ? MAX_HARNESS_API_TRANSFER_BYTES : MAX_SECURE_MESSAGE_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", `The plugin route call exceeds the ${MAX_SECURE_MESSAGE_BYTES}-byte remote limit.`);
     }
+    const dispatchBody = params.route === "api/bot" ? sanitizeBotRequestBody(params.body) : params.body;
+    const timeoutMs = params.route === "api/bot" ? timeoutForEndpoint(params.body.endpoint) : PLUGIN_ROUTE_TIMEOUT_MS;
     const startedAt = performance.now();
     let result;
     try {
-      result = await this.dispatch(params.route, params.body, AbortSignal.timeout(PLUGIN_ROUTE_TIMEOUT_MS));
+      result = await this.dispatch(params.route, dispatchBody, AbortSignal.timeout(timeoutMs));
     } catch (error62) {
       this.logger?.warn("plugin route call failed", {
         route: params.route,
@@ -85396,18 +85515,19 @@ var PluginRouteBridge = class {
       });
       throw error62;
     }
-    if (serializedBytes(result) > MAX_SECURE_MESSAGE_BYTES) {
+    const sanitizedJson = params.route === "api/bot" && result.status === 200 ? sanitizeBotResponseJson(params.body.endpoint, result.json) : result.json;
+    const output2 = { status: result.status, json: sanitizedJson };
+    if (serializedBytes(output2) > MAX_SECURE_MESSAGE_BYTES) {
       throw new RpcError("RESPONSE_TOO_LARGE", "The plugin route response exceeds the bounded remote limit.");
     }
     this.logger?.debug("plugin route call ok", {
       route: params.route,
-      status: result.status,
+      status: output2.status,
       durationMs: Math.round(performance.now() - startedAt)
     });
-    const output2 = { status: result.status, json: result.json };
     if (this.observer !== void 0) {
       try {
-        this.observer(params.route, params.body, output2);
+        this.observer(params.route, dispatchBody, output2);
       } catch {
       }
     }
@@ -94484,6 +94604,11 @@ var HostAttentionTracker = class {
   harnessQuestionProjectionSeqs = /* @__PURE__ */ new Map();
   harnessQuestionEventToItemId = /* @__PURE__ */ new Map();
   criticalNotifiedIds = /* @__PURE__ */ new Set();
+  botNamesById = /* @__PURE__ */ new Map();
+  roomNamesById = /* @__PURE__ */ new Map();
+  titleBySessionId = /* @__PURE__ */ new Map();
+  taskOwnerBySessionId = /* @__PURE__ */ new Map();
+  botWorkspaceId;
   now;
   tokenTtlMs;
   maxTokens;
@@ -94771,7 +94896,8 @@ var HostAttentionTracker = class {
       return;
     }
     if (body.endpoint === "answer-question" || body.endpoint === "dismiss-question") {
-      const sessionId = isRecord12(body.payload) && typeof body.payload.sessionId === "string" ? body.payload.sessionId : void 0;
+      const botId = isRecord12(body.payload) && typeof body.payload.botId === "string" ? body.payload.botId : void 0;
+      const sessionId = (isRecord12(body.payload) && typeof body.payload.sessionId === "string" ? body.payload.sessionId : void 0) ?? (botId !== void 0 ? this.botNamesById.get(botId)?.sessionId : void 0);
       const questionId = isRecord12(body.payload) && typeof body.payload.questionId === "string" ? body.payload.questionId : void 0;
       if (sessionId !== void 0 && questionId !== void 0) {
         this.onInteractionResolved(botQuestionItemId(sessionId, questionId));
@@ -94779,6 +94905,43 @@ var HostAttentionTracker = class {
         const prefix = `ds-bot:question:${sessionId}:`;
         for (const id7 of [...this.items.keys()]) {
           if (id7.startsWith(prefix)) this.onInteractionResolved(id7);
+        }
+      }
+      return;
+    }
+    if (body.endpoint === "view-reply" || body.endpoint === "dismiss-view") {
+      const viewId = isRecord12(body.payload) && typeof body.payload.viewId === "string" ? body.payload.viewId : void 0;
+      const sessionId = isRecord12(body.payload) && typeof body.payload.sessionId === "string" ? body.payload.sessionId : void 0;
+      if (viewId !== void 0) {
+        this.onInteractionResolved(botInboxItemId("view", viewId));
+      } else if (sessionId !== void 0) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith("ds-bot:inbox:view:") && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id);
+          }
+        }
+      }
+      return;
+    }
+    if (body.endpoint === "computer-app-answer") {
+      const askId = isRecord12(body.payload) ? firstNonEmptyString(body.payload.askId, body.payload.id) : void 0;
+      if (askId !== void 0) {
+        this.onInteractionResolved(botInboxItemId("computer", askId));
+      }
+      return;
+    }
+    if (body.endpoint === "secret-allow" || body.endpoint === "secret-cancel" || body.endpoint === "mail-send-answer") {
+      const kind = body.endpoint === "mail-send-answer" ? "mail" : "secret";
+      const requestId2 = isRecord12(body.payload) ? firstNonEmptyString(body.payload.id, body.payload.requestId) : void 0;
+      const botId = isRecord12(body.payload) && typeof body.payload.botId === "string" ? body.payload.botId : void 0;
+      const sessionId = (isRecord12(body.payload) && typeof body.payload.sessionId === "string" ? body.payload.sessionId : void 0) ?? (botId !== void 0 ? this.botNamesById.get(botId)?.sessionId : void 0);
+      if (requestId2 !== void 0) {
+        this.onInteractionResolved(botInboxItemId(kind, requestId2));
+      } else if (sessionId !== void 0) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith(`ds-bot:inbox:${kind}:`) && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id);
+          }
         }
       }
       return;
@@ -94792,16 +94955,25 @@ var HostAttentionTracker = class {
     }
   }
   observeBotState(state2) {
-    const botNamesById = /* @__PURE__ */ new Map();
-    const roomNamesById = /* @__PURE__ */ new Map();
-    const titleBySessionId = /* @__PURE__ */ new Map();
-    const workspaceId = typeof state2.workspaceId === "string" && state2.workspaceId.length > 0 ? state2.workspaceId : void 0;
+    if (typeof state2.workspaceId === "string" && state2.workspaceId.length > 0) {
+      this.botWorkspaceId = state2.workspaceId;
+    }
+    const workspaceId = this.botWorkspaceId;
     if (Array.isArray(state2.bots)) {
+      this.botNamesById.clear();
+      this.taskOwnerBySessionId.clear();
       for (const entry of state2.bots) {
         if (!isRecord12(entry) || typeof entry.id !== "string" || typeof entry.sessionId !== "string") continue;
         const name2 = typeof entry.name === "string" && entry.name.trim().length > 0 ? entry.name.trim() : entry.id;
-        botNamesById.set(entry.id, { name: name2, sessionId: entry.sessionId });
-        titleBySessionId.set(entry.sessionId, name2);
+        this.botNamesById.set(entry.id, { name: name2, sessionId: entry.sessionId });
+        this.titleBySessionId.set(entry.sessionId, name2);
+        if (Array.isArray(entry.tasks)) {
+          for (const task of entry.tasks) {
+            if (isRecord12(task) && typeof task.sessionId === "string" && task.sessionId.length > 0) {
+              this.taskOwnerBySessionId.set(task.sessionId, { botId: entry.id, sessionId: entry.sessionId, name: name2 });
+            }
+          }
+        }
         this.rememberMeta(sessionItemId("ds-bot", entry.sessionId), {
           backend: "ds-bot",
           mode: "bot",
@@ -94812,12 +94984,13 @@ var HostAttentionTracker = class {
       }
     }
     if (Array.isArray(state2.rooms)) {
+      this.roomNamesById.clear();
       for (const entry of state2.rooms) {
         if (!isRecord12(entry) || typeof entry.id !== "string") continue;
         const sessionId = typeof entry.sessionId === "string" && entry.sessionId.length > 0 ? entry.sessionId : entry.id;
         const name2 = typeof entry.name === "string" && entry.name.trim().length > 0 ? entry.name.trim() : entry.id;
-        roomNamesById.set(entry.id, { name: name2, sessionId });
-        titleBySessionId.set(sessionId, name2);
+        this.roomNamesById.set(entry.id, { name: name2, sessionId });
+        this.titleBySessionId.set(sessionId, name2);
         this.rememberMeta(sessionItemId("ds-bot", sessionId), {
           backend: "ds-bot",
           mode: "bot",
@@ -94833,8 +95006,12 @@ var HostAttentionTracker = class {
       const activeApprovalIds = /* @__PURE__ */ new Set();
       for (const approval of rawApprovals) {
         if (!isRecord12(approval) || typeof approval.id !== "string" || approval.id.length === 0) continue;
-        const bot = typeof approval.botId === "string" ? botNamesById.get(approval.botId) : void 0;
-        const sessionId = (typeof approval.sessionId === "string" && approval.sessionId.length > 0 ? approval.sessionId : void 0) ?? bot?.sessionId ?? (typeof approval.botId === "string" && approval.botId.length > 0 ? approval.botId : approval.id);
+        if (approval.answerable === false) continue;
+        if (isRecord12(approval.review) && approval.review.status === "reviewing") continue;
+        const room = typeof approval.roomId === "string" ? this.roomNamesById.get(approval.roomId) : void 0;
+        const taskOwner = typeof approval.sessionId === "string" ? this.taskOwnerBySessionId.get(approval.sessionId) : void 0;
+        const bot = typeof approval.botId === "string" ? this.botNamesById.get(approval.botId) : void 0;
+        const sessionId = room !== void 0 ? room.sessionId : taskOwner !== void 0 ? taskOwner.sessionId : bot?.sessionId ?? (typeof approval.sessionId === "string" && approval.sessionId.length > 0 ? approval.sessionId : void 0) ?? (typeof approval.botId === "string" && approval.botId.length > 0 ? approval.botId : approval.id);
         const itemId = botApprovalItemId(approval.id);
         activeApprovalIds.add(itemId);
         const tool = typeof approval.tool === "string" ? approval.tool.trim() : "";
@@ -94846,7 +95023,7 @@ var HostAttentionTracker = class {
           mode: "bot",
           ...workspaceId === void 0 ? {} : { workspaceId },
           sessionId,
-          sessionTitle: bot?.name ?? titleBySessionId.get(sessionId) ?? "DS-Bot",
+          sessionTitle: room?.name ?? taskOwner?.name ?? bot?.name ?? this.titleBySessionId.get(sessionId) ?? "DS-Bot",
           status: "waiting_approval",
           ...summary3 === void 0 ? {} : { summary: summary3 }
         });
@@ -94870,7 +95047,7 @@ var HostAttentionTracker = class {
           mode: "bot",
           ...workspaceId === void 0 ? {} : { workspaceId },
           sessionId,
-          sessionTitle: titleBySessionId.get(sessionId) ?? "DS-Bot",
+          sessionTitle: this.titleBySessionId.get(sessionId) ?? "DS-Bot",
           status: "waiting_question",
           ...summary3 === void 0 ? {} : { summary: summary3 }
         });
@@ -94881,12 +95058,47 @@ var HostAttentionTracker = class {
         }
       }
     }
+    if (isRecord12(state2.inbox) && Array.isArray(state2.inbox.items)) {
+      const activeInboxIds = /* @__PURE__ */ new Set();
+      for (const entry of state2.inbox.items) {
+        if (!isRecord12(entry) || typeof entry.kind !== "string") continue;
+        const kind = entry.kind;
+        const isInboxApproval = BOT_INBOX_APPROVAL_KINDS.has(kind);
+        const isInboxQuestion = BOT_INBOX_QUESTION_KINDS.has(kind);
+        if (!isInboxApproval && !isInboxQuestion) continue;
+        const rawItemId = firstNonEmptyString(entry.id, entry.callId, entry.requestId, entry.askId, entry.sessionId, entry.roomId, entry.botId);
+        if (rawItemId === void 0) continue;
+        const room = typeof entry.roomId === "string" ? this.roomNamesById.get(entry.roomId) : void 0;
+        const taskOwner = typeof entry.sessionId === "string" ? this.taskOwnerBySessionId.get(entry.sessionId) : void 0;
+        const bot = typeof entry.botId === "string" ? this.botNamesById.get(entry.botId) : void 0;
+        const sessionId = room?.sessionId ?? taskOwner?.sessionId ?? bot?.sessionId ?? firstNonEmptyString(entry.sessionId, entry.roomId, entry.botId, rawItemId);
+        const sessionTitle = room?.name ?? taskOwner?.name ?? bot?.name ?? firstNonEmptyString(entry.title, entry.name) ?? this.titleBySessionId.get(sessionId) ?? "DS-Bot";
+        const summary3 = firstNonEmptyString(entry.summary, entry.reason, entry.text, entry.title);
+        const itemId = botInboxItemId(kind, rawItemId);
+        activeInboxIds.add(itemId);
+        this.onInteractionPending({
+          id: itemId,
+          backend: "ds-bot",
+          mode: "bot",
+          ...workspaceId === void 0 ? {} : { workspaceId },
+          sessionId,
+          sessionTitle,
+          status: isInboxApproval ? "waiting_approval" : "waiting_question",
+          ...summary3 === void 0 ? {} : { summary: summary3 }
+        });
+      }
+      for (const id7 of [...this.items.keys()]) {
+        if (id7.startsWith("ds-bot:inbox:") && !activeInboxIds.has(id7)) {
+          this.onInteractionResolved(id7);
+        }
+      }
+    }
     if (work !== void 0 && (isRecord12(work.bots) || isRecord12(work.rooms))) {
       const activeSessionIds = /* @__PURE__ */ new Set();
       if (isRecord12(work.bots)) {
         for (const [botId, workEntry] of Object.entries(work.bots)) {
           if (!isBotWorkActive(workEntry)) continue;
-          const bot = botNamesById.get(botId);
+          const bot = this.botNamesById.get(botId);
           const sessionId = bot?.sessionId ?? botId;
           activeSessionIds.add(sessionId);
           this.onSessionRunning({
@@ -94894,14 +95106,14 @@ var HostAttentionTracker = class {
             mode: "bot",
             ...workspaceId === void 0 ? {} : { workspaceId },
             sessionId,
-            sessionTitle: bot?.name ?? titleBySessionId.get(sessionId) ?? botId
+            sessionTitle: bot?.name ?? this.titleBySessionId.get(sessionId) ?? botId
           });
         }
       }
       if (isRecord12(work.rooms)) {
         for (const [roomId, workEntry] of Object.entries(work.rooms)) {
           if (!isBotWorkActive(workEntry)) continue;
-          const room = roomNamesById.get(roomId);
+          const room = this.roomNamesById.get(roomId);
           const sessionId = room?.sessionId ?? roomId;
           activeSessionIds.add(sessionId);
           this.onSessionRunning({
@@ -94909,7 +95121,7 @@ var HostAttentionTracker = class {
             mode: "bot",
             ...workspaceId === void 0 ? {} : { workspaceId },
             sessionId,
-            sessionTitle: room?.name ?? titleBySessionId.get(sessionId) ?? roomId
+            sessionTitle: room?.name ?? this.titleBySessionId.get(sessionId) ?? roomId
           });
         }
       }
@@ -94930,13 +95142,19 @@ var HostAttentionTracker = class {
     const entries = Array.isArray(value) ? value : isRecord12(value) && Array.isArray(value.notices) ? value.notices : isRecord12(value) && Array.isArray(value.items) ? value.items : [];
     for (const entry of entries) {
       if (!isRecord12(entry)) continue;
-      const sessionId = firstNonEmptyString(entry.sessionId, entry.botId, entry.roomId, entry.id);
+      const room = typeof entry.roomId === "string" ? this.roomNamesById.get(entry.roomId) : void 0;
+      const bot = typeof entry.botId === "string" ? this.botNamesById.get(entry.botId) : void 0;
+      const sessionId = room?.sessionId ?? bot?.sessionId ?? firstNonEmptyString(entry.sessionId, entry.botId, entry.roomId, entry.id);
       if (sessionId === void 0) continue;
-      const title = firstNonEmptyString(entry.title, entry.botName, entry.roomName) ?? "DS-Bot";
+      const title = firstNonEmptyString(entry.title, entry.name, entry.botName, entry.roomName) ?? room?.name ?? bot?.name ?? this.titleBySessionId.get(sessionId) ?? "DS-Bot";
       const summary3 = firstNonEmptyString(entry.summary, entry.message, entry.reason, entry.text);
       const kind = typeof entry.kind === "string" ? entry.kind : typeof entry.type === "string" ? entry.type : "";
       if (kind === "approval" || kind === "waiting_approval") {
-        const noticeId = firstNonEmptyString(entry.approvalId, entry.id) ?? sessionId;
+        const explicitId = firstNonEmptyString(entry.approvalId, entry.id);
+        if (explicitId === void 0 && [...this.items.values()].some((i) => i.id.startsWith("ds-bot:approval:") && i.sessionId === sessionId)) {
+          continue;
+        }
+        const noticeId = explicitId ?? sessionId;
         this.onInteractionPending({
           id: botApprovalItemId(noticeId),
           backend: "ds-bot",
@@ -94947,7 +95165,11 @@ var HostAttentionTracker = class {
           ...summary3 === void 0 ? {} : { summary: summary3 }
         });
       } else if (kind === "question" || kind === "waiting_question") {
-        const questionId = firstNonEmptyString(entry.questionId, entry.id) ?? "notice";
+        const explicitId = firstNonEmptyString(entry.questionId, entry.id);
+        if (explicitId === void 0 && [...this.items.values()].some((i) => i.id.startsWith(`ds-bot:question:${sessionId}:`))) {
+          continue;
+        }
+        const questionId = explicitId ?? "notice";
         this.onInteractionPending({
           id: botQuestionItemId(sessionId, questionId),
           backend: "ds-bot",
@@ -94957,7 +95179,7 @@ var HostAttentionTracker = class {
           status: "waiting_question",
           ...summary3 === void 0 ? {} : { summary: summary3 }
         });
-      } else if (kind === "error" || kind === "failed" || kind === "turn_failed") {
+      } else if (kind === "blocked" || kind === "error" || kind === "failed" || kind === "turn_failed") {
         this.onSessionCompleted({
           backend: "ds-bot",
           mode: "bot",
@@ -94966,7 +95188,7 @@ var HostAttentionTracker = class {
           failed: true,
           ...summary3 === void 0 ? {} : { summary: summary3 }
         });
-      } else if (kind === "completed" || kind === "turn_completed") {
+      } else if (kind === "done" || kind === "completed" || kind === "turn_completed") {
         this.onSessionCompleted({
           backend: "ds-bot",
           mode: "bot",
@@ -95013,6 +95235,11 @@ var HostAttentionTracker = class {
     this.harnessQuestionProjectionSeqs.clear();
     this.harnessQuestionEventToItemId.clear();
     this.criticalNotifiedIds.clear();
+    this.botNamesById.clear();
+    this.roomNamesById.clear();
+    this.titleBySessionId.clear();
+    this.taskOwnerBySessionId.clear();
+    this.botWorkspaceId = void 0;
     this.activeHarnessEventStreams = 0;
   }
   // ── Harness passive read-only `session/control` observer ──────────────────
@@ -95600,11 +95827,16 @@ function harnessQuestionItemId(eventId) {
 function harnessProjectedQuestionItemId(sessionId, callId) {
   return truncateId(`harness:question:${sessionId}:${callId}`, 256);
 }
+var BOT_INBOX_APPROVAL_KINDS = /* @__PURE__ */ new Set(["secret", "connector", "mail", "computer", "handoff"]);
+var BOT_INBOX_QUESTION_KINDS = /* @__PURE__ */ new Set(["view", "goal", "blocked", "model", "paused", "room-paused"]);
 function botApprovalItemId(approvalId) {
   return truncateId(`ds-bot:approval:${approvalId}`, 256);
 }
 function botQuestionItemId(sessionId, questionId) {
   return truncateId(`ds-bot:question:${sessionId}:${questionId}`, 256);
+}
+function botInboxItemId(kind, itemId) {
+  return truncateId(`ds-bot:inbox:${kind}:${itemId}`, 256);
 }
 function truncateText(value, maxChars) {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -96325,6 +96557,7 @@ function threadIdFromParams(params) {
 
 // packages/plugin/src/compact-bot-round.ts
 var HEADER = '{"replies"';
+var SAVE_TOKEN_SUFFIX_RE = /\n\n\[save-token #[\s\S]*$/u;
 var LIMITS = Object.freeze({
   /** How far into the detail the payload header may appear. */
   scan: 4096,
@@ -96336,19 +96569,82 @@ var LIMITS = Object.freeze({
   text: 2048,
   /** Identifier/label fields kept per reply. */
   label: 256,
+  /** Array items kept for names/claims/presented fields. */
+  arrayItems: 16,
+  presentedItems: 8,
+  claimsItems: 8,
   /** Serialized projection ceiling for one round. */
   payload: 8 * 1024
 });
-var REPLY_FIELDS = ["botId", "name", "text", "kind", "via", "code", "status", "time"];
-var LABEL_FIELDS = /* @__PURE__ */ new Set(["botId", "name", "kind", "via", "code", "status"]);
+var STRING_FIELDS = ["botId", "name", "text", "kind", "via", "code", "status", "color", "cause", "helper", "stopReason"];
+var LABEL_FIELDS = /* @__PURE__ */ new Set(["botId", "name", "kind", "via", "code", "status", "color", "cause", "helper", "stopReason"]);
+var NUMBER_FIELDS = ["time", "duration", "count", "limit"];
 var object2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+function compactString(value, limit) {
+  return value.length > limit ? { value: value.slice(0, limit), truncated: true } : { value, truncated: false };
+}
+function compactPresented(raw) {
+  if (!Array.isArray(raw)) return { truncated: false };
+  const out = [];
+  let truncated = false;
+  for (const item of raw) {
+    if (out.length >= LIMITS.presentedItems) {
+      truncated = true;
+      break;
+    }
+    if (!object2(item) || typeof item.path !== "string") continue;
+    const path = compactString(item.path, LIMITS.label);
+    if (path.truncated) truncated = true;
+    const entry = { path: path.value };
+    if (typeof item.description === "string") {
+      const desc = compactString(item.description, LIMITS.label);
+      entry.description = desc.value;
+      if (desc.truncated) truncated = true;
+    }
+    if (typeof item.sessionId === "string") {
+      const sid = compactString(item.sessionId, LIMITS.label);
+      entry.sessionId = sid.value;
+      if (sid.truncated) truncated = true;
+    }
+    if (typeof item.seq === "number") entry.seq = item.seq;
+    if (typeof item.index === "number") entry.index = item.index;
+    out.push(entry);
+  }
+  return out.length > 0 ? { value: out, truncated } : { truncated };
+}
+function compactChanges(raw) {
+  if (typeof raw === "boolean") return raw;
+  if (!object2(raw)) return void 0;
+  const out = {};
+  if (typeof raw.sessionId === "string") out.sessionId = compactString(raw.sessionId, LIMITS.label).value;
+  if (typeof raw.turn === "number") out.turn = raw.turn;
+  if (typeof raw.count === "number") out.count = raw.count;
+  return Object.keys(out).length > 0 ? out : void 0;
+}
+function compactStringArray(raw, maxItems) {
+  if (!Array.isArray(raw)) return { truncated: false };
+  const out = [];
+  let truncated = false;
+  for (const item of raw) {
+    if (out.length >= maxItems) {
+      truncated = true;
+      break;
+    }
+    if (typeof item !== "string") continue;
+    const bounded = compactString(item, LIMITS.label);
+    if (bounded.truncated) truncated = true;
+    out.push(bounded.value);
+  }
+  return out.length > 0 ? { value: out, truncated } : { truncated };
+}
 function compactBotRound(text) {
   if (typeof text !== "string" || text.length === 0 || text.length > LIMITS.source) return void 0;
   const start = text.indexOf(HEADER);
   if (start < 0 || start > LIMITS.scan) return void 0;
+  const slice = text.slice(start).replace(SAVE_TOKEN_SUFFIX_RE, "");
   let parsed;
   try {
-    parsed = JSON.parse(text.slice(start));
+    parsed = JSON.parse(slice);
   } catch {
     return void 0;
   }
@@ -96364,19 +96660,30 @@ function compactBotRound(text) {
     }
     if (!object2(entry)) continue;
     const reply = {};
-    for (const field of REPLY_FIELDS) {
+    for (const field of STRING_FIELDS) {
       const value = entry[field];
-      if (field === "time") {
-        if (typeof value === "number") reply.time = value;
-      } else if (typeof value === "string") {
-        const limit = LABEL_FIELDS.has(field) ? LIMITS.label : LIMITS.text;
-        if (value.length > limit) {
-          reply[field] = value.slice(0, limit);
-          truncated = true;
-        } else reply[field] = value;
-      }
+      if (typeof value !== "string") continue;
+      const limit = LABEL_FIELDS.has(field) ? LIMITS.label : LIMITS.text;
+      const bounded = compactString(value, limit);
+      reply[field] = bounded.value;
+      if (bounded.truncated) truncated = true;
     }
-    if (reply.text === void 0 && reply.kind === void 0) continue;
+    for (const field of NUMBER_FIELDS) {
+      if (typeof entry[field] === "number") reply[field] = entry[field];
+    }
+    if (typeof entry.idle === "boolean") reply.idle = entry.idle;
+    const names = compactStringArray(entry.names, LIMITS.arrayItems);
+    if (names.value !== void 0) reply.names = names.value;
+    if (names.truncated) truncated = true;
+    const claims = compactStringArray(entry.claims, LIMITS.claimsItems);
+    if (claims.value !== void 0) reply.claims = claims.value;
+    if (claims.truncated) truncated = true;
+    const presented = compactPresented(entry.presented);
+    if (presented.value !== void 0) reply.presented = presented.value;
+    if (presented.truncated) truncated = true;
+    const changes = compactChanges(entry.changes);
+    if (changes !== void 0) reply.changes = changes;
+    if (reply.text === void 0 && reply.kind === void 0 && reply.presented === void 0 && reply.changes === void 0) continue;
     replies.push(reply);
   }
   if (replies.length === 0) return void 0;
@@ -96484,11 +96791,12 @@ function messageValue(value, budget, isInjectedUser = false) {
   }
   return out;
 }
+var PRESERVED_USER_SOURCE_KINDS = /* @__PURE__ */ new Set(["user", "user-question-reply", "bot", "schedule"]);
 function isInjectedUserEvent(event2) {
   const data2 = object3(event2.data) ? event2.data : void 0;
   const msg = data2 && object3(data2.message) ? data2.message : data2;
   const src = msg && object3(msg.source) ? msg.source : void 0;
-  return Boolean(src && typeof src.kind === "string" && src.kind !== "user");
+  return Boolean(src && typeof src.kind === "string" && !PRESERVED_USER_SOURCE_KINDS.has(src.kind));
 }
 function requestHeaderEvent(event2) {
   if (!object3(event2.data) || !object3(event2.data.header)) return event2;
@@ -114611,6 +114919,9 @@ var HarnessRemoteBridge = class {
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
     if (params.endpoint === "speech/follow") throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this speech endpoint.");
     if (params.endpoint === "dsBot/feed") throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this DS Bot feed endpoint.");
+    if (params.endpoint === "dsBot/call" && requestArgs(params.payload).endpoint === "dsh-update-install") {
+      throw new RpcError("INVALID_MESSAGE", "Host upgrades are not permitted over the remote channel.");
+    }
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
       const args = requestArgs(params.payload);
       if (args.ns === "ds-harness-remote" || args.ns === "dsh-remote") {
@@ -116777,7 +117088,7 @@ var HostPluginRuntime = class {
   async codexCloseStream(input4) {
     const peer = this.localCodexPeer;
     if (peer !== void 0) return peer.closeStream(input4);
-    const streamId = isPlainRecord2(input4) && typeof input4.streamId === "string" ? input4.streamId : void 0;
+    const streamId = isPlainRecord3(input4) && typeof input4.streamId === "string" ? input4.streamId : void 0;
     if (streamId === void 0) throw new RpcError("INVALID_MESSAGE", "A Codex stream is required.");
     return { closed: false, streamId };
   }
@@ -116800,7 +117111,7 @@ var HostPluginRuntime = class {
   async acpCloseStream(input4) {
     const peer = this.localAcpPeer;
     if (peer !== void 0) return peer.closeStream(input4);
-    const streamId = isPlainRecord2(input4) && typeof input4.streamId === "string" ? input4.streamId : void 0;
+    const streamId = isPlainRecord3(input4) && typeof input4.streamId === "string" ? input4.streamId : void 0;
     if (streamId === void 0) throw new RpcError("INVALID_MESSAGE", "A Cursor stream is required.");
     return { closed: false, streamId };
   }
@@ -117004,7 +117315,7 @@ var HostPluginRuntime = class {
 function shortId4(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
-function isPlainRecord2(value) {
+function isPlainRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 async function waitForStartupGrace(promise2, graceMs) {
@@ -117038,6 +117349,34 @@ async function waitForStartupGrace(promise2, graceMs) {
 }
 
 // packages/plugin/src/plugin-route-dispatcher.ts
+var READ_ONLY_BOT_ENDPOINTS = /* @__PURE__ */ new Set([
+  "state",
+  "hello",
+  "models",
+  "efforts",
+  "providers",
+  "local-agents",
+  "folders",
+  "folder-list",
+  "schedules",
+  "usage",
+  "usage-summary",
+  "memory-view",
+  "memory-history",
+  "chat",
+  "room-chat",
+  "group-rows",
+  "room-progress",
+  "earlier",
+  "notices",
+  "avatar",
+  "avatar-library"
+]);
+function isReadOnlyBotRoute(route, body) {
+  if (route !== "api/bot" || typeof body !== "object" || body === null) return false;
+  const endpoint = body.endpoint;
+  return typeof endpoint === "string" && READ_ONLY_BOT_ENDPOINTS.has(endpoint);
+}
 function createPluginRouteDispatcher(readConnection, readPort, peer) {
   let cookie;
   return async (route, body, signal) => {
@@ -117066,18 +117405,33 @@ function createPluginRouteDispatcher(readConnection, readPort, peer) {
         return { status: 503, json: { ok: false, error: { code: "gateway/unavailable", message: "The local plugin route carrier is unavailable." } } };
       }
       const origin = `http://127.0.0.1:${port}`;
-      if (cookie === void 0) {
+      const authenticateCookie = async () => {
         const launch = await fetch(connection.authenticatedUrl(`${origin}/`), { redirect: "manual", signal });
+        await launch.body?.cancel();
         const setCookie = typeof launch.headers.getSetCookie === "function" ? launch.headers.getSetCookie() : [];
-        cookie = setCookie.map((item) => item.split(";", 1)[0]).join("; ") || void 0;
-      }
-      response = await fetch(`${origin}/${route}${query}`, {
+        return setCookie.map((item) => item.split(";", 1)[0]).join("; ") || void 0;
+      };
+      const postFallback = async () => fetch(`${origin}/${route}${query}`, {
         method: "POST",
         headers: { "content-type": contentType2, ...cookie === void 0 ? {} : { cookie } },
         body: requestBody,
         signal
       });
-      if (response.status === 401) cookie = void 0;
+      if (cookie === void 0) {
+        cookie = await authenticateCookie();
+      }
+      response = await postFallback();
+      if (response.status === 401) {
+        cookie = void 0;
+        if (isReadOnlyBotRoute(route, body)) {
+          await response.body?.cancel();
+          cookie = await authenticateCookie();
+          if (cookie !== void 0) {
+            response = await postFallback();
+            if (response.status === 401) cookie = void 0;
+          }
+        }
+      }
     }
     const text = await response.text();
     let json2 = null;
