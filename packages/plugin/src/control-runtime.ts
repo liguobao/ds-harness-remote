@@ -155,7 +155,7 @@ export class PluginControlRuntime {
     try {
       // A request arriving during replacement must use the new Server runtime.
       if (endpoint !== 'settings.server.set' && endpoint !== 'settings.identity.reset'
-        && endpoint !== 'settings.startup.retry') await this.serverSwitchFlight
+        && endpoint !== 'settings.startup.retry' && endpoint !== 'settings.legacyStorage.set') await this.serverSwitchFlight
       if (endpoint.startsWith('host.pairing.')) {
         if (this.host?.pairingControl === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'Host device pairing is unavailable.')
         const action = endpoint.slice('host.pairing.'.length)
@@ -178,6 +178,7 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.configure') return ok(await this.configure(payload))
       if (endpoint === 'settings.server.set') return ok(await this.setServer(payload))
       if (endpoint === 'settings.startup.retry') return ok(await this.retryStartup())
+      if (endpoint === 'settings.legacyStorage.set') return ok(await this.setLegacyStorage(payload))
       if (endpoint === 'settings.role.set') return ok(await this.setRole(payload))
       if (endpoint === 'settings.codex.set') return ok(await this.setCodex(payload))
       if (endpoint === 'settings.cursor.set') return ok(await this.setCursor(payload))
@@ -376,6 +377,65 @@ export class PluginControlRuntime {
     }
   }
 
+  private async setLegacyStorage(payload: unknown): Promise<PluginSettingsView> {
+    if (this.serverSwitchFlight !== undefined) {
+      throw new ClientModeError('SERVER_SWITCH_BUSY', 'A Server switch is already in progress.')
+    }
+    const flight = this.applyLegacyStorage(payload)
+    this.serverSwitchFlight = flight
+    try {
+      return await flight
+    } finally {
+      if (this.serverSwitchFlight === flight) this.serverSwitchFlight = undefined
+    }
+  }
+
+  private async applyLegacyStorage(payload: unknown): Promise<PluginSettingsView> {
+    await this.logoutFlight
+    if (this.settings === undefined) {
+      throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
+    }
+    const value = record(payload)
+    if (!('legacyStorageRoot' in value) || (
+      value.legacyStorageRoot !== null
+      && value.legacyStorageRoot !== false
+      && typeof value.legacyStorageRoot !== 'string'
+    )) {
+      throw new ClientModeError('INVALID_MESSAGE', 'legacyStorageRoot must be a non-empty path, false, or null.')
+    }
+    const nextInput: Config = { ...this.settings.get() }
+    if (value.legacyStorageRoot === null) {
+      delete nextInput.legacyStorageRoot
+    } else {
+      nextInput.legacyStorageRoot = value.legacyStorageRoot
+    }
+    let next: ResolvedConfig
+    try {
+      next = resolveConfig(nextInput)
+    } catch (error) {
+      throw new ClientModeError('INVALID_MESSAGE', error instanceof Error ? error.message : 'Invalid legacyStorageRoot.')
+    }
+    await this.settings.replace(editableConfig(next))
+    if (this.switchServer !== undefined) {
+      if (next.legacyStorageRoot !== this.config.legacyStorageRoot || this.startupFailure !== undefined) {
+        try {
+          const runtimes = await this.switchServer(next)
+          this.client = runtimes.client
+          this.host = runtimes.host
+          this.clearStartupFailure()
+        } catch (error) {
+          this.config = next
+          this.setStartupFailure(error)
+          throw error
+        }
+      }
+      this.config = next
+      return { ...await this.settingsView(), applies: 'live' }
+    }
+    this.config = next
+    return this.settingsView()
+  }
+
   private async applyServer(payload: unknown): Promise<PluginSettingsView> {
     await this.logoutFlight
     if (this.settings === undefined) {
@@ -437,7 +497,9 @@ export class PluginControlRuntime {
       roles,
       config.serverUrl,
       hostname(),
-      this.useDefaultStorage ? {} : { directory: this.identityDirectory },
+      this.useDefaultStorage
+        ? { legacyStorageRoot: config.legacyStorageRoot }
+        : { directory: this.identityDirectory },
     )
     this.setIdentityDirectory(nextDirectory)
     if (this.switchServer !== undefined) {
@@ -904,6 +966,7 @@ function editableConfig(config: ResolvedConfig): Config {
     enabled: config.enabled,
     role: config.role,
     ...(config.serverUrl === undefined ? {} : { serverUrl: config.serverUrl }),
+    ...(config.legacyStorageRoot === undefined ? {} : { legacyStorageRoot: config.legacyStorageRoot }),
     httpServerAllowlist: config.httpServerAllowlist,
     terminal: config.terminal,
     remoteTools: config.remoteTools,
