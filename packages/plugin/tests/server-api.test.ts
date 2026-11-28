@@ -984,3 +984,66 @@ it('retries unstructured authorization responses but preserves explicit protocol
     } else expect(fetchMock).toHaveBeenCalledTimes(1)
   } })), cleanupContract1)
 })
+
+it.each(['refresh response', 'disk write'])('clears authorization during a pending %s', async stage => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-clear-refresh-'))
+  directories.push(directory)
+  const identity = hostIdentity()
+  const store = new ServerCredentialStore(directory)
+  const url = 'https://dsh.r2049.cn'
+  await store.save({ serverUrl: url, deviceId: identity.deviceId, authorizationMethod: 'account', ...tokens() })
+  const started = Promise.withResolvers<void>()
+  const resume = Promise.withResolvers<void>()
+  async function pause() {
+    started.resolve()
+    await resume.promise
+  }
+  const save = store.save.bind(store)
+  vi.spyOn(store, 'save').mockImplementation(async record => {
+    if (stage === 'disk write') await pause()
+    return save(record)
+  })
+  const api = new ClientServerApi(url, store, async () => {
+    if (stage === 'refresh response') await pause()
+    return json(tokens())
+  })
+  api.bindIdentity(identity)
+  const refresh = expect(api.refreshCredentials('access-token-value')).rejects.toMatchObject({ code: 'CONNECTION_CLOSED' })
+  await started.promise
+  const clearing = api.clearAuthorization()
+  resume.resolve()
+  await Promise.all([refresh, clearing])
+  expect(await new ServerCredentialStore(directory).load(url, identity.deviceId)).toBeUndefined()
+  expect(api.currentAuthorization()).toBeUndefined()
+})
+
+it.each(['logout', 'new identity'])('discards an outstanding stored policy read after %s', async change => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-stale-policy-'))
+  directories.push(directory)
+  const store = new ServerCredentialStore(directory)
+  const identity = hostIdentity()
+  const url = 'https://dsh.r2049.cn'
+  const previous = await store.save({ serverUrl: url, deviceId: identity.deviceId, authorizationMethod: 'account',
+    pairingRestricted: true, ...tokens() })
+  const api = new HostServerApi(url, store)
+  api.bindIdentity(identity)
+  const started = Promise.withResolvers<void>()
+  const resume = Promise.withResolvers<void>()
+  vi.spyOn(store, 'load').mockImplementationOnce(async () => {
+    started.resolve()
+    await resume.promise
+    return previous
+  })
+  const loading = api.loadStoredPolicy()
+  await started.promise
+  if (change === 'logout') {
+    await api.clearAuthorization()
+  } else {
+    api.bindIdentity({ ...identity, deviceId: 'other-device' })
+    await api.loadStoredPolicy()
+  }
+  resume.resolve()
+  await loading
+  expect(api.pairingHostOnly()).toBe(false)
+  expect(api.currentAuthorization()).toBeUndefined()
+})

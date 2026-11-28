@@ -12,14 +12,6 @@ import type {
   ToolDisplayDetail,
 } from '../types'
 
-export function findApproval(messages: Record<string, ChatItem[]>, itemId: string) {
-  for (const items of Object.values(messages)) {
-    const found = items.find(item => item.kind === 'approval' && item.id === itemId)
-    if (found !== undefined && found.kind === 'approval') return found
-  }
-  return undefined
-}
-
 export function findQuestion(messages: Record<string, ChatItem[]>, itemId: string) {
   for (const items of Object.values(messages)) {
     const found = items.find(item => item.kind === 'question' && item.id === itemId)
@@ -30,12 +22,18 @@ export function findQuestion(messages: Record<string, ChatItem[]>, itemId: strin
 
 export function mapApprovalOutcome(
   messages: Record<string, ChatItem[]>,
+  sessionId: string,
   itemId: string,
   outcome: ApprovalOutcome,
 ): Record<string, ChatItem[]> {
-  return mapItems(messages, item => item.kind === 'approval' && item.id === itemId
-    ? { ...item, outcome }
-    : item)
+  const items = messages[sessionId]
+  if (!items) return messages
+  const index = items.findIndex(item => item.kind === 'approval' && item.id === itemId)
+  const item = items[index]
+  if (item?.kind !== 'approval' || item.outcome !== undefined) return messages
+  const updated = items.slice()
+  updated[index] = { ...item, outcome }
+  return { ...messages, [sessionId]: updated }
 }
 
 export function mapQuestionAnswered(

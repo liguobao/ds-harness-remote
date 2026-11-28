@@ -109,7 +109,7 @@ describe('prompt-actions ACP dispatch', () => {
       await actions.stopSession()
       expect(client.cancel).toHaveBeenCalledWith('native-1')
 
-      await actions.respondApproval('approval-1', 'allowed-once')
+      await actions.respondApproval('approval-1', 'allowed-once', session.sessionId)
       expect(client.respond).toHaveBeenCalledWith('req-app-1', 'allow-once')
 
       await actions.respondQuestion('question-1', { q1: ['Yes'] })
@@ -171,6 +171,8 @@ describe('prompt-actions ACP dispatch', () => {
       { name: 'ACP CURSOR_APPROVAL_NOT_FOUND', backend: 'cursor' as const, code: 'CURSOR_APPROVAL_NOT_FOUND', expectedOutcome: 'unavailable' },
       { name: 'Codex CODEX_APPROVAL_NOT_FOUND', backend: 'codex' as const, code: 'CODEX_APPROVAL_NOT_FOUND', expectedOutcome: 'unavailable' },
       { name: 'Harness APPROVAL_NOT_FOUND', backend: 'harness' as const, code: 'APPROVAL_NOT_FOUND', expectedOutcome: 'unavailable' },
+      { name: 'decision followed by missing RPC', backend: 'harness' as const, decided: true, code: 'APPROVAL_NOT_FOUND', expectedOutcome: 'rejected' },
+      { name: 'decision followed by success', backend: 'codex' as const, decided: true, code: '', expectedOutcome: 'rejected' },
       { name: 'transient error keeps pending', backend: 'cursor' as const, code: 'TIMEOUT', expectedOutcome: undefined },
     ]
 
@@ -196,7 +198,7 @@ describe('prompt-actions ACP dispatch', () => {
         connection: { phase: 'connected' },
         selectedSession: session,
         sessions: [session],
-        messages: { [session.sessionId]: [approvalItem] },
+        messages: { other: [{ ...approvalItem, sessionId: 'other' }], [session.sessionId]: [approvalItem] },
         busyAction: undefined,
         error: undefined,
       }
@@ -205,23 +207,29 @@ describe('prompt-actions ACP dispatch', () => {
         state = { ...state, ...patch }
       }
       const err = Object.assign(new Error(`failed: ${scenario.code}`), { code: scenario.code })
-      const rejectFn = vi.fn(async () => { throw err })
+      const respond = vi.fn(async () => {
+        if (scenario.decided) state.messages[session.sessionId] = [{ ...approvalItem, outcome: 'rejected' }]
+        if (scenario.code) throw err
+      })
       const actions = createPromptActions({
         get: () => state as never,
         set,
         runtime: {
           flushPendingMuxFrames: vi.fn(),
           connection: {
-            requireCursor: () => ({ respond: rejectFn }),
-            requireCodex: () => ({ respond: rejectFn }),
-            requireProxy: () => ({ respondApproval: rejectFn }),
+            requireCursor: () => ({ respond }),
+            requireCodex: () => ({ respond }),
+            requireProxy: () => ({ respondApproval: respond }),
           },
         } as never,
       })
 
-      await actions.respondApproval('approval-1', 'allowed-once')
+      await actions.respondApproval('approval-1', 'allowed-once', session.sessionId)
       expect(state.busyAction).toBeUndefined()
-      expect(state.error).toBeTruthy()
+      expect(respond).toHaveBeenCalledOnce()
+      expect(state.messages.other[0].outcome).toBeUndefined()
+      if (scenario.decided) expect(state.error).toBeUndefined()
+      else expect(state.error).toBeTruthy()
       const updated = state.messages[session.sessionId][0] as Extract<ChatItem, { kind: 'approval' }>
       expect(updated.outcome, scenario.name).toBe(scenario.expectedOutcome)
     }

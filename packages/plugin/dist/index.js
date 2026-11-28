@@ -75171,11 +75171,14 @@ var HostServerApi = class {
     return this.hostOnly;
   }
   async loadStoredPolicy() {
+    const identity3 = this.requireIdentity();
+    const epoch = this.credentialsEpoch;
     const policyHostOnly = this.role === "host" && await this.store.pairingHostOnly();
-    const stored = await this.store.load(this.baseUrl, this.requireIdentity().deviceId).catch((error62) => {
+    const stored = await this.store.load(this.baseUrl, identity3.deviceId).catch((error62) => {
       if (policyHostOnly) return void 0;
       throw error62;
     });
+    if (epoch !== this.credentialsEpoch) return;
     this.hostOnly = this.role === "host" && (policyHostOnly || stored?.pairingRestricted === true);
     if (stored !== void 0 && this.credentials === void 0 && stored.refreshTokenExpiresAt > Date.now()) {
       this.credentials = stored;
@@ -75221,7 +75224,10 @@ var HostServerApi = class {
   }
   async clearAuthorization() {
     this.resetCachedCredentials();
-    await this.store.clear();
+    await this.withRefreshLock(async () => {
+      await this.store.clear();
+      this.resetCachedCredentials();
+    });
   }
   async revokeCurrentDevice() {
     const identity3 = this.requireIdentity();
@@ -75409,16 +75415,15 @@ var HostServerApi = class {
     const epoch = this.credentialsEpoch;
     const promise2 = this.credentialsPromise ?? (() => {
       let created;
-      created = this.loadOrIssue(identity3).finally(() => {
+      created = this.loadOrIssue(identity3, epoch).finally(() => {
         if (this.credentialsPromise === created) this.credentialsPromise = void 0;
       });
       this.credentialsPromise = created;
       return created;
     })();
     const resolved = await promise2;
-    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity3.deviceId) {
-      this.credentials = resolved;
-    }
+    this.assertCredentialsEpoch(epoch);
+    this.credentials = resolved;
     return resolved;
   }
   async refreshCredentials(rejectedAccessToken = this.credentials?.accessToken) {
@@ -75427,18 +75432,23 @@ var HostServerApi = class {
     const refreshed = await this.withRefreshLock(async () => {
       const stored = await this.store.load(this.baseUrl, identity3.deviceId);
       if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now()) {
+        this.assertCredentialsEpoch(epoch);
         if (this.role === "client") throw new ServerApiError("ACCOUNT_AUTH_REQUIRED", "Client sign-in is required.", false);
         return this.register(identity3);
       }
       if (stored.accessToken !== rejectedAccessToken && stored.accessTokenExpiresAt > Date.now() + 3e4) {
         return stored;
       }
-      return this.rotateCredentials(identity3, stored);
+      return this.rotateCredentials(identity3, stored, epoch);
     });
-    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity3.deviceId) {
-      this.credentials = refreshed;
-    }
+    this.assertCredentialsEpoch(epoch);
+    this.credentials = refreshed;
     return refreshed;
+  }
+  assertCredentialsEpoch(epoch) {
+    if (epoch !== this.credentialsEpoch) {
+      throw new ServerApiError("CONNECTION_CLOSED", "Authorization state changed during authentication.", false);
+    }
   }
   async withRefreshLock(operation) {
     try {
@@ -75453,7 +75463,8 @@ var HostServerApi = class {
       throw error62;
     }
   }
-  async rotateCredentials(identity3, stored, allowRecoveredRotation = true) {
+  async rotateCredentials(identity3, stored, epoch, allowRecoveredRotation = true) {
+    this.assertCredentialsEpoch(epoch);
     let tokens;
     try {
       tokens = await this.publicRequest("/api/v1/auth/refresh", {
@@ -75466,19 +75477,20 @@ var HostServerApi = class {
           const latest = await this.store.load(this.baseUrl, identity3.deviceId);
           if (latest !== void 0 && latest.refreshToken !== stored.refreshToken && latest.refreshTokenExpiresAt > Date.now()) {
             if (latest.accessTokenExpiresAt > Date.now() + 3e4) return latest;
-            if (allowRecoveredRotation) return this.rotateCredentials(identity3, latest, false);
+            if (allowRecoveredRotation) return this.rotateCredentials(identity3, latest, epoch, false);
           }
         }
         throw new ServerApiError(error62.code, error62.message, error62.retryable, error62.status, "credential_refresh", error62.reason);
       }
       throw error62;
     }
+    this.assertCredentialsEpoch(epoch);
     const saved = await this.store.save({
       ...stored,
       ...validateTokens(tokens)
     });
     if (allowRecoveredRotation && saved.accessTokenExpiresAt <= Date.now() + 3e4 && saved.refreshToken !== stored.refreshToken && saved.refreshTokenExpiresAt > Date.now()) {
-      return this.rotateCredentials(identity3, saved, false);
+      return this.rotateCredentials(identity3, saved, epoch, false);
     }
     if (saved.accessTokenExpiresAt <= Date.now()) {
       throw new ServerApiError(
@@ -75548,14 +75560,15 @@ var HostServerApi = class {
   dshWebPath() {
     return `/api/v1/hosts/${encodeURIComponent(this.requireIdentity().deviceId)}/dsh-web/sessions`;
   }
-  async loadOrIssue(identity3) {
+  async loadOrIssue(identity3, epoch) {
     return this.withRefreshLock(async () => {
       const stored = await this.store.load(this.baseUrl, identity3.deviceId);
       if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now() + 3e4) {
+        this.assertCredentialsEpoch(epoch);
         return this.register(identity3);
       }
       if (stored.accessTokenExpiresAt > Date.now() + 3e4) return stored;
-      return this.rotateCredentials(identity3, stored);
+      return this.rotateCredentials(identity3, stored, epoch);
     });
   }
   async register(identity3, authorization) {
