@@ -41,6 +41,12 @@ import { useThemedStyles } from '../../ui/use-themed-styles'
 
 export type HeaderPopoverView = 'menu' | 'workspace-from-menu' | 'workspace-standalone'
 
+type PopoverPhase = 'unmounted' | 'open' | 'dismissing'
+
+// `animationType="none"` dismisses on UIKit in 1-2 frames; this caps wait time if
+// the native Modal never presented (e.g. closed before attaching to a window).
+export const CHAT_HEADER_POPOVER_DISMISS_FALLBACK_MS = 180
+
 interface MenuRowItem {
   key: string
   icon: LucideIcon
@@ -116,48 +122,70 @@ export function ChatHeaderMenuPopover({
   const anim = useRef(new Animated.Value(0)).current
   const visible = view !== null
   const waitForNativeDismiss = Platform.OS === 'ios'
-  const [dismissing, setDismissing] = useState(false)
-  const dismissingRef = useRef(false)
-  const prevVisibleRef = useRef(visible)
+  const [phase, setPhase] = useState<PopoverPhase>(() => (visible ? 'open' : 'unmounted'))
+  const phaseRef = useRef<PopoverPhase>(phase)
+  phaseRef.current = phase
+  const retainedViewRef = useRef<HeaderPopoverView>(view ?? 'menu')
+  const retainedTitleRef = useRef<string>(sessionTitle)
+  if (view !== null) {
+    retainedViewRef.current = view
+    retainedTitleRef.current = sessionTitle
+  }
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const onDismissRef = useRef(onDismiss)
   onDismissRef.current = onDismiss
 
   const settleNativeDismiss = useCallback(() => {
-    if (!dismissingRef.current) return
-    dismissingRef.current = false
+    if (phaseRef.current !== 'dismissing') return
+    phaseRef.current = 'unmounted'
     if (dismissTimerRef.current !== undefined) {
       clearTimeout(dismissTimerRef.current)
       dismissTimerRef.current = undefined
     }
-    setDismissing(false)
+    setPhase(current => (current === 'dismissing' ? 'unmounted' : current))
     onDismissRef.current?.()
   }, [])
 
   useEffect(() => {
-    const wasVisible = prevVisibleRef.current
-    prevVisibleRef.current = visible
     if (visible) {
-      if (dismissTimerRef.current !== undefined) {
-        clearTimeout(dismissTimerRef.current)
-        dismissTimerRef.current = undefined
-      }
-      dismissingRef.current = false
-      setDismissing(false)
+      // Wait for an in-flight native iOS Modal dismissal to settle through
+      // `unmounted` before re-opening so UIKit never receives a concurrent present.
+      if (phase === 'dismissing') return
+      if (phase !== 'open') setPhase('open')
       return
     }
-    if (wasVisible && waitForNativeDismiss) {
-      dismissingRef.current = true
-      setDismissing(true)
-      dismissTimerRef.current = setTimeout(() => {
-        dismissTimerRef.current = undefined
-        settleNativeDismiss()
-      }, 180)
+    if (phase === 'open') {
+      if (waitForNativeDismiss) {
+        setPhase('dismissing')
+      } else {
+        setPhase('unmounted')
+        onDismissRef.current?.()
+      }
     }
-  }, [visible, waitForNativeDismiss, settleNativeDismiss])
+  }, [visible, phase, waitForNativeDismiss])
+
+  useEffect(() => {
+    if (phase !== 'dismissing' || phaseRef.current !== 'dismissing') return
+    if (dismissTimerRef.current !== undefined) {
+      clearTimeout(dismissTimerRef.current)
+    }
+    const timer = setTimeout(() => {
+      if (dismissTimerRef.current === timer) {
+        dismissTimerRef.current = undefined
+      }
+      settleNativeDismiss()
+    }, CHAT_HEADER_POPOVER_DISMISS_FALLBACK_MS)
+    dismissTimerRef.current = timer
+    return () => {
+      clearTimeout(timer)
+      if (dismissTimerRef.current === timer) {
+        dismissTimerRef.current = undefined
+      }
+    }
+  }, [phase, settleNativeDismiss])
 
   useEffect(() => () => {
-    dismissingRef.current = false
+    phaseRef.current = 'unmounted'
     if (dismissTimerRef.current !== undefined) {
       clearTimeout(dismissTimerRef.current)
       dismissTimerRef.current = undefined
@@ -165,11 +193,13 @@ export function ChatHeaderMenuPopover({
   }, [])
 
   useEffect(() => {
-    if (!visible) {
+    if (phase !== 'open' || !visible) {
+      anim.stopAnimation()
       anim.setValue(0)
       return
     }
     if (reduceMotion) {
+      anim.stopAnimation()
       anim.setValue(1)
       return
     }
@@ -182,14 +212,16 @@ export function ChatHeaderMenuPopover({
     })
     animation.start()
     return () => animation.stop()
-  }, [anim, reduceMotion, visible])
+  }, [anim, phase, reduceMotion, visible])
 
-  const showDismissHost = !visible && waitForNativeDismiss && (dismissing || prevVisibleRef.current)
-  if (!visible && !showDismissHost) return null
+  if (phase === 'unmounted' || (!visible && !waitForNativeDismiss)) return null
 
+  const interactive = visible && phase === 'open'
+  const activeView = view ?? retainedViewRef.current
+  const displayTitle = visible ? sessionTitle : retainedTitleRef.current
   const cardWidth = Math.min(288, Math.max(228, windowWidth - spacing.md * 2))
   const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] })
-  const isWorkspaceView = view === 'workspace-from-menu' || view === 'workspace-standalone'
+  const isWorkspaceView = activeView === 'workspace-from-menu' || activeView === 'workspace-standalone'
   const filteredWorkspaces = workspaces.filter(
     workspace => (workspace.backend ?? 'harness') === (sessionBackend ?? 'harness'),
   )
@@ -254,20 +286,21 @@ export function ChatHeaderMenuPopover({
   return (
     <Modal
       transparent
-      visible={visible}
+      visible={phase !== 'dismissing'}
       animationType="none"
       onRequestClose={() => {
-        if (!visible) return
-        if (view === 'workspace-from-menu') onChangeView('menu')
+        if (!interactive) return
+        if (activeView === 'workspace-from-menu') onChangeView('menu')
         else onChangeView(null)
       }}
       onDismiss={waitForNativeDismiss ? settleNativeDismiss : onDismiss}
       statusBarTranslucent
     >
-      {!visible ? null : (
-      <View style={styles.overlay}>
+      {phase === 'dismissing' ? null : (
+      <View style={styles.overlay} pointerEvents={interactive ? 'auto' : 'none'}>
         <Pressable
           style={StyleSheet.absoluteFill}
+          disabled={!interactive}
           onPress={() => onChangeView(null)}
           accessibilityRole="button"
           accessibilityLabel={strings.common.close}
@@ -289,7 +322,7 @@ export function ChatHeaderMenuPopover({
             <>
               <View style={styles.captionWrap}>
                 <Text numberOfLines={1} ellipsizeMode="tail" style={styles.captionText}>
-                  {sessionTitle}
+                  {displayTitle}
                 </Text>
               </View>
               <View style={styles.divider} />
@@ -301,18 +334,19 @@ export function ChatHeaderMenuPopover({
                 {menuRows.map(row => {
                   const Icon = row.icon
                   const iconColor = row.danger ? colors.danger : colors.ink
+                  const rowDisabled = Boolean(row.disabled) || !interactive
                   return (
                     <View key={row.key}>
                       {row.dividerBefore && <View style={styles.divider} />}
                       <Pressable
                         accessibilityRole="menuitem"
                         accessibilityLabel={row.accessibilityLabel ?? row.label}
-                        accessibilityState={{ disabled: row.disabled }}
-                        disabled={row.disabled}
+                        accessibilityState={{ disabled: rowDisabled }}
+                        disabled={rowDisabled}
                         onPress={row.onPress}
                         style={({ pressed }) => [
                           styles.row,
-                          pressed && !row.disabled && styles.rowPressed,
+                          pressed && !rowDisabled && styles.rowPressed,
                           row.disabled && styles.rowDisabled,
                         ]}
                       >
@@ -336,27 +370,29 @@ export function ChatHeaderMenuPopover({
           ) : (
             <>
               <View style={styles.subviewHeader}>
-                {view === 'workspace-from-menu' && (
+                {activeView === 'workspace-from-menu' && (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={strings.common.back}
+                    disabled={!interactive}
                     hitSlop={8}
                     onPress={() => onChangeView('menu')}
-                    style={({ pressed }) => [styles.headerIconBtn, pressed && styles.rowPressed]}
+                    style={({ pressed }) => [styles.headerIconBtn, pressed && interactive && styles.rowPressed]}
                   >
                     <ChevronLeft size={19} color={colors.ink} strokeWidth={2} />
                   </Pressable>
                 )}
                 <Text numberOfLines={1} style={styles.subviewTitle}>
-                  {view === 'workspace-from-menu' ? strings.chat.addToWorkspace : strings.chat.selectWorkspace}
+                  {activeView === 'workspace-from-menu' ? strings.chat.addToWorkspace : strings.chat.selectWorkspace}
                 </Text>
-                {view === 'workspace-standalone' && (
+                {activeView === 'workspace-standalone' && (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={strings.common.close}
+                    disabled={!interactive}
                     hitSlop={8}
                     onPress={() => onChangeView(null)}
-                    style={({ pressed }) => [styles.headerIconBtn, pressed && styles.rowPressed]}
+                    style={({ pressed }) => [styles.headerIconBtn, pressed && interactive && styles.rowPressed]}
                   >
                     <X size={17} color={colors.muted} strokeWidth={2} />
                   </Pressable>
@@ -376,14 +412,14 @@ export function ChatHeaderMenuPopover({
                 ) : (
                   filteredWorkspaces.map(workspace => {
                     const isCurrent = workspace.sessionIds.includes(sessionId)
-                    const disabled = busy !== undefined
-                    const displayTitle = workspace.title?.trim() || workspace.path
-                    const showPath = workspace.path.length > 0 && workspace.path !== displayTitle
+                    const disabled = busy !== undefined || !interactive
+                    const displayTitleText = workspace.title?.trim() || workspace.path
+                    const showPath = workspace.path.length > 0 && workspace.path !== displayTitleText
                     return (
                       <Pressable
                         key={workspace.workspaceId}
                         accessibilityRole="menuitem"
-                        accessibilityLabel={displayTitle}
+                        accessibilityLabel={displayTitleText}
                         accessibilityState={{ selected: isCurrent, disabled }}
                         disabled={disabled}
                         onPress={() => runAfterClose(() => onPickWorkspace(workspace))}
@@ -391,7 +427,7 @@ export function ChatHeaderMenuPopover({
                           styles.wsRow,
                           isCurrent && styles.wsRowSelected,
                           pressed && !disabled && styles.rowPressed,
-                          disabled && styles.rowDisabled,
+                          busy !== undefined && styles.rowDisabled,
                         ]}
                       >
                         <Folder
@@ -405,7 +441,7 @@ export function ChatHeaderMenuPopover({
                             ellipsizeMode={showPath ? 'tail' : 'middle'}
                             style={[styles.wsTitle, isCurrent && styles.wsTitleSelected]}
                           >
-                            {displayTitle}
+                            {displayTitleText}
                           </Text>
                           {showPath && (
                             <Text numberOfLines={1} ellipsizeMode="middle" style={styles.wsPath}>
@@ -423,8 +459,9 @@ export function ChatHeaderMenuPopover({
               <Pressable
                 accessibilityRole="menuitem"
                 accessibilityLabel={strings.chat.manageWorkspaces}
+                disabled={!interactive}
                 onPress={() => runAfterClose(onManageWorkspaces)}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                style={({ pressed }) => [styles.row, pressed && interactive && styles.rowPressed]}
               >
                 <FolderCog size={19} color={colors.ink} strokeWidth={1.9} />
                 <Text numberOfLines={1} style={styles.rowLabel}>

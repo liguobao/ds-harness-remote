@@ -26,7 +26,6 @@ import * as Clipboard from 'expo-clipboard'
 import Svg, { Path } from 'react-native-svg'
 import {
   ArrowLeft,
-  ArrowRightLeft,
   Bot,
   Check,
   ChevronDown,
@@ -94,6 +93,8 @@ import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/w
 import { BOT_MODALS_LINGER_MS, isDrawerHostHidden, shouldRenderBotModalsHost } from './bot/popover-menu'
 import { BotModalsHost, BotSidebarSection, useBotTeamLoad } from './bot-sidebar-section'
 import { HomeActionsMenu, openMembershipPlan } from './setup-screens'
+import { createModalActionQueue } from './chat/modal-action-queue'
+import { SessionContextMenuModal } from './session-context-menu-modal'
 import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } from './workspace-modals'
 
 const SESSION_PAGE_SIZE = 3
@@ -730,15 +731,8 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   const [botSearchQuery, setBotSearchQuery] = useState('')
 
   const [menuSession, setMenuSession] = useState<RemoteSession | null>(null)
-  const handoffTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const clearHandoffTimer = useCallback(() => {
-    if (handoffTimerRef.current !== undefined) {
-      clearTimeout(handoffTimerRef.current)
-      handoffTimerRef.current = undefined
-    }
-  }, [])
-  useEffect(() => clearHandoffTimer, [clearHandoffTimer])
-  useEffect(() => { clearHandoffTimer() }, [deviceId, clearHandoffTimer])
+  const menuActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
+  useEffect(() => () => menuActions.cancel(), [menuActions])
   const [renameTarget, setRenameTarget] = useState<{ sessionId: string; currentTitle: string; backend?: RemoteSession['backend'] } | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renameError, setRenameError] = useState<string | null>(null)
@@ -1007,14 +1001,14 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
 
   useEffect(() => {
     if (!connected) {
-      clearHandoffTimer()
+      menuActions.cancel()
       setMenuSession(null)
       setRenameTarget(null)
       setRenameError(null)
       setRenaming(false)
       setToastMessage(null)
     }
-  }, [connected, clearHandoffTimer])
+  }, [connected, menuActions])
 
   useEffect(() => {
     if (!toastMessage) return
@@ -1329,14 +1323,14 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   }
 
   const clearTransientOverlays = useCallback(() => {
-    clearHandoffTimer()
+    menuActions.cancel()
     const state = transientStateRef.current
     if (state.menuSession !== null) setMenuSession(null)
     if (state.renameTarget !== null) setRenameTarget(null)
     if (state.renameError !== null) setRenameError(null)
     if (state.renaming) setRenaming(false)
     if (state.toastMessage !== null) setToastMessage(null)
-  }, [clearHandoffTimer])
+  }, [menuActions])
 
   const closeDrawer = useCallback(() => {
     clearTransientOverlays()
@@ -1344,7 +1338,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
   }, [onClose, clearTransientOverlays])
 
   resetRef.current = () => {
-    clearHandoffTimer()
+    menuActions.cancel()
     const state = transientStateRef.current
     if (state.menuSession !== null) setMenuSession(null)
     if (state.renameTarget !== null) setRenameTarget(null)
@@ -2201,175 +2195,76 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
       </View>
 
       {/* 会话上下文操作浮层/菜单 */}
-      {menuSession && (
-        <Modal
-          transparent
-          animationType="fade"
-          visible={true}
-          onRequestClose={() => setMenuSession(null)}
-          statusBarTranslucent
-        >
-          <Pressable style={styles.menuBackdrop} onPress={() => setMenuSession(null)}>
-            <View style={styles.contextMenuCard} onStartShouldSetResponder={() => true}>
-              <View style={styles.menuHeader}>
-                <Text style={styles.menuTitle} numberOfLines={1}>
-                  {resolveSessionDisplayTitle(menuSession, handoffOrigins?.[menuSession.sessionId]) ?? strings.sessions.untitled}
-                </Text>
-              </View>
-
-              {canPinSession && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={menuIsPinned ? strings.sessions.unpinSession : strings.sessions.pinSession}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={async () => {
-                    const sid = menuSession.sessionId
-                    const targetBackend = menuSession.backend
-                    setMenuSession(null)
-                    if (menuIsPinned) {
-                      const ok = await unpinSession(sid, targetBackend)
-                      if (!ok) setToastMessage(strings.sessions.unpinFailed)
-                    } else {
-                      const ok = await pinSession(sid, targetBackend)
-                      if (!ok) setToastMessage(strings.sessions.pinFailed)
-                    }
-                  }}
-                >
-                  {menuIsPinned ? (
-                    <OfficialMenuIcons.pinFill size={16} color={colors.ink} />
-                  ) : (
-                    <OfficialMenuIcons.pin size={16} color={colors.ink} />
-                  )}
-                  <Text style={styles.menuItemText}>
-                    {menuIsPinned ? strings.sessions.unpinSession : strings.sessions.pinSession}
-                  </Text>
-                </Pressable>
-              )}
-
-              {canUseHarnessActions && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={strings.sessions.renameSession}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={() => {
-                    const target = {
-                      sessionId: menuSession.sessionId,
-                      currentTitle: resolveSessionDisplayTitle(menuSession, handoffOrigins?.[menuSession.sessionId]) ?? '',
-                      backend: menuSession.backend,
-                    }
-                    setMenuSession(null)
-                    setRenameError(null)
-                    setRenameTarget(target)
-                  }}
-                >
-                  <OfficialMenuIcons.edit size={16} color={colors.ink} />
-                  <Text style={styles.menuItemText}>{strings.sessions.renameSession}</Text>
-                </Pressable>
-              )}
-
-              {menuSession && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={strings.sessions.forkSession}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={async () => {
-                    const sid = menuSession.sessionId
-                    const targetBackend = menuSession.backend
-                    setMenuSession(null)
-                    const created = await forkSession(sid, targetBackend)
-                    if (created) {
-                      closeDrawer()
-                    }
-                  }}
-                >
-                  <OfficialMenuIcons.fork size={16} color={colors.ink} />
-                  <Text style={styles.menuItemText}>{strings.sessions.forkSession}</Text>
-                </Pressable>
-              )}
-
-              {connected && onHandoffSession !== undefined && !isSubagentSession(menuSession) && menuSession.blank !== true && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={strings.handoff.action}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={() => {
-                    const targetSession = menuSession
-                    const menuWorkspace = workspaces.find(w => w.sessionIds.includes(targetSession.sessionId))
-                    setMenuSession(null)
-                    if (Platform.OS === 'ios') {
-                      if (handoffTimerRef.current !== undefined) clearTimeout(handoffTimerRef.current)
-                      handoffTimerRef.current = setTimeout(() => {
-                        handoffTimerRef.current = undefined
-                        onHandoffSession(targetSession, menuWorkspace)
-                      }, 80)
-                    } else {
-                      onHandoffSession(targetSession, menuWorkspace)
-                    }
-                  }}
-                >
-                  <ArrowRightLeft size={16} color={colors.ink} />
-                  <Text style={styles.menuItemText}>{strings.handoff.action}</Text>
-                </Pressable>
-              )}
-
-              {canUseHarnessActions && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={menuIsArchived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={async () => {
-                    const sid = menuSession.sessionId
-                    const wasArchived = menuIsArchived
-                    const isCurrent = sid === selected?.sessionId
-                    setMenuSession(null)
-                    if (wasArchived) {
-                      const ok = await unarchiveSession(sid, menuSession.backend)
-                      if (!ok) setToastMessage(strings.sessions.unarchiveFailed)
-                    } else {
-                      const ok = await archiveSession(sid)
-                      if (!ok) {
-                        setToastMessage(strings.sessions.archiveFailed)
-                      } else if (isCurrent) {
-                        closeDrawer()
-                      }
-                    }
-                  }}
-                >
-                  {menuIsArchived ? (
-                    <OfficialMenuIcons.unarchive size={16} color={colors.ink} />
-                  ) : (
-                    <OfficialMenuIcons.archive size={16} color={colors.ink} />
-                  )}
-                  <Text style={styles.menuItemText}>
-                    {menuIsArchived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession}
-                  </Text>
-                </Pressable>
-              )}
-
-              {/* 复制 Session ID 对所有会话可用 */}
-              <Pressable
-                accessibilityRole="menuitem"
-                accessibilityLabel={strings.sessions.copySessionId}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                onPress={async () => {
-                  const sid = menuSession.sessionId
-                  setMenuSession(null)
-                  try {
-                    await Clipboard.setStringAsync(sid)
-                    setToastMessage(strings.sessions.sessionIdCopied)
-                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined)
-                  } catch {
-                    setToastMessage(strings.sessions.copyFailed)
-                  }
-                }}
-              >
-                <OfficialMenuIcons.copy size={16} color={colors.ink} />
-                <Text style={styles.menuItemText}>{strings.sessions.copySessionId}</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Modal>
-      )}
+      <SessionContextMenuModal
+        session={menuSession}
+        sessionTitle={
+          menuSession
+            ? (resolveSessionDisplayTitle(menuSession, handoffOrigins?.[menuSession.sessionId]) ?? strings.sessions.untitled)
+            : ''
+        }
+        isPinned={menuIsPinned}
+        isArchived={menuIsArchived}
+        canHandoff={connected && onHandoffSession !== undefined && menuSession !== null && !isSubagentSession(menuSession) && menuSession.blank !== true}
+        onClose={() => setMenuSession(null)}
+        onDismiss={menuActions.onDismiss}
+        runAfterClose={action => menuActions.run(() => setMenuSession(null), action)}
+        onTogglePin={(target, wasPinned) => {
+          void (async () => {
+            if (wasPinned) {
+              const ok = await unpinSession(target.sessionId, target.backend)
+              if (!ok) setToastMessage(strings.sessions.unpinFailed)
+            } else {
+              const ok = await pinSession(target.sessionId, target.backend)
+              if (!ok) setToastMessage(strings.sessions.pinFailed)
+            }
+          })()
+        }}
+        onRename={target => {
+          setRenameError(null)
+          setRenameTarget({
+            sessionId: target.sessionId,
+            currentTitle: resolveSessionDisplayTitle(target, handoffOrigins?.[target.sessionId]) ?? '',
+            backend: target.backend,
+          })
+        }}
+        onFork={target => {
+          void forkSession(target.sessionId, target.backend).then(created => {
+            if (created) closeDrawer()
+          })
+        }}
+        onHandoff={target => {
+          if (onHandoffSession === undefined) return
+          const menuWorkspace = workspaces.find(w => w.sessionIds.includes(target.sessionId))
+          onHandoffSession(target, menuWorkspace)
+        }}
+        onToggleArchive={(target, wasArchived) => {
+          const isCurrent = target.sessionId === selected?.sessionId
+          void (async () => {
+            if (wasArchived) {
+              const ok = await unarchiveSession(target.sessionId, target.backend)
+              if (!ok) setToastMessage(strings.sessions.unarchiveFailed)
+            } else {
+              const ok = await archiveSession(target.sessionId)
+              if (!ok) {
+                setToastMessage(strings.sessions.archiveFailed)
+              } else if (isCurrent) {
+                closeDrawer()
+              }
+            }
+          })()
+        }}
+        onCopySessionId={target => {
+          void (async () => {
+            try {
+              await Clipboard.setStringAsync(target.sessionId)
+              setToastMessage(strings.sessions.sessionIdCopied)
+              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined)
+            } catch {
+              setToastMessage(strings.sessions.copyFailed)
+            }
+          })()
+        }}
+      />
 
       {/* 重命名模态弹窗 */}
       {renameTarget && (
@@ -3466,48 +3361,6 @@ const createStyles = (colors: ThemeColors) =>
       borderRadius: 22,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-
-    menuBackdrop: {
-      flex: 1,
-      backgroundColor: colors.modalBackdrop,
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: spacing.md,
-    },
-    contextMenuCard: {
-      width: '80%',
-      maxWidth: 280,
-      backgroundColor: colors.surface,
-      borderRadius: radius.xl,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-      paddingVertical: spacing.xs,
-      ...floatingShadow(colors, 'high'),
-    },
-    menuHeader: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.separator,
-      marginBottom: spacing.xxs,
-    },
-    menuTitle: {
-      ...type.caption,
-      fontWeight: '600',
-      color: colors.muted,
-    },
-    menuItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: 48,
-      paddingHorizontal: spacing.lg,
-      gap: spacing.md,
-    },
-    menuItemText: {
-      ...type.body,
-      color: colors.ink,
-      flex: 1,
     },
 
     renameBackdrop: {
