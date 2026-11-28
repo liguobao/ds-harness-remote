@@ -6,6 +6,7 @@ import {
   Dimensions,
   Easing,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -51,10 +52,13 @@ import {
 } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
 import { Button, IconButton } from '../../ui/components'
+import { finishSheetExit, motionTokens, nextSheetPhase, type SheetPhase } from '../../ui/motion'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { Toggle } from '../../ui/toggle'
+import { useReduceMotion } from '../../ui/use-reduce-motion'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ModalSurface } from '../chat/modal'
+import { createModalActionQueue } from '../chat/modal-action-queue'
 import { BotAgentBadge, engineOfModel } from './agent-badge'
 import { BotAvatar, BotAvatarWithBadge } from './avatar'
 import { BotFloatingPopover, type BotPopoverAction } from './popover-menu'
@@ -70,6 +74,8 @@ import {
 
 type ProfileTopTab = 'details' | 'browser'
 type ProfileSubPage = 'sessions' | 'memory' | 'usage' | 'schedules' | null
+
+const NATIVE_DISMISS_FALLBACK_MS = 180
 
 function isNonEmptyObject(value: BotObject | undefined): boolean {
   return value !== undefined && Object.keys(value).length > 0
@@ -94,14 +100,15 @@ function groupBotModels(models: BotObject[]): { provider: string; label: string;
 export function BotProfilePage({
   visible,
   covered = false,
-  bot,
-  room,
+  bot: propBot,
+  room: propRoom,
   state,
   client,
   busy,
   error,
   runStats,
   onClose,
+  onDismiss,
   onEdit,
   perform,
 }: {
@@ -115,15 +122,28 @@ export function BotProfilePage({
   error?: string
   runStats?: BotObject | null
   onClose: () => void
+  onDismiss?: () => void
   onEdit: () => void
   perform: (operation: BotOperation, payload?: BotObject) => Promise<{ ok: boolean; value?: unknown }>
 }) {
   const insets = useSafeAreaInsets()
   const { colors, scheme } = useTheme()
+  const reduceMotion = useReduceMotion()
   const styles = useThemedStyles(createProfileStyles)
   const appSessions = useAppStore(store => store.sessions)
+  const waitForNativeDismiss = Platform.OS === 'ios'
 
-  const [mounted, setMounted] = useState(visible)
+  const targetVisible = visible && Boolean(propBot || propRoom)
+  const [phase, setPhase] = useState<SheetPhase>(() => (targetVisible ? 'opening' : 'unmounted'))
+  const phaseRef = useRef<SheetPhase>(phase)
+  phaseRef.current = phase
+  const retainedTargetRef = useRef<{ bot?: BotEntry; room?: BotRoom }>({ bot: propBot, room: propRoom })
+  if (targetVisible) {
+    retainedTargetRef.current = { bot: propBot, room: propRoom }
+  }
+  const bot = targetVisible ? propBot : (propBot ?? retainedTargetRef.current.bot)
+  const room = targetVisible ? propRoom : (bot ? undefined : (propRoom ?? retainedTargetRef.current.room))
+
   const [topTab, setTopTab] = useState<ProfileTopTab>('details')
   const [subPage, setSubPage] = useState<ProfileSubPage>(null)
   const [mountedSubPage, setMountedSubPage] = useState<ProfileSubPage>(null)
@@ -139,67 +159,194 @@ export function BotProfilePage({
   const [usageLoading, setUsageLoading] = useState(false)
 
   const screenWidth = Dimensions.get('window').width || 390
+  const screenWidthRef = useRef(screenWidth)
+  screenWidthRef.current = screenWidth
   const slideAnim = useRef(new Animated.Value(screenWidth)).current
   const subSlideAnim = useRef(new Animated.Value(screenWidth)).current
+  const slideAnimRef = useRef<Animated.CompositeAnimation | null>(null)
+  const subSlideAnimRef = useRef<Animated.CompositeAnimation | null>(null)
+  const subAnimSeqRef = useRef(0)
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const onDismissRef = useRef(onDismiss)
+  onDismissRef.current = onDismiss
+  const actionQueue = useMemo(() => createModalActionQueue(waitForNativeDismiss), [waitForNativeDismiss])
+
+  const runAfterClose = useCallback(
+    (action: () => void) => {
+      actionQueue.run(onClose, action)
+    },
+    [actionQueue, onClose],
+  )
+
+  const settleNativeDismiss = useCallback(() => {
+    if (phaseRef.current !== 'dismissing') return
+    phaseRef.current = 'unmounted'
+    if (dismissTimerRef.current !== undefined) {
+      clearTimeout(dismissTimerRef.current)
+      dismissTimerRef.current = undefined
+    }
+    retainedTargetRef.current = {}
+    setPhase(current => (current === 'dismissing' ? 'unmounted' : current))
+    try {
+      actionQueue.onDismiss()
+    } finally {
+      onDismissRef.current?.()
+    }
+  }, [actionQueue])
 
   useEffect(() => {
-    if (visible) {
-      setMounted(true)
-      setTopTab('details')
-      setSubPage(null)
-      setMountedSubPage(null)
-      setMoreOpen(false)
-      slideAnim.setValue(screenWidth)
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 250,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start()
-    } else if (mounted) {
-      setMoreOpen(false)
-      Animated.timing(slideAnim, {
-        toValue: screenWidth,
-        duration: 210,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) {
-          setMounted(false)
-          setSubPage(null)
-          setMountedSubPage(null)
-        }
-      })
+    if (targetVisible) {
+      if (phase === 'dismissing') return
+      if (phase === 'unmounted') {
+        setTopTab('details')
+        setSubPage(null)
+        setMountedSubPage(null)
+        setMoreOpen(false)
+        setModelPickerOpen(false)
+        setFolderPickerOpen(false)
+        slideAnim.setValue(screenWidthRef.current)
+      }
+      setPhase(current => nextSheetPhase(current, true, false, waitForNativeDismiss))
+      return
     }
-  }, [visible, screenWidth, slideAnim, mounted])
+    setMoreOpen(false)
+    setModelPickerOpen(false)
+    setFolderPickerOpen(false)
+    const hasRetainedTarget = Boolean(bot || room)
+    setPhase(current => nextSheetPhase(current, false, !hasRetainedTarget, waitForNativeDismiss))
+  }, [targetVisible, bot, room, phase, waitForNativeDismiss, slideAnim])
+
+  useEffect(() => {
+    if (phase === 'unmounted' || phase === 'dismissing') {
+      slideAnimRef.current?.stop()
+      slideAnimRef.current = null
+      slideAnim.setValue(screenWidth)
+      if (phase === 'unmounted' && !waitForNativeDismiss) {
+        retainedTargetRef.current = {}
+      }
+      return
+    }
+    if (phase === 'open') {
+      slideAnimRef.current?.stop()
+      slideAnimRef.current = null
+      slideAnim.setValue(0)
+      return
+    }
+    const opening = phase === 'opening'
+    const duration = reduceMotion ? motionTokens.duration.reduced : (opening ? 250 : 210)
+    let stoppedByCleanup = false
+    const anim = Animated.timing(slideAnim, {
+      toValue: opening ? 0 : screenWidth,
+      duration,
+      easing: opening ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    })
+    slideAnimRef.current = anim
+    anim.start(({ finished }) => {
+      if (stoppedByCleanup) return
+      if (!finished) {
+        slideAnim.setValue(opening ? 0 : screenWidth)
+      }
+      if (!opening) {
+        setSubPage(null)
+        setMountedSubPage(null)
+      }
+      const next = opening ? 'open' : finishSheetExit('closing', waitForNativeDismiss)
+      setPhase(current => (current === 'opening' ? 'open' : finishSheetExit(current, waitForNativeDismiss)))
+      if (!opening && next === 'unmounted') {
+        retainedTargetRef.current = {}
+        onDismissRef.current?.()
+      }
+    })
+    return () => {
+      stoppedByCleanup = true
+      anim.stop()
+      if (slideAnimRef.current === anim) slideAnimRef.current = null
+    }
+  }, [phase, screenWidth, reduceMotion, slideAnim, waitForNativeDismiss])
+
+  useEffect(() => {
+    if (phase !== 'dismissing' || phaseRef.current !== 'dismissing') return
+    if (dismissTimerRef.current !== undefined) {
+      clearTimeout(dismissTimerRef.current)
+    }
+    const timer = setTimeout(() => {
+      if (dismissTimerRef.current === timer) {
+        dismissTimerRef.current = undefined
+      }
+      settleNativeDismiss()
+    }, NATIVE_DISMISS_FALLBACK_MS)
+    dismissTimerRef.current = timer
+    return () => {
+      clearTimeout(timer)
+      if (dismissTimerRef.current === timer) {
+        dismissTimerRef.current = undefined
+      }
+    }
+  }, [phase])
+
+  useEffect(() => () => {
+    phaseRef.current = 'unmounted'
+    slideAnimRef.current?.stop()
+    subSlideAnimRef.current?.stop()
+    if (dismissTimerRef.current !== undefined) {
+      clearTimeout(dismissTimerRef.current)
+      dismissTimerRef.current = undefined
+    }
+    actionQueue.cancel()
+  }, [actionQueue])
 
   const openSubPage = useCallback(
     (target: Exclude<ProfileSubPage, null>, createScheduleNow = false) => {
+      const seq = ++subAnimSeqRef.current
+      subSlideAnimRef.current?.stop()
       setSchedulesStartCreating(createScheduleNow)
       setSubPage(target)
       setMountedSubPage(target)
+      if (reduceMotion) {
+        subSlideAnim.setValue(0)
+        return
+      }
       subSlideAnim.setValue(screenWidth)
-      Animated.timing(subSlideAnim, {
+      const anim = Animated.timing(subSlideAnim, {
         toValue: 0,
         duration: 240,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
-      }).start()
+      })
+      subSlideAnimRef.current = anim
+      anim.start(({ finished }) => {
+        if (seq !== subAnimSeqRef.current) return
+        subSlideAnimRef.current = null
+        if (!finished) subSlideAnim.setValue(0)
+      })
     },
-    [screenWidth, subSlideAnim],
+    [reduceMotion, screenWidth, subSlideAnim],
   )
 
   const closeSubPage = useCallback(() => {
+    const seq = ++subAnimSeqRef.current
+    subSlideAnimRef.current?.stop()
     setSubPage(null)
-    Animated.timing(subSlideAnim, {
+    if (reduceMotion) {
+      subSlideAnim.setValue(screenWidth)
+      setMountedSubPage(null)
+      return
+    }
+    const anim = Animated.timing(subSlideAnim, {
       toValue: screenWidth,
       duration: 200,
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setMountedSubPage(null)
     })
-  }, [screenWidth, subSlideAnim])
+    subSlideAnimRef.current = anim
+    anim.start(({ finished }) => {
+      if (seq !== subAnimSeqRef.current) return
+      subSlideAnimRef.current = null
+      if (!finished) subSlideAnim.setValue(screenWidth)
+      setMountedSubPage(null)
+    })
+  }, [reduceMotion, screenWidth, subSlideAnim])
 
   const handleBack = useCallback(() => {
     if (moreOpen) {
@@ -215,10 +362,10 @@ export function BotProfilePage({
   }, [moreOpen, subPage, closeSubPage, onClose])
 
   useEffect(() => {
-    if (!visible || covered) return
+    if (!targetVisible || covered) return
     const sub = BackHandler.addEventListener('hardwareBackPress', handleBack)
     return () => sub.remove()
-  }, [visible, covered, handleBack])
+  }, [targetVisible, covered, handleBack])
 
   const reloadSchedules = useCallback(() => {
     if (!visible || !client) return
@@ -286,7 +433,22 @@ export function BotProfilePage({
     return []
   }, [schedulesData, bot, room])
 
-  if (!mounted || (!bot && !room)) return null
+  if (phase === 'unmounted') return null
+  if (phase === 'dismissing' || (!bot && !room)) {
+    if (!waitForNativeDismiss) return null
+    return (
+      <Modal
+        transparent
+        visible={false}
+        animationType="none"
+        onRequestClose={() => {}}
+        onDismiss={settleNativeDismiss}
+        statusBarTranslucent
+      >
+        {null}
+      </Modal>
+    )
+  }
 
   const mainCount = state.bots.filter(b => b.main).length
   const allParts = bot
@@ -295,6 +457,7 @@ export function BotProfilePage({
 
   const confirmDelete = () => {
     const targetId = bot?.id ?? room?.id
+    const deleteOp = bot ? 'delete-bot' : 'delete-room'
     if (!targetId) return
     Alert.alert(s.bots.delete, s.bots.deleteHint, [
       { text: s.bots.cancel, style: 'cancel' },
@@ -302,8 +465,9 @@ export function BotProfilePage({
         text: s.bots.delete,
         style: 'destructive',
         onPress: () => {
-          onClose()
-          void perform(bot ? 'delete-bot' : 'delete-room', { id: targetId })
+          runAfterClose(() => {
+            void perform(deleteOp, { id: targetId })
+          })
         },
       },
     ])
@@ -329,8 +493,10 @@ export function BotProfilePage({
       label: s.bots.newSession,
       disabled: busy || Boolean(state.readOnly),
       onPress: () => {
-        onClose()
-        void perform('bot-new-part', { botId: bot.id })
+        const botId = bot.id
+        runAfterClose(() => {
+          void perform('bot-new-part', { botId })
+        })
       },
     })
     if (!bot.main || mainCount > 1) {
@@ -349,8 +515,10 @@ export function BotProfilePage({
         label: s.bots.duplicate,
         disabled: busy || Boolean(state.readOnly),
         onPress: () => {
-          onClose()
-          void perform('duplicate-bot', { id: bot.id })
+          const botId = bot.id
+          runAfterClose(() => {
+            void perform('duplicate-bot', { id: botId })
+          })
         },
       })
     }
@@ -439,10 +607,28 @@ export function BotProfilePage({
 
   const memoryCountLabel =
     memoryCount === null ? '…' : memoryCount === 0 ? s.bots.memoryEmpty : s.bots.memoryCount(memoryCount)
+  const backdropOpacity = slideAnim.interpolate({
+    inputRange: [0, Math.max(1, screenWidth)],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  })
 
   return (
-    <Modal transparent visible animationType="none" onRequestClose={handleBack} statusBarTranslucent>
-      <View style={styles.modalRoot}>
+    <Modal
+      transparent
+      visible
+      animationType="none"
+      onRequestClose={() => {
+        if (targetVisible) handleBack()
+      }}
+      onDismiss={waitForNativeDismiss ? settleNativeDismiss : onDismiss}
+      statusBarTranslucent
+    >
+      <View style={styles.modalRoot} pointerEvents={targetVisible ? 'auto' : 'none'}>
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, styles.modalBackdrop, { opacity: backdropOpacity }]}
+        />
         <Animated.View
           style={[
             styles.page,
@@ -708,8 +894,7 @@ export function BotProfilePage({
                   {bot.instructions.trim() ? (
                     <Pressable
                       onPress={() => {
-                        onClose()
-                        onEdit()
+                        runAfterClose(onEdit)
                       }}
                       style={[styles.selectorBox, { backgroundColor: cardBg }]}
                     >
@@ -721,8 +906,7 @@ export function BotProfilePage({
                     <Pressable
                       accessibilityRole="button"
                       onPress={() => {
-                        onClose()
-                        onEdit()
+                        runAfterClose(onEdit)
                       }}
                       style={styles.centeredHintBtn}
                     >
@@ -1053,8 +1237,10 @@ export function BotProfilePage({
                     accessibilityLabel={s.bots.newSession}
                     disabled={busy || Boolean(state.readOnly)}
                     onPress={() => {
-                      onClose()
-                      void perform('bot-new-part', { botId: bot.id })
+                      const botId = bot.id
+                      runAfterClose(() => {
+                        void perform('bot-new-part', { botId })
+                      })
                     }}
                     hitSlop={8}
                     style={({ pressed }) => [
@@ -1091,8 +1277,10 @@ export function BotProfilePage({
                           accessibilityLabel={label}
                           disabled={current || busy || Boolean(state.readOnly)}
                           onPress={() => {
-                            onClose()
-                            void perform('bot-open-part', { botId: bot.id, sessionId: partId })
+                            const botId = bot.id
+                            runAfterClose(() => {
+                              void perform('bot-open-part', { botId, sessionId: partId })
+                            })
                           }}
                           style={({ pressed }) => [
                             styles.partRow,
@@ -1193,7 +1381,7 @@ export function BotProfilePage({
         </Animated.View>
 
         {/* Quick Model Picker Sheet */}
-        {bot && modelPickerOpen && (
+        {targetVisible && bot && modelPickerOpen && (
           <Modal transparent animationType="fade" visible onRequestClose={() => setModelPickerOpen(false)}>
             <ModalSurface onClose={() => setModelPickerOpen(false)}>
               <View style={{ gap: 12 }}>
@@ -1276,6 +1464,8 @@ const createProfileStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     modalRoot: {
       flex: 1,
+    },
+    modalBackdrop: {
       backgroundColor: 'rgba(0, 0, 0, 0.14)',
     },
     page: {
