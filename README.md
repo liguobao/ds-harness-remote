@@ -191,9 +191,8 @@ Remote negotiates paths in the order `LAN -> P2P -> TURN -> Relay`.
 
 When WebRTC is unavailable or cannot connect, it falls back to the encrypted WebSocket Relay.
 
-On Linux musl, the Host uses werift. On Linux glibc, the Host probes native WebRTC in a child process.
-If the probe fails, the Host uses werift.
-Set `DSH_REMOTE_WEBRTC_BACKEND=werift` in the Host environment to force werift.
+On Linux musl, the Host uses werift.
+Set `DSH_REMOTE_WEBRTC_BACKEND=werift` in the Host environment to use werift on all platforms.
 
 Every path carries the same Noise ciphertext and keeps the same Host/Client identity boundary.
 

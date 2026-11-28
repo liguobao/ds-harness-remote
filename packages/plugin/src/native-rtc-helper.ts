@@ -172,9 +172,6 @@ export function isUsableExternalNode(candidate: string, requireFrom: string): bo
       "const wrtc = require('@roamhq/wrtc');",
       "const RTCPeerConnection = wrtc.RTCPeerConnection ?? wrtc.default?.RTCPeerConnection;",
       "if (typeof RTCPeerConnection !== 'function') throw new Error('missing-rtc');",
-      "const pc = new RTCPeerConnection({ iceServers: [] });",
-      "if (typeof pc.close !== 'function') throw new Error('missing-close');",
-      "pc.close();",
       "console.log(`node:${process.versions.node}`);",
     ].join(''),
   ], {
@@ -236,7 +233,6 @@ class ExternalNativePeerConnection implements RtcPeerConnection {
     this.child.on('error', error => this.handleExit(error))
     this.child.stdin.on('error', error => this.handleExit(error))
     this.ready = this.request('init', { iceServers: configuration.iceServers ?? [], iceTransportPolicy: configuration.iceTransportPolicy }).then(() => undefined)
-    void this.ready.catch(() => undefined)
   }
 
   createDataChannel(label: string, options?: RtcDataChannelInit): RtcDataChannel {
@@ -391,19 +387,11 @@ class ExternalNativePeerConnection implements RtcPeerConnection {
   }
 
   private handleExit(error?: Error): void {
-    const unexpected = !this.closed
-    this.closed = true
+    if (!this.closed) this.closed = true
     const reason = error ?? new Error('native rtc helper exited')
     for (const pending of this.pending.values()) pending.reject(reason)
     this.pending.clear()
     for (const channel of this.channels.values()) channel.updateState('closed', 0)
-    if (unexpected) {
-      this.connectionState = 'failed'
-      this.iceConnectionState = 'failed'
-      this.signalingState = 'closed'
-      this.onconnectionstatechange?.()
-      this.oniceconnectionstatechange?.()
-    }
   }
 }
 

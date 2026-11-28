@@ -134,11 +134,11 @@ interface NativeDataChannel {
   close(): void
 }
 
-/** Native RTC uses a child on Linux. musl uses werift because the native binary can crash the Host. */
+/** Use werift on Linux without glibc to avoid loading an incompatible native RTC binary. */
 export async function loadNodeRtcFactory(options: WeriftFactoryOptions = {}): Promise<RtcPeerConnectionFactory | undefined> {
   const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === 'werift' || shouldUseWeriftForLinuxLibc(process.platform, linuxGlibcVersion())
     ? undefined
-    : process.platform === 'linux' || isElectronRuntime()
+    : isElectronRuntime()
       ? await loadExternalNativeRtcFactory().catch(() => undefined)
       : await loadNativeRtcFactory().catch(() => undefined)
   const factory = nativeFactory ?? await loadWeriftFactory(options)

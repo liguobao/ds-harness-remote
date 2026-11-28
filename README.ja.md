@@ -189,9 +189,8 @@ Remote は `LAN -> P2P -> TURN -> Relay` の順で通信経路を選びます。
 
 WebRTC が利用できない場合や接続できない場合は、暗号化された WebSocket Relay にフォールバックします。
 
-Linux musl では Host は werift を使います。Linux glibc では Host が子プロセスでネイティブ WebRTC を検査します。
-検査に失敗した場合、Host は werift を使います。
-Host の環境変数 `DSH_REMOTE_WEBRTC_BACKEND=werift` を設定すると、werift を使います。
+Linux musl では Host は werift を使います。
+Host の環境変数 `DSH_REMOTE_WEBRTC_BACKEND=werift` を設定すると、すべての環境で werift を使います。
 
 すべての経路で同じ Noise 暗号文を転送し、Host／Client の識別・認可の境界を維持します。
 
