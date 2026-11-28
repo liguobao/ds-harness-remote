@@ -211,7 +211,7 @@ export interface AppState {
   createSession(workspaceId?: string, backend?: AgentBackend): Promise<boolean>
   loadSessionHandoffItems(session: RemoteSession): Promise<ChatItem[]>
   handoffSession(params: HandoffSessionParams): Promise<HandoffSessionResult>
-  forkSession(sessionId: string, backend?: RemoteSession['backend'], lastTurnId?: string): Promise<RemoteSession | undefined>
+  forkSession(sessionId: string, backend?: RemoteSession['backend'], lastTurnId?: string, messageId?: string): Promise<RemoteSession | undefined>
   archiveSession(sessionId: string): Promise<boolean>
   unarchiveSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>
   pinSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>

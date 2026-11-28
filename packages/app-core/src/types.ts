@@ -278,6 +278,7 @@ export interface ChatItemBase {
 }
 
 export interface ChatMessage extends ChatItemBase {
+  codexTurnId?: string
   kind: 'message'
   role: 'user' | 'assistant' | 'system'
   text: string

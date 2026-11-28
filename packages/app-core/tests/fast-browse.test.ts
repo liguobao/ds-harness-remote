@@ -455,9 +455,10 @@ describe('session pin, unpin, rename, unarchive, and fork actions', () => {
     expect(state.openSession).toHaveBeenCalledWith(child)
 
     state.selectedSession = parent
+    client.request.mockResolvedValueOnce({ thread: { id: 'parent', turns: [{ id: 'turn-2', items: [{ id: 'reply' }] }] } })
     client.request.mockResolvedValueOnce({ thread: thread('earlier-child') })
     expect(await state.forkChatMessage({ kind: 'message', id: 'reply', sessionId: parent.sessionId,
-      role: 'assistant', turn: 'turn-2', text: 'Done', createdAt: 1 })).toBe(true)
+      role: 'assistant', turn: '2', text: 'Done', createdAt: 1 })).toBe(true)
     expect(client.request).toHaveBeenLastCalledWith('thread/fork', { threadId: 'parent', lastTurnId: 'turn-2' })
   })
 

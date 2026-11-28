@@ -327,6 +327,7 @@ function addAssistantMessage(current: ChatItem[], data: UnknownRecord, sessionId
   }
   const message: ChatMessage = {
     kind: 'message', id, sessionId, role: 'assistant', text: finalText, createdAt: now(data),
+    ...(typeof data.codexTurnId === 'string' ? { codexTurnId: data.codexTurnId } : {}),
     ...(images.length === 0 ? {} : { images }),
     ...(group === undefined ? {} : { replyGroup: group }),
     ...(finalReasoning === undefined ? {} : { reasoning: finalReasoning }),

@@ -86738,7 +86738,7 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
       )) {
         const eventSeq = append(
           event2.type,
-          event2.data,
+          event2.type === "assistant/message" && typeof turn.id === "string" ? { ...record5(event2.data), codexTurnId: turn.id } : event2.data,
           normalizeTime(item.createdAt) || time3,
           event2.view,
           event2.type === "tool/result" && toolCallSeq !== void 0 ? [toolCallSeq] : void 0
@@ -97535,7 +97535,8 @@ var CodexRemoteDomain = class {
       } : call.method === "thread/fork" && allowedThread !== void 0 ? {
         ...permission.params,
         ...allowedThread.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
-        ...codexThreadPermissionParams(permission)
+        ...codexThreadPermissionParams(permission),
+        excludeTurns: true
       } : call.method === "turn/start" ? {
         ...permission.params,
         ...allowedThread?.cwd === void 0 ? {} : { cwd: allowedThread.cwd },
