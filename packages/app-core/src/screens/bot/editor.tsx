@@ -504,10 +504,15 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
               </View>
             )}
             <Text style={styles.heading}>{s.bots.permissions}</Text>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {([
                 ['read-only', s.bots.permReadOnly],
                 ['workspace-write', s.bots.permWorkspace],
+                ...((permission === 'review' || (
+                  Array.isArray(object(state.permissions).options)
+                  && (object(state.permissions).options as unknown[]).some(raw =>
+                    (typeof raw === 'string' ? raw : text(object(raw).id)) === 'review')
+                )) ? [['review', s.dsBotSettings.permReview] as const] : []),
                 ['danger-full-access', s.bots.permFullAccess],
               ] as const).map(([val, label]) => (
                 <BotChoice key={val} label={label} checked={permission === val} disabled={busy} onPress={() => setPermission(val)} />

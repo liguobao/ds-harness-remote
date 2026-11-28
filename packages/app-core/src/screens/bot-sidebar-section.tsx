@@ -43,6 +43,7 @@ import {
   object,
   objects,
   pausedWorksList,
+  pendingBotRequests,
   text,
   type BotEntry,
   type BotRemoteClient,
@@ -106,10 +107,10 @@ export function botLiveStatus(state: BotState, bot: BotEntry): { kind: 'idle' | 
   const hasWorkWait = state.work.waiting?.[bot.id] !== undefined || state.work.waiting?.[bot.sessionId] !== undefined
     || pausedWorksList(state.work.paused, bot.id, bot.sessionId).length > 0
   const hasHoldOrRequest = Object.keys(object(state.browserHolds?.[bot.id] ?? state.browserHolds?.[bot.sessionId])).length > 0
-    || Object.keys(object(state.secretRequests?.[bot.id] ?? state.secretRequests?.[bot.sessionId])).length > 0
-    || Object.keys(object(state.connectorRequests[bot.id] ?? state.connectorRequests[bot.sessionId])).length > 0
-    || Object.keys(object(state.mailRequests[bot.id] ?? state.mailRequests[bot.sessionId])).length > 0
-  if (hasQuestion || hasApproval || hasView || hasWorkWait || hasHoldOrRequest || state.activity[bot.id] === 'alert' || bot.waiting || bot.blocked !== undefined) {
+    || pendingBotRequests(state.secretRequests, bot.id, bot.sessionId).length > 0
+    || pendingBotRequests(state.connectorRequests, bot.id, bot.sessionId).length > 0
+    || pendingBotRequests(state.mailRequests, bot.id, bot.sessionId).length > 0
+  if (hasQuestion || hasApproval || hasView || hasWorkWait || hasHoldOrRequest || state.activity[bot.id] === 'alert' || bot.waiting || bot.blocked !== undefined || Boolean(bot.sessionMissing)) {
     return { kind: 'waiting', label: s.bots.waiting }
   }
   const ownTurn = state.work.bots[bot.id] ?? state.activity[bot.id]

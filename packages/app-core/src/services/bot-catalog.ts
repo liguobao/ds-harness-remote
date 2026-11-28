@@ -10,7 +10,7 @@ export interface BotEntry {
   extraDirs?: string[]
   blocked?: BotObject
   failures?: BotObject
-  sessionMissing?: boolean
+  sessionMissing?: boolean | string
   agentPreset?: string
   packs?: BotObject
   name: string
@@ -239,7 +239,6 @@ export class BotRemoteClient {
           this.helloInfo = null
           return null
         }
-        this.helloInfo = null
         return null
       } finally {
         if (this.helloPromise === pending) this.helloPromise = undefined
@@ -435,7 +434,7 @@ export function parseBotState(value: unknown): BotState {
       ...(Array.isArray(entry.extraDirs) ? { extraDirs: entry.extraDirs.filter(nonempty) } : {}),
       ...(isBotObject(entry.blocked) ? { blocked: entry.blocked } : {}),
       ...(isBotObject(entry.failures) ? { failures: entry.failures } : {}),
-      ...(entry.sessionMissing === true ? { sessionMissing: true } : {}),
+      ...(entry.sessionMissing === true || nonempty(entry.sessionMissing) ? { sessionMissing: entry.sessionMissing } : {}),
       ...(nonempty(entry.agentPreset) ? { agentPreset: entry.agentPreset } : {}),
       ...(isBotObject(entry.packs) ? { packs: entry.packs } : {}),
       name: text(entry.name) || entry.id,
@@ -745,6 +744,45 @@ export function pausedWorksList(
   if (botId && paused[botId] !== undefined) return [isBotObject(paused[botId]) ? paused[botId] : { id: botId, from: botId }]
   if (sessionId && paused[sessionId] !== undefined) return [isBotObject(paused[sessionId]) ? paused[sessionId] : { id: sessionId, from: botId }]
   return []
+}
+
+/** Normalize DS-Bot pending requests across arrays, single objects, and keyed maps. */
+export function pendingBotRequests(map: BotObject | undefined, ...keys: Array<string | undefined>): BotObject[] {
+  if (!isBotObject(map)) return []
+  const seenKeys = new Set<string>()
+  const collected: BotObject[] = []
+  const seenIds = new Set<string>()
+  const push = (req: BotObject) => {
+    const status = text(req.status)
+    if (status !== '' && status !== 'pending') return
+    const id = text(req.id)
+    if (id !== '') {
+      if (seenIds.has(id)) return
+      seenIds.add(id)
+    }
+    collected.push(req)
+  }
+  for (const key of keys) {
+    if (!key || seenKeys.has(key)) continue
+    seenKeys.add(key)
+    const raw = map[key]
+    if (raw === undefined || raw === null) continue
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        if (isBotObject(entry)) push(entry)
+      }
+      continue
+    }
+    if (!isBotObject(raw) || Object.keys(raw).length === 0) continue
+    if ('id' in raw || 'status' in raw || 'kind' in raw || 'name' in raw || 'secret' in raw || 'subject' in raw || 'connectorId' in raw) {
+      push(raw)
+    } else {
+      for (const entry of Object.values(raw)) {
+        if (isBotObject(entry)) push(entry)
+      }
+    }
+  }
+  return collected
 }
 function nonempty(value: unknown): value is string { return typeof value === 'string' && value.length > 0 }
 

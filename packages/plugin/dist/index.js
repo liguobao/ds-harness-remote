@@ -95073,6 +95073,21 @@ var HostAttentionTracker = class {
       }
       return;
     }
+    if (body.endpoint === "learning-answer") {
+      const proposalId = isRecord12(body.payload) ? firstNonEmptyString(body.payload.id) : void 0;
+      const botId = isRecord12(body.payload) && typeof body.payload.botId === "string" ? body.payload.botId : void 0;
+      const sessionId = (isRecord12(body.payload) && typeof body.payload.sessionId === "string" ? body.payload.sessionId : void 0) ?? (botId !== void 0 ? this.botNamesById.get(botId)?.sessionId : void 0);
+      if (proposalId !== void 0) {
+        this.onInteractionResolved(botInboxItemId("learning", proposalId));
+      } else if (sessionId !== void 0) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith("ds-bot:inbox:learning:") && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id);
+          }
+        }
+      }
+      return;
+    }
     if (body.endpoint === "secret-set" || body.endpoint === "secret-allow" || body.endpoint === "secret-cancel" || body.endpoint === "mail-send-answer") {
       const kind = body.endpoint === "mail-send-answer" ? "mail" : "secret";
       const requestId2 = isRecord12(body.payload) ? firstNonEmptyString(body.payload.id, body.payload.requestId) : void 0;
@@ -96138,7 +96153,7 @@ function harnessQuestionItemId(eventId) {
 function harnessProjectedQuestionItemId(sessionId, callId) {
   return truncateId(`harness:question:${sessionId}:${callId}`, 256);
 }
-var BOT_INBOX_APPROVAL_KINDS = /* @__PURE__ */ new Set(["secret", "connector", "mail", "computer", "handoff"]);
+var BOT_INBOX_APPROVAL_KINDS = /* @__PURE__ */ new Set(["secret", "connector", "mail", "computer", "handoff", "learning"]);
 var BOT_INBOX_QUESTION_KINDS = /* @__PURE__ */ new Set(["view", "goal", "blocked", "model", "paused", "room-paused"]);
 function botApprovalItemId(approvalId) {
   return truncateId(`ds-bot:approval:${approvalId}`, 256);

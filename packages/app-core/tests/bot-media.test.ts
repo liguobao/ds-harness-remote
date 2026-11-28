@@ -90,6 +90,17 @@ describe('bot media upload staging and chunked download', () => {
     }))
     const legacy = await downloadBotFileChunked({ call: legacyCall }, { sessionId: 'bot-s1', attachmentId: 'att-1' }, { chunked: false })
     expect(new TextDecoder().decode(legacy.bytes)).toBe('12345')
+
+    // Implicit legacy Host (chunked: undefined) returning single packet without done/nextOffset stops after 1 call.
+    const implicitLegacyCall = vi.fn(async () => ({
+      name: 'legacy2.txt',
+      mime: 'text/plain',
+      size: 5,
+      bytes: bytesToBase64(new TextEncoder().encode('67890')),
+    }))
+    const implicitLegacy = await downloadBotFileChunked({ call: implicitLegacyCall }, { sessionId: 'bot-s1', attachmentId: 'att-2' })
+    expect(implicitLegacyCall).toHaveBeenCalledTimes(1)
+    expect(new TextDecoder().decode(implicitLegacy.bytes)).toBe('67890')
   })
 
   it('fetches bounded image previews with data URI normalization', async () => {

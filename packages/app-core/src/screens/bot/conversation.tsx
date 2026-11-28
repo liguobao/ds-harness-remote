@@ -6,7 +6,7 @@ import { AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, Pressable, Sc
 import { Image as ImageIcon, MessageCircle, Paperclip, Users, X } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { BUILT_IN_PROMPTS, type CustomPrompt } from '../../services/storage'
-import { botMessageRequest, formatBotSubmission, isBotObject, object, objects, pausedWorksList, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
+import { botMessageRequest, formatBotSubmission, isBotObject, object, objects, pausedWorksList, pendingBotRequests, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
 import {
   BOT_STAGED_IMAGE_TYPES,
   BOT_STAGED_MAX_BYTES,
@@ -391,10 +391,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const attachmentId = text(file.attachmentId) || undefined
     const name = text(file.name) || text(file.path).split(/[\\/]/).pop() || 'file'
     try {
+      await client.negotiate()
       const downloaded = await downloadBotFileChunked(
         client,
         { sessionId: fileSessionId, attachmentId, seq, index, name },
-        { chunked: client.hasCapability('file-download-chunks') || undefined },
+        { chunked: client.hasCapability('file-download-chunks') },
       )
       await saveBotDownloadedFile(downloaded)
     } catch (reason) {
@@ -528,8 +529,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const signal = request.current.signal
     try {
       if (room !== undefined) {
-        const defaultCursor = cursor === undefined && (room.ownParts?.length ?? 0) > 0
-          ? { part: Math.max(0, (room.ownParts?.length ?? 0) - 1) }
+        const ownParts = room.ownParts ?? []
+        const currentPartIdx = ownParts.indexOf(session.sessionId)
+        const initialPart = currentPartIdx > 0 ? currentPartIdx - 1 : ownParts.length - 1
+        const defaultCursor = cursor === undefined && initialPart >= 0
+          ? { part: initialPart }
           : cursor
         const value = object(await client.call('room-chat', {
           roomId: room.id,
@@ -582,9 +586,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     void tick()
     return () => { control.abort(); clearTimeout(timer) }
   }, [active, connected, bot?.id, client, session.sessionId, pendingAsidePages])
-  const question = object(state.questions[session.sessionId])
-  const view = object(state.views[session.sessionId])
-  const closedCards = object(state.closedCards[session.sessionId])
+  const question = object(state.questions[session.sessionId] ?? state.questions[logicalOwnerId])
+  const view = object(state.views[session.sessionId] ?? state.views[logicalOwnerId])
+  const closedCards = object(state.closedCards[session.sessionId] ?? state.closedCards[logicalOwnerId])
   const approvals = state.approvals.filter(entry => {
     if (entry.answerable === false || text(object(entry.review).status) === 'reviewing') return false
     if (room) return entry.roomId === room.id
@@ -592,18 +596,15 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   })
   const pendingSecretRequests = useMemo(() => {
     if (!bot) return []
-    return objects(state.secretRequests?.[bot.id] ?? state.secretRequests?.[session.sessionId])
-      .filter(req => text(req.status) === 'pending' && text(req.id) !== '')
+    return pendingBotRequests(state.secretRequests, bot.id, session.sessionId).filter(req => text(req.id) !== '')
   }, [bot, state.secretRequests, session.sessionId])
   const pendingConnectorRequests = useMemo(() => {
     if (!bot) return []
-    return objects(state.connectorRequests[bot.id] ?? state.connectorRequests[session.sessionId])
-      .filter(req => text(req.status) === 'pending' && text(req.id) !== '')
+    return pendingBotRequests(state.connectorRequests, bot.id, session.sessionId).filter(req => text(req.id) !== '')
   }, [bot, state.connectorRequests, session.sessionId])
   const pendingMailRequests = useMemo(() => {
     if (!bot) return []
-    return objects(state.mailRequests[bot.id] ?? state.mailRequests[session.sessionId])
-      .filter(req => text(req.status) === 'pending' && text(req.id) !== '')
+    return pendingBotRequests(state.mailRequests, bot.id, session.sessionId).filter(req => text(req.id) !== '')
   }, [bot, state.mailRequests, session.sessionId])
   const pendingLearning = useMemo(() => {
     if (!bot) return []
@@ -643,7 +644,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const botAttentionBlocked = Boolean(
     bot !== undefined && (
       bot.blocked !== undefined
-      || bot.sessionMissing === true
+      || Boolean(bot.sessionMissing)
       || text(object(bot.failures?.[session.sessionId]).code) === 'OVERFLOW'
     ),
   )
@@ -882,7 +883,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     (bot
       && (bot.parts ?? []).some(id => id !== session.sessionId)
       && bot.parts?.[0] !== session.sessionId)
-    || (room && (room.ownParts ?? []).length > 0),
+    || (room
+      && (room.ownParts ?? []).some(id => id !== session.sessionId)
+      && room.ownParts?.[0] !== session.sessionId),
   )
   const showLoadOlder = hasMore || (hasEarlierParts && cursor !== null && client !== undefined)
   const updateAtEnd = (nativeEvent: { contentOffset: { y: number }; contentSize: { height: number }; layoutMeasurement: { height: number } }) => {

@@ -10,6 +10,7 @@ import {
   isScopedKnownBotSessionId,
   parseBotState,
   pausedWorksList,
+  pendingBotRequests,
   trackScopedBotStateSessions,
   type BotOperation,
 } from '../src/services/bot-catalog'
@@ -583,5 +584,45 @@ describe('Android Bot client authority', () => {
     })
     expect(merged?.secrets).toEqual([{ name: 'OPENAI_KEY', scope: ['chief'] }])
     expect(merged?.secretStore).toEqual({ unlocked: true })
+  })
+
+  it('retries negotiate() after transient errors, preserves string sessionMissing, and normalizes pendingBotRequests across arrays/maps', async () => {
+    let calls = 0
+    const rpcCall = vi.fn(async (endpoint: BotOperation) => ({ ok: true, value: { endpoint } }))
+    const retryClient = new BotRemoteClient(
+      async () => {
+        calls += 1
+        if (calls === 1) throw new Error('temporary network blip')
+        return envelope({ api: 1, capabilities: ['rpc'], rpc: { call: 'dsBot/call', feed: 'dsBot/feed' } })
+      },
+      async () => [],
+      () => {},
+      { call: rpcCall, openFeed: vi.fn(async () => { throw new Error('unused') }) },
+    )
+    expect(await retryClient.negotiate()).toBeNull()
+    expect(retryClient.hasCapability('rpc')).toBe(false)
+    const negotiated = await retryClient.negotiate()
+    expect(negotiated?.capabilities.has('rpc')).toBe(true)
+    await expect(retryClient.call('models')).resolves.toEqual({ endpoint: 'models' })
+    expect(rpcCall).toHaveBeenCalledTimes(1)
+
+    const parsedMissing = parseBotState({
+      bots: [{ id: 'chief', sessionId: 's-1', name: 'Chief', sessionMissing: 's-1' }],
+      rooms: [],
+    })
+    expect(parsedMissing.bots[0]?.sessionMissing).toBe('s-1')
+
+    expect(pendingBotRequests({
+      chief: [
+        { id: 'r1', status: 'answered' },
+        { id: 'r2', status: 'pending', name: 'OPENAI_KEY' },
+      ],
+    }, 'chief', 's-1').map(r => r.id)).toEqual(['r2'])
+    expect(pendingBotRequests({
+      's-1': { reqMapKey: { id: 'r3', status: 'pending' }, doneKey: { id: 'r4', status: 'cancelled' } },
+    }, 'chief', 's-1').map(r => r.id)).toEqual(['r3'])
+    expect(pendingBotRequests({
+      chief: { id: 'r5', kind: 'fill' },
+    }, 'chief').map(r => r.id)).toEqual(['r5'])
   })
 })

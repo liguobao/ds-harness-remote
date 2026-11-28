@@ -1603,7 +1603,10 @@ describe('HostAttentionTracker', () => {
                     work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
                     inbox: {
                       items: stateCalls === 1
-                        ? [{ id: 'view:v-1', kind: 'view', ref: 'v-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'Form' }]
+                        ? [
+                            { id: 'view:v-1', kind: 'view', ref: 'v-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'Form' },
+                            { id: 'learning:lp-1', kind: 'learning', ref: 'lp-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'skills/helper/SKILL.md' },
+                          ]
                         : stateCalls === 2
                           ? [{ id: 'secret:s-1', kind: 'secret', ref: 's-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'API key' }]
                           : [],
@@ -1630,10 +1633,13 @@ describe('HostAttentionTracker', () => {
       await vi.waitFor(() => {
         expect(stateCalls).toBeGreaterThanOrEqual(1)
         expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:view:v-1')).toBe(true)
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:learning:lp-1')).toBe(true)
       })
-      // View reply resolves prefixed inbox item `id: 'view:v-1'` via stripped `ref`.
+      // View reply and learning answer resolve prefixed inbox items via stripped `ref`.
       tracker.observeBotResponse('api/bot', { endpoint: 'view-reply', payload: { sessionId: 'sess-a', viewId: 'v-1' } }, { status: 200, json: { ok: true, value: true } })
       expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:view:v-1')).toBe(false)
+      tracker.observeBotResponse('api/bot', { endpoint: 'learning-answer', payload: { id: 'lp-1', approve: true } }, { status: 200, json: { ok: true, value: true } })
+      expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:learning:lp-1')).toBe(false)
 
       // DS-Bot emits `'revision'` on rt.save() instead of `'state'`.
       feedStream.push({ event: 'revision', data: { revision: 2 } })

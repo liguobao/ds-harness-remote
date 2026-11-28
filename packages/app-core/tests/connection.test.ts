@@ -236,6 +236,7 @@ afterEach(async () => {
       } else {
         const client = connection.requireBotClient()
         if (outcome === 'current') {
+          expect(connection.requireBotClient()).toBe(client)
           vi.spyOn(core, 'rpc').mockResolvedValueOnce({ status: 200, json: { ok: true, value: { bots: [], rooms: [] } } })
           await expect(client.state()).resolves.toMatchObject({ bots: [], rooms: [] })
           expect(core.rpc).toHaveBeenCalledWith('plugin.route.call', { route: 'api/bot', body: { endpoint: 'state', payload: { avatars: 'ref' } } }, undefined)

@@ -554,6 +554,23 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       return
     }
 
+    if (body.endpoint === 'learning-answer') {
+      const proposalId = isRecord(body.payload) ? firstNonEmptyString(body.payload.id) : undefined
+      const botId = isRecord(body.payload) && typeof body.payload.botId === 'string' ? body.payload.botId : undefined
+      const sessionId = (isRecord(body.payload) && typeof body.payload.sessionId === 'string' ? body.payload.sessionId : undefined)
+        ?? (botId !== undefined ? this.botNamesById.get(botId)?.sessionId : undefined)
+      if (proposalId !== undefined) {
+        this.onInteractionResolved(botInboxItemId('learning', proposalId))
+      } else if (sessionId !== undefined) {
+        for (const item of [...this.items.values()]) {
+          if (item.id.startsWith('ds-bot:inbox:learning:') && item.sessionId === sessionId) {
+            this.onInteractionResolved(item.id)
+          }
+        }
+      }
+      return
+    }
+
     if (
       body.endpoint === 'secret-set'
       || body.endpoint === 'secret-allow'
@@ -1777,7 +1794,7 @@ function harnessProjectedQuestionItemId(sessionId: string, callId: string): stri
   return truncateId(`harness:question:${sessionId}:${callId}`, 256)
 }
 
-const BOT_INBOX_APPROVAL_KINDS = new Set(['secret', 'connector', 'mail', 'computer', 'handoff'])
+const BOT_INBOX_APPROVAL_KINDS = new Set(['secret', 'connector', 'mail', 'computer', 'handoff', 'learning'])
 const BOT_INBOX_QUESTION_KINDS = new Set(['view', 'goal', 'blocked', 'model', 'paused', 'room-paused'])
 
 function botApprovalItemId(approvalId: string): string {

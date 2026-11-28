@@ -193,7 +193,7 @@ export async function downloadBotFileChunked(
     }
     options?.onProgress?.(loaded, totalSize || loaded)
 
-    if (raw.done === true) break
+    if (raw.done === true || (raw.done === undefined && typeof raw.nextOffset !== 'number')) break
     const nextOffset = typeof raw.nextOffset === 'number' && Number.isSafeInteger(raw.nextOffset)
       ? raw.nextOffset
       : offset + bytes.byteLength

@@ -851,6 +851,11 @@ export function BotProfilePage({
                         [
                           ['read-only', s.bots.permReadOnly, false],
                           ['workspace-write', s.bots.permWorkspace, false],
+                          ...((currentPerm === 'review' || (
+                            Array.isArray(object(state.permissions).options)
+                            && (object(state.permissions).options as unknown[]).some(raw =>
+                              (typeof raw === 'string' ? raw : text(object(raw).id)) === 'review')
+                          )) ? [['review', s.dsBotSettings.permReview, false] as const] : []),
                           ['danger-full-access', s.bots.permFullAccess, true],
                         ] as const
                       ).map(([val, label, danger]) => {
