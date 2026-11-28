@@ -124,7 +124,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const [stagedImages, setStagedImages] = useState<Array<{ id: string; mediaType: string; data: string; name?: string }>>([])
   const [stagedFiles, setStagedFiles] = useState<Array<{ id: string; name: string; data: string }>>([])
   const [sideChatOpen, setSideChatOpen] = useState(false)
-  const [selectedTask, setSelectedTask] = useState<BotObject | undefined>(undefined)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(undefined)
+  const selectedTask = useMemo(
+    () => (selectedTaskId ? objects(bot?.tasks).find(t => text(t.id) === selectedTaskId) : undefined),
+    [bot?.tasks, selectedTaskId],
+  )
   const [fileLinkPath, setFileLinkPath] = useState<string>()
   const sessions = useAppStore(store => store.sessions)
   const openSession = useAppStore(store => store.openSession)
@@ -211,7 +215,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     setStagedImages([])
     setStagedFiles([])
     setSideChatOpen(false)
-    setSelectedTask(undefined)
+    setSelectedTaskId(undefined)
   }, [memoryScope, logicalOwnerId])
 
   const updateAtMention = (nextText: string, cursor: number) => {
@@ -582,7 +586,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const view = object(state.views[session.sessionId])
   const closedCards = object(state.closedCards[session.sessionId])
   const approvals = state.approvals.filter(entry => {
-    if (entry.answerable !== true || text(object(entry.review).status) === 'reviewing') return false
+    if (entry.answerable === false || text(object(entry.review).status) === 'reviewing') return false
     if (room) return entry.roomId === room.id
     return entry.roomId === undefined && (entry.sessionId === session.sessionId || (bot !== undefined && entry.botId === bot.id))
   })
@@ -636,9 +640,16 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       || Object.values(computerHolds).some(matchesTarget),
     )
   }, [state.computerLive, bot, room, session.sessionId])
+  const botAttentionBlocked = Boolean(
+    bot !== undefined && (
+      bot.blocked !== undefined
+      || bot.sessionMissing === true
+      || text(object(bot.failures?.[session.sessionId]).code) === 'OVERFLOW'
+    ),
+  )
   const hasDesktopPendingRequest = Boolean(
     hasComputerHold
-    || (bot?.blocked !== undefined)
+    || botAttentionBlocked
     || pendingSecretRequests.length > 0
     || pendingConnectorRequests.length > 0
     || pendingMailRequests.length > 0
@@ -1121,7 +1132,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
             />
           </View>
         )}
-        {bot !== undefined && bot.blocked !== undefined && (
+        {botAttentionBlocked && bot !== undefined && (
           <BotBlockedCard bot={bot} sessionId={session.sessionId} disabled={disabled} perform={perform} />
         )}
         {approvals.map(approval => (
@@ -1215,7 +1226,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         canBackground={Boolean(state.work.canBackground?.[bot.id])}
         disabled={disabled}
         onMoveToBackground={() => void perform('bot-move-to-background', { botId: bot.id, sessionId: session.sessionId })}
-        onSelectTask={setSelectedTask}
+        onSelectTask={task => setSelectedTaskId(text(task.id) || undefined)}
       />
     )}
     {bot !== undefined && objects(state.sideChats?.[bot.id]).length > 0 && (
@@ -1335,7 +1346,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         botId={bot.id}
         client={client}
         busy={disabled}
-        onClose={() => setSelectedTask(undefined)}
+        onClose={() => setSelectedTaskId(undefined)}
         perform={perform}
       />
     )}

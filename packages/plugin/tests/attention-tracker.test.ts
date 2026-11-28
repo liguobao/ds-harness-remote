@@ -1553,4 +1553,103 @@ describe('HostAttentionTracker', () => {
       expect(feedStream.wasReturned()).toBe(true)
     }
   })
+
+  it('handles revision frames, ref-based inbox resolution, startup retry, and mid-sync live frames on dsBot/feed', async () => {
+    const feedStream = createManualEventStream()
+    let mounted = false
+    let stateCalls = 0
+    let releaseSecondSync!: () => void
+    const secondSyncGate = new Promise<void>(resolve => {
+      releaseSecondSync = resolve
+    })
+    const tracker = new HostAttentionTracker({
+      logger: silentLogger(),
+      debounceMs: 10,
+      observerBackoffMs: [10, 20],
+      localGateway: {
+        supportsCarrier: true,
+        invoke: vi.fn(),
+        dispatch: vi.fn(),
+        open: vi.fn(),
+        failure: error => ({ code: (error as { code?: string }).code ?? 'internal', message: 'fail', details: {} }),
+        createPeer: () => ({
+          supportsCarrier: true,
+          invoke: vi.fn(),
+          dispatch: vi.fn(async (endpoint, payload) => {
+            if (endpoint !== 'dsBot/call') {
+              return { ok: false as const, error: { code: 'gateway/not-found', message: 'missing', details: {} } }
+            }
+            const args = (payload as { args?: { endpoint?: string; payload?: Record<string, unknown> } })?.args
+            if (args?.endpoint === 'hello') {
+              if (!mounted) {
+                return { ok: false as const, error: { code: 'gateway/invocation-unavailable', message: 'mounting', details: {} } }
+              }
+              return { ok: true as const, value: { ok: true, value: { api: 1, capabilities: ['rpc', 'feed'], rpc: { call: 'dsBot/call', feed: 'dsBot/feed' } } } }
+            }
+            if (args?.endpoint === 'state') {
+              stateCalls += 1
+              if (stateCalls === 2) {
+                await secondSyncGate
+              }
+              return {
+                ok: true as const,
+                value: {
+                  ok: true,
+                  value: {
+                    revision: stateCalls,
+                    liveKey: `lk-${stateCalls}`,
+                    bots: [{ id: 'bot-a', sessionId: 'sess-a', name: 'Alpha' }],
+                    rooms: [],
+                    work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
+                    inbox: {
+                      items: stateCalls === 1
+                        ? [{ id: 'view:v-1', kind: 'view', ref: 'v-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'Form' }]
+                        : stateCalls === 2
+                          ? [{ id: 'secret:s-1', kind: 'secret', ref: 's-1', botId: 'bot-a', sessionId: 'sess-a', summary: 'API key' }]
+                          : [],
+                    },
+                  },
+                },
+              }
+            }
+            return { ok: false as const, error: { code: 'gateway/not-found', message: 'missing', details: {} } }
+          }),
+          open: vi.fn(async endpoint => {
+            if (endpoint === 'dsBot/feed') return feedStream.stream
+            throw Object.assign(new Error('not found'), { code: 'gateway/not-found' })
+          }),
+          failure: error => ({ code: (error as { code?: string }).code ?? 'internal', message: 'fail', details: {} }),
+          dispose: vi.fn(async () => undefined),
+        }),
+      },
+    })
+
+    setTimeout(() => { mounted = true }, 15)
+    tracker.startBotFeed()
+    try {
+      await vi.waitFor(() => {
+        expect(stateCalls).toBeGreaterThanOrEqual(1)
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:view:v-1')).toBe(true)
+      })
+      // View reply resolves prefixed inbox item `id: 'view:v-1'` via stripped `ref`.
+      tracker.observeBotResponse('api/bot', { endpoint: 'view-reply', payload: { sessionId: 'sess-a', viewId: 'v-1' } }, { status: 200, json: { ok: true, value: true } })
+      expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:view:v-1')).toBe(false)
+
+      // DS-Bot emits `'revision'` on rt.save() instead of `'state'`.
+      feedStream.push({ event: 'revision', data: { revision: 2 } })
+      await vi.waitFor(() => {
+        expect(stateCalls).toBe(2)
+      })
+      // Push `'live'` while sync #2 is still in flight; follow-up sync #3 must run once #2 settles.
+      feedStream.push({ event: 'live', data: {} })
+      await new Promise(resolve => setTimeout(resolve, 180))
+      releaseSecondSync()
+      await vi.waitFor(() => {
+        expect(stateCalls).toBeGreaterThanOrEqual(3)
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:secret:s-1')).toBe(false)
+      })
+    } finally {
+      await tracker.close()
+    }
+  })
 })

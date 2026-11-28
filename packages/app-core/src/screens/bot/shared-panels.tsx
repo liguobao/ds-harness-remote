@@ -391,7 +391,9 @@ export function BotBrowserGrantsSection({
     const normalizedSite = site.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
     if (!normalizedSite) return
     const existing = (targetBot.browserGrants ?? []).filter(g => text(g.site) !== normalizedSite)
-    const nextGrants = [...existing, { site: normalizedSite, actions, until: computeUntil() }]
+    const until = computeUntil()
+    const nextGrant: BotObject = { site: normalizedSite, kinds: actions, ...(until !== null ? { until } : {}) }
+    const nextGrants = [...existing, nextGrant]
     const res = await perform('update-bot', { id: targetBot.id, browserGrants: nextGrants })
     if (res.ok) {
       setSite('')
@@ -435,7 +437,12 @@ export function BotBrowserGrantsSection({
         ) : (
           rows.map((row, idx) => {
             const siteText = text(row.grant.site)
-            const acts = Array.isArray(row.grant.actions) ? row.grant.actions.map(a => actionLabels[String(a)] ?? String(a)) : []
+            const rawKinds = Array.isArray(row.grant.kinds)
+              ? row.grant.kinds
+              : Array.isArray(row.grant.actions)
+                ? row.grant.actions
+                : []
+            const acts = rawKinds.map(a => actionLabels[String(a)] ?? String(a))
             const untilText = formatUntilLabel(row.grant.until)
             return (
               <View key={row.key}>

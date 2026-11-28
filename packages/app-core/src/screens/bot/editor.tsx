@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Alert } from '../../ui/alert'
 import { strings as s } from '../../locales/i18n'
-import { BOT_STAGED_IMAGE_TYPES, base64ToBytes } from '../../services/bot-media'
+import { BOT_STAGED_IMAGE_TYPES } from '../../services/bot-media'
 import { canDeleteBot, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotOperation, type BotObject, type BotRemoteClient } from '../../services/bot-catalog'
 import { ChevronDown, ChevronUp, Plus, RotateCcw, Trash2, X } from 'lucide-react-native'
 import { Button, IconButton } from '../../ui/components'
@@ -258,7 +258,7 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7,
+        quality: 0.4,
         base64: true,
       })
       if (result.canceled || !result.assets?.[0]) return
@@ -266,11 +266,13 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
       const mediaType = asset.mimeType ?? 'image/jpeg'
       const data = asset.base64 ?? ''
       if (!BOT_STAGED_IMAGE_TYPES.has(mediaType) || !data) return
-      if (base64ToBytes(data).byteLength > 1024 * 1024) {
-        Alert.alert(s.chat.imageLimitTitle, s.chat.imageTooLarge(asset.fileName || 'avatar', '1 MB'))
+      const dataUrl = `data:${mediaType};base64,${data}`
+      // Align with DS-Bot Host MAX_AVATAR_IMAGE (160,000 data-URL characters, ~117 KB binary).
+      if (dataUrl.length > 160_000) {
+        Alert.alert(s.chat.imageLimitTitle, s.chat.imageTooLarge(asset.fileName || 'avatar', '117 KB'))
         return
       }
-      setAvatarImage(`data:${mediaType};base64,${data}`)
+      setAvatarImage(dataUrl)
     } catch {
       Alert.alert(s.chat.imagePickerFailedTitle, s.chat.imagePickerFailedBody)
     }
@@ -457,7 +459,7 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
                 {presets.map((p, idx) => {
                   const pid = text(p.id)
                   const plabel = text(p.name) || pid
-                  const fit = p.fit !== false
+                  const fit = text(p.broken) === '' && p.fit !== false
                   return (
                     <BotChoice
                       key={pid || idx}

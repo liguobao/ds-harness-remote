@@ -118,7 +118,7 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
   - **仅认 `gateway/arguments-invalid`**（零调用、5s 预算，禁换合法空请求扫库；余错或意外成功均 fail-closed）。
 - `session/list` 超 2,048 行时 Host 只留最新根会话并提升 `projections.values.title`，Client 先过滤再截断。
 - Harness v1 审批限 `allow_once | deny`（禁 `allow_session`）；问答限 `userQuestions/answer|attachWait`（断线释 claim）。
-- `packages/plugin/src/plugin-route-bridge.ts` 仅放行 `api/session/uploadFileBinary` 与 `packages/plugin/tests/fixtures/ds-bot-v0.3.8-endpoints.json` 175 端点 + `btw`/`btw-cancel`/`room-continue`：
+- `packages/plugin/src/plugin-route-bridge.ts` 仅放行 `api/session/uploadFileBinary` 与 `packages/plugin/tests/fixtures/ds-bot-v0.4.1-endpoints.json` 177 端点 + 旧版兼容（`btw`/`btw-cancel`/`room-continue`/`bot-new-part`/`bot-open-part`）：
   - 保持 30s 预算与不重放 mutation。
   - 管理/凭据/电脑控制/审批 `choice` 交认证后 DS-Bot handler 校验。
 - 仅六类受限写入例外（禁通用 fs 写或远程桌面 RPC）：

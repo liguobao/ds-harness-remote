@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ArrowDownToLine, Layers, Send, X } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
@@ -12,6 +12,8 @@ import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ModalSurface } from '../chat/modal'
 import type { BotPerform } from './editor'
 import { createBotStyles } from './styles'
+
+const ACTIVE_TASK_STATUSES = new Set(['running', 'active', 'waiting_work', 'waiting_approval'])
 
 export function BotTaskBar({
   botId,
@@ -58,7 +60,7 @@ export function BotTaskBar({
         const taskId = text(task.id)
         const label = text(task.name) || text(task.title) || text(task.label) || taskId || `Task ${idx + 1}`
         const status = text(task.status)
-        const running = status === 'running' || status === 'active' || task.running === true
+        const running = ACTIVE_TASK_STATUSES.has(status) || task.running === true
         return (
           <Pressable
             key={taskId || idx}
@@ -103,33 +105,43 @@ export function BotTaskDetailModal({
   const [followup, setFollowup] = useState('')
 
   const status = task ? text(task.status) : ''
-  const running = status === 'running' || status === 'active' || task?.running === true
+  const running = ACTIVE_TASK_STATUSES.has(status) || task?.running === true
   const title = task ? (text(task.name) || text(task.title) || text(task.label) || taskId) : s.bots.backgroundTasks
+  const activeFetchRef = useRef<AbortController | undefined>(undefined)
 
-  const fetchTaskPage = async (signal?: AbortSignal) => {
+  const fetchTaskPage = async (signal: AbortSignal) => {
     if (!client || !taskId) return
     setLoading(true)
     setLoadError(undefined)
     try {
       const value = object(await client.call('bot-task-read', { botId, taskId }, signal))
-      if (!signal?.aborted) {
+      if (!signal.aborted) {
         setItems(objects(value.items))
       }
     } catch (reason) {
-      if (!signal?.aborted) {
+      if (!signal.aborted) {
         setLoadError(reason instanceof Error ? reason.message : s.bots.unavailable)
       }
     } finally {
-      if (!signal?.aborted) setLoading(false)
+      if (!signal.aborted) setLoading(false)
     }
   }
 
   useEffect(() => {
-    if (!task || !taskId) return
+    if (!taskId) {
+      activeFetchRef.current?.abort()
+      activeFetchRef.current = undefined
+      return
+    }
+    activeFetchRef.current?.abort()
     const controller = new AbortController()
+    activeFetchRef.current = controller
     void fetchTaskPage(controller.signal)
-    return () => controller.abort()
-  }, [botId, taskId, client, task])
+    return () => {
+      controller.abort()
+      if (activeFetchRef.current === controller) activeFetchRef.current = undefined
+    }
+  }, [botId, taskId, client])
 
   const sendFollowup = async () => {
     const trimmed = followup.trim()
@@ -137,7 +149,10 @@ export function BotTaskDetailModal({
     const result = await perform('bot-task-send', { botId, taskId, text: trimmed })
     if (result.ok) {
       setFollowup('')
-      void fetchTaskPage()
+      activeFetchRef.current?.abort()
+      const controller = new AbortController()
+      activeFetchRef.current = controller
+      void fetchTaskPage(controller.signal)
     }
   }
 

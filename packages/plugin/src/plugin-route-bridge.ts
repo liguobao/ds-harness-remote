@@ -236,6 +236,7 @@ export class PluginRouteBridge {
     const startedAt = performance.now()
     const signal = AbortSignal.timeout(timeoutMs)
     let result: { status: number; json: unknown } | undefined
+    let fallbackToHttp = false
     if (params.route === 'api/bot' && this.localDsBotCall !== undefined && this.dsBotRpcAvailable) {
       try {
         const botBody = dispatchBody as { endpoint: string; payload?: Record<string, unknown> | null }
@@ -244,12 +245,27 @@ export class PluginRouteBridge {
           result = { status: 200, json: local.value }
         } else if (local.code !== undefined && TERMINAL_LOCAL_DS_BOT_CODES.has(local.code)) {
           this.dsBotRpcAvailable = false
+          fallbackToHttp = true
+        } else {
+          this.logger?.warn('plugin route call failed', {
+            route: params.route,
+            durationMs: Math.round(performance.now() - startedAt),
+          })
+          const rpcCode = local.code === 'gateway/timeout' || local.code === 'TIMEOUT' ? 'TIMEOUT' : 'INTERNAL_ERROR'
+          throw new RpcError(rpcCode, 'The local DS-Bot call failed.')
         }
-      } catch {
-        // Fall through to the HTTP/shared-fetch dispatcher on unexpected local carrier errors.
+      } catch (error) {
+        if (!fallbackToHttp) {
+          if (error instanceof RpcError) throw error
+          this.logger?.warn('plugin route call failed', {
+            route: params.route,
+            durationMs: Math.round(performance.now() - startedAt),
+          })
+          throw new RpcError(signal.aborted ? 'TIMEOUT' : 'INTERNAL_ERROR', 'The local DS-Bot call failed.')
+        }
       }
     }
-    if (result === undefined) {
+    if (result === undefined && (fallbackToHttp || params.route !== 'api/bot' || this.localDsBotCall === undefined || !this.dsBotRpcAvailable)) {
       try {
         result = await this.dispatch(params.route, dispatchBody, signal)
       } catch (error) {
@@ -259,6 +275,9 @@ export class PluginRouteBridge {
         })
         throw error
       }
+    }
+    if (result === undefined) {
+      throw new RpcError('INTERNAL_ERROR', 'The plugin route call produced no result.')
     }
     const sanitizedJson = params.route === 'api/bot' && result.status === 200
       ? sanitizeBotResponseJson(params.body.endpoint, result.json)

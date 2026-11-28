@@ -858,7 +858,7 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 完整暴露其 `channel.js` 的命名 endpoint 与 `computer/index.js` 的 `computer-*` endpoint，
 包括模型供应商、密钥、连接器、IM、手机配对、电脑控制、更新、诊断、头像、分组、记忆编辑与 Side Chat。
 精确清单见 `packages/plugin/src/plugin-route-bridge.ts` 的 `BOT_REMOTE_OPERATIONS`；
-独立上游快照见 `packages/plugin/tests/fixtures/ds-bot-v0.3.8-endpoints.json`。
+独立上游快照见 `packages/plugin/tests/fixtures/ds-bot-v0.4.1-endpoints.json`（含 `0.3.8`~`0.4.1` 增量端点，以及旧 Host 兼容端点）。
 v0.3.8 新增的变更审查、文件下载、Markdown 图片、群聊搜索/待办、任务批注/取消、
 供应商模型保存及密钥存储/解锁/加解密端点均通过相同的认证转发入口，业务校验由 DS-Bot 执行。
 旧 Host 的 `btw`、`btw-cancel`、`room-continue` 仍放行。

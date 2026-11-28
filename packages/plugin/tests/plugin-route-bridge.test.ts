@@ -264,4 +264,29 @@ describe('PluginRouteBridge', () => {
     expect(localCall).toHaveBeenCalledTimes(2)
     expect(httpDispatch).toHaveBeenCalledTimes(2)
   })
+
+  it('never replays mutations when local dsBot/call fails with a non-terminal error', async () => {
+    const httpDispatch = vi.fn(async () => ({ status: 200, json: { ok: true, value: true } }))
+    let mode: 'error-code' | 'throw' = 'error-code'
+    const localCall = vi.fn(async () => {
+      if (mode === 'throw') throw new Error('boom')
+      return { ok: false as const, code: 'gateway/internal' }
+    })
+    const bridge = new PluginRouteBridge(httpDispatch, undefined, undefined, localCall)
+
+    await expect(bridge.call({
+      route: 'api/bot',
+      body: { endpoint: 'send', payload: { sessionId: 'bot', text: 'hello' } },
+    })).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    expect(localCall).toHaveBeenCalledTimes(1)
+    expect(httpDispatch).not.toHaveBeenCalled()
+
+    mode = 'throw'
+    await expect(bridge.call({
+      route: 'api/bot',
+      body: { endpoint: 'create-bot', payload: { name: 'Helper' } },
+    })).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    expect(localCall).toHaveBeenCalledTimes(2)
+    expect(httpDispatch).not.toHaveBeenCalled()
+  })
 })

@@ -527,4 +527,61 @@ describe('Android Bot client authority', () => {
     expect(pausedWorksList(parsed.work.paused, undefined, undefined, 'room-1')[0]?.id).toBe('w-2')
     expect(pausedWorksList({ chief: { id: 'legacy-1', from: 'chief' } }, 'chief')[0]?.id).toBe('legacy-1')
   })
+
+  it('lazily negotiates dsBot/call on media/transfer call(), preserves work.activeRooms, failures/sessionMissing, and delta secrets', async () => {
+    const dispatch = vi.fn(async (body: { endpoint: BotOperation }) => {
+      expect(body.endpoint).toBe('hello')
+      return envelope({ api: 1, capabilities: ['rpc', 'file-download-chunks'], rpc: { call: 'dsBot/call', feed: 'dsBot/feed' } })
+    })
+    const rpcCall = vi.fn(async (endpoint: BotOperation) => {
+      if (endpoint === 'stage-image') return { ok: true, value: { id: 'img-1' } }
+      return {
+        ok: true,
+        value: {
+          revision: 4,
+          liveKey: 'lk-4',
+          bots: [{
+            id: 'chief',
+            sessionId: 's-1',
+            name: 'Chief',
+            sessionMissing: true,
+            failures: { 's-1': { code: 'OVERFLOW', message: 'Context full' } },
+          }],
+          rooms: [{ id: 'room-1', name: 'Group', members: ['chief'] }],
+          work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {}, activeRooms: ['room-1'] },
+        },
+      }
+    })
+    const client = new BotRemoteClient(dispatch, async () => [], () => {}, {
+      call: rpcCall,
+      openFeed: vi.fn(async () => { throw new Error('unused') }),
+    })
+
+    await expect(client.call('stage-image', { mediaType: 'image/png', data: 'AQID' })).resolves.toEqual({ id: 'img-1' })
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(rpcCall).toHaveBeenCalledWith('stage-image', { mediaType: 'image/png', data: 'AQID' }, undefined)
+
+    const initial = await client.state()
+    expect(rpcCall).toHaveBeenCalledWith('state', { avatars: 'ref' }, undefined)
+    expect(initial.work.activeRooms).toEqual(['room-1'])
+    expect(initial.bots[0]?.sessionMissing).toBe(true)
+    expect(initial.bots[0]?.failures?.['s-1']).toEqual({ code: 'OVERFLOW', message: 'Context full' })
+
+    const updated = parseBotState({
+      bots: [{ id: 'chief', sessionId: 's-1', name: 'Chief' }],
+      rooms: [{ id: 'room-1', name: 'Group', members: ['chief'] }],
+      secrets: [{ name: 'EXISTING', scope: 'all' }],
+    })
+    const delta = await client.state(undefined, false, updated)
+    expect(delta).toBeDefined()
+    expect(initial.bots[0]?.id).toBe('chief')
+
+    const merged = (await import('../src/services/bot-catalog')).mergeBotStateDelta(updated, {
+      unchanged: true,
+      secrets: [{ name: 'OPENAI_KEY', scope: ['chief'] }],
+      secretStore: { unlocked: true },
+    })
+    expect(merged?.secrets).toEqual([{ name: 'OPENAI_KEY', scope: ['chief'] }])
+    expect(merged?.secretStore).toEqual({ unlocked: true })
+  })
 })

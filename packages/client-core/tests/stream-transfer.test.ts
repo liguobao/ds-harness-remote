@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { HARNESS_API_TRANSFER_CHUNK_BYTES as chunkSize, type EventPayload } from '@dsh-remote/protocol'
 import type { RemoteClientCore } from '../src/index.js'
-import { probeRemoteHostFeatures, RemoteTypertGateway } from '../src/remote-gateway.js'
+import { canReplayOversizedResponse, probeRemoteHostFeatures, RemoteTypertGateway } from '../src/remote-gateway.js'
 
 it.each(['inline', 'chunked', 'wrong stream'])('receives session/control frames: %s', async mode => {
   let emit!: (event: EventPayload) => void
@@ -89,4 +89,14 @@ it('opens session follows with the last confirmed stream capability during a ref
   describe = async () => ({ capabilities: ['harness.remote.v3'] })
   await probeRemoteHostFeatures(core)
   await expectFollow(false)
+})
+
+it('allows oversized response replay only for explicitly read-only dsBot/call endpoints', () => {
+  expect(canReplayOversizedResponse('session/list')).toBe(true)
+  expect(canReplayOversizedResponse('dsBot/call', { args: { endpoint: 'image', payload: { id: 'img-1' } } })).toBe(true)
+  expect(canReplayOversizedResponse('dsBot/call', { args: { endpoint: 'file-download', payload: { sessionId: 's-1' } } })).toBe(true)
+  expect(canReplayOversizedResponse('dsBot/call', { args: { endpoint: 'state', payload: {} } })).toBe(true)
+  expect(canReplayOversizedResponse('dsBot/call', { args: { endpoint: 'send', payload: { text: 'hi' } } })).toBe(false)
+  expect(canReplayOversizedResponse('dsBot/call', { args: { endpoint: 'create-bot', payload: {} } })).toBe(false)
+  expect(canReplayOversizedResponse('dsBot/call')).toBe(false)
 })

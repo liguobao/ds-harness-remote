@@ -388,10 +388,15 @@ export function BotBlockedCard({
 }) {
   const styles = useThemedStyles(createInteractiveStyles)
   const blocked = object(bot.blocked)
-  const code = text(blocked.code) || 'error'
-  const detail = [text(blocked.provider), text(blocked.message) || text(blocked.reason)].filter(Boolean).join(' · ')
-  const isOverflow = /overflow|context|length/i.test(code)
-  const isMissingSession = /missing|not_found|session/i.test(code)
+  const sessionFailure = object(bot.failures?.[sessionId])
+  const failureCode = text(sessionFailure.code)
+  const code = text(blocked.code) || (bot.sessionMissing === true ? 'SESSION_MISSING' : failureCode) || 'error'
+  const detail = [
+    text(blocked.provider),
+    text(blocked.message) || text(blocked.reason) || text(sessionFailure.message) || text(sessionFailure.reason),
+  ].filter(Boolean).join(' · ')
+  const isOverflow = failureCode === 'OVERFLOW' || /overflow|context_length/i.test(code)
+  const isMissingSession = bot.sessionMissing === true || code === 'SESSION_MISSING' || code === 'SESSION_NOT_FOUND'
 
   return (
     <View style={styles.card}>

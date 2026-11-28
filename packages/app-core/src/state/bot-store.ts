@@ -311,7 +311,7 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
               }
               continue
             }
-            if (frame.event === 'hello' || frame.event === 'state' || frame.event === 'live' || frame.event === 'notice') {
+            if (frame.event === 'hello' || frame.event === 'state' || frame.event === 'revision' || frame.event === 'live' || frame.event === 'notice') {
               scheduleLiveRefresh()
             }
           }

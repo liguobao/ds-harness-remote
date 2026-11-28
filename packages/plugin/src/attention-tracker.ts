@@ -35,6 +35,7 @@ const TERMINAL_OBSERVER_ERROR_CODES = new Set([
   'gateway/invocation-unavailable',
 ])
 const MAX_SESSION_METADATA_ENTRIES = 512
+const MAX_TRACKED_TITLES = 2048
 
 export interface AttentionSessionInfo {
   backend: AttentionBackend
@@ -149,6 +150,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
   private botStateSyncTimer?: ReturnType<typeof setTimeout>
   private botStateSyncInFlight = false
   private botStateSyncPendingFull = false
+  private botStateSyncPendingLive = false
   private botStateRevision: number | undefined
   private botStateLiveKey: string | undefined
 
@@ -552,7 +554,12 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       return
     }
 
-    if (body.endpoint === 'secret-allow' || body.endpoint === 'secret-cancel' || body.endpoint === 'mail-send-answer') {
+    if (
+      body.endpoint === 'secret-set'
+      || body.endpoint === 'secret-allow'
+      || body.endpoint === 'secret-cancel'
+      || body.endpoint === 'mail-send-answer'
+    ) {
       const kind = body.endpoint === 'mail-send-answer' ? 'mail' : 'secret'
       const requestId = isRecord(body.payload) ? firstNonEmptyString(body.payload.id, body.payload.requestId) : undefined
       const botId = isRecord(body.payload) && typeof body.payload.botId === 'string' ? body.payload.botId : undefined
@@ -593,7 +600,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
         if (!isRecord(entry) || typeof entry.id !== 'string' || typeof entry.sessionId !== 'string') continue
         const name = typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : entry.id
         this.botNamesById.set(entry.id, { name, sessionId: entry.sessionId })
-        this.titleBySessionId.set(entry.sessionId, name)
+        this.rememberTitle(entry.sessionId, name)
         if (Array.isArray(entry.tasks)) {
           for (const task of entry.tasks) {
             if (isRecord(task) && typeof task.sessionId === 'string' && task.sessionId.length > 0) {
@@ -618,7 +625,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
         const sessionId = typeof entry.sessionId === 'string' && entry.sessionId.length > 0 ? entry.sessionId : entry.id
         const name = typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : entry.id
         this.roomNamesById.set(entry.id, { name, sessionId })
-        this.titleBySessionId.set(sessionId, name)
+        this.rememberTitle(sessionId, name)
         this.rememberMeta(sessionItemId('ds-bot', sessionId), {
           backend: 'ds-bot',
           mode: 'bot',
@@ -710,7 +717,10 @@ export class HostAttentionTracker implements AttentionBackendObserver {
         const isInboxApproval = BOT_INBOX_APPROVAL_KINDS.has(kind)
         const isInboxQuestion = BOT_INBOX_QUESTION_KINDS.has(kind)
         if (!isInboxApproval && !isInboxQuestion) continue
-        const rawItemId = firstNonEmptyString(entry.id, entry.callId, entry.requestId, entry.askId, entry.sessionId, entry.roomId, entry.botId)
+        const rawFromId = typeof entry.id === 'string' && entry.id.startsWith(`${kind}:`)
+          ? entry.id.slice(kind.length + 1)
+          : entry.id
+        const rawItemId = firstNonEmptyString(entry.ref, rawFromId, entry.callId, entry.requestId, entry.askId, entry.sessionId, entry.roomId, entry.botId)
         if (rawItemId === undefined) continue
         const room = typeof entry.roomId === 'string' ? this.roomNamesById.get(entry.roomId) : undefined
         const taskOwner = typeof entry.sessionId === 'string' ? this.taskOwnerBySessionId.get(entry.sessionId) : undefined
@@ -937,6 +947,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     this.botStateLiveKey = undefined
     this.botStateSyncInFlight = false
     this.botStateSyncPendingFull = false
+    this.botStateSyncPendingLive = false
     this.activeHarnessEventStreams = 0
   }
 
@@ -1008,7 +1019,12 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           const code = isRecord(helloRpc) && isRecord(helloRpc.error) && typeof helloRpc.error.code === 'string'
             ? helloRpc.error.code
             : undefined
-          if (code === undefined || TERMINAL_OBSERVER_ERROR_CODES.has(code) || code === 'gateway/service-unavailable') {
+          const retryableRpc = code === 'gateway/invocation-unavailable' || code === 'gateway/service-unavailable'
+          if (
+            code === undefined
+            || (retryableRpc && attempt >= this.observerBackoffMs.length)
+            || (!retryableRpc && TERMINAL_OBSERVER_ERROR_CODES.has(code))
+          ) {
             terminal = true
             break
           }
@@ -1037,9 +1053,9 @@ export class HostAttentionTracker implements AttentionBackendObserver {
           code: failure.code,
           attempt,
         })
-        if (TERMINAL_OBSERVER_ERROR_CODES.has(failure.code)) {
-          terminal = true
-        } else if (failure.code === 'gateway/service-unavailable' && attempt >= this.observerBackoffMs.length) {
+        if (failure.code === 'gateway/invocation-unavailable' || failure.code === 'gateway/service-unavailable') {
+          if (attempt >= this.observerBackoffMs.length) terminal = true
+        } else if (TERMINAL_OBSERVER_ERROR_CODES.has(failure.code)) {
           terminal = true
         }
       } finally {
@@ -1070,13 +1086,14 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       }
       this.botObserverRetryWake = done
       this.botObserverRetryTimer = setTimeout(done, delayMs)
+      this.botObserverRetryTimer.unref?.()
     })
   }
 
   private handleDsBotFeedFrame(gateway: LocalTypertGateway, frame: unknown): void {
     if (!isRecord(frame) || typeof frame.event !== 'string') return
     const { event, data } = frame
-    if (event === 'hello' || event === 'state') {
+    if (event === 'hello' || event === 'state' || event === 'revision') {
       this.scheduleBotStateSync(gateway, true)
       return
     }
@@ -1096,11 +1113,13 @@ export class HostAttentionTracker implements AttentionBackendObserver {
   private scheduleBotStateSync(gateway: LocalTypertGateway, forceFull: boolean): void {
     if (this.closed) return
     if (forceFull) this.botStateSyncPendingFull = true
+    else this.botStateSyncPendingLive = true
     if (this.botStateSyncTimer !== undefined) return
     this.botStateSyncTimer = setTimeout(() => {
       this.botStateSyncTimer = undefined
       void this.syncBotStateFromRpc(gateway)
     }, 150)
+    this.botStateSyncTimer.unref?.()
   }
 
   private async syncBotStateFromRpc(gateway: LocalTypertGateway): Promise<void> {
@@ -1110,6 +1129,7 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       || this.botStateRevision === undefined
       || this.botStateLiveKey === undefined
     this.botStateSyncPendingFull = false
+    this.botStateSyncPendingLive = false
     const payload: Record<string, unknown> = wantFull
       ? { avatars: 'ref' }
       : { since: this.botStateRevision, live: this.botStateLiveKey, avatars: 'ref' }
@@ -1131,8 +1151,8 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       // Transient local sync errors recover on subsequent feed events or reconnect.
     } finally {
       this.botStateSyncInFlight = false
-      if (!this.closed && this.botStateSyncPendingFull) {
-        this.scheduleBotStateSync(gateway, true)
+      if (!this.closed && (this.botStateSyncPendingFull || this.botStateSyncPendingLive)) {
+        this.scheduleBotStateSync(gateway, this.botStateSyncPendingFull)
       }
     }
   }
@@ -1438,6 +1458,16 @@ export class HostAttentionTracker implements AttentionBackendObserver {
       const oldest = this.harnessQuestionProjectionSeqs.keys().next().value
       if (oldest === undefined) break
       this.harnessQuestionProjectionSeqs.delete(oldest)
+    }
+  }
+
+  private rememberTitle(sessionId: string, title: string): void {
+    this.titleBySessionId.delete(sessionId)
+    this.titleBySessionId.set(sessionId, title)
+    while (this.titleBySessionId.size > MAX_TRACKED_TITLES) {
+      const oldest = this.titleBySessionId.keys().next().value
+      if (oldest === undefined) break
+      this.titleBySessionId.delete(oldest)
     }
   }
 

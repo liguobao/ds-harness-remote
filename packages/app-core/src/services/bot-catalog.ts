@@ -9,6 +9,8 @@ export interface BotEntry {
   tasks?: BotObject[]
   extraDirs?: string[]
   blocked?: BotObject
+  failures?: BotObject
+  sessionMissing?: boolean
   agentPreset?: string
   packs?: BotObject
   name: string
@@ -88,7 +90,7 @@ export interface BotState {
     steered: BotObject
     paused?: BotObject | BotObject[]
     canBackground?: BotObject
-    activeRooms?: BotObject
+    activeRooms?: string[]
   }
   questions: BotObject
   views: BotObject
@@ -109,6 +111,7 @@ export interface BotState {
   memory?: boolean
   permissions?: BotObject
   secrets?: BotObject[]
+  secretStore?: BotObject
   capabilities?: BotObject[]
   capabilityStatuses?: BotObject
   connectors?: BotObject
@@ -260,6 +263,27 @@ export class BotRemoteClient {
       || (endpoint === 'approval-answer' && payload?.choice !== 'allow' && payload?.choice !== 'reject')) {
       throw new Error(strings.bots.operationDenied)
     }
+    if (endpoint !== 'hello' && this.rpcTransport !== undefined) {
+      if (this.helloPromise !== undefined) {
+        await this.helloPromise
+        this.assertCurrent()
+        checkAborted(signal)
+      } else if (
+        this.helloInfo === undefined
+        && (
+          endpoint === 'stage-image'
+          || endpoint === 'stage-file'
+          || endpoint === 'file-download'
+          || endpoint === 'image'
+          || endpoint === 'markdown-image'
+          || (payload !== null && JSON.stringify(payload).length > 1_500_000)
+        )
+      ) {
+        await this.negotiate(signal)
+        this.assertCurrent()
+        checkAborted(signal)
+      }
+    }
     if (this.useRpcCall && this.rpcTransport !== undefined) {
       const response = await this.rpcTransport.call(endpoint, payload, signal)
       this.assertCurrent()
@@ -410,6 +434,8 @@ export function parseBotState(value: unknown): BotState {
       ...(Array.isArray(entry.tasks) ? { tasks: objects(entry.tasks) } : {}),
       ...(Array.isArray(entry.extraDirs) ? { extraDirs: entry.extraDirs.filter(nonempty) } : {}),
       ...(isBotObject(entry.blocked) ? { blocked: entry.blocked } : {}),
+      ...(isBotObject(entry.failures) ? { failures: entry.failures } : {}),
+      ...(entry.sessionMissing === true ? { sessionMissing: true } : {}),
       ...(nonempty(entry.agentPreset) ? { agentPreset: entry.agentPreset } : {}),
       ...(isBotObject(entry.packs) ? { packs: entry.packs } : {}),
       name: text(entry.name) || entry.id,
@@ -516,7 +542,7 @@ export function parseBotState(value: unknown): BotState {
           ? { paused: workObj.paused }
           : {}),
       ...(isBotObject(workObj.canBackground) ? { canBackground: workObj.canBackground } : {}),
-      ...(isBotObject(workObj.activeRooms) ? { activeRooms: workObj.activeRooms } : {}),
+      ...(Array.isArray(workObj.activeRooms) ? { activeRooms: workObj.activeRooms.filter(nonempty) } : {}),
     },
     questions: object(value.questions),
     views: object(value.views),
@@ -537,6 +563,7 @@ export function parseBotState(value: unknown): BotState {
     ...(typeof value.memory === 'boolean' ? { memory: value.memory } : {}),
     ...(isBotObject(value.permissions) ? { permissions: value.permissions } : {}),
     ...(Array.isArray(value.secrets) ? { secrets: objects(value.secrets) } : {}),
+    ...(isBotObject(value.secretStore) ? { secretStore: value.secretStore } : {}),
     ...(Array.isArray(value.capabilities) ? { capabilities: objects(value.capabilities) } : {}),
     ...(isBotObject(value.capabilityStatuses) ? { capabilityStatuses: value.capabilityStatuses } : {}),
     ...(isBotObject(value.connectors) ? { connectors: value.connectors } : {}),
@@ -639,6 +666,8 @@ export function mergeBotStateDelta(previous: BotState, raw: unknown): BotState |
     || raw.learning !== undefined
     || raw.approvalReviews !== undefined
     || raw.botTails !== undefined
+    || raw.secrets !== undefined
+    || raw.secretStore !== undefined
     || raw.readOnly !== undefined
   if (!hasLiveFields && nextRevision === previous.revision && nextLiveKey === previous.liveKey) {
     return previous
@@ -668,7 +697,7 @@ export function mergeBotStateDelta(previous: BotState, raw: unknown): BotState |
             ? { paused: nextWorkObj.paused }
             : {}),
         ...(isBotObject(nextWorkObj.canBackground) ? { canBackground: nextWorkObj.canBackground } : {}),
-        ...(isBotObject(nextWorkObj.activeRooms) ? { activeRooms: nextWorkObj.activeRooms } : {}),
+        ...(Array.isArray(nextWorkObj.activeRooms) ? { activeRooms: nextWorkObj.activeRooms.filter(nonempty) } : {}),
       },
       approvals: objects(nextWorkObj.approvals),
     } : {}),
@@ -685,6 +714,8 @@ export function mergeBotStateDelta(previous: BotState, raw: unknown): BotState |
     ...(isBotObject(raw.learning) ? { learning: raw.learning } : {}),
     ...(Array.isArray(raw.approvalReviews) ? { approvalReviews: objects(raw.approvalReviews) } : {}),
     ...(isBotObject(raw.botTails) ? { botTails: raw.botTails } : {}),
+    ...(Array.isArray(raw.secrets) ? { secrets: objects(raw.secrets) } : {}),
+    ...(isBotObject(raw.secretStore) ? { secretStore: raw.secretStore } : {}),
   }
   if (nextReadOnly !== undefined) nextState.readOnly = nextReadOnly
   else delete nextState.readOnly

@@ -1054,7 +1054,7 @@ export function DsBotSecretsSubpage({
           secrets.map((sec, idx) => {
             const name = text(sec.name) || `SECRET_${idx}`
             const scope = text(sec.scope)
-            const botList = Array.isArray(sec.bots) ? sec.bots : []
+            const botList = Array.isArray(sec.scope) ? sec.scope : Array.isArray(sec.bots) ? sec.bots : []
             const scopeText =
               scope === 'all'
                 ? s.dsBotSettings.secretAllBots

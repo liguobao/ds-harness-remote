@@ -76423,8 +76423,53 @@ var replayableReads = /* @__PURE__ */ new Set([
   "officeKit/render",
   "officeToPdf/render"
 ]);
-function canReplayOversizedResponse(endpoint) {
-  return replayableReads.has(endpoint);
+var replayableDsBotReads = /* @__PURE__ */ new Set([
+  "state",
+  "image",
+  "markdown-image",
+  "file-download",
+  "file-text",
+  "avatar",
+  "avatar-library",
+  "background-picture",
+  "usage",
+  "usage-summary",
+  "chat",
+  "room-chat",
+  "earlier",
+  "exchange",
+  "exchange-text",
+  "group-rows",
+  "group-search",
+  "group-relay-replies",
+  "room-progress",
+  "agent-chat",
+  "bot-task-read",
+  "browser-frame",
+  "memory-view",
+  "memory-history",
+  "diagnostics",
+  "diagnostics-log",
+  "models",
+  "presets",
+  "providers",
+  "schedules",
+  "folders",
+  "folder-list",
+  "notices",
+  "hello"
+]);
+function canReplayOversizedResponse(endpoint, payload) {
+  if (replayableReads.has(endpoint))
+    return true;
+  if (endpoint === "dsBot/call" && typeof payload === "object" && payload !== null && !Array.isArray(payload)) {
+    const args = payload.args;
+    if (typeof args === "object" && args !== null && !Array.isArray(args)) {
+      const innerEndpoint = args.endpoint;
+      return typeof innerEndpoint === "string" && replayableDsBotReads.has(innerEndpoint);
+    }
+  }
+  return false;
 }
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
 var SPEECH_TRANSCRIBE_TIMEOUT_MS = 3 * 6e4;
@@ -85514,6 +85559,7 @@ var PluginRouteBridge = class {
     const startedAt = performance.now();
     const signal = AbortSignal.timeout(timeoutMs);
     let result;
+    let fallbackToHttp = false;
     if (params.route === "api/bot" && this.localDsBotCall !== void 0 && this.dsBotRpcAvailable) {
       try {
         const botBody = dispatchBody;
@@ -85522,11 +85568,27 @@ var PluginRouteBridge = class {
           result = { status: 200, json: local.value };
         } else if (local.code !== void 0 && TERMINAL_LOCAL_DS_BOT_CODES.has(local.code)) {
           this.dsBotRpcAvailable = false;
+          fallbackToHttp = true;
+        } else {
+          this.logger?.warn("plugin route call failed", {
+            route: params.route,
+            durationMs: Math.round(performance.now() - startedAt)
+          });
+          const rpcCode = local.code === "gateway/timeout" || local.code === "TIMEOUT" ? "TIMEOUT" : "INTERNAL_ERROR";
+          throw new RpcError(rpcCode, "The local DS-Bot call failed.");
         }
-      } catch {
+      } catch (error62) {
+        if (!fallbackToHttp) {
+          if (error62 instanceof RpcError) throw error62;
+          this.logger?.warn("plugin route call failed", {
+            route: params.route,
+            durationMs: Math.round(performance.now() - startedAt)
+          });
+          throw new RpcError(signal.aborted ? "TIMEOUT" : "INTERNAL_ERROR", "The local DS-Bot call failed.");
+        }
       }
     }
-    if (result === void 0) {
+    if (result === void 0 && (fallbackToHttp || params.route !== "api/bot" || this.localDsBotCall === void 0 || !this.dsBotRpcAvailable)) {
       try {
         result = await this.dispatch(params.route, dispatchBody, signal);
       } catch (error62) {
@@ -85536,6 +85598,9 @@ var PluginRouteBridge = class {
         });
         throw error62;
       }
+    }
+    if (result === void 0) {
+      throw new RpcError("INTERNAL_ERROR", "The plugin route call produced no result.");
     }
     const sanitizedJson = params.route === "api/bot" && result.status === 200 ? sanitizeBotResponseJson(params.body.endpoint, result.json) : result.json;
     const output2 = { status: result.status, json: sanitizedJson };
@@ -89370,7 +89435,7 @@ var RemoteTypertGateway2 = class {
       try {
         response = rpcOptions === void 0 ? await this.client.rpc("harness.remote.call", request2, signal) : await this.client.rpc("harness.remote.call", request2, signal, rpcOptions);
       } catch (error62) {
-        if (!hasErrorCode(error62, "RESPONSE_TOO_LARGE") || !canReplayOversizedResponse(endpoint)) throw error62;
+        if (!hasErrorCode(error62, "RESPONSE_TOO_LARGE") || !canReplayOversizedResponse(endpoint, payload)) throw error62;
         response = await this.callTransferred(encoded, signal, rpcOptions);
       }
     }
@@ -94605,6 +94670,7 @@ var TERMINAL_OBSERVER_ERROR_CODES = /* @__PURE__ */ new Set([
   "gateway/invocation-unavailable"
 ]);
 var MAX_SESSION_METADATA_ENTRIES = 512;
+var MAX_TRACKED_TITLES = 2048;
 var HostAttentionTracker = class {
   constructor(options = {}) {
     this.options = options;
@@ -94661,6 +94727,7 @@ var HostAttentionTracker = class {
   botStateSyncTimer;
   botStateSyncInFlight = false;
   botStateSyncPendingFull = false;
+  botStateSyncPendingLive = false;
   botStateRevision;
   botStateLiveKey;
   /** Start passive read-only `session/control` observation when the Host Harness supports it. */
@@ -94993,7 +95060,7 @@ var HostAttentionTracker = class {
       }
       return;
     }
-    if (body.endpoint === "secret-allow" || body.endpoint === "secret-cancel" || body.endpoint === "mail-send-answer") {
+    if (body.endpoint === "secret-set" || body.endpoint === "secret-allow" || body.endpoint === "secret-cancel" || body.endpoint === "mail-send-answer") {
       const kind = body.endpoint === "mail-send-answer" ? "mail" : "secret";
       const requestId2 = isRecord12(body.payload) ? firstNonEmptyString(body.payload.id, body.payload.requestId) : void 0;
       const botId = isRecord12(body.payload) && typeof body.payload.botId === "string" ? body.payload.botId : void 0;
@@ -95029,7 +95096,7 @@ var HostAttentionTracker = class {
         if (!isRecord12(entry) || typeof entry.id !== "string" || typeof entry.sessionId !== "string") continue;
         const name2 = typeof entry.name === "string" && entry.name.trim().length > 0 ? entry.name.trim() : entry.id;
         this.botNamesById.set(entry.id, { name: name2, sessionId: entry.sessionId });
-        this.titleBySessionId.set(entry.sessionId, name2);
+        this.rememberTitle(entry.sessionId, name2);
         if (Array.isArray(entry.tasks)) {
           for (const task of entry.tasks) {
             if (isRecord12(task) && typeof task.sessionId === "string" && task.sessionId.length > 0) {
@@ -95053,7 +95120,7 @@ var HostAttentionTracker = class {
         const sessionId = typeof entry.sessionId === "string" && entry.sessionId.length > 0 ? entry.sessionId : entry.id;
         const name2 = typeof entry.name === "string" && entry.name.trim().length > 0 ? entry.name.trim() : entry.id;
         this.roomNamesById.set(entry.id, { name: name2, sessionId });
-        this.titleBySessionId.set(sessionId, name2);
+        this.rememberTitle(sessionId, name2);
         this.rememberMeta(sessionItemId("ds-bot", sessionId), {
           backend: "ds-bot",
           mode: "bot",
@@ -95129,7 +95196,8 @@ var HostAttentionTracker = class {
         const isInboxApproval = BOT_INBOX_APPROVAL_KINDS.has(kind);
         const isInboxQuestion = BOT_INBOX_QUESTION_KINDS.has(kind);
         if (!isInboxApproval && !isInboxQuestion) continue;
-        const rawItemId = firstNonEmptyString(entry.id, entry.callId, entry.requestId, entry.askId, entry.sessionId, entry.roomId, entry.botId);
+        const rawFromId = typeof entry.id === "string" && entry.id.startsWith(`${kind}:`) ? entry.id.slice(kind.length + 1) : entry.id;
+        const rawItemId = firstNonEmptyString(entry.ref, rawFromId, entry.callId, entry.requestId, entry.askId, entry.sessionId, entry.roomId, entry.botId);
         if (rawItemId === void 0) continue;
         const room = typeof entry.roomId === "string" ? this.roomNamesById.get(entry.roomId) : void 0;
         const taskOwner = typeof entry.sessionId === "string" ? this.taskOwnerBySessionId.get(entry.sessionId) : void 0;
@@ -95326,6 +95394,7 @@ var HostAttentionTracker = class {
     this.botStateLiveKey = void 0;
     this.botStateSyncInFlight = false;
     this.botStateSyncPendingFull = false;
+    this.botStateSyncPendingLive = false;
     this.activeHarnessEventStreams = 0;
   }
   // ── Harness passive read-only `session/control` observer ──────────────────
@@ -95390,7 +95459,8 @@ var HostAttentionTracker = class {
         if (this.closed || controller.signal.aborted) break;
         if (!isRecord12(helloRpc) || helloRpc.ok !== true) {
           const code = isRecord12(helloRpc) && isRecord12(helloRpc.error) && typeof helloRpc.error.code === "string" ? helloRpc.error.code : void 0;
-          if (code === void 0 || TERMINAL_OBSERVER_ERROR_CODES.has(code) || code === "gateway/service-unavailable") {
+          const retryableRpc = code === "gateway/invocation-unavailable" || code === "gateway/service-unavailable";
+          if (code === void 0 || retryableRpc && attempt >= this.observerBackoffMs.length || !retryableRpc && TERMINAL_OBSERVER_ERROR_CODES.has(code)) {
             terminal = true;
             break;
           }
@@ -95419,9 +95489,9 @@ var HostAttentionTracker = class {
           code: failure5.code,
           attempt
         });
-        if (TERMINAL_OBSERVER_ERROR_CODES.has(failure5.code)) {
-          terminal = true;
-        } else if (failure5.code === "gateway/service-unavailable" && attempt >= this.observerBackoffMs.length) {
+        if (failure5.code === "gateway/invocation-unavailable" || failure5.code === "gateway/service-unavailable") {
+          if (attempt >= this.observerBackoffMs.length) terminal = true;
+        } else if (TERMINAL_OBSERVER_ERROR_CODES.has(failure5.code)) {
           terminal = true;
         }
       } finally {
@@ -95451,12 +95521,13 @@ var HostAttentionTracker = class {
       };
       this.botObserverRetryWake = done;
       this.botObserverRetryTimer = setTimeout(done, delayMs);
+      this.botObserverRetryTimer.unref?.();
     });
   }
   handleDsBotFeedFrame(gateway, frame) {
     if (!isRecord12(frame) || typeof frame.event !== "string") return;
     const { event: event2, data: data2 } = frame;
-    if (event2 === "hello" || event2 === "state") {
+    if (event2 === "hello" || event2 === "state" || event2 === "revision") {
       this.scheduleBotStateSync(gateway, true);
       return;
     }
@@ -95475,17 +95546,20 @@ var HostAttentionTracker = class {
   scheduleBotStateSync(gateway, forceFull) {
     if (this.closed) return;
     if (forceFull) this.botStateSyncPendingFull = true;
+    else this.botStateSyncPendingLive = true;
     if (this.botStateSyncTimer !== void 0) return;
     this.botStateSyncTimer = setTimeout(() => {
       this.botStateSyncTimer = void 0;
       void this.syncBotStateFromRpc(gateway);
     }, 150);
+    this.botStateSyncTimer.unref?.();
   }
   async syncBotStateFromRpc(gateway) {
     if (this.closed || this.botStateSyncInFlight) return;
     this.botStateSyncInFlight = true;
     const wantFull = this.botStateSyncPendingFull || this.botStateRevision === void 0 || this.botStateLiveKey === void 0;
     this.botStateSyncPendingFull = false;
+    this.botStateSyncPendingLive = false;
     const payload = wantFull ? { avatars: "ref" } : { since: this.botStateRevision, live: this.botStateLiveKey, avatars: "ref" };
     try {
       const rpcResult = await gateway.dispatch("dsBot/call", {
@@ -95504,8 +95578,8 @@ var HostAttentionTracker = class {
     } catch {
     } finally {
       this.botStateSyncInFlight = false;
-      if (!this.closed && this.botStateSyncPendingFull) {
-        this.scheduleBotStateSync(gateway, true);
+      if (!this.closed && (this.botStateSyncPendingFull || this.botStateSyncPendingLive)) {
+        this.scheduleBotStateSync(gateway, this.botStateSyncPendingFull);
       }
     }
   }
@@ -95790,6 +95864,15 @@ var HostAttentionTracker = class {
       const oldest = this.harnessQuestionProjectionSeqs.keys().next().value;
       if (oldest === void 0) break;
       this.harnessQuestionProjectionSeqs.delete(oldest);
+    }
+  }
+  rememberTitle(sessionId, title) {
+    this.titleBySessionId.delete(sessionId);
+    this.titleBySessionId.set(sessionId, title);
+    while (this.titleBySessionId.size > MAX_TRACKED_TITLES) {
+      const oldest = this.titleBySessionId.keys().next().value;
+      if (oldest === void 0) break;
+      this.titleBySessionId.delete(oldest);
     }
   }
   rememberMeta(key, info) {
