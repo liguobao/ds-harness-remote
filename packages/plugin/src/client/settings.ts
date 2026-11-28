@@ -1333,7 +1333,8 @@ export function createRemotePluginOptions(React: ClientReact) {
               inlineSignIn)
             : React.createElement('div', { className: 'dshRemoteSettings' },
               startupErrorBanner,
-              hostStatus?.error === 'SERVER_CREDENTIALS_LOCK_UNSUPPORTED'
+              hostStatus?.error !== undefined && !hostStatus.online && !hostStatus.accountRequired
+                && !(hostStatus.reconnecting && hostStatus.error === 'CONNECTION_FAILED')
                 ? React.createElement('div', { className: 'dshRemoteConnectionIssue', role: 'status' },
                   React.createElement('p', null, connectionErrorMessage(hostStatus.error, t)), reconnectButton)
                 : null,

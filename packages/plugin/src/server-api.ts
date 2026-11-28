@@ -119,7 +119,15 @@ export class HostServerApi {
   pairingHostOnly(): boolean { return this.hostOnly }
 
   async loadStoredPolicy(): Promise<void> {
-    this.hostOnly = this.role === 'host' && (await this.store.pairingHostOnly() || (await this.store.load(this.baseUrl, this.requireIdentity().deviceId))?.pairingRestricted === true)
+    const policyHostOnly = this.role === 'host' && await this.store.pairingHostOnly()
+    const stored = await this.store.load(this.baseUrl, this.requireIdentity().deviceId).catch(error => {
+      if (policyHostOnly) return undefined
+      throw error
+    })
+    this.hostOnly = this.role === 'host' && (policyHostOnly || stored?.pairingRestricted === true)
+    if (stored !== undefined && this.credentials === undefined && stored.refreshTokenExpiresAt > Date.now()) {
+      this.credentials = stored
+    }
   }
 
   async adoptPairing(result: PairingCredentials): Promise<void> {

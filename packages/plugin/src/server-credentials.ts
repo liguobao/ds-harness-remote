@@ -209,14 +209,31 @@ async function participants(lock: string): Promise<QueueParticipant[]> {
   return result
 }
 
+const HARD_LINK_UNSUPPORTED_CODES = new Set(['EXDEV', 'EOPNOTSUPP', 'ENOTSUP', 'ENOSYS'])
+const HARD_LINK_PERMISSION_CODES = new Set(['EPERM', 'EACCES'])
+
 async function publishExclusive(path: string, record: string): Promise<void> {
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`
   await writeFile(temporary, record, { mode: 0o600, flag: 'wx' })
   try {
     try { await link(temporary, path) } catch (error) {
-      if (error instanceof Error && 'code' in error
-        && ['EXDEV', 'EOPNOTSUPP', 'ENOTSUP', 'ENOSYS', 'EPERM', 'EACCES'].includes(String(error.code))) {
-        throw new ServerCredentialsLockUnsupportedError()
+      if (error instanceof Error && 'code' in error) {
+        const code = String(error.code)
+        if (HARD_LINK_UNSUPPORTED_CODES.has(code)) {
+          throw new ServerCredentialsLockUnsupportedError()
+        }
+        if (HARD_LINK_PERMISSION_CODES.has(code)) {
+          // On Windows, link() onto an already-existing queue marker or directory
+          // can reject with EPERM/EACCES instead of EEXIST. Treat only a missing
+          // target as lack of hard-link support so existing markers enter normal
+          // contention handling instead of permanently halting Host reconnects.
+          const metadata = await lstat(path).catch(reason => {
+            if (reason instanceof Error && 'code' in reason && reason.code === 'ENOENT') return undefined
+            throw reason
+          })
+          if (metadata?.isDirectory()) throw new ServerCredentialsLockDirectoryError()
+          if (metadata === undefined) throw new ServerCredentialsLockUnsupportedError()
+        }
       }
       throw error
     }
@@ -226,7 +243,7 @@ async function publishExclusive(path: string, record: string): Promise<void> {
 async function isLockContention(error: unknown, path: string): Promise<boolean> {
   if (!(error instanceof Error) || !('code' in error)) return false
   if (error.code === 'EEXIST') return true
-  if (process.platform !== 'win32' || error.code !== 'EPERM') return false
+  if (error.code !== 'EPERM' && error.code !== 'EACCES') return false
   return exists(path)
 }
 

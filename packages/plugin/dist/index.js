@@ -73897,6 +73897,8 @@ async function participants(lock) {
   }
   return result;
 }
+var HARD_LINK_UNSUPPORTED_CODES = /* @__PURE__ */ new Set(["EXDEV", "EOPNOTSUPP", "ENOTSUP", "ENOSYS"]);
+var HARD_LINK_PERMISSION_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES"]);
 async function publishExclusive(path, record12) {
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
   await writeFile(temporary, record12, { mode: 384, flag: "wx" });
@@ -73904,8 +73906,19 @@ async function publishExclusive(path, record12) {
     try {
       await link(temporary, path);
     } catch (error62) {
-      if (error62 instanceof Error && "code" in error62 && ["EXDEV", "EOPNOTSUPP", "ENOTSUP", "ENOSYS", "EPERM", "EACCES"].includes(String(error62.code))) {
-        throw new ServerCredentialsLockUnsupportedError();
+      if (error62 instanceof Error && "code" in error62) {
+        const code = String(error62.code);
+        if (HARD_LINK_UNSUPPORTED_CODES.has(code)) {
+          throw new ServerCredentialsLockUnsupportedError();
+        }
+        if (HARD_LINK_PERMISSION_CODES.has(code)) {
+          const metadata = await lstat(path).catch((reason) => {
+            if (reason instanceof Error && "code" in reason && reason.code === "ENOENT") return void 0;
+            throw reason;
+          });
+          if (metadata?.isDirectory()) throw new ServerCredentialsLockDirectoryError();
+          if (metadata === void 0) throw new ServerCredentialsLockUnsupportedError();
+        }
       }
       throw error62;
     }
@@ -73916,7 +73929,7 @@ async function publishExclusive(path, record12) {
 async function isLockContention(error62, path) {
   if (!(error62 instanceof Error) || !("code" in error62)) return false;
   if (error62.code === "EEXIST") return true;
-  if (process.platform !== "win32" || error62.code !== "EPERM") return false;
+  if (error62.code !== "EPERM" && error62.code !== "EACCES") return false;
   return exists(path);
 }
 async function readLockRecord(path) {
@@ -75158,7 +75171,15 @@ var HostServerApi = class {
     return this.hostOnly;
   }
   async loadStoredPolicy() {
-    this.hostOnly = this.role === "host" && (await this.store.pairingHostOnly() || (await this.store.load(this.baseUrl, this.requireIdentity().deviceId))?.pairingRestricted === true);
+    const policyHostOnly = this.role === "host" && await this.store.pairingHostOnly();
+    const stored = await this.store.load(this.baseUrl, this.requireIdentity().deviceId).catch((error62) => {
+      if (policyHostOnly) return void 0;
+      throw error62;
+    });
+    this.hostOnly = this.role === "host" && (policyHostOnly || stored?.pairingRestricted === true);
+    if (stored !== void 0 && this.credentials === void 0 && stored.refreshTokenExpiresAt > Date.now()) {
+      this.credentials = stored;
+    }
   }
   async adoptPairing(result) {
     const identity3 = this.requireIdentity();
@@ -107556,6 +107577,7 @@ var PluginControlRuntime = class {
       }
       if (endpoint === "host.reconnect") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
+        await this.persistHostControlEnabled(true, { onlyIfChanged: true });
         this.host.reconnectHost();
         return withUpdate(ok3(this.hostOnlyStatus()), this.updates?.snapshot());
       }

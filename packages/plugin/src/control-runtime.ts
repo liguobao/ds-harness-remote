@@ -198,6 +198,7 @@ export class PluginControlRuntime {
       }
       if (endpoint === 'host.reconnect') {
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
+        await this.persistHostControlEnabled(true, { onlyIfChanged: true })
         this.host.reconnectHost()
         return withUpdate(ok(this.hostOnlyStatus()), this.updates?.snapshot())
       }

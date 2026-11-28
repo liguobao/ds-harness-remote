@@ -5234,7 +5234,7 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
             "div",
             { className: "dshRemoteSettings" },
             startupErrorBanner,
-            hostStatus?.error === "SERVER_CREDENTIALS_LOCK_UNSUPPORTED" ? React.createElement(
+            hostStatus?.error !== void 0 && !hostStatus.online && !hostStatus.accountRequired && !(hostStatus.reconnecting && hostStatus.error === "CONNECTION_FAILED") ? React.createElement(
               "div",
               { className: "dshRemoteConnectionIssue", role: "status" },
               React.createElement("p", null, connectionErrorMessage(hostStatus.error, t)),
