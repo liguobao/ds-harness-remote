@@ -40,8 +40,11 @@ function flushNextIosAlert(): void {
     iosAlertUnwinding = true
     setTimeout(() => {
       iosAlertUnwinding = false
-      next()
-      flushNextIosAlert()
+      try {
+        next()
+      } finally {
+        flushNextIosAlert()
+      }
     }, 0)
   }
 }
