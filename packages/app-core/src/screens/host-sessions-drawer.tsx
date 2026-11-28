@@ -91,6 +91,7 @@ import {
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 import { createStoreGate, shouldAllowDrawerClose, useStoreGateSelector, type StoreGate } from '../lib/gated-store'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
+import { BOT_MODALS_LINGER_MS, isDrawerHostHidden, shouldRenderBotModalsHost } from './bot/popover-menu'
 import { BotModalsHost, BotSidebarSection, useBotTeamLoad } from './bot-sidebar-section'
 import { HomeActionsMenu, openMembershipPlan } from './setup-screens'
 import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } from './workspace-modals'
@@ -98,8 +99,6 @@ import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } fro
 const SESSION_PAGE_SIZE = 3
 /** Padding inside the Agent / DS-Bot underline tab track. */
 const MODE_SWITCHER_INSET = 0
-/** Keep BotModalsHost alive briefly after store modals close so popover action delays, ConfirmDialog fade/onDismiss, and BotProfilePage slide-out can finish cleanly. */
-const BOT_MODALS_LINGER_MS = 500
 const EMPTY_SECTIONS: DrawerSection[] = []
 const sessionKeyExtractor = (item: RemoteSession) => item.sessionId
 
@@ -215,27 +214,27 @@ const BotTeamLoadBridge = memo(function BotTeamLoadBridge({ enabled }: { enabled
   return null
 })
 
-const BotModalsGate = memo(function BotModalsGate({ visible, gate }: { visible: boolean; gate: StoreGate }) {
-  const hasStoreModal = useStoreGateSelector(
-    useBotTeamStore,
+export { isDrawerHostHidden }
+
+const BotModalsGate = memo(function BotModalsGate({ visible }: { visible: boolean; gate: StoreGate }) {
+  const hasStoreModal = useBotTeamStore(
     store =>
       store.editor !== undefined
       || store.detailsOpen
       || store.report !== undefined
       || store.contextMenu !== undefined,
-    gate,
   )
   const [deleteConfirmActive, setDeleteConfirmActive] = useState(false)
-  const active = visible && (hasStoreModal || deleteConfirmActive)
+  const active = hasStoreModal || deleteConfirmActive
   const [lingerMounted, setLingerMounted] = useState(false)
 
   useEffect(() => {
-    if (!visible) {
-      if (lingerMounted) setLingerMounted(false)
-      if (deleteConfirmActive) setDeleteConfirmActive(false)
-      return
-    }
     if (active) {
+      if (!visible) {
+        if (lingerMounted) setLingerMounted(false)
+        if (deleteConfirmActive) setDeleteConfirmActive(false)
+        return
+      }
       if (!lingerMounted) setLingerMounted(true)
       return
     }
@@ -244,7 +243,9 @@ const BotModalsGate = memo(function BotModalsGate({ visible, gate }: { visible: 
     return () => clearTimeout(timer)
   }, [visible, active, lingerMounted, deleteConfirmActive])
 
-  if (!visible || (!active && !lingerMounted)) return null
+  if (!shouldRenderBotModalsHost({ visible, hasStoreModal, deleteConfirmActive, lingerMounted })) {
+    return null
+  }
   return <BotModalsHost onDeleteConfirmChange={setDeleteConfirmActive} />
 })
 
@@ -1327,7 +1328,7 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
     renameWorkspaceTarget,
   }
 
-  const closeDrawer = useCallback(() => {
+  const clearTransientOverlays = useCallback(() => {
     clearHandoffTimer()
     const state = transientStateRef.current
     if (state.menuSession !== null) setMenuSession(null)
@@ -1335,8 +1336,12 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
     if (state.renameError !== null) setRenameError(null)
     if (state.renaming) setRenaming(false)
     if (state.toastMessage !== null) setToastMessage(null)
+  }, [clearHandoffTimer])
+
+  const closeDrawer = useCallback(() => {
+    clearTransientOverlays()
     onClose()
-  }, [onClose, clearHandoffTimer])
+  }, [onClose, clearTransientOverlays])
 
   resetRef.current = () => {
     clearHandoffTimer()
@@ -2054,7 +2059,12 @@ const HostSessionsDrawerBody = memo(function HostSessionsDrawerBody({
             try {
               useBotTeamStore.getState().setSelectedId(id)
               onSelectBot?.(id)
-              if (!inline) closeDrawer()
+              if (inline) {
+                closeDrawer()
+              } else {
+                clearTransientOverlays()
+                smoothClose(false, true, true)
+              }
             } finally {
               if (!inline) releaseFreeze()
             }
@@ -2726,6 +2736,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
   const overlayOpacity = useRef(new Animated.Value(initialOpen && immediateMount ? 1 : 0)).current
   const hasSettledOpenRef = useRef(initialOpen && immediateMount)
   const dragStartX = useRef(0)
+  const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
   const animSeq = useRef(0)
   const currentAnim = useRef<Animated.CompositeAnimation | null>(null)
@@ -2768,7 +2779,12 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     })
   }, [cancelReleaseFreeze, gate, inline])
 
-  useEffect(() => cancelReleaseFreeze, [cancelReleaseFreeze])
+  useEffect(() => () => {
+    cancelReleaseFreeze()
+    animSeq.current++
+    currentAnim.current?.stop()
+    currentAnim.current = null
+  }, [cancelReleaseFreeze])
 
   const smoothClose = useCallback((withHaptic = true, force = false, unlockOnComplete = false) => {
     if (!shouldAllowDrawerClose({
@@ -2782,6 +2798,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     }
     cancelReleaseFreeze()
     closingRef.current = true
+    setClosing(true)
     if (unlockOnComplete) pendingUnlockRef.current = true
     gestureSeq.current++
     dragReady.current = false
@@ -2795,10 +2812,15 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     ])
     currentAnim.current = anim
     anim.start(({ finished }) => {
-      if (!finished || seq !== animSeq.current) return
+      if (seq !== animSeq.current) return
+      if (!finished) {
+        translateX.setValue(closedTranslateXRef.current)
+        overlayOpacity.setValue(0)
+      }
       currentAnim.current = null
       hasSettledOpenRef.current = false
       closingRef.current = false
+      setClosing(false)
       if (pendingUnlockRef.current) {
         pendingUnlockRef.current = false
         onUnlockDismissibleRef.current?.()
@@ -2837,6 +2859,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
       currentAnim.current?.stop()
       currentAnim.current = null
       closingRef.current = false
+      setClosing(false)
       pendingUnlockRef.current = false
       hasSettledOpenRef.current = false
       gestureSeq.current++
@@ -2852,6 +2875,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     currentAnim.current?.stop()
     currentAnim.current = null
     closingRef.current = false
+    setClosing(false)
     if (immediateMount || hasSettledOpenRef.current) {
       translateX.setValue(0)
       overlayOpacity.setValue(1)
@@ -2865,12 +2889,18 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
       Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
     ])
     currentAnim.current = anim
+    let stoppedByCleanup = false
     anim.start(({ finished }) => {
-      if (!finished || seq !== animSeq.current) return
+      if (stoppedByCleanup || seq !== animSeq.current) return
+      if (!finished) {
+        translateX.setValue(0)
+        overlayOpacity.setValue(1)
+      }
       currentAnim.current = null
       hasSettledOpenRef.current = true
     })
     return () => {
+      stoppedByCleanup = true
       if (currentAnim.current === anim) {
         anim.stop()
         currentAnim.current = null
@@ -2928,6 +2958,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
           if (closingRef.current || !openRef.current) return
+          animSeq.current++
           currentAnim.current?.stop()
           const seq = ++gestureSeq.current
           dragReady.current = false
@@ -3028,17 +3059,20 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
     )
   }
 
+  const drawerHidden = isDrawerHostHidden(inline, open, closing)
+  const drawerInteractive = open && !closing
+
   return (
     <View
       collapsable={false}
-      style={[StyleSheet.absoluteFill, styles.drawerHost]}
-      pointerEvents={open ? 'box-none' : 'none'}
-      accessibilityElementsHidden={!open}
-      importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
+      style={[StyleSheet.absoluteFill, styles.drawerHost, drawerHidden && styles.drawerHostHidden]}
+      pointerEvents={drawerInteractive ? 'box-none' : 'none'}
+      accessibilityElementsHidden={!drawerInteractive}
+      importantForAccessibility={drawerInteractive ? 'auto' : 'no-hide-descendants'}
     >
       <View style={styles.overlayContainer}>
         <Animated.View
-          pointerEvents={open ? 'auto' : 'none'}
+          pointerEvents={drawerInteractive ? 'auto' : 'none'}
           style={[
             StyleSheet.absoluteFill,
             styles.overlay,
@@ -3049,8 +3083,8 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
           <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" onPress={handleBackdropPress} />
         </Animated.View>
         <Animated.View
-          accessibilityViewIsModal={open}
-          pointerEvents={open ? 'auto' : 'none'}
+          accessibilityViewIsModal={drawerInteractive}
+          pointerEvents={drawerInteractive ? 'auto' : 'none'}
           {...drawerTouchProps}
           style={[
             styles.overlayDrawerShell,
@@ -3088,6 +3122,7 @@ export const HostSessionsDrawer = memo(function HostSessionsDrawer({
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     drawerHost: { zIndex: 20 },
+    drawerHostHidden: { opacity: 0 },
     overlayContainer: { flex: 1 },
     overlay: { flex: 1, backgroundColor: colors.scrim },
     overlayCappedLight: { backgroundColor: 'rgba(15, 15, 15, 0.50)' },
