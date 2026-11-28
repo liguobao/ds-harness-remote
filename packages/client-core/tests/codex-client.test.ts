@@ -407,6 +407,35 @@ describe('Codex display projection', () => {
       },
     })))
   })
+
+  it('settles running approval items when turn/completed arrives without serverRequest/resolved', async () => {
+    const base = [
+      { method: 'turn/started', params: { turn: { id: 'turn_1', status: 'inProgress', items: [] } } },
+      { method: 'item/commandExecution/requestApproval', params: { turnId: 'turn_1', requestHandle: 'approval_1', command: ['pnpm', 'test'] } },
+    ].reduce(
+      (acc, frame) => reduceCodexTimelineFrame(acc, frame),
+      createCodexTimelineState({ id: 'thr_123', cwd: '/workspace/repo', createdAt: 1, updatedAt: 2, turns: [] })!,
+    )
+
+    await runScenarios([
+      { name: 'completed turn', status: 'completed', expectedItemStatus: 'completed' },
+      { name: 'failed turn', status: 'failed', expectedItemStatus: 'failed' },
+    ].map(({ name, status, expectedItemStatus }) => ({
+      name,
+      run: () => {
+        const next = reduceCodexTimelineFrame(base, {
+          method: 'turn/completed',
+          params: { turn: { id: 'turn_1', status, items: [] } },
+        })
+        expect(next.approval).toBeUndefined()
+        expect(next.items[0]).toMatchObject({
+          kind: 'approval',
+          nativeRef: { requestHandle: 'approval_1' },
+          status: expectedItemStatus,
+        })
+      },
+    })))
+  })
 })
 
 describe('CodexRemoteClient.subscribe', () => {

@@ -254,4 +254,49 @@ describe('Session Instant Open & Flicker-free Realignment', () => {
     const finalState = useAppStore.getState()
     expect(finalState.messages['codex:s-codex']!.some(m => m.kind === 'message' && (m as ChatMessage).text.includes('Authoritative Codex prompt'))).toBe(true)
   })
+
+  it('settles stale pending approvals when reopening an idle ACP or Codex session', async () => {
+    const staleAcpApproval: ChatItem = {
+      id: 'cursor-approval:req-1',
+      kind: 'approval',
+      sessionId: 'hermes:s-hermes',
+      approvalId: 'req-1',
+      toolName: 'bash',
+      createdAt: 1000,
+    }
+    acp.transferCall.mockResolvedValue({
+      events: [
+        { event: { type: 'user/message', seq: 1, time: 1000, data: { message: { role: 'user', content: [{ type: 'text', text: 'Old' }] } } } },
+      ],
+      running: false,
+    })
+    useAppStore.setState({
+      selectedSession: hermesSession,
+      messages: { 'hermes:s-hermes': [staleAcpApproval] },
+    })
+    await useAppStore.getState().openSession(hermesSession)
+    const acpApproval = useAppStore.getState().messages['hermes:s-hermes']?.find(item => item.kind === 'approval')
+    expect(acpApproval).toMatchObject({ kind: 'approval', outcome: 'unavailable' })
+
+    const staleCodexApproval: ChatItem = {
+      id: 'codex:s-codex:t1:req-2',
+      kind: 'approval',
+      sessionId: 'codex:s-codex',
+      approvalId: 'req-2',
+      toolName: 'bash',
+      createdAt: 1000,
+    }
+    codex.request.mockImplementation(async (method: string) => {
+      if (method === 'thread/read') return { thread: { id: 's-codex', cwd: '/project', status: { type: 'idle' }, createdAt: 1, updatedAt: 2 } }
+      if (method === 'dsh/sessionHistory') return { header: { id: 'codex:s-codex' }, records: [], hasMore: false }
+      return {}
+    })
+    useAppStore.setState({
+      selectedSession: codexSession,
+      messages: { 'codex:s-codex': [staleCodexApproval] },
+    })
+    await useAppStore.getState().openSession(codexSession)
+    const codexApproval = useAppStore.getState().messages['codex:s-codex']?.find(item => item.kind === 'approval')
+    expect(codexApproval).toMatchObject({ kind: 'approval', outcome: 'unavailable' })
+  })
 })

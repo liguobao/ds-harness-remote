@@ -892,11 +892,28 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
         ? { ...item, usage }
         : item
       if (!turnMatched) return withUsage
-      return {
-        ...withUsage,
-        turnEnd: { reason, time },
-        ...(withUsage.kind === 'tool' && withUsage.state === 'running' ? { state: reason === 'completed' ? 'finished' as const : 'failed' as const } : {}),
+      if (withUsage.kind === 'tool') {
+        return {
+          ...withUsage,
+          turnEnd: { reason, time },
+          ...(withUsage.state === 'running' ? { state: reason === 'completed' ? 'finished' as const : 'failed' as const } : {}),
+        }
       }
+      if (withUsage.kind === 'approval') {
+        return {
+          ...withUsage,
+          turnEnd: { reason, time },
+          ...(withUsage.outcome === undefined ? { outcome: 'unavailable' as const } : {}),
+        }
+      }
+      if (withUsage.kind === 'question') {
+        return {
+          ...withUsage,
+          turnEnd: { reason, time },
+          ...(withUsage.outcome === undefined ? { outcome: 'cancelled' as const } : {}),
+        }
+      }
+      return { ...withUsage, turnEnd: { reason, time } }
     })
   }
   if (kind === 'user_message_chunk') {

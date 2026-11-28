@@ -97,3 +97,23 @@ export function isQueueItemNotFoundError(error: unknown): boolean {
   }
   return /queue[\s_-]*item.*not[\s_-]*found/i.test(error.message)
 }
+
+const APPROVAL_NOT_FOUND_CODES = new Set([
+  'codex_approval_not_found',
+  'cursor_approval_not_found',
+  'approval_not_found',
+  'approval-not-found',
+])
+
+/** True when the Host reports that a pending approval has already been handled or expired. */
+export function isApprovalNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const errorWithMeta = error as Error & { code?: unknown; details?: unknown }
+  const code = errorWithMeta.code
+  if (typeof code === 'string' && APPROVAL_NOT_FOUND_CODES.has(code.toLowerCase())) return true
+  if (typeof errorWithMeta.details === 'object' && errorWithMeta.details !== null) {
+    const remoteCode = (errorWithMeta.details as Record<string, unknown>).remoteCode
+    if (typeof remoteCode === 'string' && APPROVAL_NOT_FOUND_CODES.has(remoteCode.toLowerCase())) return true
+  }
+  return false
+}

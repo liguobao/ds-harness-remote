@@ -262,4 +262,44 @@ describe('applyCursorFrame', () => {
       resultDetail: { text: 'exit code 1' },
     })
   })
+
+  it('settles pending ACP approvals and questions when prompt_completed or prompt_failed arrives', async () => {
+    await runScenarios([
+      { name: 'prompt_completed end_turn', sessionUpdate: 'prompt_completed', stopReason: 'end_turn' },
+      { name: 'prompt_completed cancelled', sessionUpdate: 'prompt_completed', stopReason: 'cancelled' },
+      { name: 'prompt_failed', sessionUpdate: 'prompt_failed', stopReason: undefined },
+    ].map(({ name, sessionUpdate, stopReason }) => ({
+      name,
+      run: () => {
+        const sid = 'cursor:acp-pending'
+        let messages = applyCursorFrame([], sid, {
+          streamId: 's1',
+          frame: {
+            method: 'session/request_permission',
+            params: { sessionId: 'acp-pending', requestHandle: 'req-1', toolName: 'bash', reason: 'ls' },
+          },
+        })
+        messages = applyCursorFrame(messages, sid, {
+          streamId: 's1',
+          frame: {
+            method: 'cursor/ask_question',
+            params: {
+              sessionId: 'acp-pending',
+              requestHandle: 'q-1',
+              questions: [{ id: 'q1', prompt: 'Proceed?' }],
+            },
+          },
+        })
+        messages = applyCursorFrame(messages, sid, {
+          streamId: 's1',
+          frame: {
+            method: 'session/update',
+            params: { sessionId: 'acp-pending', update: { sessionUpdate, stopReason } },
+          },
+        })
+        expect(messages.find(item => item.kind === 'approval')).toMatchObject({ outcome: 'unavailable' })
+        expect(messages.find(item => item.kind === 'question')).toMatchObject({ outcome: 'cancelled' })
+      },
+    })))
+  })
 })

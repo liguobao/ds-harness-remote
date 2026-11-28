@@ -10,6 +10,7 @@ import { serverSession } from '../services/server-session'
 import { sessionFileStatCache } from '../services/file-stat-cache'
 import { saveLastConnectedDeviceId } from '../services/storage'
 import { useAttentionStore } from './attention-store'
+import { settleTurnItems } from './event-reducer'
 import { isTerminalLocalMessage } from './message-helpers'
 import { acpClientForBackend, storeAcpPagedMessages } from './session-actions'
 import type { SessionAccess } from './session-runtime'
@@ -353,7 +354,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                 // retain only terminal local rows and approval/question cards absent from history.
                 const preserved = existing.filter(item =>
                   isTerminalLocalMessage(item) || item.kind === 'approval' || item.kind === 'question')
-                const merged = mergeAcpHistoryAndLive(folded, preserved)
+                const merged = settleTurnItems(mergeAcpHistoryAndLive(folded, preserved))
                 const paged = storeAcpPagedMessages(selected.sessionId, merged)
                 if (canPersistSnapshot) saveSessionMessagesSnapshot(memoryScope, selected.sessionId, paged.tail)
                 return {
@@ -366,8 +367,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
               }
               // Backends without history replay (e.g. legacy Cursor) return empty events:
               // settle the active live rows in place instead of dropping earlier messages.
-              const settled = finalizeAssistantLive(existing).map(item =>
-                item.kind === 'tool' && item.state === 'running' ? { ...item, state: 'finished' as const } : item)
+              const settled = settleTurnItems(finalizeAssistantLive(existing).map(item =>
+                item.kind === 'tool' && item.state === 'running' ? { ...item, state: 'finished' as const } : item))
               if (canPersistSnapshot) saveSessionMessagesSnapshot(memoryScope, selected.sessionId, settled)
               return {
                 selectedSession: updated,

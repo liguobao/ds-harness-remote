@@ -438,7 +438,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
       style={({ pressed }) => [styles.processHeader, dense && { minHeight: 32 }, pressed && styles.reasoningHeaderPressed]}>
       <View style={styles.processIcon}><ActivityIcon size={15} color={running ? colors.primary : colors.muted} /></View>
       <Text style={styles.processLabel} numberOfLines={1} ellipsizeMode="clip">{label}</Text>
-      {expanded ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />}
+      {!pending && (expanded ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />)}
     </Pressable>
     {(latestTool !== undefined || running) && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
       {latestTool === undefined || (!closed && latestTool.state === 'running')
@@ -449,6 +449,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
     {expanded && <ScrollView ref={body} style={[{ maxHeight: Math.min(400, height / 2) }, styles.processScroll, running && styles.processScrollActive]} nestedScrollEnabled
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       onLayout={() => { if (running || pending) body.current?.scrollToEnd({ animated: false }) }}
+      onContentSizeChange={() => { if (pending) body.current?.scrollToEnd({ animated: false }) }}
       contentContainerStyle={styles.processBody}>
       {items.map(item => item.kind === 'message' && item.role === 'assistant' && !hasVisibleMessageText(item.text) && !item.images?.length
         ? <View key={item.id} style={styles.activityReasoning}><NativeMarkdown text={item.reasoning ?? ''} /></View>

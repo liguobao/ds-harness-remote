@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics'
-import { friendlyError, isQueueItemNotFoundError, isRecoverableTransportError, isRpcTimeoutError } from '../lib/errors'
+import { friendlyError, isApprovalNotFoundError, isQueueItemNotFoundError, isRecoverableTransportError, isRpcTimeoutError } from '../lib/errors'
 import { parseHandoffMessage } from '../lib/handoff-context'
 import { firstLineSnippet, harnessDisplayName, isHandoffRawText, sanitizeHandoffDisplayTitle } from '../lib/handoff-preview'
 import { strings as zhCN } from '../locales/i18n'
@@ -530,6 +530,14 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           ? Haptics.NotificationFeedbackType.Warning
           : Haptics.NotificationFeedbackType.Success)
       } catch (error) {
+        if (isApprovalNotFoundError(error)) {
+          set(state => ({
+            messages: mapApprovalOutcome(state.messages, itemId, 'unavailable'),
+            busyAction: undefined,
+            error: friendlyError(error),
+          }))
+          return
+        }
         set({ busyAction: undefined, error: friendlyError(error) })
       }
     },

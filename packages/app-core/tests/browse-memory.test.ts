@@ -299,3 +299,39 @@ it('persists encrypted scoped hiddenHosts, isolates accounts, prunes removed dev
   const e = await load()
   expect(e.useBrowseMemory.getState().hiddenHosts).toEqual({})
 })
+
+it('excludes approval items and handles from message snapshots and legacy hydrated caches', async () => {
+  const name = 'file:///app/remote-browse.enc', aad = 'dsh-remote-private-browse-v1'
+  const secret = () => fromBase64Url(keys.get('dshremote.browse-key.v1')!)
+  const a = await load()
+  const scope = a.browseScope({ config: { baseUrl: 'https://example.com', account: 'a' }, selectedDevice: { deviceId: 'host', identityKey: 'key' } } as never)
+  a.saveSessionMessagesSnapshot(scope, 's-approval', [
+    { id: 'm1', kind: 'message', role: 'user', text: 'run cmd', createdAt: 1 },
+    { id: 'approval:a1', kind: 'approval', sessionId: 's-approval', approvalId: 'secret-approval-id', frameRpcId: 'secret-rpc-id', toolName: 'bash', reason: 'secret-cmd', createdAt: 2 },
+    { id: 't1', kind: 'tool', sessionId: 's-approval', toolName: 'bash', state: 'finished', createdAt: 3 },
+  ] as never)
+  await a.flushBrowseMemory()
+
+  const ciphertext = files.get(name)!
+  expect(ciphertext).not.toMatch(/secret-approval-id|secret-rpc-id|secret-cmd/)
+
+  const b = await load()
+  const cached = b.getCachedSessionMessages(scope, 's-approval')
+  expect(cached?.map(item => item.kind)).toEqual(['message', 'tool'])
+
+  // Legacy encrypted caches that already contain an approval entry must also strip it on load.
+  const raw = JSON.parse(new TextDecoder().decode(decryptFrame(secret(), JSON.parse(files.get(name)!), aad)))
+  raw.entries[a.browseKey(scope, 's-approval')].messages.push({
+    id: 'approval:legacy',
+    kind: 'approval',
+    sessionId: 's-approval',
+    approvalId: 'legacy-handle',
+    frameRpcId: 'legacy-rpc',
+    toolName: 'bash',
+    createdAt: 4,
+  })
+  files.set(name, JSON.stringify(encryptFrame(secret(), new TextEncoder().encode(JSON.stringify(raw)), aad)))
+
+  const c = await load()
+  expect(c.getCachedSessionMessages(scope, 's-approval')?.map(item => item.kind)).toEqual(['message', 'tool'])
+})

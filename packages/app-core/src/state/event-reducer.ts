@@ -203,13 +203,14 @@ function reduceNativeEvent(
 
 /** A closed turn must not leave stale streams or actionable approvals behind. */
 export function settleTurnItems(current: ChatItem[], turn?: string, exceptTurn?: string): ChatItem[] {
-  const hasOtherOwnedTurn = turn !== undefined && current.some(item => {
+  const hasOtherOpenTurn = turn !== undefined && current.some(item => {
+    if (item.turnEnd !== undefined) return false
     const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
     return owner !== undefined && owner !== turn
   })
   return current.map(item => {
     const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
-    if ((turn !== undefined && ((owner !== undefined && owner !== turn) || (owner === undefined && hasOtherOwnedTurn)))
+    if ((turn !== undefined && ((owner !== undefined && owner !== turn) || (owner === undefined && hasOtherOpenTurn)))
       || (exceptTurn !== undefined && owner === exceptTurn)) return item
     // WHY: `$events` waterfalls can arrive before `turn/start` or `tool/call` on `session/follow`;
     // attach an unowned pending request to the active turn instead of cancelling it on turn open/reconcile.

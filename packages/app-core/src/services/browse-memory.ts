@@ -95,7 +95,7 @@ export function isValidCachedChatItem(item: unknown): item is ChatItem {
   if (!item || typeof item !== 'object') return false
   const candidate = item as Record<string, unknown>
   return typeof candidate.id === 'string' && typeof candidate.kind === 'string' &&
-    ['message', 'tool', 'approval', 'question'].includes(candidate.kind)
+    ['message', 'tool', 'question'].includes(candidate.kind)
 }
 
 export function sanitizeCachedMessages(items?: ChatItem[]): ChatItem[] | undefined {

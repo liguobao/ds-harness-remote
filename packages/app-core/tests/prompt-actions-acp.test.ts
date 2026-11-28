@@ -165,4 +165,65 @@ describe('prompt-actions ACP dispatch', () => {
       expect(selectModelCall).toHaveBeenCalledWith('native-1', backend, { provider: backend, model: 'm1' })
     },
   )
+
+  it('settles stale approval to unavailable on APPROVAL_NOT_FOUND errors and keeps pending on transient errors', async () => {
+    const scenarios = [
+      { name: 'ACP CURSOR_APPROVAL_NOT_FOUND', backend: 'cursor' as const, code: 'CURSOR_APPROVAL_NOT_FOUND', expectedOutcome: 'unavailable' },
+      { name: 'Codex CODEX_APPROVAL_NOT_FOUND', backend: 'codex' as const, code: 'CODEX_APPROVAL_NOT_FOUND', expectedOutcome: 'unavailable' },
+      { name: 'Harness APPROVAL_NOT_FOUND', backend: 'harness' as const, code: 'APPROVAL_NOT_FOUND', expectedOutcome: 'unavailable' },
+      { name: 'transient error keeps pending', backend: 'cursor' as const, code: 'TIMEOUT', expectedOutcome: undefined },
+    ]
+
+    for (const scenario of scenarios) {
+      const session: RemoteSession = {
+        sessionId: `${scenario.backend}:s1`,
+        nativeId: 's1',
+        backend: scenario.backend,
+        updatedAt: 1,
+        running: false,
+        blank: false,
+      }
+      const approvalItem: ChatItem = {
+        id: 'approval-1',
+        kind: 'approval',
+        sessionId: session.sessionId,
+        approvalId: 'req-1',
+        frameRpcId: 'rpc-1',
+        toolName: 'bash',
+        createdAt: 1,
+      }
+      let state: Record<string, any> = {
+        connection: { phase: 'connected' },
+        selectedSession: session,
+        sessions: [session],
+        messages: { [session.sessionId]: [approvalItem] },
+        busyAction: undefined,
+        error: undefined,
+      }
+      const set = (updater: any) => {
+        const patch = typeof updater === 'function' ? updater(state) : updater
+        state = { ...state, ...patch }
+      }
+      const err = Object.assign(new Error(`failed: ${scenario.code}`), { code: scenario.code })
+      const rejectFn = vi.fn(async () => { throw err })
+      const actions = createPromptActions({
+        get: () => state as never,
+        set,
+        runtime: {
+          flushPendingMuxFrames: vi.fn(),
+          connection: {
+            requireCursor: () => ({ respond: rejectFn }),
+            requireCodex: () => ({ respond: rejectFn }),
+            requireProxy: () => ({ respondApproval: rejectFn }),
+          },
+        } as never,
+      })
+
+      await actions.respondApproval('approval-1', 'allowed-once')
+      expect(state.busyAction).toBeUndefined()
+      expect(state.error).toBeTruthy()
+      const updated = state.messages[session.sessionId][0] as Extract<ChatItem, { kind: 'approval' }>
+      expect(updated.outcome, scenario.name).toBe(scenario.expectedOutcome)
+    }
+  })
 })

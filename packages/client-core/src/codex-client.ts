@@ -607,10 +607,12 @@ function reduceCodexFrame(
   if (frame.method === 'turn/completed') {
     const turn = isRecord(params.turn) ? params.turn : undefined
     const failed = turn?.status === 'failed' || turn?.error !== null && turn?.error !== undefined
+    const terminalItemStatus = failed ? 'failed' as const : 'completed' as const
+    const mergedItems = turn === undefined ? state.items : upsertItems(state.items, projectTurn(turn, state.session.nativeId))
     const next = {
       ...state,
       session: { ...state.session, status: failed ? 'failed' as const : 'idle' as const },
-      items: turn === undefined ? state.items : upsertItems(state.items, projectTurn(turn, state.session.nativeId)),
+      items: mergedItems.map(item => item.status === 'running' ? { ...item, status: terminalItemStatus } : item),
       approval: undefined,
     }
     delete next.activeTurnId
