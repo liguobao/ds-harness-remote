@@ -91373,9 +91373,22 @@ var cachedFactory;
 var cachedWerift;
 var cachedNativeFactory;
 async function loadNodeRtcFactory(options = {}) {
-  const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === "werift" ? void 0 : isElectronRuntime() ? await loadExternalNativeRtcFactory().catch(() => void 0) : await loadNativeRtcFactory().catch(() => void 0);
+  const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === "werift" || shouldUseWeriftForLinuxLibc(process.platform, linuxGlibcVersion()) ? void 0 : isElectronRuntime() ? await loadExternalNativeRtcFactory().catch(() => void 0) : await loadNativeRtcFactory().catch(() => void 0);
   const factory = nativeFactory ?? await loadWeriftFactory(options);
   return factory === void 0 ? void 0 : wrapLocalCandidateFilterFactory(factory, options);
+}
+function shouldUseWeriftForLinuxLibc(platform3, glibcVersion) {
+  return platform3 === "linux" && glibcVersion === void 0;
+}
+function linuxGlibcVersion() {
+  if (process.platform !== "linux") return void 0;
+  try {
+    const report = process.report.getReport();
+    const version2 = report.header?.glibcVersionRuntime;
+    return typeof version2 === "string" ? version2 : void 0;
+  } catch {
+    return void 0;
+  }
 }
 async function loadWeriftFactory(options = {}) {
   const cacheable = isCacheableFactoryOptions(options);

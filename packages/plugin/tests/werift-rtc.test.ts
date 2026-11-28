@@ -15,6 +15,7 @@ import { buildExternalNativeRtcFactory, resolveNativeRtcRequireFrom } from '../s
 import {
   buildWeriftFactory,
   detectHostIpv4Candidates,
+  shouldUseWeriftForLinuxLibc,
   loadNodeRtcFactory,
   loadWeriftFactory,
   orderIceServersForWerift,
@@ -63,6 +64,88 @@ class CapturingWeriftPeerConnection {
 }
 
 describe('werift RTC backend', () => {
+  it('uses werift when Linux reports no glibc runtime', () => {
+    expect(shouldUseWeriftForLinuxLibc('linux', undefined)).toBe(true)
+    expect(shouldUseWeriftForLinuxLibc('linux', '2.39')).toBe(false)
+    expect(shouldUseWeriftForLinuxLibc('darwin', undefined)).toBe(false)
+  })
+
+  it('selects werift from the Node entry on Linux without glibc', async () => {
+    const previousBackend = process.env.DSH_REMOTE_WEBRTC_BACKEND
+    const previousElectronRunAsNode = process.env.ELECTRON_RUN_AS_NODE
+    delete process.env.DSH_REMOTE_WEBRTC_BACKEND
+    delete process.env.ELECTRON_RUN_AS_NODE
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    const report = vi.spyOn(process.report, 'getReport').mockReturnValue({ header: {} } as ReturnType<typeof process.report.getReport>)
+    const helperLoad = vi.fn(async () => undefined)
+    const nativeLoad = vi.fn(() => ({ RTCPeerConnection: CapturingWeriftPeerConnection }))
+    vi.resetModules()
+    vi.doMock('../src/native-rtc-helper.js', () => ({ loadExternalNativeRtcFactory: helperLoad }))
+    vi.doMock('@roamhq/wrtc', nativeLoad)
+    vi.doMock('werift', () => ({ RTCPeerConnection: CapturingWeriftPeerConnection }))
+    CapturingWeriftPeerConnection.instances.length = 0
+    try {
+      const { loadNodeRtcFactory: loadFreshFactory } = await import('../src/werift-rtc.js')
+      const factory = await loadFreshFactory({ preferredHostIpv4Candidates: [], interfaces: {} })
+      expect(factory).toBeDefined()
+      factory?.create({ iceServers: [] })
+      expect(CapturingWeriftPeerConnection.instances).toHaveLength(1)
+      expect(nativeLoad).not.toHaveBeenCalled()
+      expect(helperLoad).not.toHaveBeenCalled()
+    } finally {
+      if (previousBackend === undefined) delete process.env.DSH_REMOTE_WEBRTC_BACKEND
+      else process.env.DSH_REMOTE_WEBRTC_BACKEND = previousBackend
+      if (previousElectronRunAsNode === undefined) delete process.env.ELECTRON_RUN_AS_NODE
+      else process.env.ELECTRON_RUN_AS_NODE = previousElectronRunAsNode
+      platform.mockRestore()
+      report.mockRestore()
+      vi.doUnmock('../src/native-rtc-helper.js')
+      vi.doUnmock('@roamhq/wrtc')
+      vi.doUnmock('werift')
+      vi.resetModules()
+    }
+  })
+
+  it('selects in-process native RTC from the Node entry on Linux glibc', async () => {
+    const previousBackend = process.env.DSH_REMOTE_WEBRTC_BACKEND
+    const previousElectronRunAsNode = process.env.ELECTRON_RUN_AS_NODE
+    delete process.env.DSH_REMOTE_WEBRTC_BACKEND
+    delete process.env.ELECTRON_RUN_AS_NODE
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    const report = vi.spyOn(process.report, 'getReport').mockReturnValue({
+      header: { glibcVersionRuntime: '2.39' },
+    } as ReturnType<typeof process.report.getReport>)
+    const helperLoad = vi.fn(async () => undefined)
+    const nativeLoad = vi.fn(() => ({ RTCPeerConnection: CapturingWeriftPeerConnection }))
+    const weriftLoad = vi.fn(() => ({ RTCPeerConnection: CapturingWeriftPeerConnection }))
+    vi.resetModules()
+    vi.doMock('../src/native-rtc-helper.js', () => ({ loadExternalNativeRtcFactory: helperLoad }))
+    vi.doMock('@roamhq/wrtc', nativeLoad)
+    vi.doMock('werift', weriftLoad)
+    CapturingWeriftPeerConnection.instances.length = 0
+    try {
+      const { loadNodeRtcFactory: loadFreshFactory } = await import('../src/werift-rtc.js')
+      const factory = await loadFreshFactory({ preferredHostIpv4Candidates: [], interfaces: {} })
+      expect(factory).toBeDefined()
+      factory?.create({ iceServers: [] })
+      expect(CapturingWeriftPeerConnection.instances).toHaveLength(1)
+      expect(nativeLoad).toHaveBeenCalledOnce()
+      expect(helperLoad).not.toHaveBeenCalled()
+      expect(weriftLoad).not.toHaveBeenCalled()
+    } finally {
+      if (previousBackend === undefined) delete process.env.DSH_REMOTE_WEBRTC_BACKEND
+      else process.env.DSH_REMOTE_WEBRTC_BACKEND = previousBackend
+      if (previousElectronRunAsNode === undefined) delete process.env.ELECTRON_RUN_AS_NODE
+      else process.env.ELECTRON_RUN_AS_NODE = previousElectronRunAsNode
+      platform.mockRestore()
+      report.mockRestore()
+      vi.doUnmock('../src/native-rtc-helper.js')
+      vi.doUnmock('@roamhq/wrtc')
+      vi.doUnmock('werift')
+      vi.resetModules()
+    }
+  })
+
   it('resolves native dependencies from a symlinked plugin physical path', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dsh-remote-rtc-'))
     try {
