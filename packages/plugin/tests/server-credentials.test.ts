@@ -76,7 +76,7 @@ describe('credential refresh process lock', () => {
     await expect(readFile(lock, 'utf8')).resolves.toBe(legacy)
   })
 
-  it.each(['EEXIST', 'EPERM'])('reports a directory lock when link returns %s', async code => {
+  it.each(['EEXIST', 'EPERM', 'EACCES'])('reports a directory lock when link returns %s', async code => {
     const path = await directory()
     const lock = lockPath(path)
     await mkdir(lock)
@@ -88,6 +88,41 @@ describe('credential refresh process lock', () => {
     await expect(assertRefreshQueueIdle(path)).rejects.toMatchObject(expected)
     expect(operation).not.toHaveBeenCalled()
     await expect(readdir(lock)).resolves.toEqual(['legacy-owner'])
+  })
+
+  it.each(['EPERM', 'EACCES'])('treats %s on existing queue markers as contention instead of unsupported hard links', async code => {
+    const root = await directory()
+    const home = join(root, 'home')
+    const hostDir = join(home, 'ds-harness-remote', 'servers', '0123456789abcdef01234567', 'host')
+    const gate = join(home, '.ds-harness-remote-migration', 'credential-refresh-gate')
+    await mkdir(hostDir, { recursive: true })
+    await mkdir(join(home, '.ds-harness-remote-migration'), { recursive: true })
+    await writeFile(gate, marker)
+    await writeFile(lockPath(hostDir), marker)
+
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    vi.mocked(link).mockImplementation(async (existingPath, newPath) => {
+      const target = String(newPath)
+      if (target === gate || target === lockPath(hostDir)) {
+        throw Object.assign(new Error('existing marker target denied'), { code })
+      }
+      return actual.link(existingPath, newPath)
+    })
+
+    const operation = vi.fn(async () => 'refreshed')
+    await expect(new ServerCredentialStore(hostDir).withRefreshLock(operation)).resolves.toBe('refreshed')
+    expect(operation).toHaveBeenCalledOnce()
+  })
+
+  it.each(['EPERM', 'EACCES'])('reports unsupported hard links when %s occurs on a missing lock target', async code => {
+    const path = await directory()
+    vi.mocked(link).mockRejectedValueOnce(Object.assign(new Error('hard links blocked'), { code }))
+    const operation = vi.fn()
+    await expect(new ServerCredentialStore(path).withRefreshLock(operation)).rejects.toMatchObject({
+      code: 'SERVER_CREDENTIALS_LOCK_UNSUPPORTED',
+      message: expect.stringContaining('hard link'),
+    })
+    expect(operation).not.toHaveBeenCalled()
   })
 
   it('recovers a lock after its owner process exits during refresh', async () => {
