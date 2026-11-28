@@ -86,7 +86,7 @@ export interface BotState {
     waiting: BotObject
     turns: BotObject
     steered: BotObject
-    paused?: BotObject
+    paused?: BotObject | BotObject[]
     canBackground?: BotObject
     activeRooms?: BotObject
   }
@@ -144,7 +144,8 @@ export const BOT_OPERATIONS = [
   'send', 'stage-image', 'stage-file',
   'btw-delete', 'side-new', 'side-ask', 'side-cancel', 'side-close',
   'answer-question', 'dismiss-question', 'dismiss-view', 'view-reply', 'approval-answer', 'stop-member-work',
-  'learning-answer', 'secret-allow', 'secret-cancel', 'mail-send-answer', 'connector-request-cancel',
+  'learning-answer', 'secret-allow', 'secret-cancel', 'secret-set', 'secret-delete', 'secret-refresh-external',
+  'mail-send-answer', 'connector-request-cancel', 'connector-disconnect', 'connector-retry',
   // Legacy compat for DS-Bot <0.4.0 Hosts.
   'btw', 'btw-cancel', 'room-continue', 'bot-new-part', 'bot-open-part',
 ] as const
@@ -509,7 +510,11 @@ export function parseBotState(value: unknown): BotState {
       waiting: object(workObj.waiting),
       turns: object(workObj.turns),
       steered: object(workObj.steered),
-      ...(isBotObject(workObj.paused) ? { paused: workObj.paused } : {}),
+      ...(Array.isArray(workObj.paused)
+        ? { paused: objects(workObj.paused) }
+        : isBotObject(workObj.paused)
+          ? { paused: workObj.paused }
+          : {}),
       ...(isBotObject(workObj.canBackground) ? { canBackground: workObj.canBackground } : {}),
       ...(isBotObject(workObj.activeRooms) ? { activeRooms: workObj.activeRooms } : {}),
     },
@@ -657,7 +662,11 @@ export function mergeBotStateDelta(previous: BotState, raw: unknown): BotState |
         waiting: object(nextWorkObj.waiting),
         turns: object(nextWorkObj.turns),
         steered: object(nextWorkObj.steered),
-        ...(isBotObject(nextWorkObj.paused) ? { paused: nextWorkObj.paused } : {}),
+        ...(Array.isArray(nextWorkObj.paused)
+          ? { paused: objects(nextWorkObj.paused) }
+          : isBotObject(nextWorkObj.paused)
+            ? { paused: nextWorkObj.paused }
+            : {}),
         ...(isBotObject(nextWorkObj.canBackground) ? { canBackground: nextWorkObj.canBackground } : {}),
         ...(isBotObject(nextWorkObj.activeRooms) ? { activeRooms: nextWorkObj.activeRooms } : {}),
       },
@@ -685,6 +694,27 @@ export function isBotObject(value: unknown): value is BotObject { return value !
 export function object(value: unknown): BotObject { return isBotObject(value) ? value : {} }
 export function objects(value: unknown): BotObject[] { return Array.isArray(value) ? value.filter(isBotObject) : [] }
 export function text(value: unknown): string { return typeof value === 'string' ? value : '' }
+
+/** Normalize `state.work.paused` across DS-Bot v0.4 arrays and legacy object maps. */
+export function pausedWorksList(
+  paused: BotObject | BotObject[] | undefined,
+  botId?: string,
+  sessionId?: string,
+  roomId?: string,
+): BotObject[] {
+  if (Array.isArray(paused)) {
+    return paused.filter(entry => {
+      if (!botId && !roomId) return true
+      if (botId && (text(entry.from) === botId || text(entry.to) === botId)) return true
+      if (roomId && text(entry.room) === roomId) return true
+      return false
+    })
+  }
+  if (!isBotObject(paused)) return []
+  if (botId && paused[botId] !== undefined) return [isBotObject(paused[botId]) ? paused[botId] : { id: botId, from: botId }]
+  if (sessionId && paused[sessionId] !== undefined) return [isBotObject(paused[sessionId]) ? paused[sessionId] : { id: sessionId, from: botId }]
+  return []
+}
 function nonempty(value: unknown): value is string { return typeof value === 'string' && value.length > 0 }
 
 // React Native's abort-controller implements aborted/events, not throwIfAborted.

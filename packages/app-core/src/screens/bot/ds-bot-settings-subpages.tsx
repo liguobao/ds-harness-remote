@@ -20,13 +20,16 @@ import {
   Monitor,
   Plug,
   Plus,
+  RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
   Terminal,
+  Trash2,
   Users,
   X,
 } from 'lucide-react-native'
+import { Alert } from '../../ui/alert'
 import { strings as s } from '../../locales/i18n'
 import {
   object,
@@ -62,8 +65,14 @@ import { formatCompactTokens, type BotPerformFn } from './shared-panels'
 
 export function DsBotConnectorsSubpage({
   effectiveState,
+  isLiveState = false,
+  busy = false,
+  perform,
 }: {
   effectiveState: BotState
+  isLiveState?: boolean
+  busy?: boolean
+  perform?: BotPerformFn
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createSubStyles)
@@ -209,43 +218,84 @@ export function DsBotConnectorsSubpage({
         })()
       )}
 
-      {selectedConnector && (
-        <Modal transparent animationType="fade" visible onRequestClose={() => setSelectedConnector(null)}>
-          <ModalSurface onClose={() => setSelectedConnector(null)}>
-            <View style={{ gap: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={styles.sheetTitle}>{selectedConnector.name}</Text>
-                <IconButton label={s.common.close} icon={X} onPress={() => setSelectedConnector(null)} />
+      {selectedConnector && (() => {
+        const remoteItems = objects(effectiveState.connectors?.connectors ?? effectiveState.connectors?.items)
+        const live = remoteItems.find(
+          it => text(it.id) === selectedConnector.id || text(it.name).toLowerCase() === selectedConnector.name.toLowerCase(),
+        )
+        const liveConnected = Boolean(live && (live.connected === true || text(live.status) === 'connected' || text(live.state) === 'ready'))
+        const liveStatus = text(live?.status) || text(live?.state)
+        const canManage = Boolean(isLiveState && !effectiveState.readOnly && perform && (liveConnected || liveStatus === 'error' || live !== undefined))
+        return (
+          <Modal transparent animationType="fade" visible onRequestClose={() => setSelectedConnector(null)}>
+            <ModalSurface onClose={() => setSelectedConnector(null)}>
+              <View style={{ gap: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={styles.sheetTitle}>{selectedConnector.name}</Text>
+                  <IconButton label={s.common.close} icon={X} onPress={() => setSelectedConnector(null)} />
+                </View>
+                <Text style={styles.rowSub}>{selectedConnector.desc}</Text>
+                <GroupCard>
+                  <GroupRow
+                    first
+                    icon={Plug}
+                    label={s.dsBotSettings.authMethod}
+                    value={
+                      selectedConnector.authKind === 'oauth'
+                        ? s.dsBotSettings.authOauth
+                        : selectedConnector.authKind === 'mail'
+                          ? s.dsBotSettings.authMail
+                          : selectedConnector.authKind === 'key'
+                            ? s.dsBotSettings.authKey
+                            : s.dsBotSettings.authNone
+                    }
+                    chevron={false}
+                  />
+                  <GroupRow
+                    icon={Monitor}
+                    label={s.dsBotSettings.setupNotes}
+                    detail={s.dsBotSettings.connectorSetupDetail}
+                    chevron={false}
+                  />
+                </GroupCard>
+                {canManage && (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Button
+                      label={s.dsBotSettings.connectorRetry}
+                      variant="secondary"
+                      disabled={busy}
+                      onPress={() => {
+                        void perform?.('connector-retry', { id: selectedConnector.id })
+                        setSelectedConnector(null)
+                      }}
+                    />
+                    <Button
+                      label={s.dsBotSettings.connectorDisconnect}
+                      variant="danger"
+                      disabled={busy}
+                      onPress={() => {
+                        const conn = selectedConnector
+                        Alert.alert(s.dsBotSettings.connectorDisconnect, s.dsBotSettings.connectorDisconnectConfirm(conn.name), [
+                          { text: s.bots.cancel, style: 'cancel' },
+                          {
+                            text: s.dsBotSettings.connectorDisconnect,
+                            style: 'destructive',
+                            onPress: () => {
+                              void perform?.('connector-disconnect', { id: conn.id })
+                              setSelectedConnector(null)
+                            },
+                          },
+                        ])
+                      }}
+                    />
+                  </View>
+                )}
+                <Button label={s.common.close} variant="secondary" onPress={() => setSelectedConnector(null)} />
               </View>
-              <Text style={styles.rowSub}>{selectedConnector.desc}</Text>
-              <GroupCard>
-                <GroupRow
-                  first
-                  icon={Plug}
-                  label={s.dsBotSettings.authMethod}
-                  value={
-                    selectedConnector.authKind === 'oauth'
-                      ? s.dsBotSettings.authOauth
-                      : selectedConnector.authKind === 'mail'
-                        ? s.dsBotSettings.authMail
-                        : selectedConnector.authKind === 'key'
-                          ? s.dsBotSettings.authKey
-                          : s.dsBotSettings.authNone
-                  }
-                  chevron={false}
-                />
-                <GroupRow
-                  icon={Monitor}
-                  label={s.dsBotSettings.setupNotes}
-                  detail={s.dsBotSettings.connectorSetupDetail}
-                  chevron={false}
-                />
-              </GroupCard>
-              <Button label={s.common.close} variant="secondary" onPress={() => setSelectedConnector(null)} />
-            </View>
-          </ModalSurface>
-        </Modal>
-      )}
+            </ModalSurface>
+          </Modal>
+        )
+      })()}
 
       {customConnectorGuideOpen && (
         <Modal transparent animationType="fade" visible onRequestClose={() => setCustomConnectorGuideOpen(false)}>
@@ -445,6 +495,7 @@ export function DsBotCapabilitiesSubpage({
           const baseOptions: { id: string; label: string; desc: string }[] = [
             { id: 'read-only', label: s.dsBotSettings.permDefault, desc: s.dsBotSettings.permDefaultDetail },
             { id: 'workspace-write', label: s.dsBotSettings.permWorkspaceWrite, desc: s.dsBotSettings.permWorkspaceWriteDetail },
+            { id: 'review', label: s.dsBotSettings.permReview, desc: s.dsBotSettings.permReviewDetail },
             { id: 'danger-full-access', label: s.dsBotSettings.permFullAccess, desc: s.dsBotSettings.permFullAccessDetail },
           ]
           const remoteOpts = Array.isArray(object(effectiveState.permissions).options)
@@ -467,7 +518,7 @@ export function DsBotCapabilitiesSubpage({
                     : null
                 })
                 .filter((opt): opt is { id: string; label: string; desc: string } => opt !== null)
-            : baseOptions
+            : baseOptions.filter(opt => opt.id !== 'review')
           return optionList
         })().map((opt, idx) => {
           const chosen = currentPerm === opt.id
@@ -695,11 +746,32 @@ export function DsBotUsageSubpage({
             </GroupCard>
           </View>
 
-          <GroupCard style={{ padding: 15, gap: 12 }}>
+          <GroupCard style={{ padding: 15, gap: 10 }}>
+            {usageView.scanning && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.rowSub}>{s.dsBotSettings.usageScanning}</Text>
+              </View>
+            )}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', flex: 1 }}>
                 <Text style={styles.rowTitle}>{s.dsBotSettings.tokenTrend}</Text>
                 <Text style={styles.rowSub}>{`${formatCompactTokens(usageView.current.tokens)} Token`}</Text>
+                {usageView.deltaPct !== null && (
+                  <Text
+                    style={[
+                      styles.rowSub,
+                      {
+                        fontWeight: '600',
+                        color: usageView.deltaPct > 0 ? colors.warning : colors.success,
+                      },
+                    ]}
+                  >
+                    {s.dsBotSettings.usageDeltaVsPrev(
+                      `${usageView.deltaPct > 0 ? '+' : ''}${usageView.deltaPct}%`,
+                    )}
+                  </Text>
+                )}
               </View>
               <View style={styles.inlinePills}>
                 {([
@@ -720,25 +792,45 @@ export function DsBotUsageSubpage({
               </View>
             </View>
 
-            <View style={styles.chartPlot}>
-              {usageView.buckets.slice(-14).map(b => {
-                const ratio =
-                  usageView.peakBucketTokens > 0
+            {(() => {
+              const activeRows = usageChartGroup === 'owner' ? usageView.byOwner : usageView.byModel
+              const colorByKey = new Map(activeRows.map(item => [item.bucketKey, item.color]))
+              const scrollable = usageView.buckets.length > 14
+              const cols = usageView.buckets.map(b => {
+                const mapObj = usageChartGroup === 'owner' ? b.byOwner : b.byModel
+                const entries = Object.entries(mapObj).filter(([, v]) => v > 0)
+                const totalRatio =
+                  usageView.peakBucketTokens > 0 && b.tokens > 0
                     ? Math.max(0.04, b.tokens / usageView.peakBucketTokens)
                     : 0
                 return (
-                  <View key={b.key} style={styles.chartCol}>
+                  <View key={b.key} style={scrollable ? [styles.chartCol, { flex: 0, width: 28 }] : styles.chartCol}>
                     <View style={styles.chartBarTrack}>
                       {b.tokens > 0 && (
-                        <View
-                          style={[
-                            styles.chartBarFill,
-                            {
-                              height: `${Math.round(ratio * 100)}%`,
-                              backgroundColor: colors.primary,
-                            },
-                          ]}
-                        />
+                        entries.length > 0 ? (
+                          <View style={{ width: '100%', height: `${Math.round(totalRatio * 100)}%`, justifyContent: 'flex-end' }}>
+                            {entries.map(([segKey, segTokens]) => (
+                              <View
+                                key={segKey}
+                                style={{
+                                  width: '100%',
+                                  height: `${Math.max(4, Math.round((segTokens / b.tokens) * 100))}%`,
+                                  backgroundColor: colorByKey.get(segKey) ?? colors.primary,
+                                }}
+                              />
+                            ))}
+                          </View>
+                        ) : (
+                          <View
+                            style={[
+                              styles.chartBarFill,
+                              {
+                                height: `${Math.round(totalRatio * 100)}%`,
+                                backgroundColor: colors.primary,
+                              },
+                            ]}
+                          />
+                        )
                       )}
                     </View>
                     <Text style={styles.chartAxisLabel} numberOfLines={1}>
@@ -746,8 +838,15 @@ export function DsBotUsageSubpage({
                     </Text>
                   </View>
                 )
-              })}
-            </View>
+              })
+              return scrollable ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={[styles.chartPlot, { gap: 6 }]}>{cols}</View>
+                </ScrollView>
+              ) : (
+                <View style={styles.chartPlot}>{cols}</View>
+              )
+            })()}
 
             {(usageChartGroup === 'owner' ? usageView.byOwner : usageView.byModel).length > 0 && (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
@@ -906,26 +1005,53 @@ export function DsBotUsageSubpage({
 
 export function DsBotSecretsSubpage({
   effectiveState,
+  isLiveState = false,
+  busy = false,
+  perform,
 }: {
   effectiveState: BotState
+  isLiveState?: boolean
+  busy?: boolean
+  perform?: BotPerformFn
 }) {
+  const { colors } = useTheme()
   const styles = useThemedStyles(createSubStyles)
+  const secrets = effectiveState.secrets ?? []
+  const hasExternal = secrets.some(sec => text(sec.kind) === 'external') || object(effectiveState.prefs).secretProviders !== undefined
+  const canEdit = Boolean(isLiveState && !effectiveState.readOnly && perform)
+
   return (
     <>
       <Text style={styles.helperNote}>
         {s.dsBotSettings.secretsNote}
       </Text>
 
-      <SectionTitle>{s.dsBotSettings.secretsTitle((effectiveState.secrets ?? []).length)}</SectionTitle>
+      <SectionTitle
+        action={
+          canEdit && hasExternal ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => void perform?.('secret-refresh-external', { resolve: true })}
+              style={({ pressed }) => [styles.inlineCreateBtn, busy && { opacity: 0.45 }, pressed && { opacity: 0.75 }]}
+            >
+              <RefreshCw size={14} color={colors.ink} />
+              <Text style={styles.inlineCreateBtnText}>{s.dsBotSettings.secretRefreshExternal}</Text>
+            </Pressable>
+          ) : undefined
+        }
+      >
+        {s.dsBotSettings.secretsTitle(secrets.length)}
+      </SectionTitle>
       <GroupCard>
-        {(effectiveState.secrets ?? []).length === 0 ? (
+        {secrets.length === 0 ? (
           <View style={styles.emptyCardBox}>
             <Text style={styles.mutedText}>
               {s.dsBotSettings.noSecrets}
             </Text>
           </View>
         ) : (
-          (effectiveState.secrets ?? []).map((sec, idx) => {
+          secrets.map((sec, idx) => {
             const name = text(sec.name) || `SECRET_${idx}`
             const scope = text(sec.scope)
             const botList = Array.isArray(sec.bots) ? sec.bots : []
@@ -946,6 +1072,28 @@ export function DsBotSecretsSubpage({
                 detail={text(sec.purpose) || scopeText}
                 value={scopeText}
                 chevron={false}
+                accessory={
+                  canEdit ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${s.bots.delete} ${name}`}
+                      disabled={busy}
+                      hitSlop={8}
+                      onPress={() => {
+                        Alert.alert(s.bots.delete, s.dsBotSettings.secretDeleteConfirm(name), [
+                          { text: s.bots.cancel, style: 'cancel' },
+                          {
+                            text: s.bots.delete,
+                            style: 'destructive',
+                            onPress: () => void perform?.('secret-delete', { name }),
+                          },
+                        ])
+                      }}
+                    >
+                      <Trash2 size={16} color={colors.muted} />
+                    </Pressable>
+                  ) : undefined
+                }
               />
             )
           })

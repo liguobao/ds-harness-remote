@@ -6,7 +6,7 @@ import { AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, Pressable, Sc
 import { Image as ImageIcon, MessageCircle, Paperclip, Users, X } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { BUILT_IN_PROMPTS, type CustomPrompt } from '../../services/storage'
-import { botMessageRequest, formatBotSubmission, isBotObject, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
+import { botMessageRequest, formatBotSubmission, isBotObject, object, objects, pausedWorksList, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
 import {
   BOT_STAGED_IMAGE_TYPES,
   BOT_STAGED_MAX_BYTES,
@@ -44,6 +44,17 @@ import type { UiArtifact } from '../../state/ui-artifacts'
 import { buildBotMentionRows, type ReferenceChatCandidate } from './at-menu'
 import { BotAvatar } from './avatar'
 import { BotQuestion, BotSettledCard, BotViewCard } from './cards'
+import {
+  BotApprovalCard,
+  BotBlockedCard,
+  BotBrowserHandoffCard,
+  BotComputerAskCard,
+  BotConnectorRequestCard,
+  BotLearningCard,
+  BotMailSendCard,
+  BotSecretRequestCard,
+  BotWorkPausedCard,
+} from './interactive-cards'
 import { parseBotReplyPayload, parseRelayRange } from './replies'
 import { BotReplies, BotViaPill, type BotMentionContext } from './reply-view'
 import { BotAsideCard } from './aside'
@@ -505,13 +516,31 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     else Alert.alert(s.chat.toolPromptSendFailed, s.chat.toolPromptSendFailed)
   }
   const earlierPage = async () => {
-    if (olderBusyRef.current || bot === undefined || !client || cursor === null) return
+    if (olderBusyRef.current || (!bot && !room) || !client || cursor === null) return
     olderBusyRef.current = true
     atEnd.current = false
     setOlderBusy(true)
     setError(undefined)
     const signal = request.current.signal
     try {
+      if (room !== undefined) {
+        const defaultCursor = cursor === undefined && (room.ownParts?.length ?? 0) > 0
+          ? { part: Math.max(0, (room.ownParts?.length ?? 0) - 1) }
+          : cursor
+        const value = object(await client.call('room-chat', {
+          roomId: room.id,
+          ...(defaultCursor === undefined ? {} : { cursor: defaultCursor }),
+        }, signal))
+        if (!mounted.current || signal.aborted) return
+        setEarlier(current => {
+          const knownItems = new Set(current.filter(entry => typeof entry.id === 'string').map(entry => `${text(entry.kind)}:${text(entry.id)}`))
+          const items = objects(value.items).filter(entry => typeof entry.id !== 'string' || !knownItems.has(`${text(entry.kind)}:${text(entry.id)}`))
+          return [...items, ...current]
+        })
+        setCursor(value.cursor ?? null)
+        return
+      }
+      if (!bot) return
       const value = object(await client.call('earlier', { sessionId: session.sessionId, ...(cursor === undefined ? {} : { cursor }) }, signal))
       if (!mounted.current || signal.aborted) return
       setEarlier(current => {
@@ -557,27 +586,67 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (room) return entry.roomId === room.id
     return entry.roomId === undefined && (entry.sessionId === session.sessionId || (bot !== undefined && entry.botId === bot.id))
   })
-  const hasDesktopPendingRequest = useMemo(() => {
+  const pendingSecretRequests = useMemo(() => {
+    if (!bot) return []
+    return objects(state.secretRequests?.[bot.id] ?? state.secretRequests?.[session.sessionId])
+      .filter(req => text(req.status) === 'pending' && text(req.id) !== '')
+  }, [bot, state.secretRequests, session.sessionId])
+  const pendingConnectorRequests = useMemo(() => {
+    if (!bot) return []
+    return objects(state.connectorRequests[bot.id] ?? state.connectorRequests[session.sessionId])
+      .filter(req => text(req.status) === 'pending' && text(req.id) !== '')
+  }, [bot, state.connectorRequests, session.sessionId])
+  const pendingMailRequests = useMemo(() => {
+    if (!bot) return []
+    return objects(state.mailRequests[bot.id] ?? state.mailRequests[session.sessionId])
+      .filter(req => text(req.status) === 'pending' && text(req.id) !== '')
+  }, [bot, state.mailRequests, session.sessionId])
+  const pendingLearning = useMemo(() => {
+    if (!bot) return []
+    return objects(state.learning?.[bot.id]).filter(item => text(item.id) !== '')
+  }, [bot, state.learning])
+  const pendingComputerAsks = useMemo(() => {
+    const asks = object(state.computerLive?.asks)
+    return Object.values(asks).filter((entry): entry is BotObject => {
+      if (!isBotObject(entry) || text(entry.id) === '') return false
+      if (room) return text(entry.roomId) === room.id
+      return bot !== undefined && text(entry.botId) === bot.id && !text(entry.roomId)
+    })
+  }, [state.computerLive, bot, room])
+  const pendingBrowserHold = useMemo(() => {
+    if (!bot) return undefined
+    const hold = object(state.browserHolds?.[bot.id] ?? state.browserHolds?.[session.sessionId])
+    return Object.keys(hold).length > 0 && text(hold.callId) !== '' ? hold : undefined
+  }, [bot, state.browserHolds, session.sessionId])
+  const pendingPausedWorks = useMemo(
+    () => pausedWorksList(state.work.paused, bot?.id, session.sessionId, room?.id),
+    [state.work.paused, bot?.id, session.sessionId, room?.id],
+  )
+  const hasComputerHold = useMemo(() => {
     const ownerId = bot?.id ?? session.sessionId
-    const hasConnector = Object.keys(object(state.connectorRequests[ownerId] ?? state.connectorRequests[session.sessionId])).length > 0
-    const hasMail = Object.keys(object(state.mailRequests[ownerId] ?? state.mailRequests[session.sessionId])).length > 0
-    const hasSecret = Object.keys(object(state.secretRequests?.[ownerId] ?? state.secretRequests?.[session.sessionId])).length > 0
-    const hasBrowser = Object.keys(object(state.browserHolds?.[ownerId] ?? state.browserHolds?.[session.sessionId])).length > 0
-    const matchesComputerTarget = (entry: unknown): boolean => {
+    const computerHolds = object(state.computerLive?.holds)
+    const matchesTarget = (entry: unknown): boolean => {
       if (!isBotObject(entry)) return false
       if (bot && text(entry.botId) === bot.id) return true
       if (room && text(entry.roomId) === room.id) return true
       return false
     }
-    const computerAsks = object(state.computerLive?.asks)
-    const computerHolds = object(state.computerLive?.holds)
-    const hasComputer = Boolean(
-      (bot && (Object.keys(object(computerAsks[bot.id])).length > 0 || Object.keys(object(computerHolds[bot.id])).length > 0))
-      || Object.values(computerAsks).some(matchesComputerTarget)
-      || Object.values(computerHolds).some(matchesComputerTarget),
+    return Boolean(
+      Object.keys(object(computerHolds[ownerId])).length > 0
+      || Object.values(computerHolds).some(matchesTarget),
     )
-    return hasConnector || hasMail || hasSecret || hasBrowser || hasComputer
-  }, [state.connectorRequests, state.mailRequests, state.secretRequests, state.browserHolds, state.computerLive, session.sessionId, bot, room])
+  }, [state.computerLive, bot, room, session.sessionId])
+  const hasDesktopPendingRequest = Boolean(
+    hasComputerHold
+    || (bot?.blocked !== undefined)
+    || pendingSecretRequests.length > 0
+    || pendingConnectorRequests.length > 0
+    || pendingMailRequests.length > 0
+    || pendingLearning.length > 0
+    || pendingComputerAsks.length > 0
+    || pendingBrowserHold !== undefined
+    || pendingPausedWorks.length > 0,
+  )
   const activeBtwCards = useMemo(
     () => (bot ? objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId) : []),
     [bot, state.btwCards, session.sessionId],
@@ -799,9 +868,10 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     void refreshLive({ forceFull: true })
   }
   const hasEarlierParts = Boolean(
-    bot
-    && (bot.parts ?? []).some(id => id !== session.sessionId)
-    && bot.parts?.[0] !== session.sessionId,
+    (bot
+      && (bot.parts ?? []).some(id => id !== session.sessionId)
+      && bot.parts?.[0] !== session.sessionId)
+    || (room && (room.ownParts ?? []).length > 0),
   )
   const showLoadOlder = hasMore || (hasEarlierParts && cursor !== null && client !== undefined)
   const updateAtEnd = (nativeEvent: { contentOffset: { y: number }; contentSize: { height: number }; layoutMeasurement: { height: number } }) => {
@@ -985,7 +1055,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
             </Pressable>
           </View>
         )}
-        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, cardId: entry.id })} /> : entry.kind === 'closed' ? <BotSettledCard key={i} title={text(entry.title) || text(object(entry.question).question) || s.bots.question} closed={text(entry.closed) || 'dismissed'} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><View style={styles.row}><Text style={[styles.muted, styles.grow]}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text>{text(entry.via) !== '' && <BotViaPill platform={text(entry.via)} />}</View><NativeMarkdown text={text(entry.text)} /></View>)}
+        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, cardId: entry.id })} /> : entry.kind === 'closed' ? <BotSettledCard key={i} title={text(entry.title) || text(object(entry.question).question) || s.bots.question} closed={text(entry.closed) || 'dismissed'} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><View style={styles.row}><Text style={[styles.muted, styles.grow]}>{entry.kind === 'user' ? s.bots.yourAnswer : text(entry.name) || state.bots.find(b => b.id === text(entry.botId))?.name || bot?.name || room?.name}</Text>{text(entry.via) !== '' && <BotViaPill platform={text(entry.via)} />}</View><NativeMarkdown text={text(entry.text)} /></View>)}
       </View>}
       ListFooterComponent={<View style={styles.section}>
         {room && progress.length > 0 && (
@@ -1037,7 +1107,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     )}
     {(Boolean(room?.paused) || approvals.length > 0 || questionId !== '' || hasDesktopPendingRequest) && (
       <ScrollView
-        style={{ maxHeight: Math.round(height * 0.4), paddingHorizontal: 14, marginBottom: 6 }}
+        style={{ maxHeight: Math.round(height * 0.44), paddingHorizontal: 14, marginBottom: 6 }}
         contentContainerStyle={styles.section}
         keyboardShouldPersistTaps="handled"
       >
@@ -1051,15 +1121,17 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
             />
           </View>
         )}
+        {bot !== undefined && bot.blocked !== undefined && (
+          <BotBlockedCard bot={bot} sessionId={session.sessionId} disabled={disabled} perform={perform} />
+        )}
         {approvals.map(approval => (
-          <View key={text(approval.id)} style={styles.card}>
-            <Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text>
-            <Text style={styles.body}>{text(approval.reason)}</Text>
-            <View style={styles.actions}>
-              <Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} />
-              <Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} />
-            </View>
-          </View>
+          <BotApprovalCard
+            key={text(approval.id)}
+            approval={approval}
+            bot={state.bots.find(entry => entry.id === approval.botId)}
+            disabled={disabled}
+            perform={perform}
+          />
         ))}
         {questionId !== '' && (
           <BotQuestion
@@ -1070,7 +1142,65 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
             dismiss={() => void perform('dismiss-question', { sessionId: session.sessionId })}
           />
         )}
-        {hasDesktopPendingRequest && (
+        {pendingComputerAsks.map(ask => (
+          <BotComputerAskCard
+            key={`cua:${text(ask.id)}`}
+            ask={ask}
+            botName={state.bots.find(entry => entry.id === text(ask.botId))?.name}
+            disabled={disabled}
+            perform={perform}
+          />
+        ))}
+        {bot !== undefined && pendingBrowserHold !== undefined && (
+          <BotBrowserHandoffCard
+            botId={bot.id}
+            hold={pendingBrowserHold}
+            disabled={disabled}
+            perform={perform}
+          />
+        )}
+        {pendingSecretRequests.map(req => (
+          <BotSecretRequestCard
+            key={`sec:${text(req.id)}`}
+            request={req}
+            disabled={disabled}
+            perform={perform}
+          />
+        ))}
+        {pendingMailRequests.map(req => (
+          <BotMailSendCard
+            key={`mail:${text(req.id)}`}
+            request={req}
+            disabled={disabled}
+            perform={perform}
+          />
+        ))}
+        {pendingConnectorRequests.map(req => (
+          <BotConnectorRequestCard
+            key={`conn:${text(req.id)}`}
+            request={req}
+            disabled={disabled}
+            perform={perform}
+          />
+        ))}
+        {pendingPausedWorks.map((work, idx) => (
+          <BotWorkPausedCard
+            key={`paused:${text(work.id) || idx}`}
+            work={work}
+            state={state}
+            disabled={disabled}
+            perform={perform}
+          />
+        ))}
+        {pendingLearning.map(proposal => (
+          <BotLearningCard
+            key={`learn:${text(proposal.id)}`}
+            proposal={proposal}
+            disabled={disabled}
+            perform={perform}
+          />
+        ))}
+        {hasComputerHold && (
           <View style={styles.card}>
             <Text style={styles.muted}>{s.bots.desktopActionRequired}</Text>
           </View>

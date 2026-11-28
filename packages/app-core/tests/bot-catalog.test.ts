@@ -2,12 +2,14 @@ import { AbortController as NativeAbortController } from 'abort-controller'
 import { describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import {
+  BOT_OPERATIONS,
   BotRemoteClient,
   botMessageRequest,
   canDeleteBot,
   formatBotSubmission,
   isScopedKnownBotSessionId,
   parseBotState,
+  pausedWorksList,
   trackScopedBotStateSessions,
   type BotOperation,
 } from '../src/services/bot-catalog'
@@ -218,7 +220,8 @@ describe('Android Bot client authority', () => {
       { name: 'one time', endpoint: 'approval-answer', payload: { id: 'approval', choice: 'allow' }, allowed: true },
       { name: 'reject', endpoint: 'approval-answer', payload: { id: 'approval', choice: 'reject' }, allowed: true },
       { name: 'broad approval', endpoint: 'approval-answer', payload: { choice: 'allow_session' }, allowed: false },
-      { name: 'credential write', endpoint: 'secret-set', payload: {}, allowed: false },
+      { name: 'secret request fill', endpoint: 'secret-set', payload: { requestId: 'req-1', value: 'sk-test', scope: 'bot' }, allowed: true },
+      { name: 'direct vault store', endpoint: 'secret-store', payload: {}, allowed: false },
       { name: 'local agent registration (0.3.0)', endpoint: 'local-agent-add', payload: {}, allowed: false },
       { name: 'im pairing (0.3.0)', endpoint: 'im-pair', payload: {}, allowed: false },
       { name: 'connector command (0.3.0)', endpoint: 'connector-add', payload: {}, allowed: false },
@@ -492,5 +495,36 @@ describe('Android Bot client authority', () => {
       endpoint: 'side-ask',
       payload: { sessionId: 'bot', recent: true, text: 'quick check' },
     })
+    for (const op of [
+      'connector-disconnect',
+      'connector-retry',
+      'secret-delete',
+      'secret-refresh-external',
+      'secret-set',
+      'learning-answer',
+      'schedule-pause',
+      'browser-frame',
+      'resume-work',
+      'cancel-work',
+    ] as const) {
+      expect(BOT_OPERATIONS).toContain(op)
+    }
+  })
+
+  it('normalizes work.paused arrays from DS-Bot v0.4 and legacy paused maps', () => {
+    const parsed = parseBotState({
+      bots: [{ id: 'chief', sessionId: 's-1', name: 'Chief' }],
+      rooms: [{ id: 'room-1', name: 'Group', members: ['chief'] }],
+      work: {
+        paused: [
+          { id: 'w-1', from: 'chief', to: 'coder', question: 'Continue?' },
+          { id: 'w-2', room: 'room-1', goal: 'Fix bug' },
+        ],
+      },
+    })
+    expect(pausedWorksList(parsed.work.paused, 'chief')).toHaveLength(1)
+    expect(pausedWorksList(parsed.work.paused, 'chief')[0]?.id).toBe('w-1')
+    expect(pausedWorksList(parsed.work.paused, undefined, undefined, 'room-1')[0]?.id).toBe('w-2')
+    expect(pausedWorksList({ chief: { id: 'legacy-1', from: 'chief' } }, 'chief')[0]?.id).toBe('legacy-1')
   })
 })

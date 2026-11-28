@@ -18,6 +18,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  ChevronUp,
   CircleAlert,
   Copy,
   CopyPlus,
@@ -41,6 +42,7 @@ import {
   canDeleteBot,
   object,
   objects,
+  pausedWorksList,
   text,
   type BotEntry,
   type BotRemoteClient,
@@ -102,7 +104,7 @@ export function botLiveStatus(state: BotState, bot: BotEntry): { kind: 'idle' | 
   )
   const hasView = state.views[bot.id] !== undefined || state.views[bot.sessionId] !== undefined
   const hasWorkWait = state.work.waiting?.[bot.id] !== undefined || state.work.waiting?.[bot.sessionId] !== undefined
-    || state.work.paused?.[bot.id] !== undefined || state.work.paused?.[bot.sessionId] !== undefined
+    || pausedWorksList(state.work.paused, bot.id, bot.sessionId).length > 0
   const hasHoldOrRequest = Object.keys(object(state.browserHolds?.[bot.id] ?? state.browserHolds?.[bot.sessionId])).length > 0
     || Object.keys(object(state.secretRequests?.[bot.id] ?? state.secretRequests?.[bot.sessionId])).length > 0
     || Object.keys(object(state.connectorRequests[bot.id] ?? state.connectorRequests[bot.sessionId])).length > 0
@@ -215,9 +217,12 @@ export function BotSidebarSection({
   const [filter, setFilter] = useState<RosterFilter>('all')
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const [inboxCollapsed, setInboxCollapsed] = useState(false)
+  const [inboxExpandedAll, setInboxExpandedAll] = useState(false)
 
   const query = searchQuery.trim().toLocaleLowerCase()
   const visibleError = actionError ?? error
+  const inboxItems = useMemo(() => objects(state?.inbox?.items), [state?.inbox])
 
   const sessionMap = useMemo(() => {
     const map = new Map<string, (typeof sessions)[number]>()
@@ -415,6 +420,78 @@ export function BotSidebarSection({
         {state?.readOnly !== undefined && (
           <View style={styles.readOnlyBadge}>
             <Text style={styles.readOnlyText}>{s.bots.readOnly}: {state.readOnly}</Text>
+          </View>
+        )}
+
+        {state !== undefined && !query && inboxItems.length > 0 && (
+          <View style={styles.unifiedInboxCard}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setInboxCollapsed(c => !c)}
+              style={styles.unifiedInboxHeader}
+            >
+              <View style={styles.unifiedInboxHeaderLeft}>
+                <CircleAlert size={15} color={colors.warning} />
+                <Text style={styles.unifiedInboxTitle}>{s.bots.inboxTitle}</Text>
+                <View style={styles.unifiedInboxCountPill}>
+                  <Text style={styles.unifiedInboxCountText}>{inboxItems.length}</Text>
+                </View>
+              </View>
+              {inboxCollapsed ? <ChevronDown size={15} color={colors.muted} /> : <ChevronUp size={15} color={colors.muted} />}
+            </Pressable>
+            {!inboxCollapsed && (
+              <View style={styles.unifiedInboxList}>
+                {(inboxExpandedAll ? inboxItems : inboxItems.slice(0, 5)).map((item, idx) => {
+                  const targetRoomId = text(item.roomId)
+                  const targetBotId = text(item.botId)
+                  const targetId = targetRoomId || targetBotId
+                  const targetName = targetRoomId
+                    ? state.rooms.find(r => r.id === targetRoomId)?.name ?? targetRoomId
+                    : state.bots.find(b => b.id === targetBotId)?.name ?? targetBotId
+                  const kindKey = text(item.kind)
+                  const kindLabel = (s.bots.inboxKindLabels as Record<string, string>)[kindKey] ?? kindKey
+                  const summary = text(item.text) || text(item.tool) || text(item.note) || kindLabel
+                  return (
+                    <Pressable
+                      key={text(item.id) || `inbox-${idx}`}
+                      accessibilityRole="button"
+                      disabled={!targetId}
+                      onPress={() => {
+                        if (targetId) onSelectBot(targetId)
+                      }}
+                      style={({ pressed }) => [
+                        styles.unifiedInboxRow,
+                        idx > 0 && styles.rowDivider,
+                        pressed && styles.rowPressed,
+                      ]}
+                    >
+                      <View style={styles.unifiedInboxKindBadge}>
+                        <Text style={styles.unifiedInboxKindText}>{kindLabel}</Text>
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.unifiedInboxTarget} numberOfLines={1}>
+                          {targetName}
+                        </Text>
+                        <Text style={styles.unifiedInboxSummary} numberOfLines={1}>
+                          {summary}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  )
+                })}
+                {!inboxExpandedAll && inboxItems.length > 5 && (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setInboxExpandedAll(true)}
+                    style={[styles.unifiedInboxRow, styles.rowDivider, { justifyContent: 'center' }]}
+                  >
+                    <Text style={[styles.retryPillText, { fontSize: 12.5 }]}>
+                      {s.bots.inboxShowAll(inboxItems.length)}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
           </View>
         )}
 
@@ -1237,6 +1314,74 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.surfaceStrong,
     },
     readOnlyText: { ...type.caption, color: colors.muted },
+    unifiedInboxCard: {
+      marginHorizontal: 6,
+      marginBottom: 6,
+      borderRadius: 16,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      overflow: 'hidden',
+    },
+    unifiedInboxHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    unifiedInboxHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    unifiedInboxTitle: {
+      fontSize: 13.5,
+      fontWeight: '700',
+      color: colors.ink,
+    },
+    unifiedInboxCountPill: {
+      paddingHorizontal: 7,
+      paddingVertical: 1,
+      borderRadius: radius.pill,
+      backgroundColor: colors.warningSoft,
+    },
+    unifiedInboxCountText: {
+      fontSize: 11.5,
+      fontWeight: '700',
+      color: colors.warning,
+    },
+    unifiedInboxList: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+    },
+    unifiedInboxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+    },
+    unifiedInboxKindBadge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: colors.grouped,
+    },
+    unifiedInboxKindText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    unifiedInboxTarget: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.ink,
+    },
+    unifiedInboxSummary: {
+      fontSize: 12,
+      color: colors.muted,
+    },
     loadingWrap: { paddingVertical: spacing.xxl, alignItems: 'center' },
     emptyWrap: { paddingVertical: spacing.lg, paddingHorizontal: 8 },
     sectionBlock: { gap: 4, marginTop: 4, paddingHorizontal: 6 },

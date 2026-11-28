@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -9,7 +10,6 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { WebView } from 'react-native-webview'
 import {
   ArrowUp,
   CalendarClock,
@@ -21,6 +21,8 @@ import {
   Folder,
   Globe,
   Lock,
+  Pause,
+  Play,
   Plus,
   RotateCw,
   Shield,
@@ -91,159 +93,140 @@ export function formatScheduleSummary(task: BotObject): string {
   return text(task.cadence) || text(task.expression) || s.bots.scheduledTasks
 }
 
-interface BrowserTabItem {
-  id: string
+interface BrowserFrameSnapshot {
+  mime: string
+  data: string
   url: string
   title: string
-  loading: boolean
-  canGoBack: boolean
-  canGoForward: boolean
-}
-
-function normalizeBrowserInput(raw: string): string {
-  const trimmed = raw.trim()
-  if (!trimmed || trimmed === 'about:blank') return 'about:blank'
-  if (/^https?:\/\//i.test(trimmed)) return trimmed
-  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/.*)?$/i.test(trimmed)) return `https://${trimmed}`
-  return `https://www.bing.com/search?q=${encodeURIComponent(trimmed)}`
-}
-
-function shortBrowserLabel(tab: BrowserTabItem): string {
-  if (tab.title && tab.title !== 'about:blank') return tab.title
-  if (!tab.url || tab.url === 'about:blank') return 'about:blank'
-  return tab.url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '')
 }
 
 /**
- * Per-Bot embedded Browser pane modeled directly on DS-Bot's `browser-pane.js` (Figure 2):
- * - Top tab strip (`about:blank ×`)
- * - Bot automation banner (`Bot 正在控制此浏览器` · `接管` · `停止` / `你在控制此浏览器` · `交还`)
- * - Navigation bar (`<` `>` `↻` `[🌐 搜索或输入网址]` `+` `⤓/🛡`)
- * - Interactive WebView viewport (blank canvas on `about:blank`, live webview on http/https)
+ * Per-Bot live Host Browser mirror modeled on DS-Bot's `browser-pane.js`:
+ * - Bot automation banner (`Bot controls` / `You control` · `Done` · `Skip` · `Take over` · `Give back` · `Stop`)
+ * - Read-only URL/title bar + Refresh + Browser permissions button
+ * - Live Host browser frame polling via `browser-frame`
  */
 export function BotBrowserPane({
   bot,
+  client,
+  hold,
   perform,
 }: {
   bot: BotEntry
+  client?: BotRemoteClient
+  hold?: BotObject | null
   perform: BotPerformFn
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createSharedStyles)
-  const webViewRef = useRef<WebView | null>(null)
-
-  const [tabs, setTabs] = useState<BrowserTabItem[]>([
-    { id: 'tab-1', url: 'about:blank', title: 'about:blank', loading: false, canGoBack: false, canGoForward: false },
-  ])
-  const [activeTabId, setActiveTabId] = useState('tab-1')
-  const [addressDraft, setAddressDraft] = useState('')
-  const [editingAddress, setEditingAddress] = useState(false)
-  const [userHeld, setUserHeld] = useState(false)
+  const [frame, setFrame] = useState<BrowserFrameSnapshot | null>(null)
+  const [frameError, setFrameError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [grantsOpen, setGrantsOpen] = useState(false)
+  const [refreshTick, setRefreshTick] = useState(0)
 
-  const activeTab = useMemo(
-    () => tabs.find(t => t.id === activeTabId) ?? tabs[0]!,
-    [tabs, activeTabId],
-  )
+  const holdObj = object(hold)
+  const userHeld = text(holdObj.by) === 'user'
+  const callId = text(holdObj.callId)
+  const holdNote = text(holdObj.note) || text(holdObj.reason)
 
-  const updateActiveTab = useCallback(
-    (patch: Partial<BrowserTabItem>) => {
-      setTabs(prev => prev.map(item => (item.id === activeTab.id ? { ...item, ...patch } : item)))
-    },
-    [activeTab.id],
-  )
-
-  const addNewTab = () => {
-    const id = `tab-${Date.now()}`
-    setTabs(prev => [
-      ...prev,
-      { id, url: 'about:blank', title: 'about:blank', loading: false, canGoBack: false, canGoForward: false },
-    ])
-    setActiveTabId(id)
-    setAddressDraft('')
-    setEditingAddress(false)
-  }
-
-  const closeTab = (id: string) => {
-    setTabs(prev => {
-      if (prev.length <= 1) {
-        return [{ id: 'tab-1', url: 'about:blank', title: 'about:blank', loading: false, canGoBack: false, canGoForward: false }]
+  useEffect(() => {
+    if (!client) {
+      setFrame(null)
+      return
+    }
+    const control = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      try {
+        const res = object(await client.call('browser-frame', { botId: bot.id }, control.signal))
+        if (control.signal.aborted) return
+        const data = text(res.data)
+        const mime = text(res.mime) || 'image/jpeg'
+        if (data) {
+          setFrame({
+            mime,
+            data,
+            url: text(res.url),
+            title: text(res.title),
+          })
+          setFrameError(null)
+        } else {
+          setFrame(null)
+        }
+      } catch (err) {
+        if (control.signal.aborted) return
+        setFrame(null)
+        setFrameError(err instanceof Error ? err.message : s.bots.browserNoOpenPage)
+      } finally {
+        if (!control.signal.aborted) setRefreshing(false)
       }
-      const next = prev.filter(t => t.id !== id)
-      if (activeTabId === id && next[0]) setActiveTabId(next[0].id)
-      return next
-    })
-  }
+      if (!control.signal.aborted) {
+        timer = setTimeout(() => void poll(), 2_000)
+      }
+    }
+    void poll()
+    return () => {
+      control.abort()
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [client, bot.id, refreshTick])
 
-  const submitAddress = () => {
-    const nextUrl = normalizeBrowserInput(addressDraft)
-    setEditingAddress(false)
-    updateActiveTab({ url: nextUrl, title: nextUrl === 'about:blank' ? 'about:blank' : nextUrl })
+  const handleManualRefresh = () => {
+    setRefreshing(true)
+    setRefreshTick(t => t + 1)
   }
 
   const handleTakeover = async () => {
-    setUserHeld(true)
     await perform('browser-takeover', { botId: bot.id }).catch(() => undefined)
   }
 
-  const handleGiveBack = async () => {
-    setUserHeld(false)
-    await perform('browser-give-back', { botId: bot.id }).catch(() => undefined)
+  const handleGiveBack = async (outcome?: 'done' | 'skip') => {
+    await perform('browser-give-back', {
+      botId: bot.id,
+      ...(outcome ? { outcome } : {}),
+      ...(callId ? { callId } : {}),
+    }).catch(() => undefined)
   }
 
   const handleStop = async () => {
-    setUserHeld(true)
-    webViewRef.current?.stopLoading()
     await perform('browser-stop', { botId: bot.id }).catch(() => undefined)
   }
 
-  const isBlank = !activeTab.url || activeTab.url === 'about:blank'
-  const isSecure = /^https:/i.test(activeTab.url)
+  const isSecure = /^https:/i.test(frame?.url ?? '')
   const grantCount = (bot.browserGrants ?? []).length
 
   return (
     <View style={styles.browserContainer}>
-      {/* Browser Tab Strip */}
-      <View style={styles.browserTabStrip}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.browserTabScroll}>
-          {tabs.map(tab => {
-            const active = tab.id === activeTab.id
-            return (
-              <Pressable
-                key={tab.id}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
-                onPress={() => {
-                  setActiveTabId(tab.id)
-                  setEditingAddress(false)
-                }}
-                style={[styles.browserTabChip, active && styles.browserTabChipActive]}
-              >
-                <Globe size={13} color={active ? colors.ink : colors.muted} />
-                <Text numberOfLines={1} style={[styles.browserTabTitle, active && styles.browserTabTitleActive]}>
-                  {shortBrowserLabel(tab)}
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => closeTab(tab.id)}
-                  style={styles.browserTabClose}
-                >
-                  <X size={12} color={colors.muted} />
-                </Pressable>
-              </Pressable>
-            )
-          })}
-        </ScrollView>
-      </View>
-
-      {/* Bot Automation Control Banner (matches Figure 2) */}
-      <View style={[styles.browserBanner, userHeld && styles.browserBannerHeld]}>
-        <Text style={styles.browserBannerText} numberOfLines={1}>
-          {userHeld ? s.bots.browserUserControls : s.bots.browserBotControls}
-        </Text>
+      {/* Bot Automation Control Banner */}
+      <View style={[styles.browserBanner, (userHeld || Boolean(callId)) && styles.browserBannerHeld]}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.browserBannerText} numberOfLines={1}>
+            {userHeld ? s.bots.browserUserControls : callId ? s.bots.browserHandoffTitle : s.bots.browserBotControls}
+          </Text>
+          {Boolean(holdNote) && (
+            <Text style={styles.rowSub} numberOfLines={2}>{holdNote}</Text>
+          )}
+        </View>
         <View style={styles.browserBannerActions}>
-          {userHeld ? (
+          {callId ? (
+            <>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void handleGiveBack('done')}
+                style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
+              >
+                <Text style={styles.browserBannerBtnText}>{s.bots.browserDone}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void handleGiveBack('skip')}
+                style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
+              >
+                <Text style={styles.browserBannerBtnText}>{s.bots.browserSkip}</Text>
+              </Pressable>
+            </>
+          ) : userHeld ? (
             <Pressable
               accessibilityRole="button"
               onPress={() => void handleGiveBack()}
@@ -251,82 +234,44 @@ export function BotBrowserPane({
             >
               <Text style={styles.browserBannerBtnText}>{s.bots.browserGiveBack}</Text>
             </Pressable>
-          ) : (
-            <>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void handleTakeover()}
-                style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
-              >
-                <Text style={styles.browserBannerBtnText}>{s.bots.browserTakeover}</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void handleStop()}
-                style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
-              >
-                <Text style={styles.browserBannerBtnText}>{s.bots.stop}</Text>
-              </Pressable>
-            </>
+          ) : null}
+          {!userHeld && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void handleTakeover()}
+              style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
+            >
+              <Text style={styles.browserBannerBtnText}>{s.bots.browserTakeover}</Text>
+            </Pressable>
           )}
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void handleStop()}
+            style={({ pressed }) => [styles.browserBannerBtn, pressed && { opacity: 0.75 }]}
+          >
+            <Text style={styles.browserBannerBtnText}>{s.bots.stop}</Text>
+          </Pressable>
         </View>
       </View>
 
-      {/* Navigation & Address Bar (matches Figure 2) */}
+      {/* Read-only URL/Title & Controls Bar */}
       <View style={styles.browserNavRow}>
         <Pressable
           accessibilityRole="button"
-          disabled={!activeTab.canGoBack || isBlank}
-          onPress={() => webViewRef.current?.goBack()}
-          style={[styles.browserNavIconBtn, (!activeTab.canGoBack || isBlank) && { opacity: 0.35 }]}
+          accessibilityLabel={s.bots.refresh}
+          onPress={handleManualRefresh}
+          style={styles.browserNavIconBtn}
         >
-          <ChevronLeft size={18} color={colors.ink} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          disabled={!activeTab.canGoForward || isBlank}
-          onPress={() => webViewRef.current?.goForward()}
-          style={[styles.browserNavIconBtn, (!activeTab.canGoForward || isBlank) && { opacity: 0.35 }]}
-        >
-          <ChevronRight size={18} color={colors.ink} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          disabled={isBlank}
-          onPress={() => (activeTab.loading ? webViewRef.current?.stopLoading() : webViewRef.current?.reload())}
-          style={[styles.browserNavIconBtn, isBlank && { opacity: 0.45 }]}
-        >
-          {activeTab.loading ? <X size={16} color={colors.ink} /> : <RotateCw size={15} color={colors.ink} />}
+          {refreshing ? <ActivityIndicator size="small" color={colors.primary} /> : <RotateCw size={15} color={colors.ink} />}
         </Pressable>
 
         <View style={styles.browserAddressBox}>
           {isSecure ? <Lock size={13} color={colors.muted} /> : <Globe size={14} color={colors.muted} />}
-          <TextInput
-            value={editingAddress ? addressDraft : isBlank ? '' : activeTab.url}
-            onFocus={() => {
-              setAddressDraft(isBlank ? '' : activeTab.url)
-              setEditingAddress(true)
-            }}
-            onBlur={() => setEditingAddress(false)}
-            onChangeText={setAddressDraft}
-            onSubmitEditing={submitAddress}
-            placeholder={s.bots.browserAddressPlaceholder}
-            placeholderTextColor={colors.muted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="go"
-            style={styles.browserAddressInput}
-          />
+          <Text style={[styles.browserAddressInput, { paddingVertical: 8 }]} numberOfLines={1}>
+            {frame?.url || frame?.title || 'about:blank'}
+          </Text>
         </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={s.bots.browserNewTab}
-          onPress={addNewTab}
-          style={styles.browserNavIconBtn}
-        >
-          <Plus size={18} color={colors.ink} />
-        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={s.bots.browserGrants}
@@ -337,25 +282,22 @@ export function BotBrowserPane({
         </Pressable>
       </View>
 
-      {/* Viewport Area */}
+      {/* Live Host Viewport Snapshot */}
       <View style={styles.browserViewport}>
-        {isBlank ? (
-          <View style={styles.browserBlankCanvas} />
-        ) : (
-          <WebView
-            ref={webViewRef}
-            source={{ uri: activeTab.url }}
-            style={{ flex: 1 }}
-            onNavigationStateChange={navState => {
-              updateActiveTab({
-                url: navState.url || activeTab.url,
-                title: navState.title || navState.url || 'about:blank',
-                loading: Boolean(navState.loading),
-                canGoBack: Boolean(navState.canGoBack),
-                canGoForward: Boolean(navState.canGoForward),
-              })
-            }}
+        {frame ? (
+          <Image
+            source={{ uri: `data:${frame.mime};base64,${frame.data}` }}
+            style={{ flex: 1, width: '100%', height: '100%' }}
+            resizeMode="contain"
           />
+        ) : (
+          <View style={[styles.browserBlankCanvas, { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 }]}>
+            <Globe size={28} color={colors.muted} />
+            <Text style={[styles.mutedText, { textAlign: 'center' }]}>
+              {frameError || s.bots.browserNoOpenPage}
+            </Text>
+            <Button variant="secondary" label={s.bots.refresh} onPress={handleManualRefresh} />
+          </View>
         )}
       </View>
 
@@ -666,6 +608,7 @@ export function BotSchedulesPanel({
 
   const [tasks, setTasks] = useState<BotObject[]>([])
   const [available, setAvailable] = useState(true)
+  const [canPause, setCanPause] = useState(false)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(initialCreating)
   const [submitting, setSubmitting] = useState(false)
@@ -692,6 +635,7 @@ export function BotSchedulesPanel({
       const res = await client.call('schedules')
       const obj = object(res)
       setAvailable(obj.available !== false)
+      setCanPause(obj.canPause === true)
       const raw = objects(obj.tasks)
       setTasks(raw)
     } catch (err) {
@@ -797,6 +741,21 @@ export function BotSchedulesPanel({
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleTogglePause = async (task: BotObject) => {
+    if (!client) return
+    const id = text(task.id)
+    const sessionId = text(task.sessionId)
+    const isPaused = text(task.status) === 'paused' || text(task.state) === 'paused'
+    setError(null)
+    try {
+      await client.call('schedule-pause', { sessionId, id, active: isPaused })
+      await reload()
+      onChanged?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -989,13 +948,34 @@ export function BotSchedulesPanel({
                 <View style={styles.listRow}>
                   <CalendarClock size={18} color={colors.primary} />
                   <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={styles.rowTitle}>
-                      {text(task.title) || text(task.prompt) || id}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.rowTitle}>
+                        {text(task.title) || text(task.prompt) || id}
+                      </Text>
+                      {(text(task.status) === 'paused' || text(task.state) === 'paused') && (
+                        <Text style={[styles.rowSub, { color: colors.warning, fontWeight: '600' }]}>
+                          {s.bots.schedulePaused}
+                        </Text>
+                      )}
+                    </View>
                     <Text style={styles.rowSub} numberOfLines={2}>
                       {[owner, formatScheduleSummary(task), text(task.prompt)].filter(Boolean).join(' · ')}
                     </Text>
                   </View>
+                  {canPause && text(task.status) !== 'ended' && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={(text(task.status) === 'paused' || text(task.state) === 'paused') ? s.automation.resumeTask : s.automation.pauseTask}
+                      onPress={() => void handleTogglePause(task)}
+                      style={styles.iconHit}
+                    >
+                      {(text(task.status) === 'paused' || text(task.state) === 'paused') ? (
+                        <Play size={16} color={colors.primary} />
+                      ) : (
+                        <Pause size={16} color={colors.muted} />
+                      )}
+                    </Pressable>
+                  )}
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => void handleDelete(task)}

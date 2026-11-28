@@ -24,6 +24,7 @@ export interface UsageBucket {
 
 export interface UsageGroupRow {
   key: string
+  bucketKey: string
   name: string
   sub?: string
   kind?: string
@@ -298,6 +299,7 @@ export function buildDsBotUsageView(
         || (kind === 'other' ? strings.dsBotSettings.otherOwner : kind === 'room' ? strings.dsBotSettings.deletedGroup : strings.dsBotSettings.deletedBot)
       return {
         key: text(metaObj.key) || `owner-${idx}`,
+        bucketKey: String(idx),
         name,
         kind,
         id: text(metaObj.id) || undefined,
@@ -317,6 +319,7 @@ export function buildDsBotUsageView(
       const providerName = text(metaObj.providerName) || text(metaObj.provider)
       return {
         key: text(metaObj.key) || `model-${idx}`,
+        bucketKey: String(idx),
         name: modelName,
         sub: providerName || undefined,
         color: CHART_COLORS[i % CHART_COLORS.length]!,
@@ -345,7 +348,7 @@ export function buildDsBotUsageView(
   }
 }
 
-export function buildDsBotActivityYear(rawUsage: BotObject | null | undefined, weeksCount = 24): ActivityYearSummary {
+export function buildDsBotActivityYear(rawUsage: BotObject | null | undefined, weeksCount = 53): ActivityYearSummary {
   const usage = object(rawUsage)
   const rawRows = Array.isArray(usage.rows) ? usage.rows.filter(Array.isArray) : []
   const nowStr = text(usage.now)

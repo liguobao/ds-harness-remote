@@ -72,8 +72,8 @@ import { useThemedStyles } from '../../ui/use-themed-styles'
 import { DsBotInstallCard } from '../bot-sidebar-section'
 import { ModalSurface } from '../chat/modal'
 import { PluginsModal } from '../plugins-modal'
-import { BotAgentBadge } from './agent-badge'
-import { BotAvatarWithBadge } from './avatar'
+import { BotAgentBadge, engineOfModel } from './agent-badge'
+import { BotAvatarWithBadge, RoomAvatar } from './avatar'
 import {
   DsBotCapabilitiesSubpage,
   DsBotComputerSubpage,
@@ -181,6 +181,7 @@ export function DsBotSettingsModal({
   const [subpage, setSubpage] = useState<DsBotSettingsTab | null>(initialTab ?? null)
   const [editorTarget, setEditorTarget] = useState<{ kind: 'bot' | 'room'; bot?: BotEntry; room?: BotRoom } | null>(null)
   const [defaultModelPickerOpen, setDefaultModelPickerOpen] = useState(false)
+  const [approvalModelPickerOpen, setApprovalModelPickerOpen] = useState(false)
   const [mainBotPickerOpen, setMainBotPickerOpen] = useState(false)
   const [teamFolderPickerOpen, setTeamFolderPickerOpen] = useState(false)
   const [botFolderTarget, setBotFolderTarget] = useState<BotEntry | null>(null)
@@ -324,9 +325,26 @@ export function DsBotSettingsModal({
     [usageData, usageRange, language],
   )
   const activityYear = useMemo(
-    () => buildDsBotActivityYear(usageData, 24),
+    () => buildDsBotActivityYear(usageData, 53),
     [usageData],
   )
+
+  useEffect(() => {
+    if (!visible || subpage !== 'usage' || !usageView.scanning || !clientInstance) return
+    const control = new AbortController()
+    const timer = setTimeout(() => {
+      void clientInstance
+        .call('usage', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }, control.signal)
+        .then(res => {
+          if (!control.signal.aborted) setUsageData(object(res))
+        })
+        .catch(() => {})
+    }, 2_000)
+    return () => {
+      control.abort()
+      clearTimeout(timer)
+    }
+  }, [visible, subpage, usageView.scanning, usageData, clientInstance])
 
   const [contentMounted, setContentMounted] = useState(visible)
   useEffect(() => {
@@ -342,9 +360,14 @@ export function DsBotSettingsModal({
 
   const prefs = object(effectiveState.prefs)
   const showThinking = prefs.thinking !== false && prefs.showThinking !== false
+  const memoryAutoRecall = prefs.memoryAutoRecall !== false
+  const backgroundAfterSec = typeof prefs.backgroundAfterSec === 'number' && Number.isFinite(prefs.backgroundAfterSec)
+    ? prefs.backgroundAfterSec
+    : 0
   const motion = text(prefs.motion) || text(prefs.animation) || 'lively'
   const enterToSend = prefs.enterToSend !== false
   const defaultBotModel = text(prefs.defaultBotModel) || effectiveState.defaultModel || ''
+  const approvalModelRef = text(prefs.approvalModel)
 
   const mainBot =
     effectiveState.bots.find(b => b.id === effectiveState.mainBotId)
@@ -604,6 +627,15 @@ export function DsBotSettingsModal({
                       onPress={() => setDefaultModelPickerOpen(true)}
                     />
                     <GroupRow
+                      icon={ShieldCheck}
+                      label={s.dsBotSettings.approvalModel}
+                      detail={s.dsBotSettings.approvalModelDetail}
+                      value={approvalModelRef ? approvalModelRef.split('/').pop() : s.dsBotSettings.defaultValue}
+                      chevron
+                      disabled={!isLiveState}
+                      onPress={() => setApprovalModelPickerOpen(true)}
+                    />
+                    <GroupRow
                       icon={Sparkles}
                       label={s.bots.showThinking}
                       detail={s.dsBotSettings.showThinkingDetail}
@@ -614,6 +646,21 @@ export function DsBotSettingsModal({
                           disabled={!isLiveState}
                           onValueChange={val => void setPref({ thinking: val })}
                           accessibilityLabel={s.bots.showThinking}
+                          {...switchColors}
+                        />
+                      }
+                    />
+                    <GroupRow
+                      icon={Sparkles}
+                      label={s.dsBotSettings.memoryAutoRecall}
+                      detail={s.dsBotSettings.memoryAutoRecallDetail}
+                      chevron={false}
+                      accessory={
+                        <Toggle
+                          value={memoryAutoRecall}
+                          disabled={!isLiveState}
+                          onValueChange={val => void setPref({ memoryAutoRecall: val })}
+                          accessibilityLabel={s.dsBotSettings.memoryAutoRecall}
                           {...switchColors}
                         />
                       }
@@ -633,6 +680,34 @@ export function DsBotSettingsModal({
                         />
                       }
                     />
+                  </GroupCard>
+
+                  <GroupCard style={{ padding: 15, gap: 10 }}>
+                    <View>
+                      <Text style={styles.rowTitle}>{s.dsBotSettings.backgroundAfter}</Text>
+                      <Text style={styles.rowSub}>{s.dsBotSettings.backgroundAfterDetail}</Text>
+                    </View>
+                    <View style={[styles.inlinePills, { flexWrap: 'wrap' }]}>
+                      {([
+                        [0, s.dsBotSettings.off],
+                        [30, '30s'],
+                        [60, '60s'],
+                        [180, '3m'],
+                        [300, '5m'],
+                      ] as const).map(([sec, label]) => {
+                        const on = backgroundAfterSec === sec
+                        return (
+                          <Pressable
+                            key={sec}
+                            disabled={!isLiveState}
+                            onPress={() => void setPref({ backgroundAfterSec: sec === 0 ? null : sec })}
+                            style={[styles.smallPill, on && styles.smallPillActive]}
+                          >
+                            <Text style={[styles.smallPillText, on && styles.smallPillTextActive]}>{label}</Text>
+                          </Pressable>
+                        )
+                      })}
+                    </View>
                   </GroupCard>
 
                   <SectionTitle>{s.dsBotSettings.sectionLocation}</SectionTitle>
@@ -1064,7 +1139,12 @@ export function DsBotSettingsModal({
                                 pressed && { opacity: 0.75 },
                               ]}
                             >
-                              <Users size={20} color={colors.ink} />
+                              <RoomAvatar
+                                members={room.members}
+                                bots={effectiveState.bots}
+                                avatar={room.avatar}
+                                size={36}
+                              />
                               <View style={{ flex: 1, minWidth: 0 }}>
                                 <Text style={styles.rowTitle} numberOfLines={1}>{room.name}</Text>
                                 <Text style={styles.rowSub} numberOfLines={1}>
@@ -1113,7 +1193,12 @@ export function DsBotSettingsModal({
 
               {/* 6. 连接器 (ConnectorsPage — strictly aligned with Screenshot 2) */}
               {subpage === 'connectors' && (
-                <DsBotConnectorsSubpage effectiveState={effectiveState} />
+                <DsBotConnectorsSubpage
+                  effectiveState={effectiveState}
+                  isLiveState={isLiveState}
+                  busy={busy}
+                  perform={perform}
+                />
               )}
 
               {/* 7. IM (ImPage — strictly aligned with Screenshot 3) */}
@@ -1160,7 +1245,12 @@ export function DsBotSettingsModal({
 
               {/* 13. 密钥 (SecretsPage) */}
               {subpage === 'secrets' && (
-                <DsBotSecretsSubpage effectiveState={effectiveState} />
+                <DsBotSecretsSubpage
+                  effectiveState={effectiveState}
+                  isLiveState={isLiveState}
+                  busy={busy}
+                  perform={perform}
+                />
               )}
             </View>
           </Screen>
@@ -1252,6 +1342,56 @@ export function DsBotSettingsModal({
                         )
                       })
                     )}
+                  </GroupCard>
+                </ScrollView>
+              </View>
+            </ModalSurface>
+          </Modal>
+        )}
+
+        {/* Approval Model Picker Modal */}
+        {approvalModelPickerOpen && (
+          <Modal transparent animationType="fade" visible onRequestClose={() => setApprovalModelPickerOpen(false)}>
+            <ModalSurface onClose={() => setApprovalModelPickerOpen(false)}>
+              <View style={{ gap: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={styles.sheetTitle}>{s.dsBotSettings.approvalModel}</Text>
+                  <IconButton label={s.common.close} icon={X} onPress={() => setApprovalModelPickerOpen(false)} />
+                </View>
+                <ScrollView style={{ maxHeight: 380 }}>
+                  <GroupCard>
+                    <GroupRow
+                      first
+                      label={s.dsBotSettings.defaultValue}
+                      selected={approvalModelRef === ''}
+                      chevron={false}
+                      accessory={approvalModelRef === '' ? <Check size={18} color={colors.primary} /> : undefined}
+                      onPress={() => {
+                        setApprovalModelPickerOpen(false)
+                        void setPref({ approvalModel: null })
+                      }}
+                    />
+                    {effectiveState.models
+                      .filter(m => engineOfModel(text(m.ref)) === undefined)
+                      .map(m => {
+                        const ref = text(m.ref)
+                        const label = text(m.name) || text(m.label) || ref
+                        const on = approvalModelRef === ref
+                        return (
+                          <GroupRow
+                            key={ref}
+                            label={label}
+                            detail={ref}
+                            selected={on}
+                            chevron={false}
+                            accessory={on ? <Check size={18} color={colors.primary} /> : undefined}
+                            onPress={() => {
+                              setApprovalModelPickerOpen(false)
+                              void setPref({ approvalModel: ref })
+                            }}
+                          />
+                        )
+                      })}
                   </GroupCard>
                 </ScrollView>
               </View>

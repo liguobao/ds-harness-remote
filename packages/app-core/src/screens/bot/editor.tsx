@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import * as ImagePicker from 'expo-image-picker'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Alert } from '../../ui/alert'
 import { strings as s } from '../../locales/i18n'
+import { BOT_STAGED_IMAGE_TYPES, base64ToBytes } from '../../services/bot-media'
 import { canDeleteBot, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotOperation, type BotObject, type BotRemoteClient } from '../../services/bot-catalog'
-import { ChevronDown, ChevronUp, RotateCcw, Trash2, X } from 'lucide-react-native'
+import { ChevronDown, ChevronUp, Plus, RotateCcw, Trash2, X } from 'lucide-react-native'
 import { Button, IconButton } from '../../ui/components'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
@@ -13,6 +15,14 @@ import { SheetModal } from '../../ui/sheet'
 import { useResponsiveLayout } from '../../ui/responsive'
 import { Toggle } from '../../ui/toggle'
 import { BotAgentBadge, engineOfModel } from './agent-badge'
+import { BotAvatar, RoomAvatar } from './avatar'
+import {
+  CHARACTER_COLORS,
+  PICKER_SHAPES,
+  resolveAvatarColor,
+  resolveAvatarFill,
+  resolveAvatarShape,
+} from './avatar-look'
 import { BotChoice } from './controls'
 import { BotFolderPickerModal, folderBasename } from './shared-panels'
 import { createBotStyles } from './styles'
@@ -151,7 +161,7 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
 }) {
   const styles = useThemedStyles(createBotStyles)
   const localStyles = useThemedStyles(createEditorStyles)
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
   const { compactHeight, sheetAsDialog } = useResponsiveLayout()
   const insets = useSafeAreaInsets()
   const editing = bot !== undefined || room !== undefined
@@ -165,13 +175,34 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
   const [model, setModel] = useState(bot?.model ?? '')
   const [effort, setEffort] = useState(bot?.effort ?? '')
   const [workDir, setWorkDir] = useState(bot?.workDir ?? room?.workDir ?? '')
+  const [extraDirs, setExtraDirs] = useState<string[]>(bot?.extraDirs ?? room?.extraDirs ?? [])
+  const [agentPreset, setAgentPreset] = useState(bot?.agentPreset ?? '')
+  const [presets, setPresets] = useState<BotObject[]>([])
+  const [avatarShape, setAvatarShape] = useState(() =>
+    bot ? resolveAvatarShape(bot.avatar?.shape, bot.id) : 'star',
+  )
+  const [avatarColor, setAvatarColor] = useState(() =>
+    bot ? resolveAvatarColor(bot.color, bot.id) : 'blue',
+  )
+  const [avatarImage, setAvatarImage] = useState(bot?.avatar?.image ?? room?.avatar?.image ?? '')
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const [permission, setPermission] = useState(bot?.permission ?? text(state.permissions?.defaultPreset) ?? 'workspace-write')
   const [isPrivate, setIsPrivate] = useState(Boolean(bot?.private))
   const [pinned, setPinned] = useState(Boolean(bot?.pinned ?? room?.pinned))
   const [hidden, setHidden] = useState(Boolean(bot?.hidden ?? room?.hidden))
-  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
+  const [folderPickerTarget, setFolderPickerTarget] = useState<'main' | 'extra' | null>(null)
   const [efforts, setEfforts] = useState<BotObject[]>([])
   const [defaultEffort, setDefaultEffort] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    if (kind !== 'bot') return
+    const control = new AbortController()
+    void client.call('presets', null, control.signal).then(res => {
+      if (!control.signal.aborted) {
+        setPresets(objects(object(res).presets))
+      }
+    }).catch(() => {})
+    return () => control.abort()
+  }, [client, kind])
   useEffect(() => {
     const control = new AbortController()
     setEfforts([])
@@ -221,18 +252,66 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
       },
     ])
   }
+  const pickCustomAvatarPhoto = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+      })
+      if (result.canceled || !result.assets?.[0]) return
+      const asset = result.assets[0]
+      const mediaType = asset.mimeType ?? 'image/jpeg'
+      const data = asset.base64 ?? ''
+      if (!BOT_STAGED_IMAGE_TYPES.has(mediaType) || !data) return
+      if (base64ToBytes(data).byteLength > 1024 * 1024) {
+        Alert.alert(s.chat.imageLimitTitle, s.chat.imageTooLarge(asset.fileName || 'avatar', '1 MB'))
+        return
+      }
+      setAvatarImage(`data:${mediaType};base64,${data}`)
+    } catch {
+      Alert.alert(s.chat.imagePickerFailedTitle, s.chat.imagePickerFailedBody)
+    }
+  }
   const save = async () => {
     const operation = kind === 'bot' ? bot ? 'update-bot' : 'create-bot' : room ? 'update-room' : 'create-room'
+    const botAvatarChanged = Boolean(
+      !bot
+      || avatarShape !== resolveAvatarShape(bot.avatar?.shape, bot.id)
+      || avatarImage !== (bot.avatar?.image ?? ''),
+    )
+    const botColorChanged = Boolean(!bot || avatarColor !== resolveAvatarColor(bot.color, bot.id))
+    const roomAvatarChanged = Boolean(avatarImage !== (room?.avatar?.image ?? ''))
+    const avatarPayload = kind === 'bot'
+      ? (botAvatarChanged ? { shape: avatarShape, ...(avatarImage ? { image: avatarImage } : {}) } : undefined)
+      : (roomAvatarChanged ? (avatarImage ? { image: avatarImage } : null) : undefined)
+    const presetChanged = Boolean(
+      (!bot && agentPreset !== '')
+      || (bot && agentPreset !== (bot.agentPreset ?? '')),
+    )
     const payload = kind === 'bot'
       ? {
           ...(bot ? { id: bot.id } : {}),
           name: name.trim(),
-          ...(bot ? { role, instructions, workDir, permission, private: canBePrivate ? isPrivate : false } : {}),
+          ...(botColorChanged ? { color: avatarColor } : {}),
+          ...(avatarPayload !== undefined ? { avatar: avatarPayload } : {}),
+          ...(presetChanged && selectedModelEngine === undefined ? { agentPreset: agentPreset || null } : {}),
+          ...(bot ? {
+            role,
+            instructions,
+            workDir,
+            ...(selectedModelEngine === undefined ? { extraDirs } : {}),
+            permission,
+            private: canBePrivate ? isPrivate : false,
+          } : {}),
           ...(bot || model ? { model: model || null } : {}),
           ...(bot || effort ? { effort } : {}),
         }
       : {
-          ...(room ? { id: room.id, notice, workDir, admin: members.includes(admin) ? admin : members[0] } : {}),
+          ...(avatarPayload !== undefined ? { avatar: avatarPayload } : {}),
+          ...(room ? { id: room.id, notice, workDir, extraDirs, admin: members.includes(admin) ? admin : members[0] } : {}),
           name: name.trim(),
           members,
         }
@@ -274,18 +353,154 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
         {error && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
         {field(s.bots.name, name, setName)}
         {kind === 'bot' ? <>
+          <View style={styles.field}>
+            <Text style={styles.heading}>{s.bots.avatarStyle}</Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => setAvatarPickerOpen(v => !v)}
+              style={[styles.input, styles.row]}
+            >
+              <BotAvatar
+                bot={{
+                  id: bot?.id ?? 'preview',
+                  avatar: { shape: avatarShape, ...(avatarImage ? { image: avatarImage } : {}) },
+                  color: avatarColor,
+                  engine: bot?.engine,
+                  model,
+                }}
+                size={28}
+              />
+              <Text style={[styles.body, styles.grow]} numberOfLines={1}>
+                {avatarImage ? s.bots.avatarCustomPhoto : `${avatarShape} · ${avatarColor}`}
+              </Text>
+              {avatarPickerOpen ? <ChevronUp size={18} color={colors.muted} /> : <ChevronDown size={18} color={colors.muted} />}
+            </Pressable>
+            {avatarPickerOpen && (
+              <View style={localStyles.avatarPanel}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={localStyles.avatarStrip}>
+                  {PICKER_SHAPES.map(shapeId => {
+                    const selected = !avatarImage && avatarShape === shapeId
+                    return (
+                      <Pressable
+                        key={shapeId}
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={() => {
+                          setAvatarImage('')
+                          setAvatarShape(shapeId)
+                        }}
+                        style={[localStyles.avatarShapeTile, selected && localStyles.avatarTileSelected]}
+                      >
+                        <BotAvatar
+                          bot={{ id: 'p', avatar: { shape: shapeId }, color: avatarColor }}
+                          size={30}
+                        />
+                      </Pressable>
+                    )
+                  })}
+                </ScrollView>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={localStyles.avatarStrip}>
+                  {[...(bot?.main ? ['deepseek'] : []), ...CHARACTER_COLORS].map(colorId => {
+                    const selected = avatarColor === colorId
+                    const swatchFill = resolveAvatarFill(colorId, scheme)
+                    return (
+                      <Pressable
+                        key={colorId}
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={() => setAvatarColor(colorId)}
+                        style={[
+                          localStyles.colorSwatch,
+                          { backgroundColor: swatchFill },
+                          selected && localStyles.colorSwatchSelected,
+                        ]}
+                      />
+                    )
+                  })}
+                </ScrollView>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Button
+                    variant="secondary"
+                    label={s.bots.avatarCustomPhoto}
+                    disabled={busy}
+                    onPress={() => void pickCustomAvatarPhoto()}
+                  />
+                  {Boolean(avatarImage) && (
+                    <Button
+                      variant="quiet"
+                      label={s.bots.avatarClearPhoto}
+                      disabled={busy}
+                      onPress={() => setAvatarImage('')}
+                    />
+                  )}
+                </View>
+              </View>
+            )}
+          </View>
           {editing && <>{field(s.bots.role, role, setRole)}{field(s.bots.instructions, instructions, setInstructions, true)}</>}
           <Text style={styles.heading}>{s.bots.model}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel={s.bots.model} accessibilityState={{ expanded: modelPicker }} style={[styles.input, styles.row]} disabled={busy} onPress={() => setModelPicker(value => !value)}>{selectedModelEngine !== undefined && <BotAgentBadge engine={selectedModelEngine} size={16} />}<Text style={[styles.body, styles.grow]} numberOfLines={1}>{model ? text(selectedModelEntry?.name) || text(selectedModelEntry?.label) || model : s.bots.defaultModel}</Text>{modelPicker ? <ChevronUp size={18} color={colors.muted} /> : <ChevronDown size={18} color={colors.muted} />}</Pressable>
           {modelPicker && <View style={styles.field}><BotChoice label={s.bots.defaultModel} checked={model === ''} disabled={busy} onPress={() => { setModel(''); setEffort(''); setModelPicker(false) }} />{groupedModels.map(group => <View key={group.provider} style={localStyles.providerGroup}><View style={localStyles.providerHeader}><BotAgentBadge engine={group.provider} size={14} /><Text style={localStyles.providerTitle}>{group.label}</Text></View>{group.items.map((entry, i) => { const ref = text(entry.ref); const isDefault = state.defaultModel !== undefined && ref === state.defaultModel; const labelText = text(entry.name) || text(entry.label) || ref; return <BotChoice key={ref || i} label={isDefault ? `${labelText} (${s.bots.defaultEffort})` : labelText} checked={model === ref} disabled={busy || ref === ''} onPress={() => { setModel(ref); setEffort(''); setModelPicker(false) }} /> })}</View>)}</View>}
           {state.models.length === 0 && <Text style={styles.muted}>{s.bots.noModel}</Text>}
           {efforts.length > 0 && <BotEffortBar efforts={efforts} defaultEffort={defaultEffort} current={effort} disabled={busy} onPick={setEffort} />}
+          {presets.length > 0 && selectedModelEngine === undefined && (
+            <View style={styles.field}>
+              <Text style={styles.heading}>{s.bots.agentPreset}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                <BotChoice
+                  label={s.bots.defaultEffort}
+                  checked={agentPreset === ''}
+                  disabled={busy}
+                  onPress={() => setAgentPreset('')}
+                />
+                {presets.map((p, idx) => {
+                  const pid = text(p.id)
+                  const plabel = text(p.name) || pid
+                  const fit = p.fit !== false
+                  return (
+                    <BotChoice
+                      key={pid || idx}
+                      label={plabel}
+                      checked={agentPreset === pid}
+                      disabled={busy || !fit}
+                      onPress={() => setAgentPreset(pid)}
+                    />
+                  )
+                })}
+              </View>
+            </View>
+          )}
           {editing && bot && <>
             <Text style={styles.heading}>{s.bots.workingFolder}</Text>
-            <Pressable accessibilityRole="button" style={[styles.input, styles.row]} disabled={busy} onPress={() => setFolderPickerOpen(true)}>
+            <Pressable accessibilityRole="button" style={[styles.input, styles.row]} disabled={busy} onPress={() => setFolderPickerTarget('main')}>
               <Text style={[styles.body, styles.grow]} numberOfLines={1}>{workDir ? folderBasename(workDir) : s.bots.teamWorkspace}</Text>
               <ChevronDown size={18} color={colors.muted} />
             </Pressable>
+            {selectedModelEngine === undefined && (
+              <View style={styles.field}>
+                <View style={[styles.row, { justifyContent: 'space-between' }]}>
+                  <Text style={styles.heading}>{s.bots.extraFolders}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busy || extraDirs.length >= 8}
+                    onPress={() => setFolderPickerTarget('extra')}
+                    style={[styles.row, (busy || extraDirs.length >= 8) && { opacity: 0.4 }]}
+                  >
+                    <Plus size={14} color={colors.primary} />
+                    <Text style={[styles.muted, { color: colors.primary, fontWeight: '600' }]}>{s.bots.addFolder}</Text>
+                  </Pressable>
+                </View>
+                {extraDirs.map(dir => (
+                  <View key={dir} style={[styles.input, styles.row, { minHeight: 40, paddingVertical: 6 }]}>
+                    <Text style={[styles.body, styles.grow]} numberOfLines={1}>{folderBasename(dir)}</Text>
+                    <Pressable hitSlop={8} disabled={busy} onPress={() => setExtraDirs(cur => cur.filter(x => x !== dir))}>
+                      <X size={15} color={colors.muted} />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
             <Text style={styles.heading}>{s.bots.permissions}</Text>
             <View style={{ flexDirection: 'row', gap: 6 }}>
               {([
@@ -323,11 +538,63 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
             )}
           </>}
         </> : <>
+          <View style={styles.field}>
+            <Text style={styles.heading}>{s.bots.avatarStyle}</Text>
+            <View style={[styles.row, { gap: 10 }]}>
+              <RoomAvatar
+                members={members}
+                bots={state.bots}
+                avatar={avatarImage ? { image: avatarImage } : undefined}
+                size={36}
+              />
+              <Button
+                variant="secondary"
+                label={s.bots.avatarCustomPhoto}
+                disabled={busy}
+                onPress={() => void pickCustomAvatarPhoto()}
+              />
+              {Boolean(avatarImage) && (
+                <Button
+                  variant="quiet"
+                  label={s.bots.avatarClearPhoto}
+                  disabled={busy}
+                  onPress={() => setAvatarImage('')}
+                />
+              )}
+            </View>
+          </View>
           {room && field(s.bots.notice, notice, setNotice, true)}
           <Text style={styles.heading}>{s.bots.members}</Text><Text style={styles.muted}>{s.bots.membersHint}</Text>
           <View style={styles.field}>{state.bots.map(entry => <BotChoice key={entry.id} label={entry.name} multiple checked={members.includes(entry.id)} disabled={busy} onPress={() => setMembers(current => current.includes(entry.id) ? current.filter(id => id !== entry.id) : [...current, entry.id])} />)}</View>
           {editing && <View style={styles.field}><Text style={styles.heading}>{s.bots.admin}</Text>{state.bots.filter(entry => members.includes(entry.id)).map(entry => <BotChoice key={entry.id} label={entry.name} checked={(members.includes(admin) ? admin : members[0]) === entry.id} disabled={busy} onPress={() => setAdmin(entry.id)} />)}</View>}
           {editing && room && <>
+            <Text style={styles.heading}>{s.bots.workingFolder}</Text>
+            <Pressable accessibilityRole="button" style={[styles.input, styles.row]} disabled={busy} onPress={() => setFolderPickerTarget('main')}>
+              <Text style={[styles.body, styles.grow]} numberOfLines={1}>{workDir ? folderBasename(workDir) : s.bots.teamWorkspace}</Text>
+              <ChevronDown size={18} color={colors.muted} />
+            </Pressable>
+            <View style={styles.field}>
+              <View style={[styles.row, { justifyContent: 'space-between' }]}>
+                <Text style={styles.heading}>{s.bots.extraFolders}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy || extraDirs.length >= 8}
+                  onPress={() => setFolderPickerTarget('extra')}
+                  style={[styles.row, (busy || extraDirs.length >= 8) && { opacity: 0.4 }]}
+                >
+                  <Plus size={14} color={colors.primary} />
+                  <Text style={[styles.muted, { color: colors.primary, fontWeight: '600' }]}>{s.bots.addFolder}</Text>
+                </Pressable>
+              </View>
+              {extraDirs.map(dir => (
+                <View key={dir} style={[styles.input, styles.row, { minHeight: 40, paddingVertical: 6 }]}>
+                  <Text style={[styles.body, styles.grow]} numberOfLines={1}>{folderBasename(dir)}</Text>
+                  <Pressable hitSlop={8} disabled={busy} onPress={() => setExtraDirs(cur => cur.filter(x => x !== dir))}>
+                    <X size={15} color={colors.muted} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
             <View style={[styles.row, { justifyContent: 'space-between', paddingVertical: 4 }]}>
               <Text style={styles.heading}>{s.bots.pinChat}</Text>
               <Toggle value={pinned} disabled={busy} onValueChange={setPinned} accessibilityLabel={s.bots.pinChat} />
@@ -342,7 +609,20 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
         {compactHeight && actions}
       </ScrollView>
       {!compactHeight && actions}
-      <BotFolderPickerModal visible={folderPickerOpen} value={workDir} client={client} onClose={() => setFolderPickerOpen(false)} onPick={setWorkDir} />
+      <BotFolderPickerModal
+        visible={folderPickerTarget !== null}
+        value={folderPickerTarget === 'main' ? workDir : ''}
+        client={client}
+        onClose={() => setFolderPickerTarget(null)}
+        onPick={picked => {
+          if (folderPickerTarget === 'main') {
+            setWorkDir(picked)
+          } else if (folderPickerTarget === 'extra' && picked && !extraDirs.includes(picked) && extraDirs.length < 8) {
+            setExtraDirs(cur => [...cur, picked])
+          }
+          setFolderPickerTarget(null)
+        }}
+      />
   </SheetModal>
 }
 
@@ -419,6 +699,41 @@ const createEditorStyles = (colors: ThemeColors) =>
       backgroundColor: colors.primary,
       borderColor: colors.surface,
       borderWidth: 2,
+    },
+    avatarPanel: {
+      padding: 12,
+      borderRadius: radius.lg,
+      backgroundColor: colors.grouped,
+      gap: 10,
+    },
+    avatarStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    avatarShapeTile: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: 1.5,
+      borderColor: 'transparent',
+    },
+    avatarTileSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    colorSwatch: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+    colorSwatchSelected: {
+      borderColor: colors.ink,
     },
     effortStopLabel: { ...type.caption, fontSize: 11, color: colors.muted, textAlign: 'center' },
     effortStopLabelActive: { color: colors.ink, fontWeight: '600' },

@@ -785,7 +785,12 @@ export function BotProfilePage({
           {/* Browser Tab Content (Figure 2) */}
           {bot && topTab === 'browser' ? (
             <View style={{ flex: 1, marginTop: 4 }}>
-              <BotBrowserPane bot={bot} perform={perform} />
+              <BotBrowserPane
+                bot={bot}
+                client={client}
+                hold={object(state.browserHolds?.[bot.id] ?? state.browserHolds?.[bot.sessionId])}
+                perform={perform}
+              />
             </View>
           ) : (
             <ScrollView
