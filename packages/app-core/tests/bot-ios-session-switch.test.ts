@@ -266,14 +266,15 @@ vi.mock('react-native', () => {
       cb?.(this.value)
     }
     interpolate(config: { inputRange: number[]; outputRange: number[]; extrapolate?: string }) {
+      const self = this
       return {
-        value: this,
+        value: self,
         config,
-        resolve(): number {
+        resolve: (): number => {
           const [in0 = 0, in1 = 1] = config.inputRange
           const [out0 = 0, out1 = 1] = config.outputRange
           const span = in1 - in0
-          const raw = span === 0 ? 0 : (this.value.value - in0) / span
+          const raw = span === 0 ? 0 : (self.value - in0) / span
           const t = config.extrapolate === 'clamp' ? Math.max(0, Math.min(1, raw)) : raw
           return out0 + (out1 - out0) * t
         },
@@ -387,7 +388,7 @@ vi.mock('lucide-react-native', () => ({
 }))
 
 vi.mock('expo-clipboard', () => ({
-  setStringAsync: vi.fn(() => Promise.resolve()),
+  setStringAsync: vi.fn<() => Promise<void>>(() => Promise.resolve()),
 }))
 
 vi.mock('react-native-safe-area-context', () => ({
@@ -710,17 +711,19 @@ const DEMO_BOT: BotEntry = {
   workDir: '/workspace/demo',
   permission: 'workspace-write',
   private: false,
+  avatar: { shape: 'star' },
   main: true,
   pinned: false,
 }
 
 const DEMO_BOT_STATE: BotState = {
+  mainBotId: 'bot-1',
   bots: [DEMO_BOT],
   rooms: [],
   agents: [],
   exchangeTurns: {},
   btwCards: {},
-  btwSupported: false,
+  btwSupported: true,
   sideChats: {},
   activity: {},
   work: {
@@ -786,8 +789,8 @@ describe('iOS DS-Bot session switching modal, scrim, and opacity regression suit
         run: () => {
           mockEnv.platform.OS = 'ios'
           vi.useFakeTimers()
-          const onDismiss = vi.fn()
-          const switchSessionAction = vi.fn()
+          const onDismiss = vi.fn<() => void>()
+          const switchSessionAction = vi.fn<() => void>()
 
           const popover = mountPopover({
             visible: true,
@@ -826,7 +829,7 @@ describe('iOS DS-Bot session switching modal, scrim, and opacity regression suit
         run: () => {
           mockEnv.platform.OS = 'ios'
           vi.useFakeTimers()
-          const onDismiss = vi.fn()
+          const onDismiss = vi.fn<() => void>()
 
           const popover = mountPopover({
             visible: true,
@@ -878,7 +881,7 @@ describe('iOS DS-Bot session switching modal, scrim, and opacity regression suit
         run: () => {
           mockEnv.platform.OS = 'android'
           vi.useFakeTimers()
-          const action = vi.fn()
+          const action = vi.fn<() => void>()
           const popover = mountPopover({
             visible: true,
             actions: [{ key: 'new-session', label: '新建会话', onPress: action }],
@@ -911,8 +914,8 @@ describe('iOS DS-Bot session switching modal, scrim, and opacity regression suit
         run: () => {
           mockEnv.platform.OS = 'ios'
           vi.useFakeTimers()
-          const perform = vi.fn(() => Promise.resolve({ ok: true }))
-          const onDismiss = vi.fn()
+          const perform = vi.fn<ProfileProps['perform']>(() => Promise.resolve({ ok: true }))
+          const onDismiss = vi.fn<() => void>()
 
           const profile = mountProfile({
             visible: true,
@@ -978,7 +981,7 @@ describe('iOS DS-Bot session switching modal, scrim, and opacity regression suit
         run: () => {
           mockEnv.platform.OS = 'ios'
           vi.useFakeTimers()
-          const onDismiss = vi.fn()
+          const onDismiss = vi.fn<() => void>()
 
           const profile = mountProfile({
             visible: true,
