@@ -67,6 +67,7 @@ export class ClientModeRuntime {
     const lifetime = this.remoteLifetime.signal
     const connectionSignal = signal === undefined ? lifetime : AbortSignal.any([lifetime, signal])
     connectionSignal.throwIfAborted()
+    if (this.identity === undefined) await this.ensureIdentity()
     const remote = await this.connection.connect(targetDeviceId, connectionSignal).catch(error => {
       if (!connectionSignal.aborted && !this.connected && this.gatewaySwitch.status().target?.deviceId === targetDeviceId) {
         this.noteClientAuthFailure(error)
@@ -94,6 +95,8 @@ export class ClientModeRuntime {
 
   private preview?: LoopbackPreview
   private identity?: HostIdentity
+  private identityLoadFlight?: Promise<HostIdentity>
+  private started = false
   private connected?: ConnectedRemote
   private pendingWorkspaceSelection?: RemoteWorkspaceSelection
   private codexVirtual?: CodexVirtualHarness
@@ -200,13 +203,13 @@ export class ClientModeRuntime {
 
   async start(): Promise<void> {
     if (this.closed) throw new Error('client remote-mode runtime is closed')
+    this.started = true
     if (this.host?.hostStatus().pairingHostOnly) { this.gatewaySwitch.install(); return }
-    this.identity = await this.identities.loadOrCreate(this.config.deviceName)
-    this.server.bindIdentity(this.identity)
+    const identity = await this.ensureIdentity()
     this.gatewaySwitch.install()
     this.logger.info('client remote-mode identity ready', {
-      deviceId: shortId(this.identity.deviceId),
-      fingerprint: this.identity.fingerprint,
+      deviceId: shortId(identity.deviceId),
+      fingerprint: identity.fingerprint,
     })
     // A previously authorized Client should make the local Host controllable
     // on startup as well. Do not register an anonymous Client just to probe:
@@ -246,7 +249,7 @@ export class ClientModeRuntime {
         if (status.authorized) return
         if (this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
       }
-      const credentials = await this.server.authenticate(this.requireIdentity())
+      const credentials = await this.server.authenticate(await this.ensureIdentity())
       try {
         await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
       } catch (error) {
@@ -333,7 +336,7 @@ export class ClientModeRuntime {
     signal?.throwIfAborted()
     if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
     this.assertHostAuthorizationForDeviceDiscovery()
-    this.requireIdentity()
+    await this.ensureIdentity()
     const devices: RemoteDeviceView[] = []
     for await (const page of this.server.devicePages(signal)) {
       const remoteDevices = page.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
@@ -387,7 +390,7 @@ export class ClientModeRuntime {
   }
 
   async authorizeClientWithAccount(email: string, password: string, verification?: AccountVerification): Promise<unknown> {
-    const authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email, password, async () => {
+    const authorization = await this.server.authorizeWithAccount(await this.ensureIdentity(), email, password, async () => {
       this.identity = await this.identities.reset(this.config.deviceName)
       return this.identity
     }, verification)
@@ -402,12 +405,18 @@ export class ClientModeRuntime {
   }
 
   async pollClientOAuthQrLogin(qrId: string): Promise<unknown> {
-    const result = await this.server.pollOAuthQrLogin(this.requireIdentity(), qrId, async () => {
-      this.identity = await this.identities.reset(this.config.deviceName)
-      this.server.bindIdentity(this.identity)
-      this.logger.info('Rotated revoked Client identity before QR authorization retry')
-      return this.identity
-    })
+    let result: Awaited<ReturnType<ClientServerApi['pollOAuthQrLogin']>>
+    try {
+      result = await this.server.pollOAuthQrLogin(await this.ensureIdentity(), qrId, async () => {
+        this.identity = await this.identities.reset(this.config.deviceName)
+        this.server.bindIdentity(this.identity)
+        this.logger.info('Rotated revoked Client identity before QR authorization retry')
+        return this.identity
+      })
+    } catch (error) {
+      this.logger.warn('Client QR login failed', { code: safeErrorCode(error) })
+      throw error
+    }
     if (result.status === 'complete') this.logger.info('Client account authorized with QR login')
     if (result.status === 'complete') {
       this.clientAuthRequired = false
@@ -421,7 +430,13 @@ export class ClientModeRuntime {
     this.codexOpenedSessions.clear()
     this.acpOpenedSessions.clear()
     this.clearHistoryCaches()
-    if (this.identity === undefined) { await Promise.all([cleanup, this.server.clearAuthorization()]); return }
+    if (this.identity === undefined) {
+      await Promise.all([cleanup, this.server.clearAuthorization()])
+      if (this.started && !this.closed && !this.host?.hostStatus().pairingHostOnly) {
+        await this.ensureIdentity()
+      }
+      return
+    }
     const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()])
     // A Host-only installation never creates a Client identity on logout.
     if (this.host?.hostStatus().pairingHostOnly) this.identity = undefined
@@ -436,7 +451,7 @@ export class ClientModeRuntime {
       await this.host.clearHostAuthorization()
       return this.status()
     }
-    const credentials = await this.server.authenticate(this.requireIdentity())
+    const credentials = await this.server.authenticate(await this.ensureIdentity())
     try {
       await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
     } catch (error) {
@@ -569,6 +584,7 @@ export class ClientModeRuntime {
       this.assertHostAuthorizationForDeviceDiscovery()
       return result
     }
+    if (this.identity === undefined) await this.ensureIdentity()
     const remote = await this.connection.connect(targetDeviceId, activeSignal, { background: true })
     let closing: Promise<void> | undefined
     const close = () => closing ??= remote.client.close()
@@ -835,6 +851,7 @@ export class ClientModeRuntime {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.started = false
     this.server.close?.()
     try {
       await this.leaveRemote()
@@ -1173,6 +1190,52 @@ export class ClientModeRuntime {
     signal?.throwIfAborted()
     if (this.closed || this.connected !== remote) {
       throw new ClientModeError('CANCELLED', 'The Remote workspace request was superseded or closed.')
+    }
+  }
+
+  async syncIdentityIfStarted(options?: { reload?: boolean }): Promise<void> {
+    if (!this.started || this.closed || this.host?.hostStatus().pairingHostOnly) return
+    if (options?.reload) {
+      this.server.resetCachedCredentials?.()
+      this.clientAuthRequired = false
+    }
+    await this.ensureIdentity(options)
+  }
+
+  async ensureIdentity(options?: { reload?: boolean }): Promise<HostIdentity> {
+    if (this.host?.hostStatus().pairingHostOnly) {
+      throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
+    }
+    if (!options?.reload && this.identityLoadFlight === undefined && this.identity !== undefined) return this.identity
+    if (!this.started || this.closed) {
+      throw new ClientModeError('IDENTITY_INVALID', 'The client identity is not ready.')
+    }
+    if (!options?.reload && this.identityLoadFlight !== undefined) return this.identityLoadFlight
+    const previous = this.identityLoadFlight
+    const flight = (async () => {
+      if (previous !== undefined) await previous.catch(() => undefined)
+      if (this.host?.hostStatus().pairingHostOnly) {
+        throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
+      }
+      if (!this.started || this.closed) {
+        throw new ClientModeError('IDENTITY_INVALID', 'The client identity is not ready.')
+      }
+      const identity = await this.identities.loadOrCreate(this.config.deviceName)
+      if (this.host?.hostStatus().pairingHostOnly) {
+        throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
+      }
+      if (!this.started || this.closed) {
+        throw new ClientModeError('IDENTITY_INVALID', 'The client identity is not ready.')
+      }
+      this.identity = identity
+      this.server.bindIdentity(identity)
+      return identity
+    })()
+    this.identityLoadFlight = flight
+    try {
+      return await flight
+    } finally {
+      if (this.identityLoadFlight === flight) this.identityLoadFlight = undefined
     }
   }
 

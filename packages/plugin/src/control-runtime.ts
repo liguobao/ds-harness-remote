@@ -311,8 +311,11 @@ export class PluginControlRuntime {
         return identity
       }, readAccountVerification(value.verification))
     }
-    if (value.role === 'client' && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
-      await this.client?.authorizeHostByDefault()
+    if (value.role === 'client') {
+      await this.client?.syncIdentityIfStarted?.({ reload: true })
+      if (resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
+        await this.client?.authorizeHostByDefault()
+      }
     }
     await this.settings.replace(editableConfig(next))
     if (value.role === 'host') {
@@ -728,19 +731,35 @@ export class PluginControlRuntime {
       throw this.startupFailure
     }
     const config = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
-    if (config.serverUrl !== undefined) {
-      const runtimes = await Promise.allSettled([
-        this.client?.clearClientAuthorization(),
-        this.host?.clearHostAuthorization(),
-      ])
-      const stores = await Promise.allSettled((['host', 'client'] as const).map(async role => {
-        const directory = serverStorageDirectory(this.identityDirectory, config.serverUrl!, role)
-        await new ServerCredentialStore(directory).clear()
-      }))
-      // A failed revocation must not skip the other role or leave its local
-      // credential behind. Report failure only after every cleanup settles.
-      const failure = [...runtimes, ...stores].find(result => result.status === 'rejected')
-      if (failure?.status === 'rejected') throw failure.reason
+    const runCleanup = async (operation: Promise<void> | undefined): Promise<PromiseSettledResult<void>> => {
+      if (operation === undefined) return { status: 'fulfilled', value: undefined }
+      try {
+        return { status: 'fulfilled', value: await operation }
+      } catch (reason) {
+        return { status: 'rejected', reason }
+      }
+    }
+    // Clear Host policy first so Client logout sees pairingHostOnly === false.
+    const hostResult = await runCleanup(this.host?.clearHostAuthorization())
+    const clientResult = await runCleanup(this.client?.clearClientAuthorization())
+    const runtimes = [clientResult, hostResult]
+    const directories = config.serverUrl === undefined
+      ? [{ role: 'host' as const, directory: this.identityDirectory }]
+      : (['host', 'client'] as const).map(role => ({
+          role,
+          directory: serverStorageDirectory(this.identityDirectory, config.serverUrl!, role),
+        }))
+    const stores = await Promise.allSettled(directories.map(async ({ role, directory }) => {
+      const store = new ServerCredentialStore(directory)
+      await store.clear()
+      if (role === 'host' && this.host === undefined) await store.clearPairingArtifacts()
+    }))
+    // A failed revocation must not skip the other role or leave its local
+    // credential behind. Report failure only after every cleanup settles.
+    const failure = [...runtimes, ...stores].find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
+    if (this.client !== undefined && !this.host?.hostStatus?.()?.pairingHostOnly) {
+      await this.client.syncIdentityIfStarted?.()
     }
     return this.settingsView()
   }
@@ -934,6 +953,9 @@ function fail(error: unknown): ControlResult<unknown> {
   const remoteCode = source !== undefined && 'code' in source && typeof source.code === 'string'
     ? source.code
     : source instanceof ClientModeError ? source.code : undefined
+  const retryable = source !== undefined && 'retryable' in source && typeof source.retryable === 'boolean'
+    ? source.retryable
+    : source instanceof ClientModeError ? source.retryable : false
   return {
     ok: false,
     error: {
@@ -941,6 +963,7 @@ function fail(error: unknown): ControlResult<unknown> {
       message: source?.message ?? 'The plugin control operation failed.',
       details: {
         ...(remoteCode === undefined ? {} : { remoteCode }),
+        retryable,
         ...(source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}),
       },
     },

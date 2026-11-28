@@ -330,6 +330,8 @@ export class HostPluginRuntime {
   async start(): Promise<void> {
     if (this.closed) throw new Error('remote runtime is closed')
     this.identity = await this.identities.loadOrCreate(this.config.deviceName)
+    this.serverApi?.bindIdentity(this.identity)
+    await this.serverApi?.loadStoredPolicy()
     this.logger.info('host identity ready', {
       deviceId: shortId(this.identity.deviceId),
       fingerprint: this.identity.fingerprint,
@@ -347,8 +349,6 @@ export class HostPluginRuntime {
       this.harnessVersion = await this.readHarnessVersion()
       attentionHarnessVersion = this.harnessVersion
       this.serverApi.setHarnessVersion(this.harnessVersion)
-      this.serverApi.bindIdentity(this.identity)
-      await this.serverApi.loadStoredPolicy()
       this.initializePairing()
       this.serverConnection = this.createServerConnection(this.identity)
       if (this.config.hostControl?.enabled !== false) {
@@ -488,10 +488,15 @@ export class HostPluginRuntime {
     this.pairing = undefined
     await this.serverConnection?.stop()
     let revokeFailure: unknown
-    try {
-      await this.serverApi?.revokeCurrentDevice()
-    } catch (error) {
-      revokeFailure = error
+    if (this.identity === undefined) {
+      await this.serverApi?.clearAuthorization()
+    } else {
+      this.serverApi?.bindIdentity(this.identity)
+      try {
+        await this.serverApi?.revokeCurrentDevice()
+      } catch (error) {
+        revokeFailure = error
+      }
     }
     this.identity = await this.identities.reset(this.config.deviceName, { clearPairingPolicy: true })
     this.serverApi?.bindIdentity(this.identity)

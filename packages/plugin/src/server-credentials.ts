@@ -65,6 +65,14 @@ export class ServerCredentialStore {
   async clear(): Promise<void> {
     await rm(this.path, { force: true })
   }
+
+  async clearPairingArtifacts(): Promise<void> {
+    const directory = dirname(this.path)
+    await Promise.all([
+      rm(join(directory, 'pairing-host-only.json'), { force: true }),
+      rm(join(directory, 'host-pairing.json'), { force: true }),
+    ])
+  }
 }
 
 function defaultMigrationGate(directory: string): string | undefined {

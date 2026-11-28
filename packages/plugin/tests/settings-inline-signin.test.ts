@@ -1041,3 +1041,161 @@ describe('HostPairingPanel completion and polling lifecycle', () => {
     }
   })
 })
+
+describe.each(['settings', 'workspace'] as const)('%s OAuth QR poll recovery and completion', entrance => {
+  const cleanups: Array<() => void> = []
+  afterEach(() => {
+    cleanups.splice(0).forEach(cleanup => cleanup())
+    vi.unstubAllGlobals()
+  })
+
+  it('stops polling and exposes retry when QR poll hits a non-retryable error', async () => {
+    const { React, resetRender, unmount } = createTestHarness()
+    cleanups.push(unmount)
+    vi.stubGlobal('window', {
+      requestAnimationFrame: vi.fn(), cancelAnimationFrame: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      setInterval: globalThis.setInterval.bind(globalThis),
+      clearInterval: globalThis.clearInterval.bind(globalThis),
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    })
+    vi.stubGlobal('document', { documentElement: { classList: { toggle: vi.fn(), remove: vi.fn() } } })
+
+    let pollCount = 0
+    let qrStartCount = 0
+    const control = vi.fn(async (endpoint: string) => {
+      if (endpoint === 'settings.get') {
+        return { config: { serverUrl: 'https://dsh.r2049.cn' }, writable: true, associations: {} } as PluginSettingsView
+      }
+      if (endpoint === 'status') {
+        return { mode: 'local', available: true, serverUrl: 'https://dsh.r2049.cn', hostAuthorizationAvailable: true, clientAuthRequired: true }
+      }
+      if (endpoint === 'client.account.providers') {
+        return [{ id: 'zhihu', displayName: 'Zhihu', qrStartUrl: '/api/v1/auth/oauth/qr/start?provider=zhihu' }]
+      }
+      if (endpoint === 'client.account.qr.start') {
+        qrStartCount += 1
+        return { qrId: `qr-session-nonretryable-${qrStartCount}`, scanUrl: `https://dsh.r2049.cn/qr/${qrStartCount}`, expiresIn: 120 }
+      }
+      if (endpoint === 'client.account.qr.poll') {
+        pollCount += 1
+        if (pollCount === 1) {
+          throw Object.assign(new Error('The client identity is not ready.'), {
+            code: 'IDENTITY_INVALID',
+            details: { remoteCode: 'IDENTITY_INVALID', retryable: false },
+          })
+        }
+        return { status: 'pending' }
+      }
+      return {}
+    })
+
+    const Component = (entrance === 'settings' ? createRemotePluginOptions(React) : createRemoteWorkspaceAction(React)) as any
+    const props = {
+      control,
+      statusFeed: { subscribe: () => () => {}, getSnapshot: () => undefined },
+      t: (k: string) => k,
+      view: 'page',
+      wide: true,
+      preferredQrProvider: 'zhihu',
+      subscribeOpen: () => () => {},
+      sidebarEntry: { read: () => 'standard', subscribe: () => () => {}, publish: () => {} },
+    }
+    const render = () => { resetRender(); return Component(props) }
+
+    render()
+    await new Promise(r => setTimeout(r, 20))
+    let tree = render()
+    findElement(tree, (n: any) => entrance === 'settings'
+      ? n.props?.['aria-controls'] === 'dsh-remote-inline-signin'
+      : n.props?.className === 'dshRemoteModeButton').props.onClick()
+
+    const { tree: failedTree, el: retryBtn } = await waitForElement(
+      render,
+      (n: any) => n.type === 'button' && n.children?.includes('retryLoginProviders'),
+    )
+    tree = failedTree
+    await new Promise(r => setTimeout(r, 1_650))
+    tree = render()
+
+    expect(pollCount).toBe(1)
+    expect(findElement(tree, (n: any) => n.props?.className === 'dshRemoteLoginSpinner')).toBeNull()
+    expect(retryBtn).not.toBeNull()
+    expect(findElement(tree, (n: any) => n.props?.role === 'alert')?.children).toContain('identityCorrupted')
+
+    retryBtn.props.onClick()
+    const { el: recoveredImg } = await waitForElement(render, (n: any) => n.type === 'img')
+    expect(recoveredImg).not.toBeNull()
+    expect(qrStartCount).toBe(2)
+  })
+
+  if (entrance === 'workspace') {
+    it('leaves authorization screen after QR completion even when device discovery fails', async () => {
+      const { React, resetRender, unmount } = createTestHarness()
+      cleanups.push(unmount)
+      vi.stubGlobal('window', {
+        requestAnimationFrame: vi.fn(), cancelAnimationFrame: vi.fn(),
+        addEventListener: vi.fn(), removeEventListener: vi.fn(),
+        setInterval: globalThis.setInterval.bind(globalThis),
+        clearInterval: globalThis.clearInterval.bind(globalThis),
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+      })
+      vi.stubGlobal('document', { documentElement: { classList: { toggle: vi.fn(), remove: vi.fn() } } })
+
+      let qrStartCount = 0
+      const control = vi.fn(async (endpoint: string) => {
+        if (endpoint === 'settings.get') {
+          return { config: { serverUrl: 'https://dsh.r2049.cn' }, writable: true, associations: {} } as PluginSettingsView
+        }
+        if (endpoint === 'status') {
+          return { mode: 'local', available: true, serverUrl: 'https://dsh.r2049.cn', hostAuthorizationAvailable: true, clientAuthRequired: true }
+        }
+        if (endpoint === 'client.account.providers') {
+          return [{ id: 'zhihu', displayName: 'Zhihu', qrStartUrl: '/api/v1/auth/oauth/qr/start?provider=zhihu' }]
+        }
+        if (endpoint === 'client.account.qr.start') {
+          qrStartCount += 1
+          return { qrId: `qr-session-complete-${qrStartCount}`, scanUrl: 'https://dsh.r2049.cn/qr/ok', expiresIn: 120 }
+        }
+        if (endpoint === 'client.account.qr.poll') {
+          return { status: 'complete' }
+        }
+        if (endpoint === 'devices') {
+          throw Object.assign(new Error('Host revoked'), { code: 'DEVICE_REVOKED' })
+        }
+        return {}
+      })
+
+      const Component = createRemoteWorkspaceAction(React) as any
+      const render = () => {
+        resetRender()
+        return Component({
+          control,
+          statusFeed: { subscribe: () => () => {}, getSnapshot: () => undefined },
+          t: (k: string) => k,
+          wide: true,
+          preferredQrProvider: 'zhihu',
+          subscribeOpen: () => () => {},
+          sidebarEntry: { read: () => 'standard', subscribe: () => () => {}, publish: () => {} },
+        })
+      }
+
+      render()
+      await new Promise(r => setTimeout(r, 20))
+      let tree = render()
+      findElement(tree, (n: any) => n.props?.className === 'dshRemoteModeButton').props.onClick()
+
+      const { tree: hostsTree } = await waitForElement(
+        render,
+        (n: any) => n.props?.className === 'dshRemoteHosts',
+      )
+      tree = hostsTree
+
+      expect(qrStartCount).toBe(1)
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemoteQrLogin')).toBeNull()
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemoteHosts')).not.toBeNull()
+    })
+  }
+})

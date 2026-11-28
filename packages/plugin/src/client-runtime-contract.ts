@@ -251,7 +251,8 @@ export function fail(error: unknown): ControlResult<unknown> {
       code: 'internal',
       message: source?.message ?? 'The remote-mode operation failed.',
       details: {
-        ...(remoteCode === undefined ? {} : { remoteCode, retryable }),
+        ...(remoteCode === undefined ? {} : { remoteCode }),
+        retryable,
         ...(source instanceof UploadSizeError ? { uploadLimitBytes: source.limitBytes, relay: source.relay } : {}),
         ...(source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}),
       },

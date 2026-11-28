@@ -1,17 +1,20 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ControlResult } from '../src/control-result.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { HostAuthorizationControl, HostConnectionHandle } from '../src/client-runtime.js'
-import type { ClientModeRuntime } from '../src/client-runtime.js'
+import { ClientModeRuntime, type HostAuthorizationControl, type HostConnectionHandle } from '../src/client-runtime.js'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { resolveConfig, type Config } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from '../src/control-runtime.js'
 import { IdentityInvalidError, IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
 import { HostLogStore } from '../src/host-log-store.js'
+import { SafeLogger } from '../src/logging.js'
+import { ClientServerApi } from '../src/server-api.js'
 import { ServerCredentialStore } from '../src/server-credentials.js'
+import { HostPluginRuntime } from '../src/service.js'
+import type { TypertGatewayLike } from '../src/typert-gateway-contract.js'
 
 const directories: string[] = []
 
@@ -1100,6 +1103,228 @@ describe('PluginControlRuntime local log endpoints', () => {
         expect(setHostControlEnabled).toHaveBeenLastCalledWith(true)
       },
     })))
+  })
+
+  it('allows OAuth QR sign-in in the same session after logging out from a DSH Go paired Host', async () => {
+    const directory = await temporaryDirectory()
+    const serverUrl = 'https://dsh.r2049.cn'
+    const settings = settingsBinding({
+      serverUrl,
+      codex: { enabled: false },
+      acp: { enabled: false, backends: [] },
+    })
+    const hostDir = serverStorageDirectory(directory, serverUrl, 'host')
+    const clientDir = serverStorageDirectory(directory, serverUrl, 'client')
+    const hostIdentities = new IdentityStore({ directory: hostDir, role: 'host' })
+    const hostIdentity = await hostIdentities.loadOrCreate('Paired Host')
+    const hostStore = new ServerCredentialStore(hostDir)
+    await hostStore.restrictPairingHostOnly()
+    await hostStore.save({
+      serverUrl,
+      deviceId: hostIdentity.deviceId,
+      authorizationMethod: 'device_pairing',
+      account: 'device:paired',
+      pairingRestricted: true,
+      inboundOnly: true,
+      ...tokens(),
+    })
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith('/api/v1/devices/self')) return json({ ok: true })
+      if (url.endsWith('/api/v1/auth/oauth/providers')) {
+        return json({ items: [{ id: 'github', displayName: 'GitHub', startUrl: '/api/v1/auth/oauth/github/start', qrStartUrl: '/api/v1/auth/oauth/qr/start?provider=github' }] })
+      }
+      if (url.endsWith('/api/v1/auth/oauth/qr/start?provider=github')) {
+        return json({ qrId: 'qr-session-after-logout-1234', scanUrl: `${serverUrl}/oauth/qr/1`, expiresIn: 120, provider: 'github' })
+      }
+      if (url.endsWith('/api/v1/auth/oauth/qr/qr-session-after-logout-1234')) {
+        return json({ status: 'complete', token: 'oauth-account-token-value' })
+      }
+      if (url.endsWith('/api/v1/auth/me')) {
+        return json({ account: 'oauth@example.com', isAdmin: false })
+      }
+      if (url.endsWith('/api/v1/devices/register') || url.endsWith('/api/v1/devices/register-owned-role')) {
+        return json(tokens())
+      }
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    const config = resolveConfig(settings.get())
+    const testLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as SafeLogger
+    const host = new HostPluginRuntime(config, hostIdentities, testLogger)
+    const clientIdentities = new IdentityStore({ directory: clientDir, role: 'client' })
+    const client = new ClientModeRuntime(
+      config,
+      clientIdentities,
+      new ClientServerApi(serverUrl, new ServerCredentialStore(clientDir), fetch, config.httpServerAllowlist),
+      { invoke: vi.fn(async () => undefined) } as unknown as TypertGatewayLike,
+      testLogger,
+      host,
+    )
+    const handler = register(new PluginControlRuntime(config, directory, settings, client, host))
+
+    await host.start()
+    await client.start()
+    try {
+      expect(host.hostStatus().pairingHostOnly).toBe(true)
+      expect(client.status().identityReady).toBe(false)
+
+      await expect(handler('settings.logout', {}, signal())).resolves.toMatchObject({ ok: true })
+      expect(host.hostStatus().pairingHostOnly).toBe(false)
+      expect(client.status().identityReady).toBe(true)
+      await expect(stat(join(hostDir, 'pairing-host-only.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+
+      await expect(handler('client.account.qr.start', { provider: 'github' }, signal())).resolves.toMatchObject({
+        ok: true,
+        value: { qrId: 'qr-session-after-logout-1234' },
+      })
+      await expect(handler('client.account.qr.poll', { qrId: 'qr-session-after-logout-1234' }, signal())).resolves.toMatchObject({
+        ok: true,
+        value: { status: 'complete', authorization: { method: 'account', account: 'oauth@example.com' } },
+      })
+    } finally {
+      await client.close()
+      await host.close()
+    }
+  })
+
+  it('clears pairing artifacts during settings.logout when Host runtime is unavailable', async () => {
+    const directory = await temporaryDirectory()
+    const serverUrl = 'https://dsh.r2049.cn'
+    const settings = settingsBinding({ serverUrl, enabled: false })
+    const hostDir = serverStorageDirectory(directory, serverUrl, 'host')
+    const store = new ServerCredentialStore(hostDir)
+    await store.restrictPairingHostOnly()
+    await writeFile(join(hostDir, 'host-pairing.json'), '{}')
+    await store.save({
+      serverUrl,
+      deviceId: 'host-device-1',
+      authorizationMethod: 'device_pairing',
+      account: 'device:paired',
+      pairingRestricted: true,
+      inboundOnly: true,
+      ...tokens(),
+    })
+
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, undefined, undefined))
+    await expect(handler('settings.logout', {}, signal())).resolves.toMatchObject({ ok: true, value: { associations: {} } })
+
+    await expect(stat(join(hostDir, 'pairing-host-only.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(join(hostDir, 'host-pairing.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(join(hostDir, 'server-credentials.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('syncs ClientModeRuntime identity and clears stale cached credentials after settings.configure and tolerates pre-start logout', async () => {
+    const directory = await temporaryDirectory()
+    const serverUrl = 'https://dsh.r2049.cn'
+    const settings = settingsBinding({
+      serverUrl,
+      codex: { enabled: false },
+      acp: { enabled: false, backends: [] },
+    })
+    const clientDir = serverStorageDirectory(directory, serverUrl, 'client')
+    const clientIdentities = new IdentityStore({ directory: clientDir, role: 'client' })
+    const oldIdentity = await clientIdentities.loadOrCreate('Old Client')
+    const clientStore = new ServerCredentialStore(clientDir)
+    await clientStore.save({
+      serverUrl,
+      deviceId: oldIdentity.deviceId,
+      authorizationMethod: 'account',
+      account: 'stale@example.com',
+      accessToken: 'stale-cached-access-token',
+      accessTokenExpiresAt: Date.now() + 600_000,
+      refreshToken: 'stale-cached-refresh-token',
+      refreshTokenExpiresAt: Date.now() + 86_400_000,
+    })
+
+    let registeredHostWithToken: string | undefined
+    let listDevicesWithToken: string | undefined
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      const auth = (init?.headers as Record<string, string> | undefined)?.Authorization
+      if (url.endsWith('/api/v1/auth/login')) {
+        return json({
+          token: 'fresh-web-token-value',
+          expiresAt: Date.now() + 600_000,
+          account: 'fresh@example.com',
+          profile: {},
+          isAdmin: false,
+        })
+      }
+      if (url.endsWith('/api/v1/devices/register')) {
+        if (!auth) {
+          return new Response(JSON.stringify({ error: { code: 'ACCOUNT_AUTH_REQUIRED', message: 'Sign in required', retryable: false } }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        return json({
+          ...tokens(),
+          accessToken: 'fresh-client-access-token',
+          refreshToken: 'fresh-client-refresh-token',
+        })
+      }
+      if (url.endsWith('/api/v1/devices/register-owned-role')) {
+        registeredHostWithToken = auth
+        return json(tokens())
+      }
+      if (url.includes('/api/v1/devices?')) {
+        listDevicesWithToken = auth
+        return json({ items: [], nextCursor: null })
+      }
+      if (url.endsWith('/api/v1/devices/self')) return json({ ok: true })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    const config = resolveConfig(settings.get())
+    const testLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as SafeLogger
+    const hostDir = serverStorageDirectory(directory, serverUrl, 'host')
+    const host = new HostPluginRuntime(config, new IdentityStore({ directory: hostDir, role: 'host' }), testLogger)
+    const clientServer = new ClientServerApi(serverUrl, clientStore, fetch, config.httpServerAllowlist)
+    const client = new ClientModeRuntime(
+      config,
+      clientIdentities,
+      clientServer,
+      { invoke: vi.fn(async () => undefined) } as unknown as TypertGatewayLike,
+      testLogger,
+      host,
+    )
+    const handler = register(new PluginControlRuntime(config, directory, settings, client, host))
+
+    try {
+      // Pre-start logout must not throw IDENTITY_INVALID even when client.start() has not run yet.
+      await expect(handler('settings.logout', {}, signal())).resolves.toMatchObject({ ok: true })
+
+      await host.start()
+      await client.start()
+      // Warm stale credentials into clientServer memory, then overwrite via settings.configure.
+      await clientStore.save({
+        serverUrl,
+        deviceId: client.status().deviceId as string,
+        authorizationMethod: 'account',
+        account: 'stale@example.com',
+        accessToken: 'stale-cached-access-token',
+        accessTokenExpiresAt: Date.now() + 600_000,
+        refreshToken: 'stale-cached-refresh-token',
+        refreshTokenExpiresAt: Date.now() + 86_400_000,
+      })
+      await clientServer.authenticate()
+
+      await expect(handler('settings.configure', {
+        role: 'client',
+        serverUrl,
+        email: 'fresh@example.com',
+        password: 'correct horse battery staple',
+      }, signal())).resolves.toMatchObject({ ok: true, value: { status: 'authorized' } })
+      expect(registeredHostWithToken).toBe('Bearer fresh-client-access-token')
+
+      await expect(handler('devices', {}, signal())).resolves.toMatchObject({ ok: true, value: [] })
+      expect(listDevicesWithToken).toBe('Bearer fresh-client-access-token')
+    } finally {
+      await client.close()
+      await host.close()
+    }
   })
 })
 function register(runtime: PluginControlRuntime) {

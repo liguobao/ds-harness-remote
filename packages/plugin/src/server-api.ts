@@ -82,6 +82,7 @@ export class HostServerApi {
   private identity?: HostIdentity
   private credentials?: ServerCredentials
   private credentialsPromise?: Promise<ServerCredentials>
+  private credentialsEpoch = 0
   private harnessVersion?: string
   private readonly lifetime = new AbortController()
 
@@ -95,7 +96,18 @@ export class HostServerApi {
     this.baseUrl = normalizeServerUrl(serverUrl, httpServerAllowlist)
   }
 
-  bindIdentity(identity: HostIdentity): void { this.identity = identity }
+  bindIdentity(identity: HostIdentity): void {
+    if (this.identity !== undefined && this.identity.deviceId !== identity.deviceId) {
+      this.resetCachedCredentials()
+    }
+    this.identity = identity
+  }
+
+  resetCachedCredentials(): void {
+    this.credentialsEpoch += 1
+    this.credentials = undefined
+    this.credentialsPromise = undefined
+  }
 
   setHarnessVersion(version: string | undefined): void { this.harnessVersion = version }
 
@@ -145,8 +157,7 @@ export class HostServerApi {
   }
 
   async clearAuthorization(): Promise<void> {
-    this.credentials = undefined
-    this.credentialsPromise = undefined
+    this.resetCachedCredentials()
     await this.store.clear()
   }
 
@@ -368,14 +379,26 @@ export class HostServerApi {
     if (this.credentials !== undefined && this.credentials.accessTokenExpiresAt > Date.now() + 30_000) {
       return this.credentials
     }
-    this.credentialsPromise ??= this.loadOrIssue(identity).finally(() => { this.credentialsPromise = undefined })
-    this.credentials = await this.credentialsPromise
-    return this.credentials
+    const epoch = this.credentialsEpoch
+    const promise = this.credentialsPromise ?? (() => {
+      let created!: Promise<ServerCredentials>
+      created = this.loadOrIssue(identity).finally(() => {
+        if (this.credentialsPromise === created) this.credentialsPromise = undefined
+      })
+      this.credentialsPromise = created
+      return created
+    })()
+    const resolved = await promise
+    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity.deviceId) {
+      this.credentials = resolved
+    }
+    return resolved
   }
 
   async refreshCredentials(rejectedAccessToken = this.credentials?.accessToken): Promise<ServerCredentials> {
     const identity = this.requireIdentity()
-    this.credentials = await this.withRefreshLock(async () => {
+    const epoch = this.credentialsEpoch
+    const refreshed = await this.withRefreshLock(async () => {
       // Another process may have rotated the token while we waited for the lock.
       const stored = await this.store.load(this.baseUrl, identity.deviceId)
       if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now()) {
@@ -388,7 +411,10 @@ export class HostServerApi {
       }
       return this.rotateCredentials(identity, stored)
     })
-    return this.credentials
+    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity.deviceId) {
+      this.credentials = refreshed
+    }
+    return refreshed
   }
 
   private async withRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -542,6 +568,7 @@ export class HostServerApi {
       authorizationMethod: 'account'
     },
   ): Promise<ServerCredentials> {
+    const epoch = this.credentialsEpoch
     const tokens = await this.publicRequest<TokenPair>('/api/v1/devices/register', {
       method: 'POST',
       body: JSON.stringify({
@@ -549,11 +576,17 @@ export class HostServerApi {
         device: this.deviceDescriptor(identity),
       }),
     }, authorization?.accountToken)
-    this.credentials = await this.saveTokens(identity, validateTokens(tokens), {
+    if (this.credentialsEpoch !== epoch || this.identity?.deviceId !== identity.deviceId) {
+      throw new ServerApiError('CONNECTION_CLOSED', 'Authorization state changed during registration.', false)
+    }
+    const saved = await this.saveTokens(identity, validateTokens(tokens), {
       authorizationMethod: authorization?.authorizationMethod ?? 'account',
       ...(authorization?.account === undefined ? {} : { account: authorization.account }),
     })
-    return this.credentials
+    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity.deviceId) {
+      this.credentials = saved
+    }
+    return saved
   }
 
   private deviceDescriptor(identity: HostIdentity): Record<string, unknown> {
