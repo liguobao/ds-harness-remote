@@ -1453,4 +1453,104 @@ describe('HostAttentionTracker', () => {
     await sub.stop()
     await tracker.close()
   })
+
+  it('subscribes to in-process dsBot/feed on 0 connected clients and ingests live state and notices', async () => {
+    const feedStream = createManualEventStream()
+    let livePoll = 0
+    const digests: AttentionDigest[] = []
+    const tracker = new HostAttentionTracker({
+      onDigest: digest => { digests.push(digest) },
+      logger: silentLogger(),
+      debounceMs: 20,
+      observerBackoffMs: [5, 5],
+      localGateway: {
+        supportsCarrier: true,
+        invoke: vi.fn(),
+        dispatch: vi.fn(),
+        open: vi.fn(),
+        failure: error => ({ code: (error as { code?: string }).code ?? 'internal', message: 'fail', details: {} }),
+        createPeer: () => ({
+          supportsCarrier: true,
+          invoke: vi.fn(),
+          dispatch: vi.fn(async (endpoint, payload) => {
+            if (endpoint !== 'dsBot/call') {
+              return { ok: false as const, error: { code: 'gateway/not-found', message: 'missing', details: {} } }
+            }
+            const args = (payload as { args?: { endpoint?: string; payload?: Record<string, unknown> } })?.args
+            if (args?.endpoint === 'hello') {
+              return { ok: true as const, value: { ok: true, value: { api: 1, capabilities: ['rpc', 'feed'], rpc: { call: 'dsBot/call', feed: 'dsBot/feed' } } } }
+            }
+            if (args?.endpoint === 'state') {
+              livePoll += 1
+              if (livePoll === 1) {
+                return {
+                  ok: true as const,
+                  value: {
+                    ok: true,
+                    value: {
+                      revision: 1,
+                      liveKey: 'lk-1',
+                      bots: [{ id: 'bot-a', sessionId: 'sess-bot-a', name: 'Ops Bot' }],
+                      rooms: [],
+                      work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
+                      inbox: { items: [{ id: 'in-1', kind: 'secret', botId: 'bot-a', sessionId: 'sess-bot-a', summary: 'Approve token' }] },
+                    },
+                  },
+                }
+              }
+              return {
+                ok: true as const,
+                value: {
+                  ok: true,
+                  value: {
+                    revision: 1,
+                    unchanged: true,
+                    liveKey: 'lk-2',
+                    bots: [{ id: 'bot-a', sessionId: 'sess-bot-a', name: 'Ops Bot' }],
+                    rooms: [],
+                    work: { bots: {}, rooms: {}, approvals: [], waiting: {}, turns: {}, steered: {} },
+                    inbox: { items: [] },
+                  },
+                },
+              }
+            }
+            return { ok: false as const, error: { code: 'gateway/not-found', message: 'missing', details: {} } }
+          }),
+          open: vi.fn(async endpoint => {
+            if (endpoint === 'session/control') {
+              throw Object.assign(new Error('not found'), { code: 'gateway/not-found' })
+            }
+            if (endpoint === 'dsBot/feed') return feedStream.stream
+            throw Object.assign(new Error('not found'), { code: 'gateway/not-found' })
+          }),
+          failure: error => ({ code: (error as { code?: string }).code ?? 'internal', message: 'fail', details: {} }),
+          dispose: vi.fn(async () => undefined),
+        }),
+      },
+    })
+
+    tracker.start('0.2.2')
+    tracker.startBotFeed()
+    try {
+      await vi.waitFor(() => {
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:secret:in-1')).toBe(true)
+      })
+      feedStream.push({ event: 'live', data: {} })
+      await vi.waitFor(() => {
+        expect(livePoll).toBeGreaterThanOrEqual(2)
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:inbox:secret:in-1')).toBe(false)
+      })
+      feedStream.push({
+        event: 'notice',
+        data: { kind: 'blocked', botId: 'bot-a', sessionId: 'sess-bot-a', name: 'Ops Bot', text: 'Needs model key' },
+      })
+      await vi.waitFor(() => {
+        expect(tracker.list().items.some(i => i.id === 'ds-bot:session:sess-bot-a' && i.status === 'failed_unread')).toBe(true)
+      })
+      expect(digests.length).toBeGreaterThan(0)
+    } finally {
+      await tracker.close()
+      expect(feedStream.wasReturned()).toBe(true)
+    }
+  })
 })

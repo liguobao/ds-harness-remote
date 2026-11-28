@@ -7467,8 +7467,11 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
       let required = botSessionIds(body.endpoint, json.value);
       if (required.size === 0) return;
       let sessions = await readSessions(), containsSessions = () => {
-        let snapshot = sessions.list.getSnapshot(), known = new Set(snapshot.ids);
-        return snapshot.phase === "ready" && [...required].every((id) => known.has(id));
+        let snapshot = sessions.list.getSnapshot();
+        if (snapshot.phase !== "ready") return !1;
+        if (snapshot.ids.length >= 2048) return !0;
+        let known = new Set(snapshot.ids);
+        return [...required].every((id) => known.has(id));
       };
       for (let attempt = 0; attempt < 2; attempt++) {
         if (signal.throwIfAborted(), containsSessions()) return;

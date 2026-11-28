@@ -428,4 +428,69 @@ describe('Android Bot client authority', () => {
     expect(second.bots[0]?.avatar).toEqual({ shape: 'cat', imageRef: 'av-bot-1', image: avatarPng })
     expect(dispatch).toHaveBeenCalledTimes(4)
   })
+
+  it('negotiates hello capabilities, upgrades to dsBot/call + dsBot/feed, falls back on legacy hosts, and routes /side + v0.4 /btw', async () => {
+    async function* emptyFeed() {
+      yield { event: 'hello', data: { seq: 1 } }
+    }
+    const dispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
+      expect(body.endpoint).toBe('hello')
+      return envelope({
+        api: 1,
+        capabilities: ['state', 'rpc', 'file-download-chunks'],
+        rpc: { call: 'dsBot/call', feed: 'dsBot/feed' },
+        revision: 3,
+      })
+    })
+    const rpcCall = vi.fn(async (endpoint: BotOperation, payload: Record<string, unknown> | null) => {
+      if (endpoint === 'models') return { ok: true, value: { modelsKey: 'm-rpc' } }
+      return { ok: true, value: { endpoint, payload } }
+    })
+    const openFeedSpy = vi.fn(async () => emptyFeed())
+    const client = new BotRemoteClient(dispatch, async () => [], () => {}, {
+      call: rpcCall,
+      openFeed: openFeedSpy,
+    })
+
+    const hello = await client.negotiate()
+    expect(hello?.capabilities.has('file-download-chunks')).toBe(true)
+    expect(client.hasCapability('rpc')).toBe(true)
+    expect(client.supportsFeed()).toBe(true)
+
+    await expect(client.call('models')).resolves.toEqual({ modelsKey: 'm-rpc' })
+    expect(rpcCall).toHaveBeenCalledWith('models', null, undefined)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+
+    const stream = await client.openFeed()
+    expect(stream).toBeDefined()
+    expect(openFeedSpy).toHaveBeenCalledTimes(1)
+
+    // Legacy host without hello falls back cleanly without breaking callers.
+    const legacyDispatch = vi.fn(async () => ({
+      status: 200,
+      json: { ok: false, error: { code: 'bot/not-found', message: 'Unknown endpoint' } },
+    }))
+    const legacyClient = new BotRemoteClient(legacyDispatch, async () => [], () => {}, {
+      call: rpcCall,
+      openFeed: openFeedSpy,
+    })
+    expect(await legacyClient.negotiate()).toBeNull()
+    expect(legacyClient.supportsFeed()).toBe(false)
+    expect(await legacyClient.openFeed()).toBeUndefined()
+
+    const v4State = {
+      ...parseBotState({ ...botState(), sideChats: {} }),
+      btwSupported: false,
+      sideChatsSupported: true,
+    }
+    expect(formatBotSubmission('/side check latest', ['@[Other](dsh-session:abc)'])).toBe('/side @[Other](dsh-session:abc) check latest')
+    expect(botMessageRequest(v4State, 'bot', '/side check latest')).toEqual({
+      endpoint: 'side-ask',
+      payload: { sessionId: 'bot', recent: true, text: 'check latest' },
+    })
+    expect(botMessageRequest(v4State, 'bot', '/btw quick check')).toEqual({
+      endpoint: 'side-ask',
+      payload: { sessionId: 'bot', recent: true, text: 'quick check' },
+    })
+  })
 })

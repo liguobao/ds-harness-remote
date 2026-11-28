@@ -214,7 +214,15 @@ const deDE = {
     "privateBotDesc": "Andere Bots können seinen Ordner, sein Gedächtnis oder seine Chats nicht lesen.",
     "privateMainDisabled": "Ein Haupt-Bot kann nicht privat sein.",
     "privateGroupDisabled": "Verlassen Sie zuerst alle Gruppenchats.",
-    "privateFolderDisabled": "Wählen Sie zuerst einen eigenen Arbeitsordner."
+    "privateFolderDisabled": "Wählen Sie zuerst einen eigenen Arbeitsordner.",
+    "addFiles": "Dateien hinzufügen",
+    "sideChat": "Seitenchat",
+    "newSideChat": "Neuer Seitenchat",
+    "moveToBackground": "In Hintergrund verschieben",
+    "backgroundTasks": "Hintergrundaufgaben",
+    "viewCardJump": "Ausstehende Karte ansehen",
+    "copyCsv": "CSV kopieren",
+    "deliveredFiles": "Bereitgestellte Dateien"
 },
 
   dsBotSettings: {

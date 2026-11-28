@@ -232,4 +232,36 @@ describe('PluginRouteBridge', () => {
     await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'state' } }))
       .rejects.toMatchObject({ code: 'TIMEOUT', retryable: true })
   })
+
+  it('prefers local dsBot/call RPC, sanitizes its response, falls back on gateway/not-found, and still refuses dsh-update-install', async () => {
+    const httpDispatch = dispatcher({ json: { ok: true, value: { source: 'http' } } })
+    const localCall = vi.fn(async (endpoint: string) => {
+      if (endpoint === 'state') {
+        return {
+          ok: true as const,
+          value: { ok: true, value: { bots: [], rooms: [], phone: { pairing: { secret: 'hide' } } } },
+        }
+      }
+      return { ok: false as const, code: 'gateway/not-found' }
+    })
+    const observed: unknown[] = []
+    const bridge = new PluginRouteBridge(httpDispatch, undefined, (route, body, result) => observed.push({ route, body, result }), localCall)
+
+    const stateRes = await bridge.call({ route: 'api/bot', body: { endpoint: 'state' } })
+    expect(stateRes).toEqual({ status: 200, json: { ok: true, value: { bots: [], rooms: [], phone: {} } } })
+    expect(httpDispatch).not.toHaveBeenCalled()
+    expect(observed).toHaveLength(1)
+
+    await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'dsh-update-install', payload: {} } }))
+      .rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+    expect(localCall).toHaveBeenCalledTimes(1)
+
+    const fallbackRes = await bridge.call({ route: 'api/bot', body: { endpoint: 'models' } })
+    expect(fallbackRes).toEqual({ status: 200, json: { ok: true, value: { source: 'http' } } })
+    expect(httpDispatch).toHaveBeenCalledTimes(1)
+
+    await bridge.call({ route: 'api/bot', body: { endpoint: 'state' } })
+    expect(localCall).toHaveBeenCalledTimes(2)
+    expect(httpDispatch).toHaveBeenCalledTimes(2)
+  })
 })

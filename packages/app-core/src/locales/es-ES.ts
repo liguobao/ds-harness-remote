@@ -214,7 +214,15 @@ const esES = {
     "privateBotDesc": "Otros Bots no pueden leer su carpeta, memoria o chats, y tú apruebas lo que comparte.",
     "privateMainDisabled": "Un Bot principal no puede ser privado.",
     "privateGroupDisabled": "Sal de los grupos antes de hacerlo privado.",
-    "privateFolderDisabled": "Elige primero una carpeta propia."
+    "privateFolderDisabled": "Elige primero una carpeta propia.",
+    "addFiles": "Añadir archivos",
+    "sideChat": "Chat lateral",
+    "newSideChat": "Nuevo chat lateral",
+    "moveToBackground": "Mover a segundo plano",
+    "backgroundTasks": "Tareas en segundo plano",
+    "viewCardJump": "Ver tarjeta pendiente",
+    "copyCsv": "Copiar CSV",
+    "deliveredFiles": "Archivos entregados"
 },
 
   dsBotSettings: {

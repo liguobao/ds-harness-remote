@@ -225,7 +225,15 @@ const ukUA = {
     "privateBotDesc": "Інші боти не можуть читати його теку, памʼять чи чати, а те, чим він ділиться з ними, підтверджуєте ви.",
     "privateMainDisabled": "Головний бот не може бути приватним.",
     "privateGroupDisabled": "Щоб зробити бота приватним, спершу виведіть його з групових чатів.",
-    "privateFolderDisabled": "Спершу виберіть для нього окрему робочу теку."
+    "privateFolderDisabled": "Спершу виберіть для нього окрему робочу теку.",
+    "addFiles": "Додати файли",
+    "sideChat": "Бічний чат",
+    "newSideChat": "Новий бічний чат",
+    "moveToBackground": "Перенести у фон",
+    "backgroundTasks": "Фонові завдання",
+    "viewCardJump": "Переглянути картку",
+    "copyCsv": "Копіювати CSV",
+    "deliveredFiles": "Доставлені файли"
 },
 
   dsBotSettings: {

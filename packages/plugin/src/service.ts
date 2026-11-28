@@ -236,10 +236,21 @@ export class HostPluginRuntime {
       // service (and its shared fetch handler) may become ready after this
       // plugin is activated.
       const dispatcher = this.pluginRoutes?.(peerGateway?.peer)
+      const localDsBotCall = peerGateway?.supportsCarrier === true
+        ? async (endpoint: string, payload: Record<string, unknown> | null, signal: AbortSignal) => {
+            const rpc = await peerGateway.dispatch('dsBot/call', {
+              args: { endpoint, payload: payload ?? {} },
+            }, signal)
+            return rpc.ok
+              ? { ok: true as const, value: rpc.value }
+              : { ok: false as const, code: rpc.error.code }
+          }
+        : undefined
       const pluginRoute = dispatcher === undefined ? undefined : new PluginRouteBridge(
         dispatcher,
         this.logger,
         (route, body, result) => this.attention.observeBotResponse(route, body, result),
+        localDsBotCall,
       )
       const workspaceUpload = new WorkspaceUploadHost(workspaceUploadRootResolver(
           peerGateway,
@@ -363,6 +374,7 @@ export class HostPluginRuntime {
       attentionHarnessVersion = await readHarnessDistributionVersion()
     }
     this.attention.start(attentionHarnessVersion)
+    this.attention.startBotFeed()
   }
 
   attentionTracker(): HostAttentionTracker {

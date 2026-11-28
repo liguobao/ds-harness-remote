@@ -441,6 +441,30 @@ export class AndroidRemoteConnection {
       (body, signal) => { current(); return core.rpc('plugin.route.call', { route: 'api/bot', body }, signal) },
       () => { current(); return proxy.sessionList() },
       current,
+      {
+        call: (endpoint, payload, signal) => {
+          current()
+          return new RemoteTypertGateway(core).call('dsBot/call', { args: { endpoint, payload: payload ?? {} } }, signal)
+        },
+        openFeed: async signal => {
+          current()
+          const stream = await new RemoteTypertGateway(core).open('dsBot/feed', { args: {} }, signal)
+          return (async function* () {
+            try {
+              for await (const frame of stream) {
+                current()
+                if (typeof frame !== 'object' || frame === null || !('event' in frame)) continue
+                const record = frame as { event?: unknown; data?: unknown }
+                if (typeof record.event === 'string') {
+                  yield { event: record.event, data: record.data }
+                }
+              }
+            } finally {
+              await stream.close()
+            }
+          })()
+        },
+      },
     )
   }
 

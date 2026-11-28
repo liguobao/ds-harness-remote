@@ -222,7 +222,15 @@ const ruRU = {
     "privateBotDesc": "Другие боты не могут читать его папку, память и чаты, а то, чем он делится с ними, подтверждаете вы.",
     "privateMainDisabled": "Главный бот не может быть приватным.",
     "privateGroupDisabled": "Чтобы сделать бота приватным, сначала выведите его из групповых чатов.",
-    "privateFolderDisabled": "Сначала выберите для него отдельную рабочую папку."
+    "privateFolderDisabled": "Сначала выберите для него отдельную рабочую папку.",
+    "addFiles": "Добавить файлы",
+    "sideChat": "Побочный чат",
+    "newSideChat": "Новый побочный чат",
+    "moveToBackground": "В фон",
+    "backgroundTasks": "Фоновые задачи",
+    "viewCardJump": "Показать карточку",
+    "copyCsv": "Копировать CSV",
+    "deliveredFiles": "Доставленные файлы"
 },
 
   dsBotSettings: {

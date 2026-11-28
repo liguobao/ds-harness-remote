@@ -214,7 +214,15 @@ const jaJP = {
     "privateBotDesc": "他の Bot はこのフォルダ、メモリ、会話を読み取れず、共有にはあなたの承認が必要です。",
     "privateMainDisabled": "メイン Bot はプライベートにできません。",
     "privateGroupDisabled": "先にすべてのグループチャットから退出してください。",
-    "privateFolderDisabled": "先に専用の作業フォルダを選択してください。"
+    "privateFolderDisabled": "先に専用の作業フォルダを選択してください。",
+    "addFiles": "ファイルを追加",
+    "sideChat": "サイドチャット",
+    "newSideChat": "新しいサイドチャット",
+    "moveToBackground": "バックグラウンドへ移動",
+    "backgroundTasks": "バックグラウンドタスク",
+    "viewCardJump": "保留中のカードを表示",
+    "copyCsv": "CSV をコピー",
+    "deliveredFiles": "納品ファイル"
 },
 
   dsBotSettings: {

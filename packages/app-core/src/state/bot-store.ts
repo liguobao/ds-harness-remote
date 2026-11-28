@@ -70,6 +70,8 @@ interface BotTeamStoreState {
   report?: BotReportTarget
   contextMenu?: BotContextMenuTarget
   runStats?: BotObject | null
+  feedConnected: boolean
+  roomFeedSeq: Record<string, number>
   ensureScope: (scope: string) => void
   setSelectedId: (id?: string) => void
   setEditor: (editor?: BotEditorTarget) => void
@@ -77,6 +79,8 @@ interface BotTeamStoreState {
   setReport: (report?: BotReportTarget) => void
   setContextMenu: (target?: BotContextMenuTarget) => void
   clearErrors: () => void
+  startFeed: () => void
+  stopFeed: () => void
   refresh: (force?: boolean, signal?: AbortSignal) => Promise<void>
   refreshLive: (options?: { forceFull?: boolean }) => Promise<void>
   syncSelectedSession: (options?: { selectedId?: string; force?: boolean; signal?: AbortSignal }) => Promise<RemoteSession | undefined>
@@ -102,6 +106,29 @@ let lastObservedGen = -1
 let lastObservedDeviceId = ''
 let lastObservedConnected = false
 let connectionEpoch = 0
+let activeFeedRevision = 0
+let activeFeedAbort: AbortController | undefined
+let activeFeedKey: string | undefined
+let feedDebounceTimer: ReturnType<typeof setTimeout> | undefined
+const FEED_BACKOFF_MS = [2_000, 5_000, 15_000, 30_000]
+const TERMINAL_FEED_CODES = new Set([
+  'METHOD_NOT_FOUND',
+  'FEATURE_NOT_SUPPORTED',
+  'gateway/not-found',
+  'gateway/interactions-forbidden',
+  'gateway/invocation-unavailable',
+])
+
+function stopFeedTracking(): void {
+  ++activeFeedRevision
+  if (feedDebounceTimer !== undefined) {
+    clearTimeout(feedDebounceTimer)
+    feedDebounceTimer = undefined
+  }
+  activeFeedAbort?.abort()
+  activeFeedAbort = undefined
+  activeFeedKey = undefined
+}
 
 function resetOpenTracking(): void {
   ++activeOpenRevision
@@ -169,11 +196,14 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
   report: undefined,
   contextMenu: undefined,
   runStats: undefined,
+  feedConnected: false,
+  roomFeedSeq: {},
 
   ensureScope: (nextScope: string) => {
     if (get().scope === nextScope) return
     ++activeRevision
     resetLiveTracking()
+    stopFeedTracking()
     explicitClearRevision = 0
     resetOpenTracking()
     actionLocked = false
@@ -195,6 +225,8 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
       report: undefined,
       contextMenu: undefined,
       runStats: undefined,
+      feedConnected: false,
+      roomFeedSeq: {},
     })
   },
 
@@ -225,6 +257,87 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
   setReport: (report?: BotReportTarget) => set({ report }),
   setContextMenu: (contextMenu?: BotContextMenuTarget) => set({ contextMenu }),
   clearErrors: () => set({ error: undefined, actionError: undefined, openError: undefined }),
+
+  stopFeed: () => {
+    stopFeedTracking()
+    if (get().feedConnected) set({ feedConnected: false })
+  },
+
+  startFeed: () => {
+    const { scope, connected, epoch } = observeAppConnection()
+    get().ensureScope(scope)
+    if (!connected) return
+    const key = `${scope}:${epoch}`
+    if (activeFeedKey === key && activeFeedAbort !== undefined && !activeFeedAbort.signal.aborted) return
+    stopFeedTracking()
+    const client = getClient()
+    if (!client.value) return
+    const feedRev = ++activeFeedRevision
+    const control = new AbortController()
+    activeFeedAbort = control
+    activeFeedKey = key
+    const scheduleLiveRefresh = () => {
+      if (control.signal.aborted || activeFeedRevision !== feedRev) return
+      if (feedDebounceTimer !== undefined) return
+      feedDebounceTimer = setTimeout(() => {
+        feedDebounceTimer = undefined
+        if (!control.signal.aborted && activeFeedRevision === feedRev && get().scope === scope) {
+          void get().refreshLive()
+        }
+      }, 150)
+    }
+    void (async () => {
+      let attempt = 0
+      while (!control.signal.aborted && activeFeedRevision === feedRev) {
+        const current = observeAppConnection()
+        if (!current.connected || current.epoch !== epoch || get().scope !== scope) break
+        try {
+          const stream = await client.value!.openFeed(control.signal)
+          if (!stream) break
+          if (control.signal.aborted || activeFeedRevision !== feedRev) break
+          attempt = 0
+          set({ feedConnected: true })
+          for await (const frame of stream) {
+            if (control.signal.aborted || activeFeedRevision !== feedRev || get().scope !== scope) break
+            if (frame.event === 'room') {
+              const roomId = text(object(frame.data).roomId)
+              if (roomId) {
+                set(state => ({
+                  roomFeedSeq: {
+                    ...state.roomFeedSeq,
+                    [roomId]: (state.roomFeedSeq[roomId] ?? 0) + 1,
+                  },
+                }))
+              }
+              continue
+            }
+            if (frame.event === 'hello' || frame.event === 'state' || frame.event === 'live' || frame.event === 'notice') {
+              scheduleLiveRefresh()
+            }
+          }
+        } catch (err) {
+          if (control.signal.aborted || activeFeedRevision !== feedRev) break
+          const code = err && typeof err === 'object' && 'code' in err && typeof err.code === 'string' ? err.code : ''
+          if (TERMINAL_FEED_CODES.has(code)) break
+        } finally {
+          if (activeFeedRevision === feedRev && get().feedConnected) {
+            set({ feedConnected: false })
+          }
+        }
+        if (control.signal.aborted || activeFeedRevision !== feedRev) break
+        const delayMs = FEED_BACKOFF_MS[Math.min(attempt, FEED_BACKOFF_MS.length - 1)] ?? 30_000
+        attempt += 1
+        await new Promise<void>(resolve => {
+          const timer = setTimeout(resolve, delayMs)
+          control.signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+        })
+      }
+      if (activeFeedAbort === control) {
+        activeFeedAbort = undefined
+        activeFeedKey = undefined
+      }
+    })()
+  },
 
   refresh: async (force = false, signal?: AbortSignal) => {
     const { scope, connected, epoch } = observeAppConnection()
@@ -621,9 +734,10 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
 useAppStore.subscribe(appState => {
   if (appState.connection.phase !== 'connected') {
     lastObservedConnected = false
-    if (useBotTeamStore.getState().openedSessionKey !== undefined) {
+    stopFeedTracking()
+    if (useBotTeamStore.getState().openedSessionKey !== undefined || useBotTeamStore.getState().feedConnected) {
       resetOpenTracking()
-      useBotTeamStore.setState({ openedSessionKey: undefined })
+      useBotTeamStore.setState({ openedSessionKey: undefined, feedConnected: false })
     }
   }
 })

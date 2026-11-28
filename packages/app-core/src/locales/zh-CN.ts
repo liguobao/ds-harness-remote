@@ -212,7 +212,15 @@ const zhCN = {
     "privateBotDesc": "其他 Bot 不能读取它的文件夹、记忆或对话；它分享给其他 Bot 的内容需要你批准。",
     "privateMainDisabled": "主 Bot 不能设为隐私 Bot。",
     "privateGroupDisabled": "先退出所有群聊，才能设为隐私 Bot。",
-    "privateFolderDisabled": "先选择一个独立的工作文件夹。"
+    "privateFolderDisabled": "先选择一个独立的工作文件夹。",
+    "addFiles": "添加文件",
+    "sideChat": "侧边提问",
+    "newSideChat": "新建侧边提问",
+    "moveToBackground": "转入后台",
+    "backgroundTasks": "后台任务",
+    "viewCardJump": "查看待处理卡片",
+    "copyCsv": "复制 CSV",
+    "deliveredFiles": "交付文件"
 },
 
   dsBotSettings: {

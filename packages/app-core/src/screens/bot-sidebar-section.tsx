@@ -70,17 +70,26 @@ export function useBotTeamLoad(enabled: boolean): void {
   const botScope = useAppStore(browseScope)
   const ensureScope = useBotTeamStore(state => state.ensureScope)
   const refresh = useBotTeamStore(state => state.refresh)
+  const startFeed = useBotTeamStore(state => state.startFeed)
+  const stopFeed = useBotTeamStore(state => state.stopFeed)
 
   useEffect(() => {
     ensureScope(botScope)
   }, [botScope, ensureScope])
 
   useEffect(() => {
-    if (!enabled || !connected) return
+    if (!enabled || !connected) {
+      stopFeed()
+      return
+    }
     const controller = new AbortController()
     void refresh(false, controller.signal)
-    return () => controller.abort()
-  }, [enabled, connected, botScope, refresh])
+    startFeed()
+    return () => {
+      controller.abort()
+      stopFeed()
+    }
+  }, [enabled, connected, botScope, refresh, startFeed, stopFeed])
 }
 
 export function botLiveStatus(state: BotState, bot: BotEntry): { kind: 'idle' | 'working' | 'away' | 'waiting'; label: string } {

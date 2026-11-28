@@ -177,6 +177,22 @@ describe('browser plugin route authority', () => {
     })))
   })
 
+  it('does not fail closed when the ready catalog is capped at 2,048 root sessions', async () => {
+    const cappedIds = Array.from({ length: 2048 }, (_, i) => `sess-${i}`)
+    const refresh = vi.fn(async () => {})
+    const guard = createPluginRouteCatalogGuard(async () => ({
+      list: { getSnapshot: () => ({ ids: cappedIds, phase: 'ready' }) },
+      refresh,
+    }))
+    await expect(guard(
+      remoteStatus(),
+      { endpoint: 'state' },
+      { ok: true, value: { bots: [{ id: 'older-bot', sessionId: 'older-part' }], rooms: [], agents: [] } },
+      new AbortController().signal,
+    )).resolves.toBeUndefined()
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
   it('preserves cancellation and rejects uncorrelated control responses without reaching local routes', async () => {
     await runScenarios([
       {

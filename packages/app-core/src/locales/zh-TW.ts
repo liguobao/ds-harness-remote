@@ -212,7 +212,15 @@ const zhTW = {
     "privateBotDesc": "其他 Bot 不能讀取它的資料夾、記憶或對話；它分享給其他 Bot 的內容需要你批准。",
     "privateMainDisabled": "主 Bot 不能設為隱私 Bot。",
     "privateGroupDisabled": "先退出所有群組聊天，才能設為隱私 Bot。",
-    "privateFolderDisabled": "先選擇一個獨立的工作資料夾。"
+    "privateFolderDisabled": "先選擇一個獨立的工作資料夾。",
+    "addFiles": "新增檔案",
+    "sideChat": "側邊提問",
+    "newSideChat": "新增側邊提問",
+    "moveToBackground": "轉入背景",
+    "backgroundTasks": "背景工作",
+    "viewCardJump": "檢視待處理卡片",
+    "copyCsv": "複製 CSV",
+    "deliveredFiles": "交付檔案"
 },
 
   dsBotSettings: {

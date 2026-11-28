@@ -194,11 +194,26 @@ export type PluginRouteObserver = (
   result: PluginRouteCallResult,
 ) => void
 
+export type LocalDsBotCall = (
+  endpoint: string,
+  payload: Record<string, unknown> | null,
+  signal: AbortSignal,
+) => Promise<{ ok: true; value: unknown } | { ok: false; code?: string }>
+
+const TERMINAL_LOCAL_DS_BOT_CODES = new Set([
+  'gateway/not-found',
+  'gateway/invocation-unavailable',
+  'METHOD_NOT_FOUND',
+])
+
 export class PluginRouteBridge {
+  private dsBotRpcAvailable = true
+
   constructor(
     private readonly dispatch: PluginRouteDispatcher,
     private readonly logger?: SafeLogger,
     private readonly observer?: PluginRouteObserver,
+    private readonly localDsBotCall?: LocalDsBotCall,
   ) {}
 
   async call(input: unknown, transferred = false): Promise<PluginRouteCallResult> {
@@ -219,15 +234,31 @@ export class PluginRouteBridge {
     const dispatchBody = params.route === 'api/bot' ? sanitizeBotRequestBody(params.body) : params.body
     const timeoutMs = params.route === 'api/bot' ? timeoutForEndpoint(params.body.endpoint) : PLUGIN_ROUTE_TIMEOUT_MS
     const startedAt = performance.now()
-    let result: { status: number; json: unknown }
-    try {
-      result = await this.dispatch(params.route, dispatchBody, AbortSignal.timeout(timeoutMs))
-    } catch (error) {
-      this.logger?.warn('plugin route call failed', {
-        route: params.route,
-        durationMs: Math.round(performance.now() - startedAt),
-      })
-      throw error
+    const signal = AbortSignal.timeout(timeoutMs)
+    let result: { status: number; json: unknown } | undefined
+    if (params.route === 'api/bot' && this.localDsBotCall !== undefined && this.dsBotRpcAvailable) {
+      try {
+        const botBody = dispatchBody as { endpoint: string; payload?: Record<string, unknown> | null }
+        const local = await this.localDsBotCall(botBody.endpoint, botBody.payload ?? null, signal)
+        if (local.ok) {
+          result = { status: 200, json: local.value }
+        } else if (local.code !== undefined && TERMINAL_LOCAL_DS_BOT_CODES.has(local.code)) {
+          this.dsBotRpcAvailable = false
+        }
+      } catch {
+        // Fall through to the HTTP/shared-fetch dispatcher on unexpected local carrier errors.
+      }
+    }
+    if (result === undefined) {
+      try {
+        result = await this.dispatch(params.route, dispatchBody, signal)
+      } catch (error) {
+        this.logger?.warn('plugin route call failed', {
+          route: params.route,
+          durationMs: Math.round(performance.now() - startedAt),
+        })
+        throw error
+      }
     }
     const sanitizedJson = params.route === 'api/bot' && result.status === 200
       ? sanitizeBotResponseJson(params.body.endpoint, result.json)

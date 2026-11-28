@@ -214,7 +214,15 @@ const frFR = {
     "privateBotDesc": "Les autres Bots ne peuvent pas lire son dossier, sa mémoire ou ses conversations.",
     "privateMainDisabled": "Un Bot principal ne peut pas être privé.",
     "privateGroupDisabled": "Quittez d’abord tous les groupes.",
-    "privateFolderDisabled": "Choisissez d’abord un dossier dédié."
+    "privateFolderDisabled": "Choisissez d’abord un dossier dédié.",
+    "addFiles": "Ajouter des fichiers",
+    "sideChat": "Discussion annexe",
+    "newSideChat": "Nouvelle discussion annexe",
+    "moveToBackground": "Passer en arrière-plan",
+    "backgroundTasks": "Tâches en arrière-plan",
+    "viewCardJump": "Voir la carte en attente",
+    "copyCsv": "Copier en CSV",
+    "deliveredFiles": "Fichiers livrés"
 },
 
   dsBotSettings: {

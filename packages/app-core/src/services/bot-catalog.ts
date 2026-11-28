@@ -77,6 +77,7 @@ export interface BotState {
   btwCards: BotObject
   btwSupported: boolean
   parallelSessionsSupported?: boolean
+  sideChatsSupported?: boolean
   sideChats: BotObject
   activity: BotObject
   work: {
@@ -149,14 +150,106 @@ export const BOT_OPERATIONS = [
 ] as const
 export type BotOperation = typeof BOT_OPERATIONS[number]
 
+export interface BotHelloInfo {
+  api: number | null
+  capabilities: ReadonlySet<string>
+  rpc?: { call: string; feed: string }
+  revision?: number
+  boot?: string
+  seq?: number
+}
+
+export interface BotRpcTransport {
+  call(endpoint: BotOperation, payload: BotObject | null, signal?: AbortSignal): Promise<unknown>
+  openFeed(signal?: AbortSignal): Promise<AsyncIterable<{ event: string; data: unknown }>>
+}
+
 export class BotRemoteClient {
   private readonly avatarCache = new Map<string, string>()
+  private helloPromise?: Promise<BotHelloInfo | null>
+  private helloInfo?: BotHelloInfo | null
+  private useRpcCall = false
 
   constructor(
     private readonly dispatch: (body: { endpoint: BotOperation; payload: BotObject | null }, signal?: AbortSignal) => Promise<unknown>,
     private readonly readSessions: () => Promise<RemoteSession[]>,
     private readonly assertCurrent: () => void,
+    private readonly rpcTransport?: BotRpcTransport,
   ) {}
+
+  hasCapability(name: string): boolean {
+    return this.helloInfo?.capabilities.has(name) ?? false
+  }
+
+  supportsFeed(): boolean {
+    return Boolean(
+      this.rpcTransport
+      && (this.helloInfo?.capabilities.has('rpc') || this.helloInfo?.rpc?.feed === 'dsBot/feed'),
+    )
+  }
+
+  async negotiate(signal?: AbortSignal): Promise<BotHelloInfo | null> {
+    this.assertCurrent()
+    checkAborted(signal)
+    if (this.helloInfo !== undefined) return this.helloInfo
+    if (this.helloPromise !== undefined) return this.helloPromise
+    let pending: Promise<BotHelloInfo | null> | undefined
+    pending = (async (): Promise<BotHelloInfo | null> => {
+      try {
+        const raw = await this.call('hello', { api: [1] }, signal)
+        if (!isBotObject(raw)) {
+          this.helloInfo = null
+          return null
+        }
+        const capabilities = new Set(
+          Array.isArray(raw.capabilities)
+            ? raw.capabilities.filter((item): item is string => typeof item === 'string' && item.length > 0)
+            : [],
+        )
+        const rpcObj = isBotObject(raw.rpc)
+          && typeof raw.rpc.call === 'string'
+          && typeof raw.rpc.feed === 'string'
+          ? { call: raw.rpc.call, feed: raw.rpc.feed }
+          : undefined
+        const info: BotHelloInfo = {
+          api: typeof raw.api === 'number' || raw.api === null ? raw.api : null,
+          capabilities,
+          ...(rpcObj !== undefined ? { rpc: rpcObj } : {}),
+          ...(typeof raw.revision === 'number' ? { revision: raw.revision } : {}),
+          ...(typeof raw.boot === 'string' ? { boot: raw.boot } : {}),
+          ...(typeof raw.seq === 'number' ? { seq: raw.seq } : {}),
+        }
+        this.helloInfo = info
+        if (this.rpcTransport !== undefined && (capabilities.has('rpc') || rpcObj?.call === 'dsBot/call')) {
+          this.useRpcCall = true
+        }
+        return info
+      } catch (error) {
+        this.assertCurrent()
+        checkAborted(signal)
+        if (error instanceof Error && (
+          error.message === strings.bots.notInstalled
+          || error.message === strings.bots.unsupported
+          || /unknown endpoint|not found/i.test(error.message)
+        )) {
+          this.helloInfo = null
+          return null
+        }
+        this.helloInfo = null
+        return null
+      } finally {
+        if (this.helloPromise === pending) this.helloPromise = undefined
+      }
+    })()
+    this.helloPromise = pending
+    return pending
+  }
+
+  async openFeed(signal?: AbortSignal): Promise<AsyncIterable<{ event: string; data: unknown }> | undefined> {
+    await this.negotiate(signal)
+    if (!this.supportsFeed()) return undefined
+    return this.rpcTransport!.openFeed(signal)
+  }
 
   async call(endpoint: BotOperation, payload: BotObject | null = null, signal?: AbortSignal): Promise<unknown> {
     this.assertCurrent()
@@ -165,6 +258,18 @@ export class BotRemoteClient {
       || (payload !== null && !isBotObject(payload))
       || (endpoint === 'approval-answer' && payload?.choice !== 'allow' && payload?.choice !== 'reject')) {
       throw new Error(strings.bots.operationDenied)
+    }
+    if (this.useRpcCall && this.rpcTransport !== undefined) {
+      const response = await this.rpcTransport.call(endpoint, payload, signal)
+      this.assertCurrent()
+      checkAborted(signal)
+      if (!isBotObject(response)) throw new Error(strings.bots.invalid)
+      if (response.ok !== true) {
+        const error = object(response.error)
+        if (error.code === 'bot/stale') throw new Error(strings.bots.stale)
+        throw new Error(typeof error.message === 'string' ? error.message : strings.bots.unavailable)
+      }
+      return response.value
     }
     const response = await this.dispatch({ endpoint, payload }, signal)
     this.assertCurrent()
@@ -395,6 +500,7 @@ export function parseBotState(value: unknown): BotState {
     btwSupported: isBotObject(value.btwCards) && !hasUnifiedInbox,
     parallelSessionsSupported: !(hasUnifiedInbox || hasTasks),
     sideChats: object(value.sideChats),
+    sideChatsSupported: isBotObject(value.sideChats),
     exchangeTurns: object(value.exchangeTurns),
     activity: object(value.activity),
     work: {
@@ -559,7 +665,7 @@ export function mergeBotStateDelta(previous: BotState, raw: unknown): BotState |
     } : {}),
     ...(raw.computerLive !== undefined ? { computerLive: object(raw.computerLive) } : {}),
     ...(raw.btwCards !== undefined ? { btwCards: object(raw.btwCards), btwSupported: isBotObject(raw.btwCards) && !hasInbox } : {}),
-    ...(raw.sideChats !== undefined ? { sideChats: object(raw.sideChats) } : {}),
+    ...(raw.sideChats !== undefined ? { sideChats: object(raw.sideChats), sideChatsSupported: isBotObject(raw.sideChats) } : {}),
     ...(raw.connectors !== undefined ? { connectors: object(raw.connectors) } : {}),
     ...(raw.capabilityStatuses !== undefined ? { capabilityStatuses: object(raw.capabilityStatuses) } : {}),
     ...(raw.imStatus !== undefined ? { imStatus: object(raw.imStatus) } : {}),
@@ -607,22 +713,29 @@ export function formatBotSubmission(rawDraft: string, referenceMentions: readonl
   if (/^\/btw(?:\s|$)/.test(trimmed)) {
     return ['/btw', prefix, trimmed.slice(4).trim()].filter(Boolean).join(' ')
   }
+  if (/^\/side(?:\s|$)/.test(trimmed)) {
+    return ['/side', prefix, trimmed.slice(5).trim()].filter(Boolean).join(' ')
+  }
   return [prefix, trimmed].filter(Boolean).join(' ')
 }
 
-/** Claim /btw before normal sending; refusals never become queued prompts. */
+/** Claim /btw and /side before normal sending; refusals never become queued prompts. */
 export function botMessageRequest(state: BotState, targetId: string, draft: string): { endpoint: BotOperation; payload: BotObject } {
   const message = draft.trim()
   const bot = state.bots.find(entry => entry.id === targetId || entry.sessionId === targetId)
   const room = state.rooms.find(entry => entry.id === targetId || entry.sessionId === targetId)
   const isAgentSession = (state.agents ?? []).some(entry => entry.sessions.includes(targetId))
   if ((!bot && !room && !isAgentSession) || state.readOnly !== undefined || !message) throw new Error(strings.bots.sessionUnavailable)
-  const aside = /^\/btw(?:\s|$)/.test(message)
-  if (aside) {
+  const isSide = /^\/side(?:\s|$)/.test(message)
+  const isAside = /^\/btw(?:\s|$)/.test(message)
+  if (isSide || isAside) {
     if (!bot) throw new Error(strings.bots.btwPrivate)
-    if (!state.btwSupported) throw new Error(strings.bots.btwUnsupported)
-    const question = message.slice(4).trim()
+    const question = message.slice(isSide ? 5 : 4).trim()
     if (!question) throw new Error(strings.bots.btwEmpty)
+    if (isSide || (!state.btwSupported && state.sideChatsSupported === true)) {
+      return { endpoint: 'side-ask', payload: { sessionId: bot.id, recent: true, text: question } }
+    }
+    if (!state.btwSupported) throw new Error(strings.bots.btwUnsupported)
     return { endpoint: 'btw', payload: { sessionId: bot.id, text: question } }
   }
   const resolvedTargetId = bot?.id ?? room?.id ?? targetId

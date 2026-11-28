@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { CalendarDays, MessageSquare, Search, X } from 'lucide-react-native'
+import { CalendarDays, ImagePlus, MessageCircle, MessageSquare, Paperclip, Search, X } from 'lucide-react-native'
 import { strings } from '../../locales/i18n'
 import type { BotState } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
@@ -21,11 +21,17 @@ export function BotPlusMenuModal({
   visible,
   onClose,
   onReferenceChat,
+  onPickImages,
+  onPickFiles,
+  onOpenSideChat,
   onOpenSchedules,
 }: {
   visible: boolean
   onClose: () => void
   onReferenceChat: () => void
+  onPickImages?: () => void
+  onPickFiles?: () => void
+  onOpenSideChat?: () => void
   onOpenSchedules?: () => void
 }) {
   const styles = useThemedStyles(createStyles)
@@ -48,6 +54,37 @@ export function BotPlusMenuModal({
                 onReferenceChat()
               }}
             />
+            {onPickImages !== undefined && (
+              <GroupRow
+                icon={ImagePlus}
+                label={strings.chat.addImages}
+                onPress={() => {
+                  onClose()
+                  onPickImages()
+                }}
+              />
+            )}
+            {onPickFiles !== undefined && (
+              <GroupRow
+                icon={Paperclip}
+                label={strings.bots.addFiles}
+                onPress={() => {
+                  onClose()
+                  onPickFiles()
+                }}
+              />
+            )}
+            {onOpenSideChat !== undefined && (
+              <GroupRow
+                icon={MessageCircle}
+                label={strings.bots.sideChat}
+                detail={strings.bots.btwNote}
+                onPress={() => {
+                  onClose()
+                  onOpenSideChat()
+                }}
+              />
+            )}
             {onOpenSchedules !== undefined && (
               <GroupRow
                 icon={CalendarDays}

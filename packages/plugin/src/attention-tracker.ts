@@ -134,11 +134,23 @@ export class HostAttentionTracker implements AttentionBackendObserver {
   private closed = false
   private started = false
   private observerGateway?: LocalTypertGateway
+  private activeObserverTasks = 0
   private observerController?: AbortController
   private observerIterator?: AsyncIterator<unknown>
   private observerTask?: Promise<void>
   private observerRetryTimer?: ReturnType<typeof setTimeout>
   private observerRetryWake?: () => void
+  private botObserverStarted = false
+  private botObserverController?: AbortController
+  private botObserverIterator?: AsyncIterator<unknown>
+  private botObserverTask?: Promise<void>
+  private botObserverRetryTimer?: ReturnType<typeof setTimeout>
+  private botObserverRetryWake?: () => void
+  private botStateSyncTimer?: ReturnType<typeof setTimeout>
+  private botStateSyncInFlight = false
+  private botStateSyncPendingFull = false
+  private botStateRevision: number | undefined
+  private botStateLiveKey: string | undefined
 
   constructor(private readonly options: AttentionTrackerOptions = {}) {
     this.now = options.now ?? (() => Date.now())
@@ -161,9 +173,41 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     if (observerGateway === undefined || observerGateway === gateway) return
     this.started = true
     this.observerGateway = observerGateway
+    this.activeObserverTasks += 1
     this.observerTask = this.runHarnessObserver(observerGateway).finally(() => {
       if (this.observerTask !== undefined) this.observerTask = undefined
+      void this.releaseObserverGatewayIfIdle(observerGateway)
     })
+  }
+
+  /** Start passive local `dsBot/feed` observation for 0-client DS-Bot attention updates. */
+  startBotFeed(): void {
+    if (this.closed || this.botObserverStarted) return
+    const gateway = this.options.localGateway
+    if (gateway?.supportsCarrier !== true) return
+    const observerGateway = this.observerGateway ?? gateway.createPeer?.({ interactions: 'none' })
+    if (observerGateway === undefined || observerGateway === gateway) return
+    this.observerGateway = observerGateway
+    this.startBotObserver(observerGateway)
+  }
+
+  private startBotObserver(observerGateway: LocalTypertGateway): void {
+    if (this.closed || this.botObserverStarted) return
+    this.botObserverStarted = true
+    this.activeObserverTasks += 1
+    this.botObserverTask = this.runDsBotObserver(observerGateway).finally(() => {
+      if (this.botObserverTask !== undefined) this.botObserverTask = undefined
+      void this.releaseObserverGatewayIfIdle(observerGateway)
+    })
+  }
+
+  private async releaseObserverGatewayIfIdle(gateway: LocalTypertGateway): Promise<void> {
+    this.activeObserverTasks = Math.max(0, this.activeObserverTasks - 1)
+    if (this.activeObserverTasks > 0) return
+    if (this.observerGateway === gateway) {
+      this.observerGateway = undefined
+      await gateway.dispose?.().catch(() => undefined)
+    }
   }
 
   /** Observe live Harness `$events` frames forwarded through an authenticated client bridge. */
@@ -839,19 +883,39 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     this.observerRetryWake?.()
     this.observerRetryWake = undefined
 
+    if (this.botObserverRetryTimer !== undefined) {
+      clearTimeout(this.botObserverRetryTimer)
+      this.botObserverRetryTimer = undefined
+    }
+    this.botObserverRetryWake?.()
+    this.botObserverRetryWake = undefined
+    if (this.botStateSyncTimer !== undefined) {
+      clearTimeout(this.botStateSyncTimer)
+      this.botStateSyncTimer = undefined
+    }
+
     const controller = this.observerController
     const iterator = this.observerIterator
     const task = this.observerTask
+    const botController = this.botObserverController
+    const botIterator = this.botObserverIterator
+    const botTask = this.botObserverTask
     const gateway = this.observerGateway
     this.observerController = undefined
     this.observerIterator = undefined
     this.observerTask = undefined
+    this.botObserverController = undefined
+    this.botObserverIterator = undefined
+    this.botObserverTask = undefined
     this.observerGateway = undefined
 
-    // Strict lifecycle sequence: abort signal -> iterator.return() -> peer.dispose()
+    // Strict lifecycle sequence: abort signals -> iterator.return() -> tasks -> peer.dispose()
     controller?.abort('attention-tracker-closed')
+    botController?.abort('attention-tracker-closed')
     await iterator?.return?.().catch(() => undefined)
+    await botIterator?.return?.().catch(() => undefined)
     await task?.catch(() => undefined)
+    await botTask?.catch(() => undefined)
     await gateway?.dispose?.().catch(() => undefined)
 
     this.followers.clear()
@@ -869,6 +933,10 @@ export class HostAttentionTracker implements AttentionBackendObserver {
     this.titleBySessionId.clear()
     this.taskOwnerBySessionId.clear()
     this.botWorkspaceId = undefined
+    this.botStateRevision = undefined
+    this.botStateLiveKey = undefined
+    this.botStateSyncInFlight = false
+    this.botStateSyncPendingFull = false
     this.activeHarnessEventStreams = 0
   }
 
@@ -919,9 +987,152 @@ export class HostAttentionTracker implements AttentionBackendObserver {
         await this.waitBackoff(delayMs)
       }
     } finally {
-      if (this.observerGateway === gateway) {
-        this.observerGateway = undefined
-        await gateway.dispose?.().catch(() => undefined)
+      // Shared observerGateway cleanup runs in releaseObserverGatewayIfIdle/close.
+    }
+  }
+
+  private async runDsBotObserver(gateway: LocalTypertGateway): Promise<void> {
+    let attempt = 0
+    while (!this.closed) {
+      const controller = new AbortController()
+      this.botObserverController = controller
+      let iterator: AsyncIterator<unknown> | undefined
+      let terminal = false
+      try {
+        // Probe hello before opening dsBot/feed so Hosts without DS-Bot v0.4 do not open redundant streams.
+        const helloRpc = await gateway.dispatch('dsBot/call', {
+          args: { endpoint: 'hello', payload: { api: [1] } },
+        }, controller.signal)
+        if (this.closed || controller.signal.aborted) break
+        if (!isRecord(helloRpc) || helloRpc.ok !== true) {
+          const code = isRecord(helloRpc) && isRecord(helloRpc.error) && typeof helloRpc.error.code === 'string'
+            ? helloRpc.error.code
+            : undefined
+          if (code === undefined || TERMINAL_OBSERVER_ERROR_CODES.has(code) || code === 'gateway/service-unavailable') {
+            terminal = true
+            break
+          }
+          throw Object.assign(new Error('dsBot/call hello failed'), { code })
+        }
+        const helloEnvelope = unwrapDsBotEnvelope(helloRpc.value)
+        if (!isRecord(helloEnvelope) || helloEnvelope.ok !== true || !isRecord(helloEnvelope.value)) {
+          terminal = true
+          break
+        }
+        const stream = await gateway.open('dsBot/feed', { args: {} }, controller.signal)
+        if (this.closed || controller.signal.aborted) break
+        iterator = stream[Symbol.asyncIterator]()
+        this.botObserverIterator = iterator
+        this.scheduleBotStateSync(gateway, true)
+        while (!this.closed && !controller.signal.aborted) {
+          const next = await iterator.next()
+          if (next.done || this.closed || controller.signal.aborted) break
+          attempt = 0
+          this.handleDsBotFeedFrame(gateway, next.value)
+        }
+      } catch (error) {
+        if (this.closed || controller.signal.aborted) break
+        const failure = gateway.failure(error)
+        this.options.logger?.debug('ds-bot attention feed observer degraded', {
+          code: failure.code,
+          attempt,
+        })
+        if (TERMINAL_OBSERVER_ERROR_CODES.has(failure.code)) {
+          terminal = true
+        } else if (failure.code === 'gateway/service-unavailable' && attempt >= this.observerBackoffMs.length) {
+          terminal = true
+        }
+      } finally {
+        if (this.botObserverIterator === iterator) this.botObserverIterator = undefined
+        if (this.botObserverController === controller) this.botObserverController = undefined
+        controller.abort()
+        await iterator?.return?.().catch(() => undefined)
+      }
+      if (this.closed || terminal) break
+      const delayMs = this.observerBackoffMs[Math.min(attempt, this.observerBackoffMs.length - 1)] ?? 60_000
+      attempt += 1
+      await this.waitBotBackoff(delayMs)
+    }
+  }
+
+  private waitBotBackoff(delayMs: number): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    return new Promise(resolve => {
+      const done = () => {
+        if (this.botObserverRetryTimer !== undefined) {
+          clearTimeout(this.botObserverRetryTimer)
+          this.botObserverRetryTimer = undefined
+        }
+        if (this.botObserverRetryWake === done) {
+          this.botObserverRetryWake = undefined
+        }
+        resolve()
+      }
+      this.botObserverRetryWake = done
+      this.botObserverRetryTimer = setTimeout(done, delayMs)
+    })
+  }
+
+  private handleDsBotFeedFrame(gateway: LocalTypertGateway, frame: unknown): void {
+    if (!isRecord(frame) || typeof frame.event !== 'string') return
+    const { event, data } = frame
+    if (event === 'hello' || event === 'state') {
+      this.scheduleBotStateSync(gateway, true)
+      return
+    }
+    if (event === 'live') {
+      this.scheduleBotStateSync(gateway, false)
+      return
+    }
+    if (event === 'notice' && isRecord(data)) {
+      this.observeBotResponse(
+        'api/bot',
+        { endpoint: 'notices', payload: {} },
+        { status: 200, json: { ok: true, value: { notices: [data] } } },
+      )
+    }
+  }
+
+  private scheduleBotStateSync(gateway: LocalTypertGateway, forceFull: boolean): void {
+    if (this.closed) return
+    if (forceFull) this.botStateSyncPendingFull = true
+    if (this.botStateSyncTimer !== undefined) return
+    this.botStateSyncTimer = setTimeout(() => {
+      this.botStateSyncTimer = undefined
+      void this.syncBotStateFromRpc(gateway)
+    }, 150)
+  }
+
+  private async syncBotStateFromRpc(gateway: LocalTypertGateway): Promise<void> {
+    if (this.closed || this.botStateSyncInFlight) return
+    this.botStateSyncInFlight = true
+    const wantFull = this.botStateSyncPendingFull
+      || this.botStateRevision === undefined
+      || this.botStateLiveKey === undefined
+    this.botStateSyncPendingFull = false
+    const payload: Record<string, unknown> = wantFull
+      ? { avatars: 'ref' }
+      : { since: this.botStateRevision, live: this.botStateLiveKey, avatars: 'ref' }
+    try {
+      const rpcResult = await gateway.dispatch('dsBot/call', {
+        args: { endpoint: 'state', payload },
+      }, this.botObserverController?.signal ?? AbortSignal.timeout(15_000))
+      if (this.closed || !isRecord(rpcResult) || rpcResult.ok !== true) return
+      const envelope = unwrapDsBotEnvelope(rpcResult.value)
+      if (!isRecord(envelope) || envelope.ok !== true || !isRecord(envelope.value)) return
+      if (typeof envelope.value.revision === 'number') this.botStateRevision = envelope.value.revision
+      if (typeof envelope.value.liveKey === 'string') this.botStateLiveKey = envelope.value.liveKey
+      this.observeBotResponse(
+        'api/bot',
+        { endpoint: 'state', payload },
+        { status: 200, json: envelope },
+      )
+    } catch {
+      // Transient local sync errors recover on subsequent feed events or reconnect.
+    } finally {
+      this.botStateSyncInFlight = false
+      if (!this.closed && this.botStateSyncPendingFull) {
+        this.scheduleBotStateSync(gateway, true)
       }
     }
   }
@@ -1609,4 +1820,10 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function unwrapDsBotEnvelope(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined
+  if (typeof value.ok === 'boolean') return value
+  return { ok: true, value }
 }

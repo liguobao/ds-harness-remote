@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ScrollView, Text, View } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
+import { Pressable, ScrollView, Text, View } from 'react-native'
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg'
 import { strings as s } from '../../locales/i18n'
 import { objects, text, type BotObject } from '../../services/bot-catalog'
@@ -14,11 +15,18 @@ export function BotChart({ node, scope }: { node: BotObject; scope: Scope }) {
   const styles = useThemedStyles(createBotStyles)
   const { colors } = useTheme()
   const [table, setTable] = useState(false)
+  const [selectedIndex, setSelectedIndex] = useState<number | undefined>(undefined)
   const categories = (node.categories as unknown[]).map(asText)
-  const series = objects(node.series).map(entry => ({ label: text(entry.name), values: (entry.values as unknown[]).map(value => {
-    const number = Number(resolve(value, scope, NaN))
-    return Number.isFinite(number) ? number : NaN
-  }) }))
+  const series = objects(node.series).map(entry => {
+    const rawValues = Array.isArray(entry.values) ? entry.values : Array.isArray(entry.data) ? entry.data : []
+    return {
+      label: text(entry.name),
+      values: rawValues.map(value => {
+        const number = Number(resolve(value, scope, NaN))
+        return Number.isFinite(number) ? number : NaN
+      }),
+    }
+  })
   const palette = [colors.primary, colors.accent, colors.success, colors.warning]
   const unit = text(node.unit)
   const caption = text(node.caption)
@@ -65,7 +73,44 @@ export function BotChart({ node, scope }: { node: BotObject; scope: Scope }) {
       </>}
     </Svg>}
     <View style={styles.wrap}>{(kind === 'donut' ? categories : series.map(entry => entry.label)).map((label, i) => <View key={i} style={styles.row}><View style={{ width: 10, height: 10, backgroundColor: palette[i % palette.length] }} /><Text style={styles.muted}>{label}</Text></View>)}</View>
-    <Button variant="quiet" label={s.bots.chartData} onPress={() => setTable(current => !current)} />
+    {categories.length > 0 && (
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 6 }}>
+        {categories.map((cat, idx) => (
+          <Pressable
+            key={`${idx}:${cat}`}
+            onPress={() => setSelectedIndex(current => (current === idx ? undefined : idx))}
+            style={{
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 12,
+              backgroundColor: selectedIndex === idx ? colors.primarySoft : colors.surfaceStrong,
+            }}
+          >
+            <Text style={[styles.muted, selectedIndex === idx && { color: colors.primary, fontWeight: '600' }]}>{cat}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    )}
+    {selectedIndex !== undefined && selectedIndex >= 0 && selectedIndex < categories.length && (
+      <Text style={styles.muted}>
+        {categories[selectedIndex]}: {series.map(entry => `${entry.label ? `${entry.label}=` : ''}${Number.isFinite(entry.values[selectedIndex]) ? asText(entry.values[selectedIndex]) : '—'}${unit ? ` ${unit}` : ''}`).join(', ')}
+      </Text>
+    )}
+    <View style={styles.actions}>
+      <Button
+        variant="quiet"
+        label={s.bots.copyCsv}
+        onPress={() => {
+          const escape = (cell: string) => (/[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell)
+          const header = [unit || 'Category', ...series.map(entry => entry.label)].map(escape).join(',')
+          const lines = categories.map((label, idx) =>
+            [label, ...series.map(entry => (Number.isFinite(entry.values[idx]) ? asText(entry.values[idx]) : ''))].map(escape).join(','),
+          )
+          void Clipboard.setStringAsync([header, ...lines].join('\n'))
+        }}
+      />
+      <Button variant="quiet" label={s.bots.chartData} onPress={() => setTable(current => !current)} />
+    </View>
     {(table || !valid) && <ScrollView horizontal><View>
       <View style={styles.tableRow}><Text style={styles.cell}>{unit}</Text>{series.map((entry, i) => <Text key={i} style={styles.cell}>{entry.label}</Text>)}</View>
       {categories.map((label, index) => <View key={index} style={styles.tableRow}><Text style={styles.cell}>{label}</Text>{series.map((entry, i) => <Text selectable key={i} style={styles.cell}>{Number.isFinite(entry.values[index]) ? asText(entry.values[index]) : '—'}{unit ? ` ${unit}` : ''}</Text>)}</View>)}

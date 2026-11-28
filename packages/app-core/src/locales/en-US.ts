@@ -214,7 +214,15 @@ const enUS = {
     "privateBotDesc": "Other Bots cannot read its folder, memory or chats, and you approve what it shares with them.",
     "privateMainDisabled": "A Main Bot cannot be private.",
     "privateGroupDisabled": "Leave its group chats before making it private.",
-    "privateFolderDisabled": "Choose a working folder of its own first."
+    "privateFolderDisabled": "Choose a working folder of its own first.",
+    "addFiles": "Add files",
+    "sideChat": "Side chat",
+    "newSideChat": "New side chat",
+    "moveToBackground": "Move to background",
+    "backgroundTasks": "Background tasks",
+    "viewCardJump": "View pending card",
+    "copyCsv": "Copy CSV",
+    "deliveredFiles": "Delivered files"
 },
 
   dsBotSettings: {

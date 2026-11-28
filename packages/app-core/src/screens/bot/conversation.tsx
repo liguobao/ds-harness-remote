@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, Pressable, Text, TextInput, View } from 'react-native'
-import { Users } from 'lucide-react-native'
+import * as DocumentPicker from 'expo-document-picker'
+import { File as LocalFile } from 'expo-file-system'
+import * as ImagePicker from 'expo-image-picker'
+import { AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { Image as ImageIcon, MessageCircle, Paperclip, Users, X } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { BUILT_IN_PROMPTS, type CustomPrompt } from '../../services/storage'
 import { botMessageRequest, formatBotSubmission, isBotObject, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
+import {
+  BOT_STAGED_IMAGE_TYPES,
+  BOT_STAGED_MAX_BYTES,
+  base64ToBytes,
+  downloadBotFileChunked,
+  sanitizeBotFileName,
+  saveBotDownloadedFile,
+  stageBotFile,
+  stageBotImage,
+} from '../../services/bot-media'
 import { pollRoomRows, preferredRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
 import { useAppStore } from '../../state/store'
 import { useBotTeamStore } from '../../state/bot-store'
@@ -36,6 +49,8 @@ import { BotReplies, BotViaPill, type BotMentionContext } from './reply-view'
 import { BotAsideCard } from './aside'
 import type { BotPerform } from './editor'
 import { BotPlusMenuModal, ReferenceChatModal, ReferencedChatPills } from './reference-chat-modal'
+import { BotSideChatSheet } from './side-chat-panel'
+import { BotTaskBar, BotTaskDetailModal } from './task-bar'
 import { createBotStyles } from './styles'
 import { linkBotMentions, botMentionTarget } from './mentions'
 import { BotMessageActionsContext } from '../message-actions'
@@ -77,8 +92,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const respondQuestion = useAppStore(store => store.respondQuestion)
   const stopSession = useAppStore(store => store.stopSession)
   const refreshLive = useBotTeamStore(store => store.refreshLive)
+  const feedConnected = useBotTeamStore(store => store.feedConnected)
+  const roomFeedTick = useBotTeamStore(store => (room ? (store.roomFeedSeq[room.id] ?? 0) : 0))
   const memoryScope = useAppStore(browseScope)
-  const savedDraft = useBrowseMemory(store => store.entries[browseKey(memoryScope, session.sessionId)]?.draft ?? '')
+  const logicalOwnerId = bot?.id ?? room?.id ?? session.sessionId
+  const savedDraft = useBrowseMemory(store => store.entries[browseKey(memoryScope, logicalOwnerId)]?.draft ?? '')
   const [draft, setDraft] = useState(savedDraft)
   const draftRef = useRef(draft)
   draftRef.current = draft
@@ -92,6 +110,10 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const expandedActivatedRef = useRef(false)
   const [referenceChatOpen, setReferenceChatOpen] = useState(false)
   const [stagedReferences, setStagedReferences] = useState<ReferenceChatCandidate[]>([])
+  const [stagedImages, setStagedImages] = useState<Array<{ id: string; mediaType: string; data: string; name?: string }>>([])
+  const [stagedFiles, setStagedFiles] = useState<Array<{ id: string; name: string; data: string }>>([])
+  const [sideChatOpen, setSideChatOpen] = useState(false)
+  const [selectedTask, setSelectedTask] = useState<BotObject | undefined>(undefined)
   const [fileLinkPath, setFileLinkPath] = useState<string>()
   const sessions = useAppStore(store => store.sessions)
   const openSession = useAppStore(store => store.openSession)
@@ -161,10 +183,10 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const applyDraft = useCallback((nextText: string) => {
     draftRef.current = nextText
     setDraft(nextText)
-    updateBrowseEntry(memoryScope, session.sessionId, { draft: nextText })
-  }, [memoryScope, session.sessionId])
+    updateBrowseEntry(memoryScope, logicalOwnerId, { draft: nextText })
+  }, [memoryScope, logicalOwnerId])
   useEffect(() => {
-    const initialDraft = useBrowseMemory.getState().entries[browseKey(memoryScope, session.sessionId)]?.draft ?? ''
+    const initialDraft = useBrowseMemory.getState().entries[browseKey(memoryScope, logicalOwnerId)]?.draft ?? ''
     draftRef.current = initialDraft
     selectionRef.current = { start: initialDraft.length, end: initialDraft.length }
     setDraft(initialDraft)
@@ -175,7 +197,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     setPromptsPickerOpen(false)
     setReferenceChatOpen(false)
     setStagedReferences([])
-  }, [memoryScope, session.sessionId])
+    setStagedImages([])
+    setStagedFiles([])
+    setSideChatOpen(false)
+    setSelectedTask(undefined)
+  }, [memoryScope, logicalOwnerId])
 
   const updateAtMention = (nextText: string, cursor: number) => {
     const detected = detectMention(nextText, cursor)
@@ -275,24 +301,116 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
           return call?.kind !== 'tool' || (call.state !== 'finished' && call.state !== 'failed')
         }).flatMap(entry => objects(entry.replies)))
       } catch { /* The parent state refresh reports connection and Host errors. */ }
-      if (!control.signal.aborted) timer = setTimeout(() => void tick(), 2000)
+      if (!control.signal.aborted) timer = setTimeout(() => void tick(), feedConnected ? 15_000 : 2_000)
     }
     void tick()
     return () => { control.abort(); clearTimeout(timer) }
-  }, [client, room?.id, session.sessionId, active, connected])
+  }, [client, room?.id, session.sessionId, active, connected, feedConnected, roomFeedTick])
+  const pickBotImages = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        orderedSelection: true,
+        allowsEditing: false,
+        quality: 0.9,
+        base64: true,
+      })
+      if (result.canceled || !result.assets) return
+      const picked: Array<{ id: string; mediaType: string; data: string; name?: string }> = []
+      for (const asset of result.assets) {
+        const mediaType = asset.mimeType ?? 'image/jpeg'
+        const data = asset.base64 ?? ''
+        if (!BOT_STAGED_IMAGE_TYPES.has(mediaType) || !data) continue
+        try {
+          if (base64ToBytes(data).byteLength > BOT_STAGED_MAX_BYTES) continue
+        } catch {
+          continue
+        }
+        picked.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          mediaType,
+          data,
+          ...(asset.fileName ? { name: sanitizeBotFileName(asset.fileName, 'image.jpg') } : {}),
+        })
+      }
+      if (picked.length > 0) setStagedImages(current => [...current, ...picked])
+    } catch {
+      Alert.alert(s.chat.filePickerFailedTitle, s.chat.filePickerFailedBody)
+    }
+  }
+
+  const pickBotFiles = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: true,
+        copyToCacheDirectory: true,
+      })
+      if (result.canceled || !result.assets) return
+      const picked: Array<{ id: string; name: string; data: string }> = []
+      for (const asset of result.assets) {
+        const name = sanitizeBotFileName(asset.name, 'file')
+        if (typeof asset.size === 'number' && asset.size > BOT_STAGED_MAX_BYTES) {
+          Alert.alert(s.chat.filePickerFailedTitle, s.chat.fileSizeUnavailable(name))
+          continue
+        }
+        const data = await new LocalFile(asset.uri).base64()
+        if (base64ToBytes(data).byteLength > BOT_STAGED_MAX_BYTES) continue
+        picked.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name,
+          data,
+        })
+      }
+      if (picked.length > 0) setStagedFiles(current => [...current, ...picked])
+    } catch {
+      Alert.alert(s.chat.filePickerFailedTitle, s.chat.filePickerFailedBody)
+    }
+  }
+
+  const onDownloadPresented = useCallback(async (file: BotObject, fallbackSessionId?: string) => {
+    if (!client) return
+    const fileSessionId = text(file.sessionId) || fallbackSessionId || session.sessionId
+    const seq = typeof file.seq === 'number' ? file.seq : undefined
+    const index = typeof file.index === 'number' ? file.index : 0
+    const attachmentId = text(file.attachmentId) || undefined
+    const name = text(file.name) || text(file.path).split(/[\\/]/).pop() || 'file'
+    try {
+      const downloaded = await downloadBotFileChunked(
+        client,
+        { sessionId: fileSessionId, attachmentId, seq, index, name },
+        { chunked: client.hasCapability('file-download-chunks') || undefined },
+      )
+      await saveBotDownloadedFile(downloaded)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : s.bots.unavailable)
+    }
+  }, [client, session.sessionId])
+
   const sendSubmission = async (rawText: string, clearDraft: boolean): Promise<boolean> => {
     if (sendingRef.current || disabled) return false
     const rawDraft = rawText.trim()
     const submittedRefs = stagedReferences
+    const submittedImages = clearDraft ? stagedImages : []
+    const submittedFiles = clearDraft ? stagedFiles : []
     const submitted = formatBotSubmission(rawDraft, submittedRefs.map(item => item.mentionText))
-    if (!submitted) return false
+    const hasMedia = submittedImages.length > 0 || submittedFiles.length > 0
+    if (!submitted && !hasMedia) return false
     sendingRef.current = true
     atEnd.current = true
     followEnd()
     setError(undefined)
     let message: { endpoint: BotOperation; payload: BotObject }
     try {
-      message = botMessageRequest(state, bot?.id ?? room?.id ?? session.sessionId, submitted)
+      message = submitted
+        ? botMessageRequest(state, bot?.id ?? room?.id ?? session.sessionId, submitted)
+        : {
+            endpoint: 'send',
+            payload: { sessionId: bot?.id ?? room?.id ?? session.sessionId, text: '' },
+          }
+      if (!submitted && state.readOnly !== undefined) {
+        throw new Error(s.bots.sessionUnavailable)
+      }
     } catch (reason) {
       sendingRef.current = false
       setError(reason instanceof Error ? reason.message : s.bots.unavailable)
@@ -304,6 +422,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       applyDraft('')
       selectionRef.current = { start: 0, end: 0 }
       setAtQuery(null)
+      setStagedImages([])
+      setStagedFiles([])
     }
     setStagedReferences([])
     const restoreFailedDraft = () => {
@@ -322,9 +442,30 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
           return [...submittedRefs.filter(item => !existing.has(item.sessionId)), ...current]
         })
       }
+      if (submittedImages.length > 0) {
+        setStagedImages(current => [...submittedImages, ...current])
+      }
+      if (submittedFiles.length > 0) {
+        setStagedFiles(current => [...submittedFiles, ...current])
+      }
     }
     try {
-      const result = await perform(message.endpoint, message.payload)
+      let payload = message.payload
+      if (message.endpoint === 'send' && hasMedia) {
+        const imageIds = await Promise.all(
+          submittedImages.map(img => stageBotImage(client, img, activeRequest.signal)),
+        )
+        const fileIds = await Promise.all(
+          submittedFiles.map(file => stageBotFile(client, file, activeRequest.signal)),
+        )
+        payload = {
+          ...payload,
+          ...(imageIds.length > 0 ? { images: imageIds } : {}),
+          ...(fileIds.length > 0 ? { files: fileIds } : {}),
+          requestId: `bot-send-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        }
+      }
+      const result = await perform(message.endpoint, payload)
       if (!result.ok) {
         restoreFailedDraft()
         return false
@@ -486,7 +627,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (!active || !connected || !ready) return
     const control = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
-    const intervalMs = hasLiveFooterWork ? 1500 : 3000
+    const intervalMs = feedConnected
+      ? (hasLiveFooterWork ? 8_000 : 15_000)
+      : (hasLiveFooterWork ? 1_500 : 3_000)
     const tick = async () => {
       await refreshLive({ forceFull: hasPendingBtw })
       if (!control.signal.aborted) {
@@ -498,7 +641,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       control.abort()
       clearTimeout(timer)
     }
-  }, [active, connected, ready, session.sessionId, hasLiveFooterWork, hasPendingBtw, refreshLive])
+  }, [active, connected, ready, session.sessionId, hasLiveFooterWork, hasPendingBtw, feedConnected, refreshLive])
   const questionId = text(question.id)
   const viewId = text(view.id)
   const approvalsKey = approvals.map(entry => text(entry.id)).join(',')
@@ -697,17 +840,40 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     }
     if (item.kind === 'tool' && item.state === 'finished') {
       const range = parseRelayRange(item.resultDetail?.text)
-      if (range) return <BotLedgerReplies key={`${session.sessionId}:${item.id}`} client={client} sessionId={session.sessionId} callId={item.id} range={range} botOf={botById} mentions={mentions} adminId={text(room?.admin)} fallback={null} />
+      if (range) {
+        return (
+          <BotLedgerReplies
+            key={`${session.sessionId}:${item.id}`}
+            client={client}
+            sessionId={session.sessionId}
+            callId={item.id}
+            range={range}
+            botOf={botById}
+            mentions={mentions}
+            adminId={text(room?.admin)}
+            onDownloadPresented={file => void onDownloadPresented(file, session.sessionId)}
+            fallback={null}
+          />
+        )
+      }
       const payload = parseBotReplyPayload(item.resultDetail?.text)
       if (payload !== undefined && payload.rows.length > 0) {
-        return <BotReplies rows={payload.rows} botOf={botById} mentions={mentions} adminId={text(room?.admin)} />
+        return (
+          <BotReplies
+            rows={payload.rows}
+            botOf={botById}
+            mentions={mentions}
+            adminId={text(room?.admin)}
+            onDownloadPresented={file => void onDownloadPresented(file, session.sessionId)}
+          />
+        )
       }
     }
     if (item.kind === 'tool') return null
     return <ChatItemView item={item} compact={false} showActions={showActions} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} userBubble={room !== undefined} />
   }
   const composerLabel = bot ? s.bots.askBot(bot.name) : room ? s.bots.askBot(room.name) : s.bots.message
-  const hasComposerContent = draft.trim().length > 0 || stagedReferences.length > 0
+  const hasComposerContent = draft.trim().length > 0 || stagedReferences.length > 0 || stagedImages.length > 0 || stagedFiles.length > 0
   const replyActive = Boolean(selected?.running)
   const stopping = storeBusy === 'stop-session'
   const composerSendDisabled = disabled || !hasComposerContent
@@ -822,16 +988,132 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, cardId: entry.id })} /> : entry.kind === 'closed' ? <BotSettledCard key={i} title={text(entry.title) || text(object(entry.question).question) || s.bots.question} closed={text(entry.closed) || 'dismissed'} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><View style={styles.row}><Text style={[styles.muted, styles.grow]}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text>{text(entry.via) !== '' && <BotViaPill platform={text(entry.via)} />}</View><NativeMarkdown text={text(entry.text)} /></View>)}
       </View>}
       ListFooterComponent={<View style={styles.section}>
-        {room && progress.length > 0 && <BotReplies rows={progress} botOf={botById} mentions={mentions} adminId={text(room?.admin)} />}
+        {room && progress.length > 0 && (
+          <BotReplies
+            rows={progress}
+            botOf={botById}
+            mentions={mentions}
+            adminId={text(room?.admin)}
+            onDownloadPresented={file => void onDownloadPresented(file, session.sessionId)}
+          />
+        )}
         {room && speaking.map(id => <View key={id} style={styles.row}><ActivityIndicator size="small" /><Text style={styles.muted}>{state.bots.find(bot => bot.id === id)?.name ?? id} · {s.bots.relayTyping}</Text></View>)}
-        {room?.paused && <View style={styles.section}><Text style={styles.body}>{s.bots.roomPaused}</Text><Button label={s.bots.roomContinue} disabled={disabled} onPress={() => void perform(room.idlePaused ? 'resume-room-pause' : 'room-continue', { roomId: room.id })} /></View>}
         {bot && objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId).slice().reverse().map(card => <BotAsideCard key={text(card.id)} card={card} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot.id, id: card.id })} onDelete={() => void perform('btw-delete', { sessionId: bot.id, cardId: card.id })} />)}
-        {approvals.map(approval => <View key={text(approval.id)} style={styles.card}><Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text><Text style={styles.body}>{text(approval.reason)}</Text><View style={styles.actions}><Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} /><Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} /></View></View>)}
-        {text(question.id) !== '' && <BotQuestion key={text(question.id)} question={question} busy={disabled} answer={answer => void perform('answer-question', { sessionId: session.sessionId, questionId: question.id, answer })} dismiss={() => void perform('dismiss-question', { sessionId: session.sessionId })} />}
-        {text(view.id) !== '' && <BotViewCard key={text(view.id)} pending={view} busy={disabled} reply={(action, values) => void perform('view-reply', { sessionId: session.sessionId, viewId: view.id, action, values })} />}
-        {hasDesktopPendingRequest && <View style={styles.card}><Text style={styles.muted}>{s.bots.desktopActionRequired}</Text></View>}
+        {viewId !== '' && (
+          <BotViewCard
+            key={viewId}
+            pending={view}
+            busy={disabled}
+            reply={(action, values) => void perform('view-reply', { sessionId: session.sessionId, viewId: view.id, action, values })}
+            dismiss={() => void perform('dismiss-view', { sessionId: session.sessionId })}
+          />
+        )}
       </View>} />
     {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+    {viewId !== '' && (
+      <View style={{ paddingHorizontal: 14, paddingBottom: 4 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={text(view.title) || s.bots.viewCardJump}
+          onPress={() => list.current?.scrollToEnd({ animated: true })}
+          style={({ pressed }) => [
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 6,
+              paddingHorizontal: 12,
+              borderRadius: 14,
+              backgroundColor: colors.primarySoft,
+            },
+            pressed && { opacity: 0.72 },
+          ]}
+        >
+          <Text style={[styles.muted, { color: colors.primary, fontWeight: '600' }]}>
+            {text(view.title) || s.bots.viewCardJump}
+          </Text>
+        </Pressable>
+      </View>
+    )}
+    {(Boolean(room?.paused) || approvals.length > 0 || questionId !== '' || hasDesktopPendingRequest) && (
+      <ScrollView
+        style={{ maxHeight: Math.round(height * 0.4), paddingHorizontal: 14, marginBottom: 6 }}
+        contentContainerStyle={styles.section}
+        keyboardShouldPersistTaps="handled"
+      >
+        {room?.paused && (
+          <View style={styles.card}>
+            <Text style={styles.body}>{s.bots.roomPaused}</Text>
+            <Button
+              label={s.bots.roomContinue}
+              disabled={disabled}
+              onPress={() => void perform(room.idlePaused ? 'resume-room-pause' : 'room-continue', { roomId: room.id })}
+            />
+          </View>
+        )}
+        {approvals.map(approval => (
+          <View key={text(approval.id)} style={styles.card}>
+            <Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text>
+            <Text style={styles.body}>{text(approval.reason)}</Text>
+            <View style={styles.actions}>
+              <Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} />
+              <Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} />
+            </View>
+          </View>
+        ))}
+        {questionId !== '' && (
+          <BotQuestion
+            key={questionId}
+            question={question}
+            busy={disabled}
+            answer={answer => void perform('answer-question', { sessionId: session.sessionId, questionId: question.id, answer })}
+            dismiss={() => void perform('dismiss-question', { sessionId: session.sessionId })}
+          />
+        )}
+        {hasDesktopPendingRequest && (
+          <View style={styles.card}>
+            <Text style={styles.muted}>{s.bots.desktopActionRequired}</Text>
+          </View>
+        )}
+      </ScrollView>
+    )}
+    {bot !== undefined && (
+      <BotTaskBar
+        botId={bot.id}
+        sessionId={session.sessionId}
+        tasks={objects(bot.tasks)}
+        canBackground={Boolean(state.work.canBackground?.[bot.id])}
+        disabled={disabled}
+        onMoveToBackground={() => void perform('bot-move-to-background', { botId: bot.id, sessionId: session.sessionId })}
+        onSelectTask={setSelectedTask}
+      />
+    )}
+    {bot !== undefined && objects(state.sideChats?.[bot.id]).length > 0 && (
+      <View style={{ paddingHorizontal: 14, paddingBottom: 4, flexDirection: 'row' }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={s.bots.sideChat}
+          onPress={() => setSideChatOpen(true)}
+          style={({ pressed }) => [
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: 14,
+              backgroundColor: colors.surfaceStrong,
+            },
+            pressed && { opacity: 0.72 },
+          ]}
+        >
+          <MessageCircle size={13} color={colors.primary} />
+          <Text style={[styles.muted, { color: colors.ink, fontWeight: '600' }]}>
+            {s.bots.sideChat} ({objects(state.sideChats?.[bot.id]).length})
+          </Text>
+        </Pressable>
+      </View>
+    )}
     {queueItems.length > 0 && (
       <View style={{ paddingHorizontal: 14, paddingBottom: 4 }}>
         <QueueDock items={queueItems} />
@@ -843,6 +1125,28 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
           items={stagedReferences}
           onRemove={sid => setStagedReferences(current => current.filter(item => item.sessionId !== sid))}
         />
+        {(stagedImages.length > 0 || stagedFiles.length > 0) && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 6, paddingBottom: 6 }}>
+            {stagedImages.map(img => (
+              <View key={img.id} style={[styles.row, { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: colors.surfaceStrong }]}>
+                <ImageIcon size={13} color={colors.primary} />
+                <Text numberOfLines={1} style={[styles.muted, { maxWidth: 140 }]}>{img.name || s.chat.unnamedImage}</Text>
+                <Pressable hitSlop={6} onPress={() => setStagedImages(cur => cur.filter(item => item.id !== img.id))}>
+                  <X size={13} color={colors.muted} />
+                </Pressable>
+              </View>
+            ))}
+            {stagedFiles.map(file => (
+              <View key={file.id} style={[styles.row, { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: colors.surfaceStrong }]}>
+                <Paperclip size={13} color={colors.primary} />
+                <Text numberOfLines={1} style={[styles.muted, { maxWidth: 140 }]}>{file.name}</Text>
+                <Pressable hitSlop={6} onPress={() => setStagedFiles(cur => cur.filter(item => item.id !== file.id))}>
+                  <X size={13} color={colors.muted} />
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        )}
         <ChatComposer
           draft={draft}
           input={composerInputBridge}
@@ -879,8 +1183,32 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       visible={plusMenuOpen}
       onClose={() => setPlusMenuOpen(false)}
       onReferenceChat={() => setReferenceChatOpen(true)}
+      onPickImages={() => void pickBotImages()}
+      onPickFiles={() => void pickBotFiles()}
+      onOpenSideChat={bot ? () => setSideChatOpen(true) : undefined}
       onOpenSchedules={() => void perform('schedules')}
     />
+    {bot !== undefined && (
+      <BotSideChatSheet
+        visible={sideChatOpen}
+        botId={bot.id}
+        botName={bot.name}
+        sideChats={state.sideChats?.[bot.id]}
+        busy={disabled}
+        onClose={() => setSideChatOpen(false)}
+        perform={perform}
+      />
+    )}
+    {bot !== undefined && (
+      <BotTaskDetailModal
+        task={selectedTask}
+        botId={bot.id}
+        client={client}
+        busy={disabled}
+        onClose={() => setSelectedTask(undefined)}
+        perform={perform}
+      />
+    )}
     <ReferenceChatModal
       visible={referenceChatOpen}
       currentSessionId={session.sessionId}
@@ -931,9 +1259,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   </View></MarkdownLinkProvider></BotMessageActionsContext.Provider>
 }
 
-function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, adminId, fallback }: {
+function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, adminId, onDownloadPresented, fallback }: {
   client?: BotRemoteClient; sessionId: string; callId: string; range: { from: number; to?: number; anchor?: string }
-  botOf?: (botId: string) => BotEntry | undefined; mentions?: BotMentionContext; adminId?: string; fallback: React.ReactNode
+  botOf?: (botId: string) => BotEntry | undefined; mentions?: BotMentionContext; adminId?: string; onDownloadPresented?: (file: BotObject) => void; fallback: React.ReactNode
 }) {
   const scope = useAppStore(browseScope)
   const canCache = useAppStore(state => Boolean(state.config?.baseUrl && state.selectedDevice?.identityKey))
@@ -978,7 +1306,7 @@ function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, a
     return () => { control.abort(); if (timer) clearTimeout(timer) }
   }, [client, sessionId, callId, scope, canCache, round])
   return <View>
-    {shown.length ? <BotReplies rows={shown} botOf={botOf} mentions={mentions} adminId={adminId} /> : fallback}
+    {shown.length ? <BotReplies rows={shown} botOf={botOf} mentions={mentions} adminId={adminId} onDownloadPresented={onDownloadPresented} /> : fallback}
     {loadError && <Text accessibilityRole="alert">{loadError}</Text>}
   </View>
 }
