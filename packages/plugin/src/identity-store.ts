@@ -4,9 +4,10 @@ import type { BigIntStats } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
 import { z } from 'zod'
+import { parseLegacyStorageRootEnv } from './config.js'
 import { uuidV7 } from './ids.js'
 import { SERVER_CREDENTIALS_QUEUE_MARKER, ServerCredentialStore, ServerCredentialsBusyError, ServerCredentialsLockDirectoryError, assertRefreshQueueIdle, withDefaultCredentialMigrationGate } from './server-credentials.js'
 
@@ -57,6 +58,11 @@ export interface IdentityStoreOptions {
   env?: NodeJS.ProcessEnv
   homeDirectory?: string
   role?: RemoteDeviceRole
+  /**
+   * Custom legacy storage directory (absolute or relative to `$DSH_HOME`),
+   * or `false` to skip legacy `$DSH_HOME/remote` inspection and migration.
+   */
+  legacyStorageRoot?: string | false
 }
 
 export interface ResetIdentityOptions extends IdentityStoreOptions {
@@ -67,6 +73,9 @@ export type RemoteDeviceRole = 'host' | 'client'
 export type IdentityErrorCode = 'IDENTITY_INVALID' | 'IDENTITY_LOCKED' | 'STORAGE_CONFLICT'
 
 const STORAGE_CONFLICT_MESSAGE = 'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.'
+const STORAGE_CONFLICT_FOREIGN_MESSAGE = 'Remote storage ownership could not be verified; nothing was moved. Legacy directory contains no Remote identity records and may belong to another plugin. Set legacyStorageRoot to false (or DSH_REMOTE_LEGACY_STORAGE_ROOT=false) to skip legacy migration, or inspect it manually.'
+const STORAGE_CONFLICT_TUNNEL_PLUGIN_MESSAGE = 'Remote storage ownership could not be verified; nothing was moved. Legacy directory contains no Remote identity records and matches another Remote/tunnel plugin layout. Set legacyStorageRoot to false (or DSH_REMOTE_LEGACY_STORAGE_ROOT=false) to start with fresh ds-harness-remote storage.'
+const MAX_REPORTED_CONFLICT_ENTRIES = 8
 const STORAGE_CONFLICT_ENTRY_PATTERN = /^(?:device\.json|device\.key|trusted-peers\.json|server-credentials\.json|host-pairing\.json|pairing-host-only\.json)(?:\.bak(?:-[0-9]+)?|\.old|\.orig|~|\.swp)$/
 /** Every record this plugin writes directly into a storage root or role directory. */
 const LEGACY_IDENTITY_RECORD_NAMES: ReadonlySet<string> = new Set([
@@ -334,9 +343,44 @@ export async function prepareDefaultIdentityDirectory(
 }
 
 interface DefaultStoragePaths {
-  source: string
+  source: string | undefined
   target: string
   lockDirectory: string
+}
+
+function resolveLegacyStorageSource(
+  home: string,
+  target: string,
+  lockDirectory: string,
+  options: IdentityStoreOptions,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  let configured: string | false | undefined
+  if (options.legacyStorageRoot !== undefined) {
+    if (options.legacyStorageRoot === false) {
+      configured = false
+    } else {
+      const trimmed = options.legacyStorageRoot.trim()
+      if (trimmed === '' || trimmed.includes('\0') || trimmed.length > 4096) {
+        throw new IdentityInvalidError(STORAGE_CONFLICT_MESSAGE, 'STORAGE_CONFLICT')
+      }
+      configured = trimmed
+    }
+  } else {
+    try {
+      configured = parseLegacyStorageRootEnv(env.DSH_REMOTE_LEGACY_STORAGE_ROOT)
+    } catch {
+      throw new IdentityInvalidError(STORAGE_CONFLICT_MESSAGE, 'STORAGE_CONFLICT')
+    }
+  }
+  if (configured === false) return undefined
+  if (configured === undefined) return join(home, 'remote')
+  const candidate = resolve(home, configured)
+  if (candidate === resolve(target)) return undefined
+  if (candidate === resolve(home) || candidate === resolve(lockDirectory)) {
+    throw new IdentityInvalidError(STORAGE_CONFLICT_MESSAGE, 'STORAGE_CONFLICT')
+  }
+  return candidate
 }
 
 async function withDefaultStorageTransaction<T>(
@@ -345,11 +389,11 @@ async function withDefaultStorageTransaction<T>(
 ): Promise<T> {
   const env = options.env ?? process.env
   const home = env.DSH_HOME || join(options.homeDirectory ?? homedir(), '.dsh')
-  const source = join(home, 'remote')
   const target = join(home, 'ds-harness-remote')
-  await mkdir(home, { recursive: true, mode: 0o700 })
   // Kept outside the renamed tree so competing new-version migrators share one lock.
   const lockDirectory = join(home, '.ds-harness-remote-migration')
+  const source = resolveLegacyStorageSource(home, target, lockDirectory, options, env)
+  await mkdir(home, { recursive: true, mode: 0o700 })
   await storageDirectoryStat(lockDirectory)
   await ensureDirectory(lockDirectory)
   return withIdentityLock(lockDirectory, () => withDefaultCredentialMigrationGate(home,
@@ -357,7 +401,7 @@ async function withDefaultStorageTransaction<T>(
 }
 
 async function prepareDefaultIdentityDirectoryLocked({ source, target, lockDirectory }: DefaultStoragePaths): Promise<string> {
-    const old = await storageDirectoryStat(source)
+    const old = source === undefined ? undefined : await storageDirectoryStat(source)
     const current = await storageDirectoryStat(target)
     const pinPath = join(lockDirectory, 'legacy-root.json')
     const pinMetadata = await lstat(pinPath).catch(error => {
@@ -376,7 +420,7 @@ async function prepareDefaultIdentityDirectoryLocked({ source, target, lockDirec
         throw new IdentityInvalidError('Remote storage fallback record is invalid; no credentials were changed.', 'STORAGE_CONFLICT')
       }
     }
-    if (old !== undefined) {
+    if (old !== undefined && source !== undefined) {
       if (current !== undefined) {
         // A directory named `remote` that holds none of this plugin's records
         // belongs to another product: it must not keep an owned root from
@@ -387,7 +431,7 @@ async function prepareDefaultIdentityDirectoryLocked({ source, target, lockDirec
         }
         throw new IdentityInvalidError('Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.', 'STORAGE_CONFLICT')
       }
-      await assertOwnedRemoteStorage(source)
+      await assertOwnedRemoteStorage(source, { isLegacyRoot: true })
       await assertStorageIdle(source)
       // Persist the choice across processes. A later installer/CLI must not move
       // storage out from under a Host that is already using the fallback.
@@ -406,7 +450,7 @@ async function prepareDefaultIdentityDirectoryLocked({ source, target, lockDirec
         // A failed move is compatible only if the same verified tree still exists
         // and no destination appeared. Never fall back from an ambiguous outcome.
         if (remaining === undefined || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target) !== undefined) throw error
-        await assertOwnedRemoteStorage(source)
+        await assertOwnedRemoteStorage(source, { isLegacyRoot: true })
         await assertStorageIdle(source)
         // If the fallback choice cannot be recorded, stop rather than risk
         // another process moving a directory this process starts using.
@@ -465,7 +509,7 @@ export async function resetDefaultIdentityRoles(
       await resetRolesInRoot(root)
       return root
     } catch (error) {
-      if (!(error instanceof IdentityInvalidError) || error.code !== 'IDENTITY_INVALID') throw error
+      if (!(error instanceof IdentityInvalidError) || error.code !== 'IDENTITY_INVALID' || paths.source === undefined) throw error
       const [old, current] = await Promise.all([storageDirectoryStat(paths.source), storageDirectoryStat(paths.target)])
       if (old === undefined || current !== undefined) throw error
       await assertStorageIdle(paths.source)
@@ -479,20 +523,31 @@ export async function resetDefaultIdentityRoles(
  * cryptographically consistent identities, rather than trusting the directory name.
  * Read-only: never repair, create peers, rename devices or refresh tokens here.
  */
-export async function assertOwnedRemoteStorage(root: string): Promise<void> {
+export async function assertOwnedRemoteStorage(
+  root: string,
+  options: { isLegacyRoot?: boolean } = {},
+): Promise<void> {
   let failureCode: IdentityErrorCode = 'STORAGE_CONFLICT'
-  const rejected = (code: IdentityErrorCode = failureCode, entryName?: string) => new IdentityInvalidError(
-    entryName === undefined
-      ? STORAGE_CONFLICT_MESSAGE
-      : `${STORAGE_CONFLICT_MESSAGE} Unexpected entry "${safeStorageEntryName(entryName)}" was found.`,
-    code,
-  )
+  const rejected = (code: IdentityErrorCode = failureCode, entryNames?: string | readonly string[]) => {
+    const list = entryNames === undefined
+      ? []
+      : typeof entryNames === 'string'
+        ? [entryNames]
+        : entryNames
+    return new IdentityInvalidError(
+      list.length === 0
+        ? STORAGE_CONFLICT_MESSAGE
+        : `${STORAGE_CONFLICT_MESSAGE}${formatUnexpectedEntriesSuffix(list)}`,
+      code,
+    )
+  }
   const identityFiles = LEGACY_IDENTITY_RECORD_NAMES
   let identities = 0
   let verifiedScopedIdentities = 0
   const checkIdentity = async (directory: string, scope?: string, role?: RemoteDeviceRole): Promise<void> => {
     const canAutoHeal = role === 'client' || (directory === root && verifiedScopedIdentities > 0)
     const entries = (await readStorageEntries(directory)).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
+    const unexpectedNames: string[] = []
     for (const entry of entries) {
       if (entry.name === 'server-credentials.json.refresh-lock' && entry.isDirectory()) {
         throw new ServerCredentialsLockDirectoryError()
@@ -523,13 +578,17 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
       const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name)
         || isRefreshQueueArtifact(entry.name) || isBackupArtifact(entry.name)
         || (canAutoHeal && isIdentityTempArtifact(entry.name))
-      if (!entry.isFile() || !allowedFile) throw rejected('STORAGE_CONFLICT', entry.name)
+      if (!entry.isFile() || !allowedFile) {
+        unexpectedNames.push(entry.name)
+        continue
+      }
       const metadata = await lstat(join(directory, entry.name))
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024
         || (metadata.nlink !== 1 && !(await isVerifiedRefreshHardlink(directory, entry.name, entries.map(item => item.name))))) {
-        throw rejected('STORAGE_CONFLICT', entry.name)
+        unexpectedNames.push(entry.name)
       }
     }
+    if (unexpectedNames.length > 0) throw rejected('STORAGE_CONFLICT', unexpectedNames)
     const names = new Set(entries.map(entry => entry.name).filter(name => !isLockArtifact(name)))
     if (names.has('server-credentials.json.refresh-lock')
       && await readFile(join(directory, 'server-credentials.json.refresh-lock'), 'utf8') !== SERVER_CREDENTIALS_QUEUE_MARKER) {
@@ -607,13 +666,32 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
   }
   try {
     const entries = await readStorageEntries(root)
+    if (entries.length > 0 && !hasOwnedStorageArtifact(entries)) {
+      const names = entries.map(entry => entry.name)
+      if (!options.isLegacyRoot) throw rejected('STORAGE_CONFLICT', names)
+      const baseMessage = isKnownForeignTunnelLayout(entries)
+        ? STORAGE_CONFLICT_TUNNEL_PLUGIN_MESSAGE
+        : STORAGE_CONFLICT_FOREIGN_MESSAGE
+      throw new IdentityInvalidError(
+        `${baseMessage}${formatUnexpectedEntriesSuffix(names)}`,
+        'STORAGE_CONFLICT',
+      )
+    }
     const servers = entries.find(entry => entry.name === 'servers')
     if (servers !== undefined) {
       if (!servers.isDirectory()) throw rejected('STORAGE_CONFLICT', servers.name)
-      for (const scope of await readStorageEntries(join(root, 'servers'))) {
-        if (!scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name)) throw rejected('STORAGE_CONFLICT', scope.name)
-        for (const role of await readStorageEntries(join(root, 'servers', scope.name))) {
-          if (!role.isDirectory() || (role.name !== 'host' && role.name !== 'client')) throw rejected('STORAGE_CONFLICT', role.name)
+      const scopes = await readStorageEntries(join(root, 'servers'))
+      const invalidScopes = scopes
+        .filter(scope => !scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name))
+        .map(scope => scope.name)
+      if (invalidScopes.length > 0) throw rejected('STORAGE_CONFLICT', invalidScopes)
+      for (const scope of scopes) {
+        const roles = await readStorageEntries(join(root, 'servers', scope.name))
+        const invalidRoles = roles
+          .filter(role => !role.isDirectory() || (role.name !== 'host' && role.name !== 'client'))
+          .map(role => role.name)
+        if (invalidRoles.length > 0) throw rejected('STORAGE_CONFLICT', invalidRoles)
+        for (const role of roles) {
           await checkIdentity(join(root, 'servers', scope.name, role.name), scope.name, role.name)
         }
       }
@@ -621,7 +699,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     const flat = entries.filter(entry => entry.name !== 'servers')
     if (flat.length > 0) {
       // Validate a historical unscoped identity without including the servers container.
-      const unexpected = flat.find(entry => {
+      const unexpected = flat.filter(entry => {
         if (entry.name.includes('.refresh-lock')) return entry.isSymbolicLink()
         if (!entry.isFile()) return true
         return !identityFiles.has(entry.name)
@@ -631,7 +709,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
           && !isBackupArtifact(entry.name)
           && !(verifiedScopedIdentities > 0 && isIdentityTempArtifact(entry.name))
       })
-      if (unexpected !== undefined) throw rejected('STORAGE_CONFLICT', unexpected.name)
+      if (unexpected.length > 0) throw rejected('STORAGE_CONFLICT', unexpected.map(entry => entry.name))
       await checkIdentity(root)
     }
     if (identities === 0) throw rejected(failureCode)
@@ -651,6 +729,43 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
  * plugin's records or artifacts belongs to whatever else created it. Reporting
  * that here keeps a foreign directory from being claimed by migration or from
  * blocking a root this plugin already owns. It never moves, creates or deletes. */
+function hasOwnedStorageArtifact(entries: readonly Dirent[]): boolean {
+  return entries.some(entry =>
+    entry.name === 'servers'
+    || LEGACY_IDENTITY_RECORD_NAMES.has(entry.name)
+    || entry.name.includes('.refresh-lock')
+    || isOwnedTempArtifact(entry.name)
+    || isRefreshQueueArtifact(entry.name)
+    || isLockArtifact(entry.name)
+    || isBackupArtifact(entry.name)
+    || isIdentityTempArtifact(entry.name))
+}
+
+function isKnownForeignTunnelLayout(entries: readonly Dirent[]): boolean {
+  let hasAccessJson = false
+  let hasMachinesJson = false
+  let hasBinDir = false
+  for (const entry of entries) {
+    if (entry.name === 'access.json' && entry.isFile()) hasAccessJson = true
+    else if (entry.name === 'machines.json' && entry.isFile()) hasMachinesJson = true
+    else if (entry.name === 'bin' && entry.isDirectory()) hasBinDir = true
+  }
+  return hasAccessJson && hasMachinesJson && hasBinDir
+}
+
+function formatUnexpectedEntriesSuffix(entryNames: readonly string[]): string {
+  const unique = [...new Set(entryNames.map(safeStorageEntryName))].sort()
+  if (unique.length === 0) return ''
+  if (unique.length === 1) {
+    return ` Unexpected entry "${unique[0]}" was found.`
+  }
+  const shown = unique.slice(0, MAX_REPORTED_CONFLICT_ENTRIES).map(name => `"${name}"`).join(', ')
+  const remaining = unique.length - MAX_REPORTED_CONFLICT_ENTRIES
+  return remaining > 0
+    ? ` Unexpected entries ${shown} (and ${remaining} more) were found.`
+    : ` Unexpected entries ${shown} were found.`
+}
+
 async function isUnownedStorageRoot(root: string): Promise<boolean> {
   let entries: Dirent[]
   try {
@@ -660,15 +775,7 @@ async function isUnownedStorageRoot(root: string): Promise<boolean> {
     // caller's fail-closed path.
     return false
   }
-  return !entries.some(entry =>
-    (entry.name === 'servers' && entry.isDirectory())
-    || LEGACY_IDENTITY_RECORD_NAMES.has(entry.name)
-    || entry.name.includes('.refresh-lock')
-    || isOwnedTempArtifact(entry.name)
-    || isRefreshQueueArtifact(entry.name)
-    || isLockArtifact(entry.name)
-    || isBackupArtifact(entry.name)
-    || isIdentityTempArtifact(entry.name))
+  return !hasOwnedStorageArtifact(entries)
 }
 
 async function isRepairableLegacyClientDirectory(directory: string, names: ReadonlySet<string>): Promise<boolean> {

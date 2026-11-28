@@ -16,6 +16,12 @@ export interface Config {
   enabled?: boolean
   role?: 'host' | 'client' | 'both'
   serverUrl?: string
+  /**
+   * Custom legacy storage directory to migrate from (absolute or relative to `$DSH_HOME`),
+   * or `false` to skip legacy `$DSH_HOME/remote` inspection and migration when another
+   * plugin owns `$DSH_HOME/remote`.
+   */
+  legacyStorageRoot?: string | false
   /** Additional hosts or CIDR ranges that may use HTTP for a self-hosted Server. */
   httpServerAllowlist?: string[]
   deviceName?: string
@@ -84,6 +90,7 @@ export interface ResolvedConfig {
   enabled: boolean
   role: 'host' | 'client' | 'both'
   serverUrl?: string
+  legacyStorageRoot?: string | false
   httpServerAllowlist: string[]
   deviceName: string
   forceRelay: boolean
@@ -124,6 +131,7 @@ export const entryConfigSchema = s.object({
   enabled: s.boolean(),
   role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),
+  legacyStorageRoot: s.union([s.string(), s.boolean()]),
   httpServerAllowlist: s.array(s.string()),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
@@ -182,6 +190,12 @@ const configSchema = z.object({
   enabled: z.boolean().optional(),
   role: z.enum(['host', 'client', 'both']).optional(),
   serverUrl: z.string().url().optional(),
+  legacyStorageRoot: z.union([
+    z.string().trim().min(1).max(4096).refine(value => !value.includes('\0'), {
+      message: 'legacyStorageRoot must not contain NUL bytes',
+    }),
+    z.literal(false),
+  ]).optional(),
   httpServerAllowlist: z.array(z.string().trim().min(1).max(128)).max(64).optional(),
   deviceName: z.string().trim().min(1).max(80).optional(),
   terminal: z.object({ enabled: z.boolean().optional() }).strict().optional(),
@@ -217,6 +231,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   const codexEnabled = codexBackend?.enabled ?? parsed.codex?.enabled ?? true
   const acpEnabled = parsed.acp?.enabled ?? true
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
+  const legacyStorageRoot = parsed.legacyStorageRoot ?? parseLegacyStorageRootEnv(env.DSH_REMOTE_LEGACY_STORAGE_ROOT)
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER
   const httpServerAllowlist = normalizeHttpServerAllowlist(
     parsed.httpServerAllowlist ?? parseHttpServerAllowlistEnv(env.DSH_REMOTE_HTTP_SERVER_ALLOWLIST),
@@ -231,6 +246,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     enabled: parsed.enabled ?? true,
     role: parsed.role ?? 'host',
     ...(serverUrl === undefined ? {} : { serverUrl }),
+    ...(legacyStorageRoot === undefined ? {} : { legacyStorageRoot }),
     httpServerAllowlist,
     deviceName: parsed.deviceName ?? env.DSH_REMOTE_DEVICE_NAME ?? hostname(),
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
@@ -331,6 +347,23 @@ export function normalizeServerUrl(value: string, httpServerAllowlist: readonly 
 interface ParsedIpAddress {
   version: 4 | 6
   value: bigint
+}
+
+export function parseLegacyStorageRootEnv(value: string | undefined): string | false | undefined {
+  if (value === undefined) return undefined
+  const trimmed = value.trim()
+  if (trimmed === '') return undefined
+  if (trimmed.includes('\0')) {
+    throw new TypeError('legacyStorageRoot must not contain NUL bytes')
+  }
+  if (trimmed.length > 4096) {
+    throw new TypeError('legacyStorageRoot must be at most 4096 characters')
+  }
+  const lowered = trimmed.toLowerCase()
+  if (lowered === 'false' || lowered === '0' || lowered === 'off' || lowered === 'none') {
+    return false
+  }
+  return trimmed
 }
 
 function parseHttpServerAllowlistEnv(value: string | undefined): string[] | undefined {

@@ -190,9 +190,50 @@ export function startupErrorMessage(error: { code: string; message: string }, t:
   return error.message || t('remoteStartupFailed')
 }
 
+const MANUAL_STORAGE_CONFLICT_PREFIX = 'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually. '
+const FOREIGN_STORAGE_CONFLICT_PREFIX = 'Remote storage ownership could not be verified; nothing was moved. Legacy directory contains no Remote identity records and may belong to another plugin. Set legacyStorageRoot to false (or DSH_REMOTE_LEGACY_STORAGE_ROOT=false) to skip legacy migration, or inspect it manually. '
+const TUNNEL_PLUGIN_STORAGE_CONFLICT_PREFIX = 'Remote storage ownership could not be verified; nothing was moved. Legacy directory contains no Remote identity records and matches another Remote/tunnel plugin layout. Set legacyStorageRoot to false (or DSH_REMOTE_LEGACY_STORAGE_ROOT=false) to start with fresh ds-harness-remote storage. '
+
+const SINGLE_STORAGE_CONFLICT_ENTRY_RE = /^Unexpected entry "([A-Za-z0-9._-]{1,160})" was found\.$/
+const MULTIPLE_STORAGE_CONFLICT_ENTRIES_RE = /^Unexpected entries ("[A-Za-z0-9._-]{1,160}"(?:, "[A-Za-z0-9._-]{1,160}"){1,7})(?: \(and ([1-9]\d{0,5}) more\))? were found\.$/
+
+function parseUnexpectedEntriesClause(
+  suffix: string,
+  t: Translate,
+): { singleName?: string; formattedEntries: string } | undefined {
+  const single = SINGLE_STORAGE_CONFLICT_ENTRY_RE.exec(suffix)
+  if (single !== null) {
+    return { singleName: single[1], formattedEntries: `"${single[1]}"` }
+  }
+  const multiple = MULTIPLE_STORAGE_CONFLICT_ENTRIES_RE.exec(suffix)
+  if (multiple === null) return undefined
+  const entries = multiple[1]!
+  const moreCount = multiple[2]
+  return {
+    formattedEntries: moreCount === undefined
+      ? entries
+      : t('storageConflictMoreEntries', { entries, count: Number(moreCount) }),
+  }
+}
+
 function storageConflictMessage(message: string, t: Translate): string {
-  const match = /^Remote storage ownership could not be verified; nothing was moved\. Inspect the legacy directory manually\. Unexpected entry "([A-Za-z0-9._-]{1,160})" was found\.$/.exec(message)
-  return match === null ? t('storageConflict') : t('storageConflictEntry', { name: match[1] })
+  if (message.startsWith(MANUAL_STORAGE_CONFLICT_PREFIX)) {
+    const parsed = parseUnexpectedEntriesClause(message.slice(MANUAL_STORAGE_CONFLICT_PREFIX.length), t)
+    if (parsed === undefined) return t('storageConflict')
+    if (parsed.singleName !== undefined) return t('storageConflictEntry', { name: parsed.singleName })
+    return t('storageConflictEntries', { entries: parsed.formattedEntries })
+  }
+  if (message.startsWith(TUNNEL_PLUGIN_STORAGE_CONFLICT_PREFIX)) {
+    const parsed = parseUnexpectedEntriesClause(message.slice(TUNNEL_PLUGIN_STORAGE_CONFLICT_PREFIX.length), t)
+    if (parsed === undefined) return t('storageConflict')
+    return t('storageConflictTunnelPlugin', { entries: parsed.formattedEntries })
+  }
+  if (message.startsWith(FOREIGN_STORAGE_CONFLICT_PREFIX)) {
+    const parsed = parseUnexpectedEntriesClause(message.slice(FOREIGN_STORAGE_CONFLICT_PREFIX.length), t)
+    if (parsed === undefined) return t('storageConflict')
+    return t('storageConflictForeignEntries', { entries: parsed.formattedEntries })
+  }
+  return t('storageConflict')
 }
 
 export function messageOf(reason: unknown, t: Translate): string {

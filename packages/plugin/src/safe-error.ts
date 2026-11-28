@@ -76,7 +76,20 @@ const SAFE_STATIC_STARTUP_MESSAGES = new Set([
   'Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.',
 ])
 
-const SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE = /^Remote storage ownership could not be verified; nothing was moved\. Inspect the legacy directory manually\. Unexpected entry "[A-Za-z0-9._-]{1,160}" was found\.$/
+const SAFE_STORAGE_CONFLICT_PREFIXES = [
+  'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually. ',
+  'Remote storage ownership could not be verified; nothing was moved. Legacy directory contains no Remote identity records and may belong to another plugin. Set legacyStorageRoot to false (or DSH_REMOTE_LEGACY_STORAGE_ROOT=false) to skip legacy migration, or inspect it manually. ',
+  'Remote storage ownership could not be verified; nothing was moved. Legacy directory contains no Remote identity records and matches another Remote/tunnel plugin layout. Set legacyStorageRoot to false (or DSH_REMOTE_LEGACY_STORAGE_ROOT=false) to start with fresh ds-harness-remote storage. ',
+]
+const SAFE_SINGLE_CONFLICT_ENTRY_RE = /^Unexpected entry "[A-Za-z0-9._-]{1,160}" was found\.$/
+const SAFE_MULTIPLE_CONFLICT_ENTRIES_RE = /^Unexpected entries "[A-Za-z0-9._-]{1,160}"(?:, "[A-Za-z0-9._-]{1,160}"){1,7}(?: \(and [1-9]\d{0,5} more\))? were found\.$/
+
+function isSafeStorageConflictEntryMessage(message: string): boolean {
+  const prefix = SAFE_STORAGE_CONFLICT_PREFIXES.find(candidate => message.startsWith(candidate))
+  if (prefix === undefined) return false
+  const suffix = message.slice(prefix.length)
+  return SAFE_SINGLE_CONFLICT_ENTRY_RE.test(suffix) || SAFE_MULTIPLE_CONFLICT_ENTRIES_RE.test(suffix)
+}
 
 export function safeStartupError(error: unknown): { code: string; message: string } {
   const code = error instanceof Error && 'code' in error && typeof error.code === 'string' && SAFE_STARTUP_CODES.has(error.code)
@@ -96,7 +109,7 @@ export function safeStartupError(error: unknown): { code: string; message: strin
   if (code === 'IDENTITY_INVALID' || code === 'IDENTITY_LOCKED' || code === 'STORAGE_CONFLICT') {
     const rawMessage = error instanceof Error ? error.message : ''
     if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage)
-      || SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE.test(rawMessage)
+      || isSafeStorageConflictEntryMessage(rawMessage)
       || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
       return { code, message: rawMessage }
     }

@@ -136,16 +136,6 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     let disposePendingControl: (() => Promise<void>) | undefined
     const installPendingControl = async (): Promise<void> => {
       if (connection === undefined || disposePendingControl !== undefined) return
-      let identityDirectory = new IdentityStore().directory
-      let storageError: unknown
-      try {
-        identityDirectory = await prepareDefaultIdentityDirectory()
-      } catch (error) {
-        storageError = error
-      }
-      if (!isFiberActive(runtimeContext)) return
-      const pendingLogStore = createHostLogStore(runtimeContext)
-      const pendingLogger = createSafeLogger(runtimeContext, pendingLogStore, () => readSafeLogLevel(readConfig, 'info'))
       let configError: unknown
       let pendingConfig: ResolvedConfig
       try {
@@ -154,6 +144,20 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
         configError = error
         pendingConfig = resolveFallbackConfig(readConfig)
       }
+      let identityDirectory = new IdentityStore({
+        legacyStorageRoot: pendingConfig.legacyStorageRoot,
+      }).directory
+      let storageError: unknown
+      try {
+        identityDirectory = await prepareDefaultIdentityDirectory({
+          legacyStorageRoot: pendingConfig.legacyStorageRoot,
+        })
+      } catch (error) {
+        storageError = error
+      }
+      if (!isFiberActive(runtimeContext)) return
+      const pendingLogStore = createHostLogStore(runtimeContext)
+      const pendingLogger = createSafeLogger(runtimeContext, pendingLogStore, () => readSafeLogLevel(readConfig, 'info'))
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           pendingConfig,
@@ -262,7 +266,9 @@ async function activate(
     config = resolveConfig(settingsBinding?.get() ?? readConfig())
     fallbackLogLevel = config.logLevel
     try {
-      defaultIdentityDirectory = await prepareDefaultIdentityDirectory()
+      defaultIdentityDirectory = await prepareDefaultIdentityDirectory({
+        legacyStorageRoot: config.legacyStorageRoot,
+      })
       storageAvailable = true
     } catch (error) {
       initialStorageError = error
@@ -472,7 +478,9 @@ async function activate(
         const failure = shutdown.find(result => result.status === 'rejected')
         if (failure?.status === 'rejected') throw failure.reason
         if (closed) throw new Error('Remote plugin is closed')
-        defaultIdentityDirectory = await prepareDefaultIdentityDirectory()
+        defaultIdentityDirectory = await prepareDefaultIdentityDirectory({
+          legacyStorageRoot: next.legacyStorageRoot,
+        })
         controlRuntime?.setIdentityDirectory(defaultIdentityDirectory)
         const fresh = createRuntimes(next)
         try {
