@@ -223,7 +223,9 @@ async function logout(args: readonly string[], runtime: CliRuntime): Promise<num
     exists(join(directory, 'server-credentials.json')),
   ])
   if (!hasDevice && !hasKey && !hasCredentials) {
-    await new ServerCredentialStore(directory).clear()
+    const store = new ServerCredentialStore(directory)
+    await store.clear()
+    await store.clearPairingArtifacts()
     write(runtime.stdout, 'This Host is already logged out.\n')
     return 0
   }
@@ -238,7 +240,7 @@ async function logout(args: readonly string[], runtime: CliRuntime): Promise<num
   } catch (error) {
     revokeFailure = error
   }
-  await identities.reset(deviceName)
+  await identities.reset(deviceName, { clearPairingPolicy: true })
   await new ServerCredentialStore(directory).clear()
   if (revokeFailure !== undefined
     && !(revokeFailure instanceof IdentityInvalidError)

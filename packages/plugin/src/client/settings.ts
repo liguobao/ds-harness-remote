@@ -1,4 +1,5 @@
 import { useAccountVerification } from './account-verification.js'
+import { isNonRetryableControlError } from './control-result.js'
 import { createHostPairingPanel } from './pairing.js'
 import { createServerNotice } from './server-notice.js'
 import QRCode from 'qrcode'
@@ -309,7 +310,16 @@ export function createRemotePluginOptions(React: ClientReact) {
             setQrBusy(false)
           }
         }).catch(reason => {
-          if (active && !settled && run === qrFlowRun.current) setError(messageOf(reason, t))
+          if (!active || settled || run !== qrFlowRun.current) return
+          if (isNonRetryableControlError(reason)) {
+            settled = true
+            if (timer !== undefined) clearInterval(timer)
+            setQrFailed(true)
+            setQrSession(undefined)
+            setQrImage(undefined)
+            setQrBusy(false)
+          }
+          setError(messageOf(reason, t))
         }).finally(() => {
           polling = false
         })

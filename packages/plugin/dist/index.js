@@ -73771,6 +73771,13 @@ var ServerCredentialStore = class {
   async clear() {
     await rm(this.path, { force: true });
   }
+  async clearPairingArtifacts() {
+    const directory = dirname(this.path);
+    await Promise.all([
+      rm(join(directory, "pairing-host-only.json"), { force: true }),
+      rm(join(directory, "host-pairing.json"), { force: true })
+    ]);
+  }
 };
 function defaultMigrationGate(directory) {
   const parts = directory.split(sep);
@@ -75126,10 +75133,19 @@ var HostServerApi = class {
   identity;
   credentials;
   credentialsPromise;
+  credentialsEpoch = 0;
   harnessVersion;
   lifetime = new AbortController();
   bindIdentity(identity3) {
+    if (this.identity !== void 0 && this.identity.deviceId !== identity3.deviceId) {
+      this.resetCachedCredentials();
+    }
     this.identity = identity3;
+  }
+  resetCachedCredentials() {
+    this.credentialsEpoch += 1;
+    this.credentials = void 0;
+    this.credentialsPromise = void 0;
   }
   setHarnessVersion(version2) {
     this.harnessVersion = version2;
@@ -75183,8 +75199,7 @@ var HostServerApi = class {
     return await this.store.load(this.baseUrl, identity3.deviceId) !== void 0;
   }
   async clearAuthorization() {
-    this.credentials = void 0;
-    this.credentialsPromise = void 0;
+    this.resetCachedCredentials();
     await this.store.clear();
   }
   async revokeCurrentDevice() {
@@ -75370,15 +75385,25 @@ var HostServerApi = class {
     if (this.credentials !== void 0 && this.credentials.accessTokenExpiresAt > Date.now() + 3e4) {
       return this.credentials;
     }
-    this.credentialsPromise ??= this.loadOrIssue(identity3).finally(() => {
-      this.credentialsPromise = void 0;
-    });
-    this.credentials = await this.credentialsPromise;
-    return this.credentials;
+    const epoch = this.credentialsEpoch;
+    const promise2 = this.credentialsPromise ?? (() => {
+      let created;
+      created = this.loadOrIssue(identity3).finally(() => {
+        if (this.credentialsPromise === created) this.credentialsPromise = void 0;
+      });
+      this.credentialsPromise = created;
+      return created;
+    })();
+    const resolved = await promise2;
+    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity3.deviceId) {
+      this.credentials = resolved;
+    }
+    return resolved;
   }
   async refreshCredentials(rejectedAccessToken = this.credentials?.accessToken) {
     const identity3 = this.requireIdentity();
-    this.credentials = await this.withRefreshLock(async () => {
+    const epoch = this.credentialsEpoch;
+    const refreshed = await this.withRefreshLock(async () => {
       const stored = await this.store.load(this.baseUrl, identity3.deviceId);
       if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now()) {
         if (this.role === "client") throw new ServerApiError("ACCOUNT_AUTH_REQUIRED", "Client sign-in is required.", false);
@@ -75389,7 +75414,10 @@ var HostServerApi = class {
       }
       return this.rotateCredentials(identity3, stored);
     });
-    return this.credentials;
+    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity3.deviceId) {
+      this.credentials = refreshed;
+    }
+    return refreshed;
   }
   async withRefreshLock(operation) {
     try {
@@ -75510,6 +75538,7 @@ var HostServerApi = class {
     });
   }
   async register(identity3, authorization) {
+    const epoch = this.credentialsEpoch;
     const tokens = await this.publicRequest("/api/v1/devices/register", {
       method: "POST",
       body: JSON.stringify({
@@ -75517,11 +75546,17 @@ var HostServerApi = class {
         device: this.deviceDescriptor(identity3)
       })
     }, authorization?.accountToken);
-    this.credentials = await this.saveTokens(identity3, validateTokens(tokens), {
+    if (this.credentialsEpoch !== epoch || this.identity?.deviceId !== identity3.deviceId) {
+      throw new ServerApiError("CONNECTION_CLOSED", "Authorization state changed during registration.", false);
+    }
+    const saved = await this.saveTokens(identity3, validateTokens(tokens), {
       authorizationMethod: authorization?.authorizationMethod ?? "account",
       ...authorization?.account === void 0 ? {} : { account: authorization.account }
     });
-    return this.credentials;
+    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity3.deviceId) {
+      this.credentials = saved;
+    }
+    return saved;
   }
   deviceDescriptor(identity3) {
     return {
@@ -83693,7 +83728,8 @@ function fail2(error62) {
       code: "internal",
       message: source?.message ?? "The remote-mode operation failed.",
       details: {
-        ...remoteCode === void 0 ? {} : { remoteCode, retryable },
+        ...remoteCode === void 0 ? {} : { remoteCode },
+        retryable,
         ...source instanceof UploadSizeError ? { uploadLimitBytes: source.limitBytes, relay: source.relay } : {},
         ...source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}
       }
@@ -92214,6 +92250,7 @@ var ClientModeRuntime = class {
     const lifetime2 = this.remoteLifetime.signal;
     const connectionSignal = signal === void 0 ? lifetime2 : AbortSignal.any([lifetime2, signal]);
     connectionSignal.throwIfAborted();
+    if (this.identity === void 0) await this.ensureIdentity();
     const remote = await this.connection.connect(targetDeviceId, connectionSignal).catch((error62) => {
       if (!connectionSignal.aborted && !this.connected && this.gatewaySwitch.status().target?.deviceId === targetDeviceId) {
         this.noteClientAuthFailure(error62);
@@ -92239,6 +92276,8 @@ var ClientModeRuntime = class {
   codexStreamBridge;
   preview;
   identity;
+  identityLoadFlight;
+  started = false;
   connected;
   pendingWorkspaceSelection;
   codexVirtual;
@@ -92277,16 +92316,16 @@ var ClientModeRuntime = class {
   }
   async start() {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
+    this.started = true;
     if (this.host?.hostStatus().pairingHostOnly) {
       this.gatewaySwitch.install();
       return;
     }
-    this.identity = await this.identities.loadOrCreate(this.config.deviceName);
-    this.server.bindIdentity(this.identity);
+    const identity3 = await this.ensureIdentity();
     this.gatewaySwitch.install();
     this.logger.info("client remote-mode identity ready", {
-      deviceId: shortId(this.identity.deviceId),
-      fingerprint: this.identity.fingerprint
+      deviceId: shortId(identity3.deviceId),
+      fingerprint: identity3.fingerprint
     });
     if (this.config.hostControl?.enabled !== false && this.host !== void 0 && this.server.hasStoredAuthorization !== void 0) {
       try {
@@ -92310,7 +92349,7 @@ var ClientModeRuntime = class {
         if (status2.authorized) return;
         if (this.host.hasStoredAuthorization !== void 0 && await this.host.hasStoredAuthorization()) return;
       }
-      const credentials = await this.server.authenticate(this.requireIdentity());
+      const credentials = await this.server.authenticate(await this.ensureIdentity());
       try {
         await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account);
       } catch (error62) {
@@ -92386,7 +92425,7 @@ var ClientModeRuntime = class {
     signal?.throwIfAborted();
     if (this.closed) throw new ClientModeError("CANCELLED", "The Remote runtime is closed.");
     this.assertHostAuthorizationForDeviceDiscovery();
-    this.requireIdentity();
+    await this.ensureIdentity();
     const devices = [];
     for await (const page of this.server.devicePages(signal)) {
       const remoteDevices = page.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
@@ -92437,7 +92476,7 @@ var ClientModeRuntime = class {
     throw new ClientModeError(status2.error, message);
   }
   async authorizeClientWithAccount(email3, password, verification) {
-    const authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email3, password, async () => {
+    const authorization = await this.server.authorizeWithAccount(await this.ensureIdentity(), email3, password, async () => {
       this.identity = await this.identities.reset(this.config.deviceName);
       return this.identity;
     }, verification);
@@ -92450,12 +92489,18 @@ var ClientModeRuntime = class {
     return this.server.startOAuthQrLogin(provider);
   }
   async pollClientOAuthQrLogin(qrId) {
-    const result = await this.server.pollOAuthQrLogin(this.requireIdentity(), qrId, async () => {
-      this.identity = await this.identities.reset(this.config.deviceName);
-      this.server.bindIdentity(this.identity);
-      this.logger.info("Rotated revoked Client identity before QR authorization retry");
-      return this.identity;
-    });
+    let result;
+    try {
+      result = await this.server.pollOAuthQrLogin(await this.ensureIdentity(), qrId, async () => {
+        this.identity = await this.identities.reset(this.config.deviceName);
+        this.server.bindIdentity(this.identity);
+        this.logger.info("Rotated revoked Client identity before QR authorization retry");
+        return this.identity;
+      });
+    } catch (error62) {
+      this.logger.warn("Client QR login failed", { code: safeErrorCode(error62) });
+      throw error62;
+    }
     if (result.status === "complete") this.logger.info("Client account authorized with QR login");
     if (result.status === "complete") {
       this.clientAuthRequired = false;
@@ -92470,6 +92515,9 @@ var ClientModeRuntime = class {
     this.clearHistoryCaches();
     if (this.identity === void 0) {
       await Promise.all([cleanup, this.server.clearAuthorization()]);
+      if (this.started && !this.closed && !this.host?.hostStatus().pairingHostOnly) {
+        await this.ensureIdentity();
+      }
       return;
     }
     const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()]);
@@ -92487,7 +92535,7 @@ var ClientModeRuntime = class {
       await this.host.clearHostAuthorization();
       return this.status();
     }
-    const credentials = await this.server.authenticate(this.requireIdentity());
+    const credentials = await this.server.authenticate(await this.ensureIdentity());
     try {
       await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account);
     } catch (error62) {
@@ -92603,6 +92651,7 @@ var ClientModeRuntime = class {
       this.assertHostAuthorizationForDeviceDiscovery();
       return result;
     }
+    if (this.identity === void 0) await this.ensureIdentity();
     const remote = await this.connection.connect(targetDeviceId, activeSignal, { background: true });
     let closing;
     const close = () => closing ??= remote.client.close();
@@ -92841,6 +92890,7 @@ var ClientModeRuntime = class {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.started = false;
     this.server.close?.();
     try {
       await this.leaveRemote();
@@ -93150,6 +93200,50 @@ Attached workspace file: ${JSON.stringify(uploaded.path)}
     signal?.throwIfAborted();
     if (this.closed || this.connected !== remote) {
       throw new ClientModeError("CANCELLED", "The Remote workspace request was superseded or closed.");
+    }
+  }
+  async syncIdentityIfStarted(options) {
+    if (!this.started || this.closed || this.host?.hostStatus().pairingHostOnly) return;
+    if (options?.reload) {
+      this.server.resetCachedCredentials?.();
+      this.clientAuthRequired = false;
+    }
+    await this.ensureIdentity(options);
+  }
+  async ensureIdentity(options) {
+    if (this.host?.hostStatus().pairingHostOnly) {
+      throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
+    }
+    if (!options?.reload && this.identityLoadFlight === void 0 && this.identity !== void 0) return this.identity;
+    if (!this.started || this.closed) {
+      throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
+    }
+    if (!options?.reload && this.identityLoadFlight !== void 0) return this.identityLoadFlight;
+    const previous = this.identityLoadFlight;
+    const flight = (async () => {
+      if (previous !== void 0) await previous.catch(() => void 0);
+      if (this.host?.hostStatus().pairingHostOnly) {
+        throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
+      }
+      if (!this.started || this.closed) {
+        throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
+      }
+      const identity3 = await this.identities.loadOrCreate(this.config.deviceName);
+      if (this.host?.hostStatus().pairingHostOnly) {
+        throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
+      }
+      if (!this.started || this.closed) {
+        throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
+      }
+      this.identity = identity3;
+      this.server.bindIdentity(identity3);
+      return identity3;
+    })();
+    this.identityLoadFlight = flight;
+    try {
+      return await flight;
+    } finally {
+      if (this.identityLoadFlight === flight) this.identityLoadFlight = void 0;
     }
   }
   requireIdentity() {
@@ -107566,8 +107660,11 @@ var PluginControlRuntime = class {
         return identity3;
       }, readAccountVerification(value.verification));
     }
-    if (value.role === "client" && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
-      await this.client?.authorizeHostByDefault();
+    if (value.role === "client") {
+      await this.client?.syncIdentityIfStarted?.({ reload: true });
+      if (resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
+        await this.client?.authorizeHostByDefault();
+      }
     }
     await this.settings.replace(editableConfig(next));
     if (value.role === "host") {
@@ -107950,17 +108047,30 @@ var PluginControlRuntime = class {
       throw this.startupFailure;
     }
     const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
-    if (config2.serverUrl !== void 0) {
-      const runtimes = await Promise.allSettled([
-        this.client?.clearClientAuthorization(),
-        this.host?.clearHostAuthorization()
-      ]);
-      const stores = await Promise.allSettled(["host", "client"].map(async (role2) => {
-        const directory = serverStorageDirectory(this.identityDirectory, config2.serverUrl, role2);
-        await new ServerCredentialStore(directory).clear();
-      }));
-      const failure5 = [...runtimes, ...stores].find((result) => result.status === "rejected");
-      if (failure5?.status === "rejected") throw failure5.reason;
+    const runCleanup = async (operation) => {
+      if (operation === void 0) return { status: "fulfilled", value: void 0 };
+      try {
+        return { status: "fulfilled", value: await operation };
+      } catch (reason) {
+        return { status: "rejected", reason };
+      }
+    };
+    const hostResult = await runCleanup(this.host?.clearHostAuthorization());
+    const clientResult = await runCleanup(this.client?.clearClientAuthorization());
+    const runtimes = [clientResult, hostResult];
+    const directories = config2.serverUrl === void 0 ? [{ role: "host", directory: this.identityDirectory }] : ["host", "client"].map((role2) => ({
+      role: role2,
+      directory: serverStorageDirectory(this.identityDirectory, config2.serverUrl, role2)
+    }));
+    const stores = await Promise.allSettled(directories.map(async ({ role: role2, directory }) => {
+      const store = new ServerCredentialStore(directory);
+      await store.clear();
+      if (role2 === "host" && this.host === void 0) await store.clearPairingArtifacts();
+    }));
+    const failure5 = [...runtimes, ...stores].find((result) => result.status === "rejected");
+    if (failure5?.status === "rejected") throw failure5.reason;
+    if (this.client !== void 0 && !this.host?.hostStatus?.()?.pairingHostOnly) {
+      await this.client.syncIdentityIfStarted?.();
     }
     return this.settingsView();
   }
@@ -108133,6 +108243,7 @@ function withUpdate(result, update) {
 function fail5(error62) {
   const source = error62 instanceof Error ? error62 : void 0;
   const remoteCode = source !== void 0 && "code" in source && typeof source.code === "string" ? source.code : source instanceof ClientModeError ? source.code : void 0;
+  const retryable = source !== void 0 && "retryable" in source && typeof source.retryable === "boolean" ? source.retryable : source instanceof ClientModeError ? source.retryable : false;
   return {
     ok: false,
     error: {
@@ -108140,6 +108251,7 @@ function fail5(error62) {
       message: source?.message ?? "The plugin control operation failed.",
       details: {
         ...remoteCode === void 0 ? {} : { remoteCode },
+        retryable,
         ...source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}
       }
     }
@@ -116400,6 +116512,8 @@ var HostPluginRuntime = class {
   async start() {
     if (this.closed) throw new Error("remote runtime is closed");
     this.identity = await this.identities.loadOrCreate(this.config.deviceName);
+    this.serverApi?.bindIdentity(this.identity);
+    await this.serverApi?.loadStoredPolicy();
     this.logger.info("host identity ready", {
       deviceId: shortId4(this.identity.deviceId),
       fingerprint: this.identity.fingerprint,
@@ -116417,8 +116531,6 @@ var HostPluginRuntime = class {
       this.harnessVersion = await this.readHarnessVersion();
       attentionHarnessVersion = this.harnessVersion;
       this.serverApi.setHarnessVersion(this.harnessVersion);
-      this.serverApi.bindIdentity(this.identity);
-      await this.serverApi.loadStoredPolicy();
       this.initializePairing();
       this.serverConnection = this.createServerConnection(this.identity);
       if (this.config.hostControl?.enabled !== false) {
@@ -116551,10 +116663,15 @@ var HostPluginRuntime = class {
     this.pairing = void 0;
     await this.serverConnection?.stop();
     let revokeFailure;
-    try {
-      await this.serverApi?.revokeCurrentDevice();
-    } catch (error62) {
-      revokeFailure = error62;
+    if (this.identity === void 0) {
+      await this.serverApi?.clearAuthorization();
+    } else {
+      this.serverApi?.bindIdentity(this.identity);
+      try {
+        await this.serverApi?.revokeCurrentDevice();
+      } catch (error62) {
+        revokeFailure = error62;
+      }
     }
     this.identity = await this.identities.reset(this.config.deviceName, { clearPairingPolicy: true });
     this.serverApi?.bindIdentity(this.identity);
@@ -117709,7 +117826,9 @@ async function logout(args, runtime) {
     exists3(join20(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
-    await new ServerCredentialStore(directory).clear();
+    const store = new ServerCredentialStore(directory);
+    await store.clear();
+    await store.clearPairingArtifacts();
     write2(runtime.stdout, "This Host is already logged out.\n");
     return 0;
   }
@@ -117723,7 +117842,7 @@ async function logout(args, runtime) {
   } catch (error62) {
     revokeFailure = error62;
   }
-  await identities.reset(deviceName);
+  await identities.reset(deviceName, { clearPairingPolicy: true });
   await new ServerCredentialStore(directory).clear();
   if (revokeFailure !== void 0 && !(revokeFailure instanceof IdentityInvalidError) && !(revokeFailure instanceof ServerCredentialsInvalidError)) {
     throw new Error(`Local Host credentials were cleared, but Server revocation failed: ${cliErrorMessage(revokeFailure)}`);

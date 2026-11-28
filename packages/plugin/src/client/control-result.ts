@@ -11,3 +11,9 @@ export function unwrapControlResult<T>(result: ControlResult<T>, fallbackMessage
   }
   return result.value as T
 }
+
+export function isNonRetryableControlError(reason: unknown): boolean {
+  if (typeof reason !== 'object' || reason === null || !('details' in reason)) return false
+  const details = (reason as { details?: unknown }).details
+  return typeof details === 'object' && details !== null && (details as { retryable?: unknown }).retryable === false
+}

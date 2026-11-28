@@ -267,6 +267,42 @@ describe('Remote CLI', () => {
     await expect(runCli(['logout'], { env, stdout: output })).resolves.toBe(0)
     expect(output.text).toContain('Remote Host logged out and its local device identity was rotated')
   })
+
+  it('clears pairing-host-only policy on logout', async () => {
+    const dshHome = join(tmpdir(), `dsh-remote-cli-pairing-logout-${crypto.randomUUID()}`)
+    directories.push(dshHome)
+    const env = { DSH_HOME: dshHome }
+    const root = new IdentityStore({ env }).directory
+    const directory = serverStorageDirectory(root, 'https://dsh.r2049.cn', 'host')
+    const identities = new IdentityStore({ directory, env, role: 'host' })
+    const identity = await identities.loadOrCreate('Paired Host')
+    const store = new ServerCredentialStore(directory)
+    await store.restrictPairingHostOnly()
+    await store.save({
+      serverUrl: 'https://dsh.r2049.cn',
+      deviceId: identity.deviceId,
+      authorizationMethod: 'device_pairing',
+      account: 'device:paired',
+      pairingRestricted: true,
+      inboundOnly: true,
+      ...tokens(),
+    })
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith('/devices/self')) return json({ ok: true })
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    await expect(runCli(['logout'], {
+      env,
+      stdout: writer(),
+      createHostApi: (serverUrl, s) => new HostServerApi(serverUrl, s, fetchMock),
+    })).resolves.toBe(0)
+
+    await expect(store.pairingHostOnly()).resolves.toBe(false)
+    await expect(stat(join(directory, 'pairing-host-only.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
 })
 
 function writer(isTTY = false): { text: string; isTTY: boolean; write(value: string): void } {

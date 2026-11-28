@@ -1,4 +1,5 @@
 import { useAccountVerification } from './account-verification.js'
+import { isNonRetryableControlError } from './control-result.js'
 import { mountAccountEntry } from './account-entry.js'
 import { watchFooterLane, type FooterForm } from './footer-lane.js'
 import { createHostPairingPanel } from './pairing.js'
@@ -191,6 +192,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const [qrSession, setQrSession] = React.useState<OAuthQrSession | undefined>(undefined)
     const [qrImage, setQrImage] = React.useState<string | undefined>(undefined)
     const [qrExpired, setQrExpired] = React.useState(false)
+    const [qrFailed, setQrFailed] = React.useState(false)
     const [hostEmail, setHostEmail] = React.useState('')
     const [hostPassword, setHostPassword] = React.useState('')
     const [hostRegistrationCode, setHostRegistrationCode] = React.useState('')
@@ -218,6 +220,10 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       if (!open) {
         setDevicesOpen(false)
         qrFlowRun.current += 1
+        setQrSession(undefined)
+        setQrImage(undefined)
+        setQrExpired(false)
+        setQrFailed(false)
         setBusy(false)
       }
     }, [open])
@@ -284,6 +290,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setBusy(true)
       setError(undefined)
       setQrExpired(false)
+      setQrFailed(false)
       try {
         const session = await props.control<OAuthQrSession>('client.account.qr.start', { provider })
         const image = await QRCode.toDataURL(session.scanUrl, {
@@ -295,7 +302,10 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         setQrSession(session)
         setQrImage(image)
       } catch (reason) {
-        if (run === qrFlowRun.current) setError(messageOf(reason, t))
+        if (run === qrFlowRun.current) {
+          setQrFailed(true)
+          setError(messageOf(reason, t))
+        }
       } finally {
         if (run === qrFlowRun.current) setBusy(false)
       }
@@ -310,6 +320,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setQrSession(undefined)
       setQrImage(undefined)
       setQrExpired(false)
+      setQrFailed(false)
       setOAuthProviders([])
       setProvidersLoading(true)
       setProvidersFailed(false)
@@ -336,13 +347,13 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     }, [open, needsAuthorization, status?.serverUrl, props.preferredQrProvider, providerReload, savingServer, serverDirty])
 
     React.useEffect(() => {
-      if (!open || !needsAuthorization || savingServer || serverDirty || providersLoading || loginMethod === 'password'
-        || !oauthProviders.some(item => `oauth:${item.id}` === loginMethod) || qrSession !== undefined || qrExpired) return
+      if (!open || !needsAuthorization || savingServer || serverDirty || providersLoading || !loginMethod.startsWith('oauth:')
+        || !oauthProviders.some(item => `oauth:${item.id}` === loginMethod) || qrSession !== undefined || qrExpired || qrFailed) return
       void startQrLogin(loginMethod.slice(6))
-    }, [open, needsAuthorization, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, savingServer, serverDirty])
+    }, [open, needsAuthorization, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, qrFailed, savingServer, serverDirty])
 
     React.useEffect(() => {
-      if (!open || savingServer || serverDirty || loginMethod === 'password' || qrSession === undefined) return
+      if (!open || !needsAuthorization || savingServer || serverDirty || !loginMethod.startsWith('oauth:') || qrSession === undefined) return
       let active = true
       let polling = false
       let settled = false
@@ -359,18 +370,29 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
             setBusy(true)
             setError(undefined)
             setQrExpired(false)
+            setQrFailed(false)
+            setNeedsAuthorization(false)
             try {
-              const [nextDevices, nextStatus] = await Promise.all([
-                props.control<RemoteDevice[]>('devices'),
+              const [statusResult, devicesResult] = await Promise.allSettled([
                 props.control<RemoteStatus>('status'),
+                props.control<RemoteDevice[]>('devices'),
               ])
               if (active && run === qrFlowRun.current) {
-                setDevices(nextDevices)
-                setStatus(nextStatus)
-                setNeedsAuthorization(false)
+                if (statusResult.status === 'fulfilled') setStatus(statusResult.value)
+                if (devicesResult.status === 'fulfilled') {
+                  setDevices(devicesResult.value)
+                  setDiscoveryUnavailable(false)
+                } else {
+                  const reason = devicesResult.reason
+                  const code = typeof reason === 'object' && reason !== null && 'code' in reason
+                    ? String((reason as { code: unknown }).code) : ''
+                  if (code === 'CONNECTION_FAILED' || messageOf(reason, t) === t('serverUnavailableError')) {
+                    setDiscoveryUnavailable(true)
+                  } else {
+                    setError(connectionErrorMessageFor(reason, t))
+                  }
+                }
               }
-            } catch (reason) {
-              if (active && run === qrFlowRun.current) setError(connectionErrorMessageFor(reason, t))
             } finally {
               if (run === qrFlowRun.current) {
                 setQrSession(undefined)
@@ -386,7 +408,15 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
             setQrImage(undefined)
           }
         }).catch(reason => {
-          if (active && !settled && run === qrFlowRun.current) setError(messageOf(reason, t))
+          if (!active || settled || run !== qrFlowRun.current) return
+          if (isNonRetryableControlError(reason)) {
+            settled = true
+            if (timer !== undefined) window.clearInterval(timer)
+            setQrFailed(true)
+            setQrSession(undefined)
+            setQrImage(undefined)
+          }
+          setError(messageOf(reason, t))
         }).finally(() => {
           polling = false
         })
@@ -407,6 +437,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setQrSession(undefined)
       setQrImage(undefined)
       setQrExpired(false)
+      setQrFailed(false)
       setError(undefined)
     }
 
@@ -918,6 +949,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       setQrSession(undefined)
       setQrImage(undefined)
       setQrExpired(false)
+      setQrFailed(false)
       setOAuthProviders([])
       setPairingServerUrl(undefined)
       setProvidersFailed(false)
@@ -1060,6 +1092,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         setQrSession(undefined)
         setQrImage(undefined)
         setQrExpired(false)
+        setQrFailed(false)
         setStatus(await props.control<RemoteStatus>('status'))
       } catch (reason) {
         setError(messageOf(reason, t))
@@ -1477,24 +1510,37 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                     className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-${loginMethod}-panel`,
                     'aria-labelledby': `dsh-remote-${loginMethod}-tab`,
                   },
-                    qrImage === undefined
-                      ? React.createElement('div', { className: 'dshRemoteQrPlaceholder', 'aria-busy': busy },
-                        qrExpired ? React.createElement('p', null, t('qrLoginExpired')) : React.createElement('span', null, t('checkingConnection')))
-                      : qrSession !== undefined
-                        ? React.createElement('a', {
-                          className: 'dshRemoteQrOpen', href: qrSession.scanUrl,
-                          target: '_blank', rel: 'noopener noreferrer',
-                          'aria-label': t('openInBrowser'),
-                        },
-                          React.createElement('img', {
-                            src: qrImage, width: 184, height: 184,
-                            alt: scanLabel,
-                          }),
-                          React.createElement('span', null, t('openInBrowser'), ' ↗'))
-                        : null,
+                    qrFailed
+                      ? React.createElement('div', { className: 'dshRemoteInlineSignInQrState' },
+                        React.createElement('p', null, t('retryLoginProviders')),
+                        React.createElement('button', {
+                          type: 'button', className: 'dshRemoteReconnect', disabled: busy,
+                          onClick: () => {
+                            setError(undefined)
+                            setQrFailed(false)
+                            setQrExpired(false)
+                            setQrSession(undefined)
+                            setQrImage(undefined)
+                          },
+                        }, t('retryLoginProviders')))
+                      : qrImage === undefined
+                        ? React.createElement('div', { className: 'dshRemoteQrPlaceholder', 'aria-busy': busy },
+                          qrExpired ? React.createElement('p', null, t('qrLoginExpired')) : React.createElement('span', null, t('checkingConnection')))
+                        : qrSession !== undefined
+                          ? React.createElement('a', {
+                            className: 'dshRemoteQrOpen', href: qrSession.scanUrl,
+                            target: '_blank', rel: 'noopener noreferrer',
+                            'aria-label': t('openInBrowser'),
+                          },
+                            React.createElement('img', {
+                              src: qrImage, width: 184, height: 184,
+                              alt: scanLabel,
+                            }),
+                            React.createElement('span', null, t('openInBrowser'), ' ↗'))
+                          : null,
                     React.createElement('strong', null, scanLabel),
                     React.createElement('p', null, t('scanLoginHint')),
-                    !qrExpired && (busy || qrSession !== undefined) ? React.createElement('div', {
+                    !qrFailed && !qrExpired && (busy || qrSession !== undefined) ? React.createElement('div', {
                       className: 'dshRemoteLoginProgress', role: 'status', 'aria-live': 'polite',
                     }, React.createElement('span', { className: 'dshRemoteLoginSpinner', 'aria-hidden': true }),
                     t(busy && qrSession !== undefined ? 'loginLoadingDevices' : 'loginWaitingAuthorization')) : null,
