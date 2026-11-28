@@ -605,7 +605,8 @@ export function createRemotePluginOptions(React: ClientReact) {
       try {
         const next = await props.control<PluginLogView>('settings.logs.get', { filter, limit: 500 })
         if (run !== logsRequestRun.current) return
-        setLogsSnapshot(next)\n      } catch (reason) {
+        setLogsSnapshot(next)
+      } catch (reason) {
         if (run !== logsRequestRun.current) return
         setLogsError(messageOf(reason, t))
       } finally {
