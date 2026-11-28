@@ -364,7 +364,7 @@ export class PluginControlRuntime {
         this.config = targetConfig
         this.clearStartupFailure()
       } catch (error) {
-        this.setStartupFailure(error)
+        this.setStartupFailure(error, isStorageUnavailableFailure(error) ? { storageAvailable: false } : undefined)
         throw error
       }
       return this.settingsView()
@@ -399,7 +399,7 @@ export class PluginControlRuntime {
     if (!('legacyStorageRoot' in value) || (
       value.legacyStorageRoot !== null
       && value.legacyStorageRoot !== false
-      && typeof value.legacyStorageRoot !== 'string'
+      && (typeof value.legacyStorageRoot !== 'string' || value.legacyStorageRoot.trim() === '')
     )) {
       throw new ClientModeError('INVALID_MESSAGE', 'legacyStorageRoot must be a non-empty path, false, or null.')
     }
@@ -415,7 +415,11 @@ export class PluginControlRuntime {
     } catch (error) {
       throw new ClientModeError('INVALID_MESSAGE', error instanceof Error ? error.message : 'Invalid legacyStorageRoot.')
     }
-    await this.settings.replace(editableConfig(next))
+    const persisted = editableConfig(next)
+    if (value.legacyStorageRoot === null) {
+      delete persisted.legacyStorageRoot
+    }
+    await this.settings.replace(persisted)
     if (this.switchServer !== undefined) {
       if (next.legacyStorageRoot !== this.config.legacyStorageRoot || this.startupFailure !== undefined) {
         try {
@@ -425,7 +429,7 @@ export class PluginControlRuntime {
           this.clearStartupFailure()
         } catch (error) {
           this.config = next
-          this.setStartupFailure(error)
+          this.setStartupFailure(error, isStorageUnavailableFailure(error) ? { storageAvailable: false } : undefined)
           throw error
         }
       }
@@ -456,7 +460,7 @@ export class PluginControlRuntime {
           this.clearStartupFailure()
         } catch (error) {
           this.config = next
-          this.setStartupFailure(error)
+          this.setStartupFailure(error, isStorageUnavailableFailure(error) ? { storageAvailable: false } : undefined)
           throw error
         }
       }
@@ -510,7 +514,7 @@ export class PluginControlRuntime {
         this.config = config
         this.clearStartupFailure()
       } catch (error) {
-        this.setStartupFailure(error)
+        this.setStartupFailure(error, isStorageUnavailableFailure(error) ? { storageAvailable: false } : undefined)
         throw error
       }
       return { ...await this.settingsView(), applies: 'live' }
@@ -959,6 +963,11 @@ function commandAvailable(command: string): boolean {
   } catch {
     return false
   }
+}
+
+function isStorageUnavailableFailure(error: unknown): boolean {
+  return error instanceof IdentityInvalidError
+    && (error.code === 'STORAGE_CONFLICT' || error.code === 'IDENTITY_LOCKED')
 }
 
 function editableConfig(config: ResolvedConfig): Config {

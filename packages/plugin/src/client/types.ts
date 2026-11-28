@@ -203,6 +203,7 @@ interface PluginSettings {
   enabled?: boolean
   role?: 'host' | 'client' | 'both'
   serverUrl?: string
+  legacyStorageRoot?: string | false
   terminal?: { enabled?: boolean }
   hostControl?: { enabled?: boolean }
   loopback?: { ports?: number[] }

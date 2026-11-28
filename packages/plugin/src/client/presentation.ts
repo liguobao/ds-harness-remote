@@ -216,6 +216,19 @@ function parseUnexpectedEntriesClause(
   }
 }
 
+export function isForeignLegacyStorageConflict(error: { code: string; message: string } | undefined): boolean {
+  if (error?.code !== 'STORAGE_CONFLICT') return false
+  if (error.message.startsWith(TUNNEL_PLUGIN_STORAGE_CONFLICT_PREFIX)) {
+    const suffix = error.message.slice(TUNNEL_PLUGIN_STORAGE_CONFLICT_PREFIX.length)
+    return SINGLE_STORAGE_CONFLICT_ENTRY_RE.test(suffix) || MULTIPLE_STORAGE_CONFLICT_ENTRIES_RE.test(suffix)
+  }
+  if (error.message.startsWith(FOREIGN_STORAGE_CONFLICT_PREFIX)) {
+    const suffix = error.message.slice(FOREIGN_STORAGE_CONFLICT_PREFIX.length)
+    return SINGLE_STORAGE_CONFLICT_ENTRY_RE.test(suffix) || MULTIPLE_STORAGE_CONFLICT_ENTRIES_RE.test(suffix)
+  }
+  return false
+}
+
 function storageConflictMessage(message: string, t: Translate): string {
   if (message.startsWith(MANUAL_STORAGE_CONFLICT_PREFIX)) {
     const parsed = parseUnexpectedEntriesClause(message.slice(MANUAL_STORAGE_CONFLICT_PREFIX.length), t)
