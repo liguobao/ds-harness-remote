@@ -24,6 +24,54 @@ interface AlertRequest {
 const store = { request: undefined as AlertRequest | undefined }
 let notify: (() => void) | undefined
 
+// On iOS, `RCTAlertManager` invokes a button's `onPress` inside `UIAlertAction`'s
+// completion handler right as `[RCTAlertController hide]` tears down `_alertWindow`
+// and restores key-window focus. Deferring button callbacks by one macrotask and
+// queuing any follow-up `Alert.alert` triggered during that unwind prevents heavy
+// Fabric subtree mutations or a second `UIAlertController` from colliding with
+// UIKit's alert-window dismissal transaction.
+let iosAlertUnwinding = false
+const iosPendingAlerts: Array<() => void> = []
+
+function flushNextIosAlert(): void {
+  if (iosAlertUnwinding || iosPendingAlerts.length === 0) return
+  const next = iosPendingAlerts.shift()
+  if (next !== undefined) {
+    iosAlertUnwinding = true
+    setTimeout(() => {
+      iosAlertUnwinding = false
+      try {
+        next()
+      } finally {
+        flushNextIosAlert()
+      }
+    }, 0)
+  }
+}
+
+function wrapIosButtons(buttons?: AlertButton[]): AlertButton[] | undefined {
+  if (buttons === undefined) return undefined
+  return buttons.map(button => ({
+    ...button,
+    onPress: () => {
+      iosAlertUnwinding = true
+      setTimeout(() => {
+        try {
+          button.onPress?.()
+        } finally {
+          iosAlertUnwinding = false
+          flushNextIosAlert()
+        }
+      }, 0)
+    },
+  }))
+}
+
+export function resetIosAlertStateForTesting(): void {
+  iosAlertUnwinding = false
+  iosPendingAlerts.length = 0
+}
+
 function subscribe(callback: () => void): () => void {
   notify = callback
   return () => { notify = undefined }
@@ -37,7 +85,14 @@ export const Alert = {
     options?: { cancelable?: boolean; onDismiss?: () => void },
   ): void {
     if (Platform.OS === 'ios') {
-      RNAlert.alert(title, message, buttons, options)
+      const present = () => {
+        RNAlert.alert(title, message, wrapIosButtons(buttons), options)
+      }
+      if (iosAlertUnwinding) {
+        iosPendingAlerts.push(present)
+      } else {
+        present()
+      }
       return
     }
     store.request = {
