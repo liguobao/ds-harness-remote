@@ -1072,6 +1072,103 @@ describe('IdentityStore', () => {
     expect(healed.deviceId).not.toBe(original.deviceId)
     expect(await readFile(join(directory, 'device.json.bak-1793870140999'), 'utf8')).toBe('backup-bytes')
   })
+
+  it('reports all unexpected entries and foreign tunnel-plugin guidance on fresh install, and recovers cleanly when legacyStorageRoot is disabled or customized', async () => {
+    const home = await temporaryDirectory()
+    const foreignRemote = join(home, 'remote')
+    const target = join(home, 'ds-harness-remote')
+    await mkdir(join(foreignRemote, 'bin'), { recursive: true })
+    await writeFile(join(foreignRemote, 'access.json'), '{"owner":"other-remote-plugin"}')
+    await writeFile(join(foreignRemote, 'machines.json'), '{"machines":["m1"]}')
+    await writeFile(join(foreignRemote, 'bin', 'tunnel.exe'), 'binary')
+
+    // Default fresh install still fails closed without touching the third-party directory,
+    // while listing every unexpected entry and pointing to legacyStorageRoot=false.
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).rejects.toMatchObject({
+      code: 'STORAGE_CONFLICT',
+      message: expect.stringContaining('matches another Remote/tunnel plugin layout'),
+    })
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).rejects.toThrow(
+      'Unexpected entries "access.json", "bin", "machines.json" were found.',
+    )
+    await expect(stat(target)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    // Explicit legacyStorageRoot: false skips $DSH_HOME/remote and initializes $DSH_HOME/ds-harness-remote.
+    await expect(prepareDefaultIdentityDirectory({
+      env: { DSH_HOME: home },
+      legacyStorageRoot: false,
+    })).resolves.toBe(target)
+    const created = await new IdentityStore({
+      env: { DSH_HOME: home },
+      legacyStorageRoot: false,
+      role: 'host',
+    }).loadOrCreate('Fresh Host')
+    expect(created.deviceId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(await readFile(join(foreignRemote, 'access.json'), 'utf8')).toBe('{"owner":"other-remote-plugin"}')
+
+    // DSH_REMOTE_LEGACY_STORAGE_ROOT=false also works on a fresh DSH_HOME and via resetDefaultIdentityRoles.
+    const envHome = await temporaryDirectory()
+    await mkdir(join(envHome, 'remote', 'bin'), { recursive: true })
+    await writeFile(join(envHome, 'remote', 'access.json'), '{}')
+    await writeFile(join(envHome, 'remote', 'machines.json'), '{}')
+    const envWithOptOut = { DSH_HOME: envHome, DSH_REMOTE_LEGACY_STORAGE_ROOT: 'false' }
+    await expect(prepareDefaultIdentityDirectory({ env: envWithOptOut })).resolves.toBe(join(envHome, 'ds-harness-remote'))
+    await expect(resetDefaultIdentityRoles(['host'], 'https://first.example.com', 'Reset Host', {
+      env: envWithOptOut,
+    })).resolves.toBe(join(envHome, 'ds-harness-remote'))
+    expect(await readdir(join(envHome, 'remote'))).toEqual(expect.arrayContaining(['access.json', 'bin', 'machines.json']))
+
+    // Custom legacyStorageRoot migrates verified storage from a custom directory while leaving $DSH_HOME/remote untouched.
+    const customHome = await temporaryDirectory()
+    await mkdir(join(customHome, 'remote'), { recursive: true })
+    await writeFile(join(customHome, 'remote', 'access.json'), '{"foreign":true}')
+    const customLegacy = join(customHome, 'remote-legacy')
+    const legacyHostDir = serverStorageDirectory(customLegacy, 'https://first.example.com', 'host')
+    const legacyIdentity = await new IdentityStore({ directory: legacyHostDir, role: 'host' }).loadOrCreate('Migrated Host')
+    await expect(prepareDefaultIdentityDirectory({
+      env: { DSH_HOME: customHome },
+      legacyStorageRoot: 'remote-legacy',
+    })).resolves.toBe(join(customHome, 'ds-harness-remote'))
+    const migratedDir = serverStorageDirectory(join(customHome, 'ds-harness-remote'), 'https://first.example.com', 'host')
+    expect((await new IdentityStore({ directory: migratedDir, role: 'host' }).loadOrCreate('Migrated Host')).deviceId)
+      .toBe(legacyIdentity.deviceId)
+    expect(await readFile(join(customHome, 'remote', 'access.json'), 'utf8')).toBe('{"foreign":true}')
+    await expect(stat(customLegacy)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    // Pointing legacyStorageRoot at ds-harness-remote itself is a safe no-op; pointing at DSH_HOME fails closed.
+    await expect(prepareDefaultIdentityDirectory({
+      env: { DSH_HOME: customHome },
+      legacyStorageRoot: 'ds-harness-remote',
+    })).resolves.toBe(join(customHome, 'ds-harness-remote'))
+    await expect(prepareDefaultIdentityDirectory({
+      env: { DSH_HOME: customHome },
+      legacyStorageRoot: '.',
+    })).rejects.toMatchObject({ code: 'STORAGE_CONFLICT' })
+  })
+
+  it('treats non-directory servers entry in legacy root as a conflict and bounds large unexpected entry lists', async () => {
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    const target = join(home, 'ds-harness-remote')
+    await mkdir(source)
+    await writeFile(join(source, 'servers'), 'not-a-directory')
+    await new IdentityStore({
+      directory: serverStorageDirectory(target, 'https://first.example.com', 'host'),
+      role: 'host',
+    }).loadOrCreate('Owned Host')
+    // Review nit regression: a plain file or symlink named `servers` must not be skipped as unowned.
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).rejects.toThrow('Both Remote storage directories exist')
+
+    const crowdedHome = await temporaryDirectory()
+    const crowdedSource = join(crowdedHome, 'remote')
+    await mkdir(crowdedSource)
+    for (let index = 1; index <= 10; index += 1) {
+      await writeFile(join(crowdedSource, `item-${String(index).padStart(2, '0')}.json`), '{}')
+    }
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: crowdedHome } })).rejects.toThrow(
+      'Unexpected entries "item-01.json", "item-02.json", "item-03.json", "item-04.json", "item-05.json", "item-06.json", "item-07.json", "item-08.json" (and 2 more) were found.',
+    )
+  })
 })
 
 async function temporaryDirectory(): Promise<string> {

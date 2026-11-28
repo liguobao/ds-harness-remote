@@ -1,4 +1,4 @@
-import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -302,6 +302,43 @@ describe('Remote CLI', () => {
 
     await expect(store.pairingHostOnly()).resolves.toBe(false)
     await expect(stat(join(directory, 'pairing-host-only.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('skips foreign $DSH_HOME/remote in CLI commands when DSH_REMOTE_LEGACY_STORAGE_ROOT=false', async () => {
+    const dshHome = join(tmpdir(), `dsh-remote-cli-foreign-${crypto.randomUUID()}`)
+    directories.push(dshHome)
+    await mkdir(join(dshHome, 'remote', 'bin'), { recursive: true })
+    await writeFile(join(dshHome, 'remote', 'access.json'), '{"owner":"other"}')
+    await writeFile(join(dshHome, 'remote', 'machines.json'), '{"machines":[]}')
+
+    const blockedErrors = writer()
+    await expect(runCli(['status'], {
+      env: { DSH_HOME: dshHome },
+      stdout: writer(),
+      stderr: blockedErrors,
+    })).resolves.toBe(1)
+    expect(blockedErrors.text).toContain('matches another Remote/tunnel plugin layout')
+    expect(blockedErrors.text).toContain('"access.json", "bin", "machines.json"')
+
+    const okOutput = writer()
+    const okErrors = writer()
+    const optOutEnv = { DSH_HOME: dshHome, DSH_REMOTE_LEGACY_STORAGE_ROOT: 'false' }
+    await expect(runCli(['status'], {
+      env: optOutEnv,
+      stdout: okOutput,
+      stderr: okErrors,
+    })).resolves.toBe(0)
+    expect(okErrors.text).toBe('')
+    expect(okOutput.text).toContain('Device: not initialized')
+
+    await expect(runCli(['reset-identity', 'host'], {
+      env: optOutEnv,
+      stdout: okOutput,
+      stderr: okErrors,
+    })).resolves.toBe(0)
+    expect(await readFile(join(dshHome, 'remote', 'access.json'), 'utf8')).toBe('{"owner":"other"}')
+    const hostDir = serverStorageDirectory(join(dshHome, 'ds-harness-remote'), 'https://dsh.r2049.cn', 'host')
+    await expect(stat(join(hostDir, 'device.json'))).resolves.toBeDefined()
   })
 })
 

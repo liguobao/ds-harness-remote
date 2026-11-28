@@ -103,4 +103,21 @@ describe('plugin config', () => {
   it('rejects an inverted reconnect range', () => {
     expect(() => resolveConfig({ reconnect: { initialDelayMs: 5_000, maxDelayMs: 1_000 } })).toThrow(/maxDelayMs/)
   })
+
+  it('resolves legacyStorageRoot from config or DSH_REMOTE_LEGACY_STORAGE_ROOT and rejects invalid values', () => {
+    expect('legacyStorageRoot' in resolveConfig({}, {})).toBe(false)
+    expect('legacyStorageRoot' in resolveConfig({}, { DSH_REMOTE_LEGACY_STORAGE_ROOT: '   ' })).toBe(false)
+    expect(resolveConfig({ legacyStorageRoot: false }, {}).legacyStorageRoot).toBe(false)
+    expect(resolveConfig({ legacyStorageRoot: '  custom-legacy  ' }, {}).legacyStorageRoot).toBe('custom-legacy')
+    for (const disabledValue of ['false', 'FALSE', '0', 'off', 'none', ' false ']) {
+      expect(resolveConfig({}, { DSH_REMOTE_LEGACY_STORAGE_ROOT: disabledValue }).legacyStorageRoot).toBe(false)
+    }
+    expect(resolveConfig({}, { DSH_REMOTE_LEGACY_STORAGE_ROOT: ' /opt/dsh-legacy ' }).legacyStorageRoot).toBe('/opt/dsh-legacy')
+    expect(resolveConfig({ legacyStorageRoot: false }, { DSH_REMOTE_LEGACY_STORAGE_ROOT: '/opt/dsh-legacy' }).legacyStorageRoot).toBe(false)
+    expect(resolveConfig({ legacyStorageRoot: 'custom-legacy' }, { DSH_REMOTE_LEGACY_STORAGE_ROOT: 'false' }).legacyStorageRoot).toBe('custom-legacy')
+    expect(() => resolveConfig({ legacyStorageRoot: true as never }, {})).toThrow()
+    expect(() => resolveConfig({ legacyStorageRoot: '   ' }, {})).toThrow()
+    expect(() => resolveConfig({ legacyStorageRoot: 'bad\0path' }, {})).toThrow()
+    expect(() => resolveConfig({}, { DSH_REMOTE_LEGACY_STORAGE_ROOT: 'bad\0path' })).toThrow()
+  })
 })
