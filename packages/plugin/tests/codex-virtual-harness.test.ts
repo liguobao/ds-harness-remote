@@ -1705,24 +1705,38 @@ describe('CodexVirtualHarness', () => {
           // Calibrate legacy Turn 2 + Turn 3 to fit inside the Host's 256 KiB budget
           // while v3 `stream: []` injection (+1,200 B across 100 assistant messages)
           // plus `permissionPreset` pushes the adapted page over the client budget.
-          const probe = makeV3BoundaryThread(2300)
-          const probeHostPage = paginateCodexNativeHistory(
-            projectCodexNativeHistory(probe, 'codex:thr_v3_boundary', 'legacy'),
-            { turnWindow: 2 },
-          )
-          const probeHostBytes = utf8JsonByteLength(probeHostPage)
+          // Search for the message length rather than pinning one: any change to the
+          // projected record size would otherwise drag the two-turn page across the
+          // Host budget and silently leave only Turn 3 behind.
           const targetSlack = VIRTUAL_HISTORY_MAX_BYTES - 2048 - 400
-          const deltaPerMsg = Math.floor((targetSlack - probeHostBytes) / 100)
-          const boundaryThread = makeV3BoundaryThread(2300 + deltaPerMsg)
-
-          const legacyHistory = projectCodexNativeHistory(boundaryThread, 'codex:thr_v3_boundary', 'legacy')
-          const turnStartSeqs = legacyHistory.entries
+          const legacyHistoryFor = (msgLen: number) =>
+            projectCodexNativeHistory(makeV3BoundaryThread(msgLen), 'codex:thr_v3_boundary', 'legacy')
+          const hostPageFor = (msgLen: number) =>
+            paginateCodexNativeHistory(legacyHistoryFor(msgLen), { turnWindow: 2 })
+          const turnStartSeqs = legacyHistoryFor(0).entries
             .filter(entry => entry.event.type === 'turn/start')
             .map(entry => entry.event.seq)
+          const fitsBothTurnsNearBudget = (msgLen: number) => {
+            const page = hostPageFor(msgLen)
+            return page.records[0]!.event.seq === turnStartSeqs[1]
+              && utf8JsonByteLength(page) <= targetSlack
+          }
+          let low = 1
+          let high = 8192
+          while (low < high) {
+            const mid = Math.ceil((low + high) / 2)
+            if (fitsBothTurnsNearBudget(mid)) low = mid
+            else high = mid - 1
+          }
+          const boundaryThread = makeV3BoundaryThread(low)
+
+          const legacyHistory = legacyHistoryFor(low)
           const hostPage = paginateCodexNativeHistory(legacyHistory, { turnWindow: 2 })
           // Confirm the Host itself returned both Turn 2 and Turn 3 cleanly before v3 adaptation.
           expect(hostPage.records[0]!.event.seq).toBe(turnStartSeqs[1])
           expect(hostPage.hasMore).toBe(true)
+          // The page must sit just under the Host budget so the v3 fields tip it over.
+          expect(utf8JsonByteLength(hostPage)).toBeGreaterThan(targetSlack - 200)
 
           const client = fakeCodex([boundaryThread])
           const originalRequest = client.request.getMockImplementation()!
