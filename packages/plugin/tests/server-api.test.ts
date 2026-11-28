@@ -985,6 +985,12 @@ it('retries unstructured authorization responses but preserves explicit protocol
   } })), cleanupContract1)
 })
 
+function deferredSignal() {
+  let resolve!: () => void
+  const promise = new Promise<void>(done => { resolve = done })
+  return { promise, resolve }
+}
+
 it.each(['refresh response', 'disk write'])('clears authorization during a pending %s', async stage => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-clear-refresh-'))
   directories.push(directory)
@@ -992,8 +998,8 @@ it.each(['refresh response', 'disk write'])('clears authorization during a pendi
   const store = new ServerCredentialStore(directory)
   const url = 'https://dsh.r2049.cn'
   await store.save({ serverUrl: url, deviceId: identity.deviceId, authorizationMethod: 'account', ...tokens() })
-  const started = Promise.withResolvers<void>()
-  const resume = Promise.withResolvers<void>()
+  const started = deferredSignal()
+  const resume = deferredSignal()
   async function pause() {
     started.resolve()
     await resume.promise
@@ -1027,8 +1033,8 @@ it.each(['logout', 'new identity'])('discards an outstanding stored policy read 
     pairingRestricted: true, ...tokens() })
   const api = new HostServerApi(url, store)
   api.bindIdentity(identity)
-  const started = Promise.withResolvers<void>()
-  const resume = Promise.withResolvers<void>()
+  const started = deferredSignal()
+  const resume = deferredSignal()
   vi.spyOn(store, 'load').mockImplementationOnce(async () => {
     started.resolve()
     await resume.promise
