@@ -597,6 +597,48 @@ describe('remote mux frame reducer', () => {
           expect(revived.find(item => item.kind === 'question')?.outcome).toBeUndefined()
         },
       },
+      {
+        name: 'settles unowned pending approval on turn/end when earlier turns are already closed, while preserving it if another turn is open',
+        run: () => {
+          const closedTurn1 = foldHistory([
+            { event: sessionEvent({ type: 'assistant/message', seq: 1, data: { turn: 1, message: { id: 'a1', role: 'assistant', content: [{ type: 'text', text: 'Done 1' }] } } }) },
+            { event: sessionEvent({ type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } }) },
+          ], 's1')
+          const unownedApproval = frame('rpc-approval-unowned', {
+            type: 'approval/requested',
+            sessionId: 's1',
+            approvalId: 'app-unowned',
+            toolName: 'bash',
+          })
+          const turn2End = frame('', {
+            type: 'session/event',
+            sessionId: 's1',
+            event: sessionEvent({ type: 'turn/end', seq: 3, data: { turn: 2, reason: { kind: 'aborted' } } }),
+          })
+          const settled = applyMuxFrame(applyMuxFrame(closedTurn1, unownedApproval), turn2End)
+          expect(settled.find(item => item.kind === 'approval')).toMatchObject({
+            approvalId: 'app-unowned',
+            outcome: 'unavailable',
+          })
+
+          // Guard: if another turn is actively open, a late turn/end for an earlier turn must not clear it.
+          const withOpenTurn4 = applyMuxFrame(
+            applyMuxFrame(closedTurn1, unownedApproval),
+            frame('', {
+              type: 'session/event',
+              sessionId: 's1',
+              event: sessionEvent({ type: 'assistant/message', seq: 4, data: { turn: 4, message: { id: 'a4', role: 'assistant', content: [{ type: 'text', text: 'Running' }] } } }),
+            }),
+          )
+          const lateTurn3End = frame('', {
+            type: 'session/event',
+            sessionId: 's1',
+            event: sessionEvent({ type: 'turn/end', seq: 5, data: { turn: 3, reason: { kind: 'completed' } } }),
+          })
+          const preserved = applyMuxFrame(withOpenTurn4, lateTurn3End)
+          expect(preserved.find(item => item.kind === 'approval')?.outcome).toBeUndefined()
+        },
+      },
     ])
   }, 15000)
 
