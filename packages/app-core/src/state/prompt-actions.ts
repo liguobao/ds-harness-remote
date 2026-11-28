@@ -16,7 +16,7 @@ import { resolveHarnessSendMode } from '../screens/chat/composer-gate'
 import type { ChatItem, RemoteSession } from '../types'
 import { acpClientForBackend } from './acp-backend-helpers'
 import { withCodexPermissionState } from './codex-session-state'
-import { findApproval, findQuestion, inboxQueuedItems, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered, removeInboxQueueItem } from './message-helpers'
+import { findQuestion, inboxQueuedItems, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered, removeInboxQueueItem } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { isRecord, record, stringValue, withActiveCodexTurn } from './session-state'
 import type { AppState } from './store-state'
@@ -501,12 +501,12 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       }
     },
 
-    async respondApproval(itemId, outcome) {
+    async respondApproval(itemId, outcome, sessionId) {
       runtime.flushPendingMuxFrames()
       set({ busyAction: `approval:${itemId}`, error: undefined })
+      const item = get().messages[sessionId]?.find(value => value.kind === 'approval' && value.id === itemId)
       try {
-        const item = findApproval(get().messages, itemId)
-        if (item === undefined) {
+        if (item?.kind !== 'approval') {
           throw new Error(zhCN.runtime.openSessionFirst)
         }
         const session = get().sessions.find(value => value.sessionId === item.sessionId) ?? get().selectedSession
@@ -523,7 +523,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           await runtime.connection.requireProxy().respondApproval(item.frameRpcId, item.sessionId, item.approvalId, outcome)
         }
         set(state => ({
-          messages: mapApprovalOutcome(state.messages, itemId, outcome),
+          messages: mapApprovalOutcome(state.messages, item.sessionId, itemId, outcome),
           busyAction: undefined,
         }))
         await Haptics.notificationAsync(outcome === 'rejected'
@@ -531,11 +531,10 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           : Haptics.NotificationFeedbackType.Success)
       } catch (error) {
         if (isApprovalNotFoundError(error)) {
-          set(state => ({
-            messages: mapApprovalOutcome(state.messages, itemId, 'unavailable'),
-            busyAction: undefined,
-            error: friendlyError(error),
-          }))
+          set(state => {
+            const messages = mapApprovalOutcome(state.messages, sessionId, itemId, 'unavailable')
+            return { messages, busyAction: undefined, error: messages === state.messages ? state.error : friendlyError(error) }
+          })
           return
         }
         set({ busyAction: undefined, error: friendlyError(error) })

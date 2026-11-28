@@ -149,7 +149,7 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   /** When the final assistant response is split into markdown-chunk FlatList rows, hide it here. */
   hiddenResponseItemId?: string
   searchHighlight?: SearchHighlightState
-  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
+  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected', sessionId: string) => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   const { colors } = useTheme()
@@ -399,7 +399,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   closed: boolean
   dense?: boolean
   busyAction?: string
-  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
+  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected', sessionId: string) => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   const { colors } = useTheme()
@@ -466,7 +466,7 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
   turnUsage?: ChatMessage['usage']
   /** Paint the user's own message as a bubble on the inverse surface (group chats). */
   userBubble?: boolean
-  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
+  onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected', sessionId: string) => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
   artifacts?: UiArtifact[]
   onSendPrompt?: (text: string) => Promise<boolean>
@@ -1057,7 +1057,7 @@ function compactActivityText(value: string | undefined): string | undefined {
 function ApprovalCard({ item, busy, onRespond }: {
   item: ApprovalActivity
   busy?: boolean
-  onRespond: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
+  onRespond: (itemId: string, outcome: 'allowed-once' | 'rejected', sessionId: string) => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1090,8 +1090,8 @@ function ApprovalCard({ item, busy, onRespond }: {
       )}
       <Text style={styles.permissionScope}>{zhCN.chat.permissionScope}</Text>
       <View style={styles.permissionActions}>
-        <Button label={zhCN.chat.allowOnce} variant="inverse" onPress={() => void onRespond(item.id, 'allowed-once')} loading={isBusy} />
-        <Button label={zhCN.chat.deny} variant="secondary" onPress={() => void onRespond(item.id, 'rejected')} disabled={isBusy} />
+        <Button label={zhCN.chat.allowOnce} variant="inverse" onPress={() => void onRespond(item.id, 'allowed-once', item.sessionId)} loading={isBusy} />
+        <Button label={zhCN.chat.deny} variant="secondary" onPress={() => void onRespond(item.id, 'rejected', item.sessionId)} disabled={isBusy} />
       </View>
     </View>
   )

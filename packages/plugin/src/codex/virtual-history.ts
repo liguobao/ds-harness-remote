@@ -142,7 +142,9 @@ export function projectCodexNativeHistory(
       )) {
         const eventSeq = append(
           event.type,
-          event.data,
+          event.type === 'assistant/message' && typeof turn.id === 'string'
+            ? { ...record(event.data), codexTurnId: turn.id }
+            : event.data,
           normalizeTime(item.createdAt) || time,
           event.view,
           event.type === 'tool/result' && toolCallSeq !== undefined ? [toolCallSeq] : undefined,

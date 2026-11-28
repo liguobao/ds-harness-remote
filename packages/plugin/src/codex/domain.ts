@@ -543,6 +543,7 @@ export class CodexRemoteDomain {
               ...permission.params,
               ...(allowedThread.cwd === undefined ? {} : { cwd: allowedThread.cwd }),
               ...codexThreadPermissionParams(permission),
+              excludeTurns: true,
             }
         : call.method === 'turn/start'
           ? {

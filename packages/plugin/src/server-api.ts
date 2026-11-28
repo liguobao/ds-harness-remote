@@ -119,11 +119,14 @@ export class HostServerApi {
   pairingHostOnly(): boolean { return this.hostOnly }
 
   async loadStoredPolicy(): Promise<void> {
+    const identity = this.requireIdentity()
+    const epoch = this.credentialsEpoch
     const policyHostOnly = this.role === 'host' && await this.store.pairingHostOnly()
-    const stored = await this.store.load(this.baseUrl, this.requireIdentity().deviceId).catch(error => {
+    const stored = await this.store.load(this.baseUrl, identity.deviceId).catch(error => {
       if (policyHostOnly) return undefined
       throw error
     })
+    if (epoch !== this.credentialsEpoch) return
     this.hostOnly = this.role === 'host' && (policyHostOnly || stored?.pairingRestricted === true)
     if (stored !== undefined && this.credentials === undefined && stored.refreshTokenExpiresAt > Date.now()) {
       this.credentials = stored
@@ -166,7 +169,10 @@ export class HostServerApi {
 
   async clearAuthorization(): Promise<void> {
     this.resetCachedCredentials()
-    await this.store.clear()
+    await this.withRefreshLock(async () => {
+      await this.store.clear()
+      this.resetCachedCredentials()
+    })
   }
 
   async revokeCurrentDevice(): Promise<void> {
@@ -390,16 +396,15 @@ export class HostServerApi {
     const epoch = this.credentialsEpoch
     const promise = this.credentialsPromise ?? (() => {
       let created!: Promise<ServerCredentials>
-      created = this.loadOrIssue(identity).finally(() => {
+      created = this.loadOrIssue(identity, epoch).finally(() => {
         if (this.credentialsPromise === created) this.credentialsPromise = undefined
       })
       this.credentialsPromise = created
       return created
     })()
     const resolved = await promise
-    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity.deviceId) {
-      this.credentials = resolved
-    }
+    this.assertCredentialsEpoch(epoch)
+    this.credentials = resolved
     return resolved
   }
 
@@ -410,6 +415,7 @@ export class HostServerApi {
       // Another process may have rotated the token while we waited for the lock.
       const stored = await this.store.load(this.baseUrl, identity.deviceId)
       if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now()) {
+        this.assertCredentialsEpoch(epoch)
         // A rejected Client read must not implicitly register a signed-out device.
         if (this.role === 'client') throw new ServerApiError('ACCOUNT_AUTH_REQUIRED', 'Client sign-in is required.', false)
         return this.register(identity)
@@ -417,12 +423,17 @@ export class HostServerApi {
       if (stored.accessToken !== rejectedAccessToken && stored.accessTokenExpiresAt > Date.now() + 30_000) {
         return stored
       }
-      return this.rotateCredentials(identity, stored)
+      return this.rotateCredentials(identity, stored, epoch)
     })
-    if (this.credentialsEpoch === epoch && this.identity?.deviceId === identity.deviceId) {
-      this.credentials = refreshed
-    }
+    this.assertCredentialsEpoch(epoch)
+    this.credentials = refreshed
     return refreshed
+  }
+
+  private assertCredentialsEpoch(epoch: number): void {
+    if (epoch !== this.credentialsEpoch) {
+      throw new ServerApiError('CONNECTION_CLOSED', 'Authorization state changed during authentication.', false)
+    }
   }
 
   private async withRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -442,8 +453,10 @@ export class HostServerApi {
   private async rotateCredentials(
     identity: HostIdentity,
     stored: ServerCredentials,
+    epoch: number,
     allowRecoveredRotation = true,
   ): Promise<ServerCredentials> {
+    this.assertCredentialsEpoch(epoch)
     let tokens: TokenPair
     try {
       tokens = await this.publicRequest<TokenPair>('/api/v1/auth/refresh', {
@@ -458,13 +471,14 @@ export class HostServerApi {
           if (latest !== undefined && latest.refreshToken !== stored.refreshToken &&
               latest.refreshTokenExpiresAt > Date.now()) {
             if (latest.accessTokenExpiresAt > Date.now() + 30_000) return latest
-            if (allowRecoveredRotation) return this.rotateCredentials(identity, latest, false)
+            if (allowRecoveredRotation) return this.rotateCredentials(identity, latest, epoch, false)
           }
         }
         throw new ServerApiError(error.code, error.message, error.retryable, error.status, 'credential_refresh', error.reason)
       }
       throw error
     }
+    this.assertCredentialsEpoch(epoch)
     const saved = await this.store.save({
       ...stored,
       ...validateTokens(tokens),
@@ -475,7 +489,7 @@ export class HostServerApi {
     // never put an already-expired accessToken on the wire.
     if (allowRecoveredRotation && saved.accessTokenExpiresAt <= Date.now() + 30_000
       && saved.refreshToken !== stored.refreshToken && saved.refreshTokenExpiresAt > Date.now()) {
-      return this.rotateCredentials(identity, saved, false)
+      return this.rotateCredentials(identity, saved, epoch, false)
     }
     if (saved.accessTokenExpiresAt <= Date.now()) {
       throw new ServerApiError(
@@ -557,14 +571,15 @@ export class HostServerApi {
     return `/api/v1/hosts/${encodeURIComponent(this.requireIdentity().deviceId)}/dsh-web/sessions`
   }
 
-  private async loadOrIssue(identity: HostIdentity): Promise<ServerCredentials> {
+  private async loadOrIssue(identity: HostIdentity, epoch: number): Promise<ServerCredentials> {
     return this.withRefreshLock(async () => {
       const stored = await this.store.load(this.baseUrl, identity.deviceId)
       if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now() + 30_000) {
+        this.assertCredentialsEpoch(epoch)
         return this.register(identity)
       }
       if (stored.accessTokenExpiresAt > Date.now() + 30_000) return stored
-      return this.rotateCredentials(identity, stored)
+      return this.rotateCredentials(identity, stored, epoch)
     })
   }
 

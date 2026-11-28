@@ -206,12 +206,12 @@ export interface AppState {
   stopSession(): Promise<void>
   /** Cancel the tracked /compact operation for the selected Session, if any. */
   cancelCompaction(): Promise<boolean>
-  respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
+  respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected', sessionId: string): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
   createSession(workspaceId?: string, backend?: AgentBackend): Promise<boolean>
   loadSessionHandoffItems(session: RemoteSession): Promise<ChatItem[]>
   handoffSession(params: HandoffSessionParams): Promise<HandoffSessionResult>
-  forkSession(sessionId: string, backend?: RemoteSession['backend'], lastTurnId?: string): Promise<RemoteSession | undefined>
+  forkSession(sessionId: string, backend?: RemoteSession['backend'], lastTurnId?: string, messageId?: string): Promise<RemoteSession | undefined>
   archiveSession(sessionId: string): Promise<boolean>
   unarchiveSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>
   pinSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>

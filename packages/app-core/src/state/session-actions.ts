@@ -1066,7 +1066,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       if (source?.sessionId !== message.sessionId) return false
       if (source.backend === 'codex') {
         if (typeof message.turn !== 'string' || !message.turn) return false
-        return !!await get().forkSession(source.sessionId, source.backend, message.turn)
+        return !!await get().forkSession(source.sessionId, source.backend, message.codexTurnId ?? message.turn, message.id)
       }
       if (!isHarnessBackend(source.backend)) return false
       set({ busyAction: `fork:${message.id}`, error: undefined })
@@ -1400,7 +1400,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       return flight
     },
 
-    async forkSession(sessionId, backend, lastTurnId) {
+    async forkSession(sessionId, backend, lastTurnId, messageId) {
       if (get().connection.phase !== 'connected') return undefined
       const targetSession = get().sessions.find(item => item.sessionId === sessionId)
       const effectiveBackend = backend ?? targetSession?.backend
@@ -1411,8 +1411,23 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         try {
           let forked: RemoteSession
           if (effectiveBackend === 'codex') {
-            const result = record(await runtime.connection.requireCodex().request('thread/fork', {
-              threadId: codexThreadId(targetSession),
+            const client = runtime.connection.requireCodex()
+            const threadId = codexThreadId(targetSession)
+            // Older Hosts project history with ordinal turn numbers. Resolve the
+            // clicked item against the native thread before sending a mutation.
+            if (messageId && lastTurnId && /^\d+$/.test(lastTurnId)) {
+              const response = record(await client.request('thread/read', { threadId, includeTurns: true }))
+              if (generation !== runtime.connectionGeneration) return undefined
+              const thread = record(response.thread)
+              const turn = thread.id === threadId && Array.isArray(thread.turns)
+                ? thread.turns.map(record).find(candidate => Array.isArray(candidate.items)
+                  && candidate.items.some(item => record(item).id === messageId))
+                : undefined
+              if (typeof turn?.id !== 'string' || !turn.id) throw new Error(zhCN.runtime.codexInvalidResponse)
+              lastTurnId = turn.id
+            }
+            const result = record(await client.request('thread/fork', {
+              threadId,
               ...(lastTurnId === undefined ? {} : { lastTurnId }),
             }))
             if (generation !== runtime.connectionGeneration) return undefined

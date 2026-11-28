@@ -1027,9 +1027,11 @@ describe('CodexRemoteDomain', () => {
     await peerTwo.openStream({ streamId: 'stream-2', threadId: 'allowed-thread' })
     await peerOne.call({
       method: 'thread/fork',
-      params: { threadId: 'allowed-thread', permissionPreset: 'workspace-write' },
+      params: { threadId: 'allowed-thread', lastTurnId: 'turn-2', permissionPreset: 'workspace-write' },
     })
     expect(app.calls.find(call => call.method === 'thread/fork')?.params).toMatchObject({
+      lastTurnId: 'turn-2',
+      excludeTurns: true,
       cwd: root,
       approvalPolicy: 'on-request',
       sandbox: 'workspace-write',
